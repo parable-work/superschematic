@@ -50,6 +50,8 @@ export type {
   MCPToolOptions,
   PaginatedConfig,
   RateLimitConfig,
+  RateLimitKey,
+  RateLimitKeys,
   RegistrationConfig,
   ServiceCallersConfig,
   ServiceHandleRef,

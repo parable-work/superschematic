@@ -902,7 +902,7 @@ func JSONLiteral(value any) string {
 // the tool arguments they address: each pointer resolves, every segment is a
 // required argument and every segment but the last an object with
 // properties, an idempotency key is a string and an expected revision a
-// number or an integer.
+// number, an integer or plain text (D124).
 func ValidateReplayContract(
 	schema JSONSchemaObject,
 	mode string,
@@ -935,11 +935,24 @@ func ValidateReplayContract(
 		if err != nil {
 			return fmt.Errorf("expected revision pointer %q: %w", pointer, err)
 		}
-		if property.Type != "integer" && property.Type != "number" {
-			return fmt.Errorf("expected revision pointer %q resolves to a %s argument, want a number", pointer, property.Type)
+		// A revision is a counter, or plain text that the route compares
+		// whole, such as the hash of a document. A string scalar names
+		// something else, such as an id (D124).
+		if property.Type != "integer" && property.Type != "number" && !isPlainText(property) {
+			what := property.Type
+			if property.ScalarType != "" && property.ScalarType != property.Type {
+				what = property.ScalarType
+			}
+			return fmt.Errorf("expected revision pointer %q resolves to a %s argument, want a number or plain text", pointer, what)
 		}
 	}
 	return nil
+}
+
+// isPlainText reports whether a tool argument is a string with no scalar
+// behind it.
+func isPlainText(property JSONSchemaProperty) bool {
+	return property.Type == "string" && property.CanonicalScalar == "" && (property.ScalarType == "" || property.ScalarType == "string")
 }
 
 func resolveRequiredProperty(schema JSONSchemaObject, pointer string) (JSONSchemaProperty, error) {

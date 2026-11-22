@@ -74,9 +74,11 @@ export abstract class AppPreference {
 | `@projection<Source>` | The table the view reads, addressed as `base` everywhere in the declaration. |
 | `pool`, `name` | The view is created as `"pool"."name"`, so readers address it as `pool.name`. Both are snake_case identifiers. Without a `pool`, the view is created beside the service's tables, in `outputs.sql.sourceSchema` or the `search_path`'s schema, and takes no table's name: a plain view the ORMs read, which binds no setting unless its rules do. |
 | `migration` | The 14-digit version stamp of the generated migration pair. Once a build writes the pair, the stamp names those files for good: a changed declaration takes a new stamp, which `check` and `build` name ([The migration stamp](#the-migration-stamp)). |
+| `sourceSchema` | The Postgres schema that holds the source table and every joined table, for a database that keeps its tables in more than one schema. It replaces the service's `outputs.sql.sourceSchema` for this view, and a view without a `pool` is created in it. A snake_case identifier (D126). |
 | `where` | Row rules, all ANDed, in order. The forms are below. |
 | `collapse` | Keeps one row per key: `by` lists the `alias.field` columns of the key (`DISTINCT ON`), `order` ranks the rows that share it and the first wins. |
-| `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. |
+| `replica` | Whether a reader may scan the view on a read replica of its database. Omitted or `true` allows it. `false` is for a view whose rows must not lag a write, such as one that hides rows a write has just withdrawn: the Arrow schema then says `false` in `projection.replica`, and a reader scans the primary (D121). |
+| `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. An empty `on`, `{}`, joins every row of the table (`ON true`). It is allowed only when the first `where` rule binds the base table's key (its `id`, else its `@key` field) to a setting, with no `optional` and no `when`: the base is then one row, and each joined row appears once, such as a catalog listed for the one account a session reads (D122). |
 | Class fields | The view's columns, in order. Each reads `base.<field>` unless `@column` names another `alias.field`, or computes it with `{ function, args }`. |
 
 Every `alias.field` reference names a schema field (camelCase), never a
@@ -93,6 +95,7 @@ resolves to its foreign-key column. The declaration never carries SQL.
 | `{ column, isNull: true }`, `{ column, notNull: true }` | `column IS null`, `column IS NOT null`. |
 | `{ column, equals: literal }` | `column = literal`. The literal's type follows the column: a member of an enum column, a boolean, a number or a string. |
 | `{ function, args, requiredSettings }` | Every listed setting is set and non-empty, and `"schema"."function"(args...) IS true`. The function belongs to a hand-written migration. |
+| `{ column, inFunction, requiredSettings }` | Every listed setting is set and non-empty, and `column IN (SELECT "schema"."function"())`. The function takes no arguments and returns the set of values a row may hold, so Postgres runs it once per scan, not once per row as a function rule's call. It belongs to a hand-written migration (D127). |
 | any form with `when: { column, equals }` | `(column IS DISTINCT FROM 'equals' OR rule)`: the rule applies only to rows whose guard column equals the literal. |
 
 A setting is a dotted custom Postgres setting (`app.account_id`); a
@@ -122,7 +125,7 @@ the table DDL in `<out>/sql/<service>/`:
 | --- | --- |
 | `create.sql`, `drop.sql` | The view is created after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"` when it has a pool, and dropped before them. |
 | `<migrationsDir>/<stamp>_<pool>_<name>_projection.up.sql` | Creates the schema of a pool, drops the view if it exists and creates it. Re-runnable. A view without a pool is `<stamp>_<name>_projection`. |
-| `<migrationsDir>/<stamp>_<pool>_<name>_projection.down.sql` | Drops the view. |
+| `<migrationsDir>/<stamp>_<pool>_<name>_projection.down.sql` | Drops the view. For a view whose declaration took a new stamp, and whose earlier pair is in the service's own `outputs.sql.migrationsDir`, it replays the earlier stamp's up statements instead, so a rollback past this stamp leaves the earlier view, not none (D128). |
 | `projections/<pool>.<name>.arrow.json` | The view's Arrow schema in arrow-rs serde form: one field per column with its Arrow type, nullability and metadata, and schema metadata naming the view and its settings. `<name>.arrow.json` for a view without a pool. |
 | `projections/<pool>.<name>.docs.json` | The view's address, description, settings, collapse key and columns (source, scalar or enum, SQL and Arrow type, nullability, description), for a catalog page. |
 
@@ -205,6 +208,7 @@ Every key starts with the naming file's
 | `<prefix>projection.settings` | schema | every setting the view reads, comma-separated, in first-use order |
 | `<prefix>projection.optional_settings` | schema | the subset a reader may leave unset |
 | `<prefix>projection.rows` | schema | `one` when the view collapses, `all` otherwise |
+| `<prefix>projection.replica` | schema | `false` when the declaration says `replica: false`, so a reader scans the primary; `true` otherwise |
 
 A reader sets every required setting (`SET LOCAL` or `set_config(name,
 value, true)` in the scan's transaction) before it reads the view.
@@ -291,7 +295,7 @@ export default defineConfig({
 | Key | Meaning |
 | --- | --- |
 | `migrationsDir` | Where the migration pairs are written, relative to the service directory, so they land next to the service's hand-written migrations. Unset keeps them under `<out>/sql/<service>/projections/migrations`. The directory is not build-cache output: commit what the build writes there, with `projections.lock` ([The migration stamp](#the-migration-stamp)). |
-| `viewOwner` | The Postgres role the up migration creates the view as: `SET ROLE <viewOwner>` before the view DDL and `RESET ROLE` after it, so the schema's default privileges for that role grant readers their access. The migration runner must be a member of the role, and the role needs `CREATE` on the pool schema and `SELECT` on the tables the view reads. A lowercase identifier. Unset creates the view as the runner. `create.sql` and the down migration never switch roles. |
+| `viewOwner` | The Postgres role the up migration creates the view as: `SET ROLE <viewOwner>` before the view DDL and `RESET ROLE` after it, so the schema's default privileges for that role grant readers their access. The migration runner must be a member of the role, and the role needs `CREATE` on the pool schema and `SELECT` on the tables the view reads. A lowercase identifier. Unset creates the view as the runner. `create.sql` and a down migration that drops the view never switch roles; one that replays an earlier stamp switches as that stamp's up did. |
 | `sourceSchema` | The Postgres schema that holds the tables the view reads. The view selects `<sourceSchema>.<table>` for its source table and every joined table, in `create.sql`, the migration pair and a migration plan, so it does not depend on the migration runner's `search_path`. A lowercase identifier. Unset leaves the tables unqualified. |
 | `dialects` | The databases the service is built for: `postgres`, and `sqlite` to also write `<out>/sql/<service>/sqlite/create.sql` and plan SQLite migrations ([Schema migrations](/superschematic/reference/migrations/#sqlite)). The list must hold `postgres`, since the Go ORM the kind always generates runs on Postgres. Unset is `["postgres"]`. A service that lists `sqlite` cannot have projections: SQLite refuses them. |
 

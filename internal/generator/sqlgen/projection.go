@@ -43,6 +43,25 @@ type ProjectionView struct {
 	UpFileName   string
 	DownFileName string
 
+	// PreviousMigration and PreviousUp are the view's last earlier
+	// migration and its up statements, read from the service's own
+	// migrations directory when the declaration takes a new stamp
+	// (ReplayPreviousViews). The down migration replays them, so a
+	// rollback past this stamp leaves the view the earlier stamp made
+	// rather than none. Both are empty for a view's first migration
+	// (D128).
+	PreviousMigration string
+	PreviousUp        string
+
+	// Replica is false when the declaration says replica: false: a reader
+	// must scan the view on its database's primary (D121).
+	Replica bool
+
+	// SourceSchema is the declaration's own sourceSchema, which replaces
+	// outputs.sql.sourceSchema for this view (D126). Empty uses the
+	// service's.
+	SourceSchema string
+
 	// ViewOwner is the Postgres role the migration creates the view as
 	// (SET ROLE around the DDL); empty creates it as the migration runner.
 	ViewOwner       string
@@ -274,6 +293,8 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		QuotedName:      sqlutil.QuoteIdentifier(def.Name),
 		Relation:        def.Relation(),
 		Migration:       def.Migration,
+		Replica:         def.AllowsReplica(),
+		SourceSchema:    def.SourceSchema,
 		UpFileName:      fmt.Sprintf("%s_%s_projection.up.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		DownFileName:    fmt.Sprintf("%s_%s_projection.down.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		QuotedBaseTable: base.QuotedName,
@@ -315,8 +336,10 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			}
 			conds = append(conds, left+" = "+right)
 		}
+		// A join with no equality, which verify allows only beside a base
+		// of one row (D122), pairs that row with every joined row.
 		if len(conds) == 0 {
-			return view, fmt.Errorf("join %s has no condition", j.Alias)
+			conds = append(conds, "true")
 		}
 		kind := "INNER"
 		switch j.Kind {
@@ -437,7 +460,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		var sql string
 		switch {
 		case pred.IsLiteral():
-			if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
+			if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || pred.InFunction != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
 				return "", fmt.Errorf("a literal rule reads no setting")
 			}
 			expr, _, _, err := aliases.expr(pred.Column)
@@ -466,6 +489,30 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			default:
 				return "", fmt.Errorf("a literal rule carries exactly one of isNull, notNull and equals")
 			}
+		case pred.InFunction != "":
+			if len(pred.RequiredSettings) == 0 || pred.Function != "" || len(pred.Args) > 0 || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 {
+				return "", fmt.Errorf("a set rule takes column, inFunction and requiredSettings only")
+			}
+			if !projectionFunctionNamePattern.MatchString(pred.InFunction) {
+				return "", fmt.Errorf("a set rule needs a schema.function name")
+			}
+			expr, _, _, err := aliases.expr(pred.Column)
+			if err != nil {
+				return "", err
+			}
+			guards := []string{}
+			for _, setting := range pred.RequiredSettings {
+				if !projectionSettingPattern.MatchString(setting) {
+					return "", fmt.Errorf("required setting %q is not a dotted custom setting name", setting)
+				}
+				addSetting(setting, false)
+				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlLiteral(setting)))
+			}
+			// An uncorrelated subquery: Postgres runs the function once per
+			// scan and matches every row against its result (D127).
+			schemaName, function, _ := strings.Cut(pred.InFunction, ".")
+			guards = append(guards, fmt.Sprintf(`%s IN (SELECT "%s"."%s"())`, expr, schemaName, function))
+			sql = "(" + strings.Join(guards, " AND ") + ")"
 		case pred.Function != "":
 			if len(pred.RequiredSettings) == 0 || pred.Column != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 {
 				return "", fmt.Errorf("a function rule takes function, args and requiredSettings only")
@@ -743,7 +790,7 @@ type MetadataKeys struct {
 	// settings a reader sets before a scan.
 	ProjectionPool, ProjectionName, ProjectionRelation, ProjectionView       string
 	ProjectionSchema, ProjectionType, ProjectionMigration, ProjectionSetting string
-	ProjectionOptionalSettings, ProjectionRows                               string
+	ProjectionOptionalSettings, ProjectionRows, ProjectionReplica            string
 }
 
 // NewMetadataKeys returns the key set under prefix ("superschematic." for
@@ -772,6 +819,7 @@ func NewMetadataKeys(prefix string) MetadataKeys {
 		ProjectionSetting:          prefix + "projection.settings",
 		ProjectionOptionalSettings: prefix + "projection.optional_settings",
 		ProjectionRows:             prefix + "projection.rows",
+		ProjectionReplica:          prefix + "projection.replica",
 	}
 }
 
@@ -844,6 +892,9 @@ func ArrowSchemaJSON(schema *ir.Schema, schemaName string, view ProjectionView, 
 			// "one" when the view keeps one row per key (DISTINCT ON), "all"
 			// when it serves every admitted row.
 			keys.ProjectionRows: projectionRowsMetadata(view),
+			// "false" when a reader must scan the view on the primary,
+			// never on a read replica that may lag a write (D121).
+			keys.ProjectionReplica: strconv.FormatBool(view.Replica),
 		},
 	}
 	out, err := json.MarshalIndent(doc, "", "  ")

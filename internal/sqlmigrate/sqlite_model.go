@@ -141,6 +141,9 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 			if idx.Opclass != "" {
 				refuse("the index %s of %s names the operator class %s", idx.Name, t.OriginalName, idx.Opclass)
 			}
+			if idx.NullsNotDistinct {
+				refuse("the index %s of %s makes nulls collide (nullsNotDistinct)", idx.Name, t.OriginalName)
+			}
 		}
 	}
 	for _, h := range out.HistoryTables {

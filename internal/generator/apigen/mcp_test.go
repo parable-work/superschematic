@@ -61,6 +61,7 @@ func TestResolveOperationMCP(t *testing.T) {
 		Name:        "Get an order",
 		Description: "Returns one order by its identifier.",
 		Icon:        &ir.MCPIcon{Name: "receipt"},
+		Annotations: &ir.MCPToolAnnotations{ReadOnlyHint: true},
 	}
 	if !reflect.DeepEqual(get.MCP, want) {
 		t.Fatalf("getOrder MCP = %+v\nwant %+v", get.MCP, want)
@@ -75,6 +76,14 @@ func TestResolveOperationMCP(t *testing.T) {
 
 	if got := endpointNamed(t, output, "updateOrder").MCP.Invocation; got != (ir.MCPInvocation{Key: "invocationPolicy", Value: "ask"}) {
 		t.Fatalf("updateOrder invocation = %+v", got)
+	}
+	// A tool that may write is destructive unless its @mcp says it only
+	// adds, as openReturn's does (D123).
+	if got := endpointNamed(t, output, "updateOrder").MCP.Annotations; got == nil || *got != (ir.MCPToolAnnotations{DestructiveHint: true}) {
+		t.Fatalf("updateOrder annotations = %+v", got)
+	}
+	if got := endpointNamed(t, output, "openReturn").MCP.Annotations; got == nil || *got != (ir.MCPToolAnnotations{IdempotentHint: true}) {
+		t.Fatalf("openReturn annotations = %+v", got)
 	}
 
 	del := endpointNamed(t, output, "deleteOrder")
@@ -146,6 +155,11 @@ func TestMCPResolutionErrors(t *testing.T) {
 				operationIn(s, "getOrder").MCP.Invocation = ir.MCPInvocation{Key: "review", Value: "ask"}
 			},
 			want: `apigen: operation order.getOrder has an invalid @mcp: invocation policy key "review" is not this build's key "invocationPolicy"`,
+		},
+		{
+			name:   "additive on a read_only operation",
+			mutate: func(s *ir.Schema) { operationIn(s, "getOrder").MCP.Additive = true },
+			want:   "apigen: visible operation order.getOrder declares @mcp additive, but a read_only operation writes nothing",
 		},
 		{
 			name:   "handle collision",

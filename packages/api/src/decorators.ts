@@ -1,7 +1,22 @@
 import type { HttpMethod } from "./enums";
 
+/**
+ * The keys a `@rateLimit` may count per (D131). `ip`, the default, counts
+ * per client IP address; `principal` per the principal the auth provider
+ * resolves for the request, in a store every replica shares. An extension
+ * that registers a principal key of its own adds it here by declaration
+ * merging: `declare module "@superschematic/api" { interface RateLimitKeys { key: true } }`.
+ */
+export interface RateLimitKeys {
+  readonly ip: true;
+  readonly principal: true;
+}
+
+export type RateLimitKey = keyof RateLimitKeys;
+
 export type RateLimitConfig = {
   readonly requestsPerMinute: number;
+  readonly key?: RateLimitKey;
 };
 
 export type BodyLimitConfig = {
@@ -131,6 +146,12 @@ export type MCPConfig =
       /** The tool's wire identifier: lowercase snake_case, at most 48 characters, unique in the API. */
       readonly handle: string;
       readonly hidden?: false;
+      /**
+       * The operation writes only by adding: it never changes or deletes
+       * data that exists. Its tool's annotations say destructiveHint false.
+       * Not for a read_only operation (D123).
+       */
+      readonly additive?: true;
       /** Copied into the tool's MCP _meta object as written. */
       readonly _meta?: Readonly<Record<string, unknown>>;
     })

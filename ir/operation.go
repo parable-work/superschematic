@@ -85,6 +85,14 @@ type MiddlewareConfig struct {
 	// RateLimit is the maximum number of requests per minute.
 	RateLimit *int `json:"rateLimit,omitempty" yaml:"rateLimit,omitempty"`
 
+	// RateLimitKey names what RateLimit counts per (D131): empty or
+	// RateLimitKeyIP counts per client IP address, RateLimitKeyPrincipal
+	// per the principal the auth provider resolves for the request. An
+	// extension may name another principal key, its own word for the
+	// principal its routers read. It travels with RateLimit: an operation's
+	// own @rateLimit replaces the set's, key and all.
+	RateLimitKey string `json:"rateLimitKey,omitempty" yaml:"rateLimitKey,omitempty"`
+
 	// BodyLimit is the maximum request body size in megabytes.
 	BodyLimit *int `json:"bodyLimit,omitempty" yaml:"bodyLimit,omitempty"`
 
@@ -172,3 +180,15 @@ func ValidateRestPath(path string) error {
 	}
 	return fmt.Errorf("@rest path %q writes %s, which OpenAPI and the generated routers read as text; write it in braces: %q", path, what, strings.Join(segments, "/"))
 }
+
+// The @rateLimit keys of the core (D131). An extension may register
+// another principal key.
+const (
+	// RateLimitKeyIP counts a route's requests per client IP address. It is
+	// the key of a @rateLimit that names none.
+	RateLimitKeyIP = "ip"
+	// RateLimitKeyPrincipal counts a route's requests per the principal the
+	// auth provider resolves for the request, in a store every replica
+	// shares.
+	RateLimitKeyPrincipal = "principal"
+)

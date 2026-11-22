@@ -13,6 +13,7 @@
         "handle": "task_approvals_list_sign_offs",
         "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "task.approvals.list-sign-offs",
@@ -61,6 +62,7 @@
         "handle": "task_approvals_sign_off",
         "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "task.approvals.sign-off",
@@ -105,6 +107,7 @@
         "handle": "task_approvals_withdraw_sign_off",
         "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "task.approvals.withdraw-sign-off",
@@ -147,6 +150,7 @@
         "handle": "task_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "task.status.transition",

@@ -39,6 +39,12 @@ type OperationMCP struct {
 	// has none.
 	Invocation MCPInvocation `json:"-" yaml:"-"`
 
+	// Additive declares that a visible tool that writes only adds: it never
+	// changes or deletes data that exists. Its annotations then say
+	// destructiveHint false. A read_only operation writes nothing, so the
+	// api generator refuses it there, and a hidden record has none (D123).
+	Additive bool `json:"additive,omitempty" yaml:"additive,omitempty"`
+
 	// Meta is copied into the tool's MCP _meta object as written. Only a
 	// visible tool takes it.
 	Meta map[string]any `json:"_meta,omitempty" yaml:"_meta,omitempty"`
@@ -51,6 +57,41 @@ type OperationMCP struct {
 
 	// Icon is the generated icon: the operation's @icon. Nil without one.
 	Icon *MCPIcon `json:"icon,omitempty" yaml:"icon,omitempty"`
+
+	// Annotations are the generated MCP tool annotations of a visible tool,
+	// from @docs replayMode and Additive (ResolveMCPToolAnnotations). Nil
+	// until the api generator resolves the tool; never authored (D123).
+	Annotations *MCPToolAnnotations `json:"annotations,omitempty" yaml:"annotations,omitempty"`
+}
+
+// MCPToolAnnotations are the behavior hints an MCP host reads on a tool.
+// They are hints: the operation's permissions and replay contract enforce.
+type MCPToolAnnotations struct {
+	// ReadOnlyHint: the operation declares replayMode read_only.
+	ReadOnlyHint bool `json:"readOnlyHint" yaml:"readOnlyHint"`
+
+	// DestructiveHint: the operation does not declare replayMode read_only,
+	// and its @mcp does not declare it additive. The MCP specification reads
+	// false as "only additive updates", so a tool that may write is marked
+	// destructive, the specification's default, unless its schema says that
+	// it only adds.
+	DestructiveHint bool `json:"destructiveHint" yaml:"destructiveHint"`
+
+	// IdempotentHint: the operation declares replayMode idempotent, so a
+	// repeated call with the same idempotency key has no further effect.
+	IdempotentHint bool `json:"idempotentHint" yaml:"idempotentHint"`
+}
+
+// ResolveMCPToolAnnotations derives a visible tool's annotations from its
+// replay contract and its @mcp additive declaration. Safety is never
+// inferred from the HTTP method or the operation's name (D123).
+func ResolveMCPToolAnnotations(replayMode DocsReplayMode, additive bool) *MCPToolAnnotations {
+	readOnly := replayMode == DocsReplayModeReadOnly
+	return &MCPToolAnnotations{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: !readOnly && !additive,
+		IdempotentHint:  replayMode == DocsReplayModeIdempotent,
+	}
 }
 
 // MCPIcon names a tool's glyph. The core sets Name from @icon; Family and
@@ -73,6 +114,9 @@ func ValidateOperationMCP(mcp *OperationMCP) error {
 	if mcp.Name != "" || mcp.Description != "" || mcp.Icon != nil {
 		return fmt.Errorf("name, description and icon are generated from @docs and @icon and cannot be declared")
 	}
+	if mcp.Annotations != nil {
+		return fmt.Errorf("annotations are generated from @docs replayMode and additive and cannot be declared")
+	}
 	if mcp.Hidden {
 		if strings.TrimSpace(mcp.HiddenReason) == "" {
 			return fmt.Errorf("reason must be non-empty for a hidden operation")
@@ -88,6 +132,9 @@ func ValidateOperationMCP(mcp *OperationMCP) error {
 		}
 		if !mcp.Invocation.IsZero() {
 			return fmt.Errorf("a hidden operation must not declare %s", mcp.Invocation.keyName())
+		}
+		if mcp.Additive {
+			return fmt.Errorf("a hidden operation must not declare additive")
 		}
 		return nil
 	}

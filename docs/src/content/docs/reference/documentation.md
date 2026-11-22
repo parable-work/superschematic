@@ -69,7 +69,9 @@ arguments (the `parameters` object in the SDK's `tools/schema.json`, see
 `requestId` field of the operation's input and `/pickup/postalCode` a field
 of a nested object. The SDK generators check that every segment is a
 required argument, that an idempotency key is a string and that a revision
-is a number, and fail the build otherwise.
+is a number or plain text, and fail the build otherwise. Plain text is a
+`string` with no scalar: a value the route compares whole, such as the
+hash of a document. A string scalar, such as an id, is no revision (D124).
 
 An operation takes at most one `@docs`. Every value must be a literal. A
 config that breaks a rule fails the load with the decorator's location:

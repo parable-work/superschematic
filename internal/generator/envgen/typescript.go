@@ -21,6 +21,9 @@ type typeScriptConfig struct {
 	SchemaName string
 	TypeName   string
 	Fields     []typeScriptField
+	// LiveFields are the Runtime<T> keys as string literals; the loader
+	// writes LIVE_FIELDS and the Live class when there is one (D129).
+	LiveFields []string
 }
 
 // typeScriptField is one variable: its loaded type and its field spec, both
@@ -66,6 +69,9 @@ func buildTypeScriptConfig(output *ConfigOutput) (typeScriptConfig, error) {
 			LoadedType:  typeScriptLoadedType(output.TypeName, field),
 			Spec:        spec,
 		})
+		if field.Runtime {
+			view.LiveFields = append(view.LiveFields, jsString(field.Key))
+		}
 	}
 	return view, nil
 }

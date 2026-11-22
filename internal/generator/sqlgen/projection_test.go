@@ -143,6 +143,84 @@ func TestWriteProjectionsGolden(t *testing.T) {
 // TestMetadataKeyPrefixNamesEveryKey: every Arrow metadata key carries the
 // configured prefix and nothing else, so a deployment whose readers expect
 // another namespace changes one naming key.
+// TestJoinWithNoEqualityJoinsOnTrue: a join with no equality, which verify
+// allows beside a base of one row, renders as ON true, so the view pairs
+// that row with every joined row (D122).
+func TestJoinWithNoEqualityJoinsOnTrue(t *testing.T) {
+	schema := loadProjectionFixture(t)
+	def := schema.Types["AppPreference"].Projection
+	def.Predicates = append([]*ir.ProjectionPredicate{{Column: "base.id", Setting: "app.preference_id"}}, def.Predicates...)
+	for _, j := range def.Joins {
+		if j.Alias == "channel" {
+			j.On = nil
+		}
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := output.Projections[0]
+	var on string
+	for _, j := range view.Joins {
+		if strings.Trim(j.QuotedAlias, `"`) == "channel" {
+			on = j.On
+		}
+	}
+	if on != "true" {
+		t.Fatalf("channel join ON = %q, want true (joins: %+v)", on, view.Joins)
+	}
+	outDir := t.TempDir()
+	if err := WriteProjections(schema, output, outDir, filepath.Join(outDir, "migrations")); err != nil {
+		t.Fatal(err)
+	}
+	up, err := os.ReadFile(filepath.Join(outDir, "migrations", view.UpFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(up), " ON true") {
+		t.Fatalf("the up migration does not join channel on true:\n%s", up)
+	}
+}
+
+// TestProjectionReplicaMetadata: a projection without replica allows the
+// read replica, and `replica: false` reaches the Arrow schema as
+// projection.replica = "false", which tells a reader to scan the view on
+// the primary (D121).
+func TestProjectionReplicaMetadata(t *testing.T) {
+	no, yes := false, true
+	for _, tc := range []struct {
+		name    string
+		replica *bool
+		want    string
+	}{
+		{"omitted", nil, "true"},
+		{"true", &yes, "true"},
+		{"false", &no, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadProjectionFixture(t)
+			schema.Types["AppPreference"].Projection.Replica = tc.replica
+			output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			arrow, err := ArrowSchemaJSON(schema, "fixture-projection", output.Projections[0], output.MetadataKeyPrefix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Meta map[string]string `json:"metadata"`
+			}
+			if err := json.Unmarshal(arrow, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Meta[NewMetadataKeys(output.MetadataKeyPrefix).ProjectionReplica]; got != tc.want {
+				t.Errorf("replica metadata = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMetadataKeyPrefixNamesEveryKey(t *testing.T) {
 	schema := loadProjectionFixture(t)
 	output, err := Generate(schema, Options{SchemaName: "fixture-projection", MetadataKeyPrefix: "acme."})
@@ -178,7 +256,7 @@ func TestMetadataKeyPrefixNamesEveryKey(t *testing.T) {
 	for _, f := range doc.Fields {
 		check(f.Metadata)
 	}
-	for _, suffix := range []string{"projection.source", "projection.settings", "projection.rows", "scalar.canonical_name", "enum.values"} {
+	for _, suffix := range []string{"projection.source", "projection.settings", "projection.rows", "projection.replica", "scalar.canonical_name", "enum.values"} {
 		if !seen[suffix] {
 			t.Errorf("no acme.%s key in the Arrow schema", suffix)
 		}
@@ -318,6 +396,50 @@ func TestTrustedFunctionProjectionPredicate(t *testing.T) {
 				if !strings.Contains(sql, expected) {
 					t.Fatalf("missing %q in %s", expected, sql)
 				}
+			}
+			if strings.Join(view.Settings, ",") != "app.account_id,app.user_id" {
+				t.Fatalf("required settings lost: %v", view.Settings)
+			}
+		})
+	}
+}
+
+// TestSetRuleProjectionPredicate: a set rule renders as an uncorrelated
+// subquery, so Postgres runs the function once per scan, behind the guard
+// of each setting it reads; an unsafe name, column or setting is refused
+// (D127).
+func TestSetRuleProjectionPredicate(t *testing.T) {
+	for _, tc := range []struct {
+		name, function, column, setting string
+		refused                         bool
+	}{
+		{"trusted", "app.visible_preference_ids", "base.id", "app.user_id", false},
+		{"SQL injection", "app.f); DROP TABLE preference;--", "base.id", "app.user_id", true},
+		{"column expression", "app.f", "base.id OR TRUE", "app.user_id", true},
+		{"unknown column", "app.f", "base.absent", "app.user_id", true},
+		{"setting injection", "app.f", "base.id", "app.user_id');--", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadProjectionFixture(t)
+			def := schema.Types["AppPreference"].Projection
+			def.Predicates = []*ir.ProjectionPredicate{
+				def.Predicates[0],
+				{Column: tc.column, InFunction: tc.function, RequiredSettings: []string{tc.setting}},
+			}
+			output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+			if tc.refused {
+				if err == nil {
+					t.Fatal("unsafe rule generated")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := output.Projections[0]
+			want := `(NULLIF(current_setting('app.user_id'), '') IS NOT null AND base.id IN (SELECT "app"."visible_preference_ids"()))`
+			if got := view.Predicates[1]; got != want {
+				t.Fatalf("set rule = %s, want %s", got, want)
 			}
 			if strings.Join(view.Settings, ",") != "app.account_id,app.user_id" {
 				t.Fatalf("required settings lost: %v", view.Settings)
@@ -649,6 +771,34 @@ func TestProjectionSourceSchemaQualifiesTables(t *testing.T) {
 		if join.QuotedTable != "channel" {
 			t.Errorf("an unset source schema must leave a joined table unqualified, got %q", join.QuotedTable)
 		}
+	}
+}
+
+// TestProjectionOwnSourceSchemaWins: a view's own sourceSchema qualifies its
+// source and joined tables in place of the service's, and an unsafe one
+// fails the build (D126).
+func TestProjectionOwnSourceSchemaWins(t *testing.T) {
+	for _, service := range []string{"", "ledger"} {
+		schema := loadProjectionFixture(t)
+		schema.Types["AppPreference"].Projection.SourceSchema = "archive"
+		output, err := Generate(schema, Options{SchemaName: "fixture-projection", SourceSchema: service})
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := output.Projections[0]
+		if view.QuotedBaseTable != "archive.preference" {
+			t.Errorf("service schema %q: source table = %q, want archive.preference", service, view.QuotedBaseTable)
+		}
+		for _, join := range view.Joins {
+			if join.QuotedTable != "archive.channel" {
+				t.Errorf("service schema %q: joined table = %q, want archive.channel", service, join.QuotedTable)
+			}
+		}
+	}
+	schema := loadProjectionFixture(t)
+	schema.Types["AppPreference"].Projection.SourceSchema = "archive; DROP SCHEMA public"
+	if _, err := Generate(schema, Options{SchemaName: "fixture-projection"}); err == nil || !strings.Contains(err.Error(), "sourceSchema") {
+		t.Fatalf("an unsafe view source schema generated: %v", err)
 	}
 }
 

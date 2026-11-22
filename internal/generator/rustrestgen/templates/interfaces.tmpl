@@ -21,7 +21,7 @@ use axum::middleware::Next;
 {{- if or .WebhookProviders .ManualEndpoints }}
 use axum::response::Response;
 {{- end }}
-use {{ .RuntimeCrateIdent }}::{ {{- if .Identity }}ApiError, IdentityAuthenticator, RequestContext{{ else if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
+use {{ .RuntimeCrateIdent }}::{ {{- if .Identity }}ApiError, IdentityAuthenticator, RequestContext{{ else if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasPrincipalRateLimit }}, PrincipalRateLimitStore{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
 use std::collections::HashMap;
 use std::sync::Arc;
 {{- range .Endpoints }}
@@ -175,6 +175,11 @@ pub struct Implementations {
     /// @requirePermission, @requireOwnership, an Authenticated set), and
     /// decides whether its permissions satisfy a @requirePermission list.
     pub authenticator: Arc<dyn Authenticator>,
+{{- end }}
+{{- if .HasPrincipalRateLimit }}
+    /// Counts the requests of every route whose @rateLimit counts per
+    /// principal (D131), so each limit holds across replicas.
+    pub principal_rate_limit_store: Arc<dyn PrincipalRateLimitStore>,
 {{- end }}
 {{- if .HasServiceCallers }}
     /// Verifies the `Service-Authorization` credential of every request

@@ -537,6 +537,16 @@ type FieldDef struct {
 	// to clients (@secret).
 	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty"`
 
+	// RequiredNull marks a field that must be present with the JSON null
+	// value and no other (RequiredNull). It has no value type: TypeRef is
+	// empty, and no wrapper, default or rule applies (D130).
+	RequiredNull bool `json:"requiredNull,omitempty" yaml:"requiredNull,omitempty"`
+
+	// Runtime marks an @envVars field the service reads again while it runs
+	// (Runtime<T>): the env loaders hold it in a Live handle whose apply
+	// takes a new value with no restart (D129).
+	Runtime bool `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+
 	// TemporalFormat declares the wire encoding of a Temporal.DateTime field
 	// whose source sends a bare epoch count instead of ISO text
 	// (@temporalFormat / x-temporal-format). Values are the epoch units unix,
@@ -762,6 +772,11 @@ type IndexDef struct {
 
 	// Unique controls whether the index is unique.
 	Unique bool `json:"unique,omitempty" yaml:"unique,omitempty"`
+
+	// NullsNotDistinct makes nulls collide in a unique index: two rows whose
+	// keys are both null conflict, as Postgres's NULLS NOT DISTINCT does. It
+	// needs Unique, and the sqlite dialect refuses it (D125).
+	NullsNotDistinct bool `json:"nullsNotDistinct,omitempty" yaml:"nullsNotDistinct,omitempty"`
 
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`

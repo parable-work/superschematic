@@ -13,6 +13,7 @@
         "handle": "ticket_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "ticket.status.transition",
@@ -56,6 +57,7 @@
         "handle": "ticket_timers_fire_timer",
         "description": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "ticket.timers.fire-timer",
@@ -98,6 +100,7 @@
         "handle": "ticket_timers_reset_timer",
         "description": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "ticket.timers.reset-timer",
@@ -140,6 +143,7 @@
         "handle": "ticket_timers_snooze_timer",
         "description": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "ticket.timers.snooze-timer",

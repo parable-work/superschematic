@@ -77,6 +77,12 @@ type EndpointInfo struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+	// PrincipalRateLimit marks a RateLimit that counts per principal, the
+	// core's @rateLimit key 'principal' (D131): the route counts each
+	// caller its permission check admits in
+	// Implementations.principal_rate_limit_store, under RateLimitBucket.
+	PrincipalRateLimit bool
+	RateLimitBucket    string
 	// ServiceCallers is the operation's effective @requireService or
 	// @allowService clause; nil without one. ServiceStep marks a route of a
 	// crate whose schema has a service clause anywhere: Implementations then
@@ -322,7 +328,7 @@ func (e EndpointInfo) HasControls() bool {
 // use.
 func (e EndpointInfo) ControlCalls(limits, authenticator, serviceAuthenticator string) []string {
 	var calls []string
-	if e.RateLimit > 0 {
+	if e.RateLimit > 0 && !e.PrincipalRateLimit {
 		if limits == "" {
 			calls = append(calls, fmt.Sprintf(".rate_limit(%d)", e.RateLimit))
 		} else {
@@ -342,10 +348,24 @@ func (e EndpointInfo) ControlCalls(limits, authenticator, serviceAuthenticator s
 		}
 		calls = append(calls, fmt.Sprintf(".authorize(%s, &[%s])", authenticator, strings.Join(perms, ", ")))
 	}
+	if e.RateLimit > 0 && e.PrincipalRateLimit {
+		calls = append(calls, fmt.Sprintf(".principal_rate_limit(%s, %s, %d)", principalStore(serviceAuthenticator), rustString(e.RateLimitBucket), e.RateLimit))
+	}
 	if e.Timeout > 0 {
 		calls = append(calls, fmt.Sprintf(".timeout_seconds(%d)", e.Timeout))
 	}
 	return calls
+}
+
+// principalStore is the Rust expression of the store a principal rate
+// limit counts in (D131): the router's Implementations field when the
+// route's other controls read the router's state, the bare name in a
+// manual route's doc.
+func principalStore(serviceAuthenticator string) string {
+	if strings.Contains(serviceAuthenticator, "state.implementations.") {
+		return "Arc::clone(&state.implementations.principal_rate_limit_store)"
+	}
+	return "principal_rate_limit_store"
 }
 
 // serviceCall is the route's service step: its @requireService or
@@ -404,6 +424,10 @@ type APIOutput struct {
 	// has a service clause: Implementations then has a
 	// service_authenticator, and every route runs the service step (D37).
 	HasServiceCallers bool
+	// HasPrincipalRateLimit reports whether a route's @rateLimit counts per
+	// principal (D131): Implementations then has a
+	// principal_rate_limit_store, which every such route counts in.
+	HasPrincipalRateLimit bool
 	// OpenAPIJSON is the service's OpenAPI document as apigen builds it
 	// for every server: written to openapi.json, embedded in src/openapi.rs
 	// and served at GET /api/openapi.json.
@@ -467,11 +491,11 @@ type APIOutput struct {
 }
 
 // HasRateLimits reports whether a route the router mounts, a manual one
-// included, has a @rateLimit: build_router_with then takes the routes'
-// limiters from its options' registry (D44, amended).
+// included, has a per-client @rateLimit: build_router_with then takes the
+// routes' limiters from its options' registry (D44, amended).
 func (o *APIOutput) HasRateLimits() bool {
 	for _, endpoint := range o.AllEndpoints() {
-		if endpoint.RateLimit > 0 {
+		if endpoint.RateLimit > 0 && !endpoint.PrincipalRateLimit {
 			return true
 		}
 	}
@@ -782,6 +806,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 	for _, endpoint := range implemented {
 		output.HasServiceCallers = output.HasServiceCallers || endpoint.ServiceCallers != nil
+		// The Rust router reads the principal its permission check admits,
+		// the core key's (D131); an extension's key reads another, which
+		// only its Go readers know.
+		if endpoint.PrincipalRateLimited() && endpoint.RateLimitKey != ir.RateLimitKeyPrincipal {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s: @rateLimit key %q is an extension's, which only Go routers read; the Rust router counts per 'ip' or 'principal'", endpoint.Namespace, endpoint.Name, endpoint.RateLimitKey)
+		}
+		output.HasPrincipalRateLimit = output.HasPrincipalRateLimit || endpoint.PrincipalRateLimited()
 	}
 
 	namespaceSet := make(map[string]struct{})
@@ -919,17 +950,19 @@ func endpointInfo(endpoint apigen.EndpointInfo, serviceStep bool) EndpointInfo {
 
 		WebhookProvider: endpoint.WebhookHMACProvider,
 
-		RequiresAuth:      endpoint.RequiresAuth,
-		RequiredPerms:     endpoint.RequiredPerms,
-		RequireOwnership:  endpoint.RequireOwnership,
-		RateLimit:         positive(endpoint.RateLimit),
-		BodyLimit:         positive(endpoint.BodyLimit),
-		Timeout:           positive(endpoint.Timeout),
-		ServiceCallers:    endpoint.ServiceCallers,
-		ServiceStep:       serviceStep,
-		Manual:            endpoint.ManualRouteRegistration,
-		OperationID:       endpoint.HandlerName,
-		IdentityOperation: endpoint.IdentityOperation,
+		RequiresAuth:       endpoint.RequiresAuth,
+		RequiredPerms:      endpoint.RequiredPerms,
+		RequireOwnership:   endpoint.RequireOwnership,
+		RateLimit:          positive(endpoint.RateLimit),
+		PrincipalRateLimit: endpoint.PrincipalRateLimited(),
+		RateLimitBucket:    endpoint.RateLimitBucket(),
+		BodyLimit:          positive(endpoint.BodyLimit),
+		Timeout:            positive(endpoint.Timeout),
+		ServiceCallers:     endpoint.ServiceCallers,
+		ServiceStep:        serviceStep,
+		Manual:             endpoint.ManualRouteRegistration,
+		OperationID:        endpoint.HandlerName,
+		IdentityOperation:  endpoint.IdentityOperation,
 	}
 }
 

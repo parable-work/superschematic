@@ -82,7 +82,10 @@ export type ProjectionLiteral = string | number | boolean;
  * - a literal rule `{ column, isNull: true }`, `{ column, notNull: true }` or
  *   `{ column, equals: literal }`, which reads no setting;
  * - a function rule `{ function, args, requiredSettings }`: the function must
- *   return true, and every listed setting must be set.
+ *   return true, and every listed setting must be set;
+ * - a set rule `{ column, inFunction, requiredSettings }`: the column must be
+ *   in the set the function, which takes no arguments, returns. Postgres runs
+ *   the function once per scan, not once per row (D127).
  */
 export type ProjectionPredicate = (
   | ProjectionSettingBinding
@@ -91,6 +94,12 @@ export type ProjectionPredicate = (
   | { readonly column: string; readonly notNull: true }
   | { readonly column: string; readonly equals: ProjectionLiteral }
   | (ProjectionFunctionCall & { readonly requiredSettings: readonly string[] })
+  | {
+      readonly column: string;
+      /** `schema.function`, with no arguments; never SQL text. */
+      readonly inFunction: string;
+      readonly requiredSettings: readonly string[];
+    }
 ) & {
   /**
    * Apply the rule only to rows where `when.column` equals `when.equals`;
@@ -137,6 +146,12 @@ export interface ProjectionOptions {
    * name, since an applied migration is never rewritten (D102).
    */
   readonly migration: string;
+  /**
+   * The Postgres schema that holds the source table and every joined table,
+   * for a database that keeps its tables in more than one schema. It
+   * replaces the service's `outputs.sql.sourceSchema` for this view (D126).
+   */
+  readonly sourceSchema?: string;
   /** The row rules, all ANDed, in order. */
   readonly where?: readonly ProjectionPredicate[];
   /**
@@ -144,6 +159,13 @@ export interface ProjectionOptions {
    * `ORDER BY by, order`, so the first row in that order wins.
    */
   readonly collapse?: ProjectionCollapse;
+  /**
+   * Whether a reader may scan the view on a read replica of its database.
+   * Omit it, or pass `true`, to allow the replica. Pass `false` for a view
+   * whose rows must not lag a write: the Arrow schema then says so in
+   * `projection.replica`, and a reader scans the primary (D121).
+   */
+  readonly replica?: boolean;
 }
 
 /**
@@ -163,7 +185,9 @@ export function projection<TSource>(_options: ProjectionOptions): ClassDecorator
  * Adds a joined table to a @projection under `alias`. `on` maps
  * `alias.field` to `otherAlias.field` equalities (schema field names, not
  * SQL). `kind` defaults to "inner"; a "left" join makes every column read
- * through the alias nullable.
+ * through the alias nullable. An empty `on` joins every row of the table,
+ * which is allowed only when the first `where` rule binds the base table's
+ * key to a setting, so the base is one row (D122).
  */
 export function join<TTable>(
   _alias: string,
@@ -206,6 +230,12 @@ export type IndexMethod = "btree" | "gin" | "gist" | "brin" | "hnsw" | "ivfflat"
 
 export interface IndexOptions {
   readonly unique?: boolean;
+  /**
+   * Nulls collide in this unique index: two rows whose keys are both null
+   * conflict (Postgres's `NULLS NOT DISTINCT`). Needs `unique: true`. The
+   * sqlite dialect refuses it.
+   */
+  readonly nullsNotDistinct?: boolean;
   /** A purpose name: the index is `idx_<table>_<name>`, or `uq_` when unique. */
   readonly name?: string;
   /**

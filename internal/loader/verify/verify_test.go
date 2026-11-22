@@ -826,6 +826,26 @@ func TestTraitUnknownConfigKey(t *testing.T) {
 	}
 }
 
+// TestRuntimeFieldsBelongToEnvVarsAndAreNotSecret: Runtime<T> marks a
+// field of an @envVars class, and never a Secret<T> one (D129).
+func TestRuntimeFieldsBelongToEnvVarsAndAreNotSecret(t *testing.T) {
+	schema := ir.NewSchema("svc", ir.SchemaKindGeneral)
+	schema.Types["ShopConfig"] = &ir.TypeDef{Name: "ShopConfig", Owner: "src/config.schema.ts", EnvVars: true, Role: ir.RoleEmbeddedStruct, Fields: []*ir.FieldDef{
+		{Name: "LOG_LEVEL", TypeRef: ir.TypeRef{Name: "string"}, Runtime: true},
+	}}
+	if r := Run(schema, Input{}); len(r.Errors) > 0 {
+		t.Fatalf("a Runtime<T> field of an @envVars class: %v", errorStrings(r))
+	}
+	schema.Types["ShopConfig"].Fields = append(schema.Types["ShopConfig"].Fields, &ir.FieldDef{Name: "API_KEY", TypeRef: ir.TypeRef{Name: "string"}, Runtime: true, Secret: true})
+	schema.Types["Order"] = &ir.TypeDef{Name: "Order", Owner: "src/order.schema.ts", Role: ir.RoleEmbeddedStruct, Fields: []*ir.FieldDef{
+		{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Runtime: true},
+	}}
+	r := Run(schema, Input{})
+	if !hasError(r, "ShopConfig.API_KEY: a Secret<T> field cannot be Runtime<T>") || !hasError(r, "Order.note: Runtime<T> marks a field of an @envVars class; Order is not @envVars") {
+		t.Fatalf("errors = %v", errorStrings(r))
+	}
+}
+
 func TestTraitConfigValueTypeMismatch(t *testing.T) {
 	r := Run(traitSchema([]ir.TraitRef{
 		{Name: "Tagged", ConfigArgs: map[string]any{"channel": float64(7)}},
@@ -850,6 +870,25 @@ func TestImplementingNonTraitIsAnError(t *testing.T) {
 	r := Run(schema, Input{})
 	if !hasError(r, "Notification implements Plain, which is not a trait") {
 		t.Errorf("expected a non-trait error, got %v", errorStrings(r))
+	}
+}
+
+// TestEnvVarsClassMayImplementAPlainClass: an @envVars class composes a
+// plain class without config arguments; config arguments to a plain class
+// still fail (D120).
+func TestEnvVarsClassMayImplementAPlainClass(t *testing.T) {
+	schema := traitSchema([]ir.TraitRef{{Name: "Plain"}})
+	schema.Types["Plain"] = &ir.TypeDef{Name: "Plain", Role: ir.RoleEmbeddedStruct}
+	schema.Types["Notification"].EnvVars = true
+	if r := Run(schema, Input{}); len(r.Errors) > 0 {
+		t.Errorf("an @envVars class may implement a plain class, got %v", errorStrings(r))
+	}
+
+	schema.Types["Notification"].Implements = []ir.TraitRef{
+		{Name: "Plain", ConfigArgs: map[string]any{"channel": "email"}},
+	}
+	if r := Run(schema, Input{}); !hasError(r, "Notification implements Plain, which is not a trait") {
+		t.Errorf("config arguments to a plain class should still fail, got %v", errorStrings(r))
 	}
 }
 

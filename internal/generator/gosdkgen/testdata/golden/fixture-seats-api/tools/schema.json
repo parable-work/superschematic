@@ -13,6 +13,7 @@
         "handle": "problem_seats_leave_seat",
         "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.seats.leave-seat",
@@ -56,6 +57,7 @@
         "handle": "problem_seats_list_seats",
         "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.seats.list-seats",
@@ -102,6 +104,7 @@
         "handle": "problem_seats_take_seat",
         "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.seats.take-seat",
@@ -145,6 +148,7 @@
         "handle": "problem_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.status.transition",
@@ -188,6 +192,7 @@
         "handle": "sandbox_observed_observe",
         "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "sandbox.observed.observe",
@@ -231,6 +236,7 @@
         "handle": "sandbox_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "sandbox.status.transition",

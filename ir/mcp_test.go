@@ -40,6 +40,9 @@ func TestValidateOperationMCP(t *testing.T) {
 		{name: "policy under a record key", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Key: "hidden", Value: "ask"}}, want: `invocation policy key "hidden" is a key @mcp already uses`},
 		{name: "policy under the engine's hiddenBy", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Key: "hiddenBy", Value: "ask"}}, want: `invocation policy key "hiddenBy" is a key @mcp already uses`},
 		{name: "hidden with policy", mcp: OperationMCP{Hidden: true, HiddenReason: "Browser only.", Invocation: MCPInvocation{Key: "review", Value: "never"}}, want: "a hidden operation must not declare review"},
+		{name: "visible additive", mcp: OperationMCP{Handle: "add_note", Additive: true}},
+		{name: "hidden additive", mcp: OperationMCP{Hidden: true, HiddenReason: "Browser only.", Additive: true}, want: "a hidden operation must not declare additive"},
+		{name: "authored annotations", mcp: OperationMCP{Handle: "get_order", Annotations: &MCPToolAnnotations{ReadOnlyHint: true}}, want: "annotations are generated"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -54,6 +57,28 @@ func TestValidateOperationMCP(t *testing.T) {
 				t.Fatalf("ValidateOperationMCP() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+// TestResolveMCPToolAnnotations: a tool's hints come from its replay mode
+// and @mcp additive alone. A tool that may write is destructive unless it
+// declares that it only adds (D123).
+func TestResolveMCPToolAnnotations(t *testing.T) {
+	for _, test := range []struct {
+		replay   DocsReplayMode
+		additive bool
+		want     MCPToolAnnotations
+	}{
+		{DocsReplayModeReadOnly, false, MCPToolAnnotations{ReadOnlyHint: true}},
+		{DocsReplayModeIdempotent, false, MCPToolAnnotations{DestructiveHint: true, IdempotentHint: true}},
+		{DocsReplayModeIdempotent, true, MCPToolAnnotations{IdempotentHint: true}},
+		{DocsReplayModeCompareAndSwap, false, MCPToolAnnotations{DestructiveHint: true}},
+		{DocsReplayModeCompareAndSwap, true, MCPToolAnnotations{}},
+		{"", false, MCPToolAnnotations{DestructiveHint: true}},
+	} {
+		if got := ResolveMCPToolAnnotations(test.replay, test.additive); *got != test.want {
+			t.Errorf("ResolveMCPToolAnnotations(%q, %v) = %+v, want %+v", test.replay, test.additive, *got, test.want)
+		}
 	}
 }
 
@@ -240,7 +265,7 @@ func TestOperationMCPDecodesItsPolicy(t *testing.T) {
 	}
 
 	// Round trips, through a FieldDef as the IR holds it.
-	for _, record := range []*OperationMCP{&want, {Hidden: true, HiddenReason: "Staff only."}, {Handle: "get_order"}} {
+	for _, record := range []*OperationMCP{&want, {Hidden: true, HiddenReason: "Staff only."}, {Handle: "get_order"}, {Handle: "add_note", Additive: true, Annotations: &MCPToolAnnotations{IdempotentHint: true}}} {
 		field := FieldDef{Name: "op", TypeRef: TypeRef{Name: "Order"}, MCP: record}
 		raw, err := json.Marshal(field)
 		if err != nil {

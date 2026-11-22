@@ -1,5 +1,5 @@
 import { Network } from "superscalar";
-import { Default, Nullable, Secret } from "@superschematic/schema";
+import { Default, Nullable, Runtime, Secret } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 
 // How the fixture service runs.
@@ -45,4 +45,11 @@ export abstract class FixtureEnvConfig {
 
   // Optional string.
   VERSION: Nullable<string>;
+
+  // A Runtime<T> string with a default: the Live handle changes it while the
+  // process runs.
+  LOG_LEVEL: Nullable<Runtime<Default<string, "info">>>;
+
+  // A Runtime<T> integer with a default.
+  BATCH_SIZE: Nullable<Runtime<Default<number, 50>>>;
 }

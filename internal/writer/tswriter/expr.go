@@ -138,6 +138,10 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 		e.failf("%s: map-typed fields have no TypeScript authoring form", owner)
 		return "never"
 	}
+	if fd.RequiredNull {
+		// RequiredNull (D130) has no value type and takes no wrapper.
+		return e.use("RequiredNull")
+	}
 
 	expr := e.refersTo(e.renderTypeName(fd.TypeRef.Name, owner), fd.References, owner)
 	if fd.FileUpload != nil {
@@ -163,6 +167,9 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 		expr = fmt.Sprintf("Encrypted<%s>", expr)
 	case fd.Secret:
 		expr = fmt.Sprintf("%s<%s>", e.use("Secret"), expr)
+	}
+	if fd.Runtime {
+		expr = fmt.Sprintf("%s<%s>", e.use("Runtime"), expr)
 	}
 
 	wrapsArray := false

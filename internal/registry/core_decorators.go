@@ -230,13 +230,13 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 		specs = append(specs, DecoratorSpec{
 			Name: name, Packages: []string{pkgAPI}, Target: TargetOperationSet,
 			Apply: func(n Node, args []any, _ Site) error {
-				return applyMiddleware(name, args, &n.OperationSet.Middleware)
+				return applyMiddleware(name, args, &n.OperationSet.Middleware, r.isRateLimitKey)
 			},
 		})
 		specs = append(specs, DecoratorSpec{
 			Name: name, Packages: []string{pkgAPI}, Target: TargetOperation,
 			Apply: func(n Node, args []any, _ Site) error {
-				return applyMiddleware(name, args, &n.Field.Middleware)
+				return applyMiddleware(name, args, &n.Field.Middleware, r.isRateLimitKey)
 			},
 			recordsErrors: true,
 		})
@@ -417,6 +417,12 @@ func indexDef(args []any) (ir.IndexDef, error) {
 						return ir.IndexDef{}, ArgErrorf(1, "@index unique must be a boolean literal")
 					}
 					idx.Unique = b
+				case "nullsNotDistinct":
+					b, ok := value.(bool)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index nullsNotDistinct must be a boolean literal")
+					}
+					idx.NullsNotDistinct = b
 				case "name":
 					s, ok := value.(string)
 					if !ok {
@@ -474,6 +480,9 @@ func indexDef(args []any) (ir.IndexDef, error) {
 		default:
 			return ir.IndexDef{}, ArgErrorf(1, "@index second argument must be a boolean unique flag or an options object")
 		}
+	}
+	if idx.NullsNotDistinct && !idx.Unique {
+		return ir.IndexDef{}, ArgErrorf(1, "@index nullsNotDistinct requires unique: true")
 	}
 	return idx, nil
 }
@@ -549,7 +558,10 @@ func rawSQLDef(args []any) (ir.RawSQLDef, error) {
 // MiddlewareConfig, allocating it on first use. Its value is a whole number
 // of at least 1: a server cannot apply a limit of 0 (the Go runtime would
 // refuse every request) or a fraction of a request, megabyte or second.
-func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) error {
+// @rateLimit also takes a key (D131), one isRateLimitKey accepts; it is
+// written down as given, and an absent one leaves the key empty, which
+// counts per client IP.
+func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig, isRateLimitKey func(string) bool) error {
 	if len(args) != 1 {
 		return fmt.Errorf("@%s takes exactly one config object", name)
 	}
@@ -581,6 +593,16 @@ func applyMiddleware(name string, args []any, target **ir.MiddlewareConfig) erro
 	}
 	n := int(f)
 	*slot = &n
+	if name == "rateLimit" {
+		(*target).RateLimitKey = ""
+		if raw, set := cfg["key"]; set {
+			key, ok := raw.(string)
+			if !ok || !isRateLimitKey(key) {
+				return fmt.Errorf("@rateLimit key must be %q, %q or a key an extension registers, not %v", ir.RateLimitKeyIP, ir.RateLimitKeyPrincipal, raw)
+			}
+			(*target).RateLimitKey = key
+		}
+	}
 	return nil
 }
 

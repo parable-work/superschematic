@@ -48,6 +48,9 @@ type Registry struct {
 	checks         []CheckSpec
 	openAPIHooks   []OpenAPIHook
 	toolHooks      []ToolHook
+	// rateLimitKeys are the principal @rateLimit keys extensions name
+	// (D131), in registration order.
+	rateLimitKeys []RateLimitKey
 	// toolInvocation is the policy RegisterToolInvocationPolicy installed;
 	// nil means ToolInvocationPolicy returns the core's.
 	toolInvocation *ToolInvocationPolicy
@@ -547,6 +550,49 @@ func (r *Registry) RegisterToolHook(h ToolHook) error {
 // ToolHooks returns the registered tool hooks in registration order.
 func (r *Registry) ToolHooks() []ToolHook {
 	return append([]ToolHook(nil), r.toolHooks...)
+}
+
+// RegisterRateLimitKey adds a principal @rateLimit key under an
+// extension's own word for the principal its Go routers count per (D131):
+// a schema writes @rateLimit({ requestsPerMinute, key: k.Name }), and the
+// route counts per the principal k.GoPrincipal reads, as a route with the
+// core's "principal" key counts per the session's. It needs a name that is
+// neither "ip" nor "principal" nor another extension's, and a GoPrincipal.
+func (r *Registry) RegisterRateLimitKey(k RateLimitKey) error {
+	if err := r.registrable("rate limit key " + k.Name); err != nil {
+		return err
+	}
+	if err := k.Validate(); err != nil {
+		return fmt.Errorf("registry: %w", err)
+	}
+	for _, existing := range r.rateLimitKeys {
+		if existing.Name == k.Name {
+			return fmt.Errorf("registry: rate limit key %q is already registered", k.Name)
+		}
+	}
+	r.rateLimitKeys = append(r.rateLimitKeys, k)
+	r.noteExtension(k.Extension)
+	return nil
+}
+
+// RateLimitKeys returns the extensions' principal @rateLimit keys in
+// registration order.
+func (r *Registry) RateLimitKeys() []RateLimitKey {
+	return append([]RateLimitKey(nil), r.rateLimitKeys...)
+}
+
+// isRateLimitKey reports whether a @rateLimit may name key: the core's
+// "ip" and "principal", or a key an extension registered.
+func (r *Registry) isRateLimitKey(key string) bool {
+	if key == ir.RateLimitKeyIP || key == ir.RateLimitKeyPrincipal {
+		return true
+	}
+	for _, k := range r.rateLimitKeys {
+		if k.Name == key {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterToolInvocationPolicy replaces the core's invocation policy

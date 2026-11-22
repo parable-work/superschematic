@@ -144,6 +144,28 @@ An integer scalar, such as `Generic.Int64`, is a pointer for the same
 reason, so an explicit `0` is written. With a default it stays the value
 type and is left out when `0`.
 
+### A field that is always null
+
+`RequiredNull`, from `@superschematic/schema`, is a field that is present
+with the value null and nothing else. Use it when a value is not known and
+the payload must say so, such as the time of an event that nobody saw:
+`voidedAt: RequiredNull`. The field is required: a payload that leaves it
+out, or gives it any other value, is refused (D130).
+
+| Language | A `RequiredNull` field |
+| --- | --- |
+| Go | `RequiredNull`, a type the package declares, whose JSON is `null`; the decoder refuses the field's absence |
+| TypeScript | `voidedAt: null`; the validator reports any other value as `expected null` |
+| Python | `voided_at: None`; `validate_all` reports any other value as `invalid` |
+| Rust | `()`, which serde reads from `null` only |
+| OpenAPI | a required `{"type": "string", "nullable": true, "enum": [null]}` |
+
+A union picks a member with a `RequiredNull` field only when the payload
+holds the field with null. `RequiredNull` takes no type argument and no
+wrapper, is not a list element or `Record` value, and is not an
+operation's argument or result. In a data form the field is
+`requiredNull: true` with `typeRef: { name: "" }`.
+
 ## Defaults
 
 `Default<T, V>` fills in a value when a payload leaves the field out. The
@@ -405,6 +427,54 @@ class. Two `@envVars` classes neither of which extends the other fail the
 load, which names both: make one extend the other, or remove `@envVars`
 from one. A plain base class, without `@envVars`, works as well, since an
 `@envVars` class holds every field it inherits.
+
+An `@envVars` class can also compose plain classes, one per part of the
+environment that other code writes, through the `Trait<T>` carrier.
+`Trait<X>` adds X's fields as X declares them. `Trait<Partial<X>>` adds
+them with each one optional, for a part that a local run leaves unset:
+
+```ts
+import { Trait } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
+
+export abstract class WorkerEnv {
+  QUEUE_NAME: string;
+}
+
+export abstract class DeployEnv {
+  RELEASE: string;
+}
+
+@envVars
+export abstract class WorkerConfig implements Trait<WorkerEnv>, Trait<Partial<DeployEnv>> {
+  SERVICE_NAME: string;
+}
+```
+
+`QUEUE_NAME` and `SERVICE_NAME` are required and `RELEASE` is optional.
+`WorkerEnv` and `DeployEnv` stay types of their own, with their fields as
+they declare them. Only an `@envVars` class may implement a plain class
+or use `Partial<>` (D120).
+
+A field the service reads again while it runs is `Runtime<T>`, from
+`@superschematic/schema`: `LOG_LEVEL: Nullable<Runtime<Default<string, "info">>>`.
+Each loader then writes a Live handle beside it that holds the config in
+effect and changes a `Runtime<T>` field with no restart (D129):
+
+| Language | Live handle |
+| --- | --- |
+| Go | `LiveFields`, and `Live`: `NewLive(boot)`, `Current()`, `Fields()`, `Subscribe(fn)` and `Apply(values)` |
+| TypeScript | `LIVE_FIELDS`, and `Live<Config>`: `new Live<Config>(boot, env?)`, `current`, `fields`, `subscribe(listener)` and `apply(values)` |
+| Rust | `LIVE_FIELDS`, and `LiveConfig`: `new(boot)`, `current()`, `subscribe()`, a tokio watch receiver, `fields()` and `apply(&values)` |
+
+`Apply` takes new values as environment text, such as the ones a settings
+service writes. It reads each `Runtime<T>` field from them, or else from
+the environment, parses and checks them as the loader does, and leaves the
+config in effect as it was when it refuses one. Every other field keeps
+the value the loader read at start, and a key that is not a `Runtime<T>`
+field is ignored. Only a field of an `@envVars` class may be `Runtime<T>`,
+and a `Secret<T>` field may not: a credential changes with a restart.
+`values-schema.json` writes `"runtime": true` on each such field.
 
 The build writes a loader that reads and checks every variable and
 reports every one that is missing or invalid at once, never a value:

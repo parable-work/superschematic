@@ -69,7 +69,7 @@ func TestGenerateWithDependencies_ImportedEnumMetadata(t *testing.T) {
 	if field.DefaultValue != "bar" {
 		t.Fatalf("default = %q, want bar", field.DefaultValue)
 	}
-	if loader := rustLoaderExpr(field); !strings.Contains(loader, `enum_or_default("IMPORTED_ENV", &["foo", "bar"], "bar")?`) {
+	if loader := rustLoaderExpr(field); !strings.Contains(loader, `enum_or_default(lookup, "IMPORTED_ENV", &["foo", "bar"], "bar")?`) {
 		t.Fatalf("unexpected Rust loader expression: %s", loader)
 	}
 }
@@ -88,7 +88,7 @@ func TestRustFloatScalarUsesFloatLoader(t *testing.T) {
 	if got := rustType(field); got != "f64" {
 		t.Fatalf("rustType = %q, want f64", got)
 	}
-	if got := rustLoaderExpr(field); got != `f64_or_default("MATCH_THRESHOLD", 0.88)?` {
+	if got := rustLoaderExpr(field); got != `f64_or_default(lookup, "MATCH_THRESHOLD", 0.88)?` {
 		t.Fatalf("rustLoaderExpr = %q", got)
 	}
 	if !usesRustFloat([]ConfigField{field}) {

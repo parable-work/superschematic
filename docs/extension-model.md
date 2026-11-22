@@ -53,6 +53,7 @@ links is active for every command it runs.
 | Tool hook | `RegisterToolHook(ToolHook)` | 3.14 |
 | MCP tool invocation policy | `RegisterToolInvocationPolicy(ToolInvocationPolicy)` | 3.15 |
 | Behavior | `RegisterBehavior(BehaviorSpec)` | 3.16 |
+| Principal `@rateLimit` key | `RegisterRateLimitKey(RateLimitKey)` | D131 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
@@ -184,6 +185,7 @@ Each `Register*` method checks its own spec:
 | `RegisterCheck` | an empty name, no `Verify`, a duplicate name |
 | `RegisterOpenAPIHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
+| `RegisterRateLimitKey` | an empty name, `ip` or `principal`, no `GoPrincipal`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog, a row whose primitive reads as object that the validators would check as a string: no `JSONSchemaType` of `object`, `array` or `any`, a pattern or a length beside `object` or `array`, or upload metadata |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
 | `RegisterPlatform`, `RegisterConnector`, `RegisterTarget`, `RegisterDNSPlatform`, `RegisterProvisioner` | the stack model's specs; `docs/stack-model.md`, section 6.7, lists what each refuses |

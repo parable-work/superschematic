@@ -20,7 +20,7 @@ import {
   tooManyRequests,
   unauthorized,
 } from './problem.js';
-import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
+import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type PrincipalRateLimitStore, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 import { downloadResponse } from './download.js';
 import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
@@ -121,6 +121,12 @@ export interface RouterRuntimeOptions {
    * the transport's peer address (remoteAddressKey).
    */
   rateLimit?: RateLimitOptions;
+  /**
+   * Counts the requests of every route whose @rateLimit counts per
+   * principal (D131), so each limit holds across replicas. Mounting such a
+   * route without one throws.
+   */
+  principalRateLimitStore?: PrincipalRateLimitStore;
 }
 
 export interface MountOptions {
@@ -264,6 +270,35 @@ async function admit(ctx: RequestContext, limitPerMinute: number, options: Route
   const key = `${ctx.operation.namespace}.${ctx.operation.name}:${keyOf(ctx)}`;
   const decision = await rateLimitStoreOf(options).take(key, limitPerMinute, now());
   if (!decision.allowed) throw tooManyRequests(decision.retryAfterSeconds);
+}
+
+/**
+ * Counts the request against its route's principal limit (D131), after the
+ * permission gate admitted ctx.principal: a request with no principal is
+ * refused 400, a store failure 503, and one past the limit 429 with
+ * Retry-After.
+ */
+async function admitPrincipal(ctx: RequestContext, limitPerMinute: number, store: PrincipalRateLimitStore): Promise<void> {
+  const principal = ctx.principal?.subject;
+  if (!principal) {
+    throw new HttpProblem(400, 'This operation is limited per principal and the request names none', { code: 'rate_limit_principal_missing' });
+  }
+  let decision: Awaited<ReturnType<PrincipalRateLimitStore['take']>>;
+  try {
+    decision = await store.take(`${ctx.operation.method} ${ctx.operation.path}`, principal, limitPerMinute, 60_000);
+  } catch {
+    throw new HttpProblem(503, 'Rate limit check is unavailable; try again shortly', { code: 'rate_limit_unavailable' });
+  }
+  if (!decision.allowed) {
+    throw tooManyRequests(Math.max(1, Math.ceil(decision.retryAfterSeconds)), `This principal exceeded ${limitPerMinute} requests per minute`);
+  }
+}
+
+/** Throws when a route that counts per principal is mounted without the store it counts in (D131). */
+function requirePrincipalStore(spec: OperationSpec, rateLimitPerMinute: number | undefined, options: RouterRuntimeOptions): void {
+  if (rateLimitPerMinute && spec.rateLimitKey === 'principal' && !options.principalRateLimitStore) {
+    throw new Error(`${spec.namespace}.${spec.name}: its @rateLimit counts per principal, and principalRateLimitStore is required`);
+  }
 }
 
 /** The effective @rateLimit and @timeout of one mount, after the mount's overrides; 0 or absent disables. */
@@ -569,7 +604,8 @@ async function runRoute<E extends Env>(
   const middleware: MiddlewareHandler[] = [];
   if (steps.webhookVerifier) middleware.push(webhookMiddleware(steps.webhookVerifier));
   const { rateLimitPerMinute } = steps;
-  if (rateLimitPerMinute) middleware.push(refusing(ctx => admit(ctx, rateLimitPerMinute, options)));
+  const perPrincipal = spec.rateLimitKey === 'principal';
+  if (rateLimitPerMinute && !perPrincipal) middleware.push(refusing(ctx => admit(ctx, rateLimitPerMinute, options)));
   if (steps.bodyLimitBytes !== undefined) middleware.push(jsonBodyLimit(steps.bodyLimitBytes));
   // A service caller that stands in for the end user skips the end-user step: no Bearer parse, no gate.
   let standsIn = false;
@@ -592,6 +628,10 @@ async function runRoute<E extends Env>(
         if (!standsIn) await establishCaller(ctx, options);
       })
     );
+  }
+  const principalStore = options.principalRateLimitStore;
+  if (rateLimitPerMinute && perPrincipal && principalStore) {
+    middleware.push(refusing(ctx => admitPrincipal(ctx, rateLimitPerMinute, principalStore)));
   }
   try {
     return await through(c, middleware, async () => {
@@ -713,6 +753,7 @@ export function mountOperation<E extends Env>(
   const limitBytes =
     mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? (spec.uploads ? uploadBodyLimitBytes(spec.uploads, jsonLimitBytes) : jsonLimitBytes);
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
+  requirePrincipalStore(spec, rateLimitPerMinute, options);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),
     rateLimitPerMinute,
@@ -749,6 +790,7 @@ export function mountManualOperation<E extends Env>(
   mount: MountOptions = {}
 ): void {
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
+  requirePrincipalStore(spec, rateLimitPerMinute, options);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),
     rateLimitPerMinute,

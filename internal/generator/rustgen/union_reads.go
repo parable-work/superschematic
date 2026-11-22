@@ -36,6 +36,7 @@ enum ReadKind {
     Object(&'static str),
     Union(&'static str),
     Any,
+    Null,
 }
 
 /// One object type of the predicate.
@@ -89,6 +90,7 @@ fn reads_value(field: &ReadField, value: &Value) -> bool {
         ReadKind::Object(name) => reads_type(name, value),
         ReadKind::Union(name) => value.is_object() && pick_union_member(name, value).is_some(),
         ReadKind::Any => true,
+        ReadKind::Null => false,
     }
 }
 
@@ -119,6 +121,7 @@ fn reads_type(name: &str, value: &Value) -> bool {
         return false;
     }
     read.fields.iter().all(|field| match object.get(field.name) {
+        Some(Value::Null) if matches!(field.kind, ReadKind::Null) => true,
         None | Some(Value::Null) => !field.required,
         Some(field_value) if field.is_map => field_value.as_object().is_some_and(|entries| {
             entries
@@ -227,6 +230,8 @@ func rustReadKind(f codegen.ReadField, scalarFns map[string]string) string {
 		return "ReadKind::Object(" + strconv.Quote(f.Ref) + ")"
 	case codegen.ReadUnionKind:
 		return "ReadKind::Union(" + strconv.Quote(f.Ref) + ")"
+	case codegen.ReadNull:
+		return "ReadKind::Null"
 	}
 	return "ReadKind::Any"
 }

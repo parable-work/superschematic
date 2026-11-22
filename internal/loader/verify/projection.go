@@ -127,6 +127,9 @@ func checkProjectionIdentifiers(td *ir.TypeDef, def *ir.ProjectionDef, r *Result
 			r.errorf(td.Owner, "%s: @projection %s must be a snake_case SQL identifier, got %q", td.Name, part.key, part.value)
 		}
 	}
+	if def.SourceSchema != "" && !projectionIdentifierPattern.MatchString(def.SourceSchema) {
+		r.errorf(td.Owner, "%s: @projection sourceSchema must be a snake_case SQL identifier, got %q", td.Name, def.SourceSchema)
+	}
 	if !migrationStampPattern.MatchString(def.Migration) {
 		r.errorf(td.Owner, "%s: @projection migration must be a 14-digit migration version stamp, got %q", td.Name, def.Migration)
 	}
@@ -196,8 +199,13 @@ func resolveProjectionScope(schema *ir.Schema, td *ir.TypeDef, def *ir.Projectio
 		scope.order = append(scope.order, j.Alias)
 
 		if len(j.On) == 0 {
-			r.errorf(td.Owner, "%s: @join %s needs at least one alias.field equality", td.Name, j.Alias)
-			ok = false
+			// A join with no equality pairs every joined row with every
+			// base row, so it is allowed only beside a base of one row:
+			// one the first rule binds by its key (D122).
+			if key := baseBoundToOneRow(scope.tables[ir.ProjectionBaseAlias], def); key == "" {
+				r.errorf(td.Owner, "%s: @join %s needs at least one alias.field equality, unless the first where rule binds the base's key to a setting", td.Name, j.Alias)
+				ok = false
+			}
 			continue
 		}
 		touchesAlias := false
@@ -223,6 +231,24 @@ func resolveProjectionScope(schema *ir.Schema, td *ir.TypeDef, def *ir.Projectio
 		return nil
 	}
 	return scope
+}
+
+// baseBoundToOneRow returns the base.<key> reference the projection's first
+// row rule binds to a setting, or "" when it binds none: a required,
+// unguarded setting binding of the base table's key, its id or else its
+// @key field. Such a base is one row, so a join with no equality lists
+// each joined row once (D122).
+func baseBoundToOneRow(base *ir.TypeDef, def *ir.ProjectionDef) string {
+	key := ir.RelatedKeyField(base)
+	if key == nil || len(def.Predicates) == 0 {
+		return ""
+	}
+	first := def.Predicates[0]
+	ref := ir.ProjectionBaseAlias + "." + key.Name
+	if first == nil || first.Setting == "" || first.Optional || first.When != nil || len(first.AnyOf) > 0 || first.Column != ref {
+		return ""
+	}
+	return ref
 }
 
 // resolve splits an alias.field reference and finds the field on the
@@ -360,6 +386,22 @@ func checkProjectionPredicate(td *ir.TypeDef, label string, pred *ir.ProjectionP
 	switch {
 	case pred.IsLiteral():
 		checkProjectionLiteral(td, label, pred, scope, r)
+	case pred.InFunction != "":
+		parts := strings.Split(pred.InFunction, ".")
+		if len(parts) != 2 || !projectionIdentifierPattern.MatchString(parts[0]) || !projectionIdentifierPattern.MatchString(parts[1]) {
+			r.errorf(td.Owner, "%s: @projection %s inFunction must name schema.function, got %q", td.Name, label, pred.InFunction)
+		}
+		if pred.Function != "" || len(pred.Args) > 0 || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || len(pred.RequiredSettings) == 0 {
+			r.errorf(td.Owner, "%s: @projection %s set rule takes column, inFunction and requiredSettings only", td.Name, label)
+		}
+		if _, _, _, problem := scope.resolve(pred.Column); problem != "" {
+			r.errorf(td.Owner, "%s: @projection %s column %q: %s", td.Name, label, pred.Column, problem)
+		}
+		for _, setting := range pred.RequiredSettings {
+			if !settingNamePattern.MatchString(setting) {
+				r.errorf(td.Owner, "%s: @projection %s required setting must be a dotted custom Postgres setting name, got %q", td.Name, label, setting)
+			}
+		}
 	case pred.Function != "":
 		checkProjectionFunction(td, "@projection "+label, pred.Function, pred.Args, scope, r)
 		if pred.Column != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || len(pred.Args) == 0 || len(pred.RequiredSettings) == 0 {
@@ -381,7 +423,7 @@ func checkProjectionPredicate(td *ir.TypeDef, label string, pred *ir.ProjectionP
 			r.errorf(td.Owner, "%s: @projection %s anyOf needs at least two alternatives", td.Name, label)
 		}
 		for i, alt := range pred.AnyOf {
-			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.IsLiteral() {
+			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.InFunction != "" || alt.IsLiteral() {
 				r.errorf(td.Owner, "%s: @projection %s anyOf[%d] carries only column, setting and optional", td.Name, label, i)
 				continue
 			}
@@ -434,7 +476,7 @@ func checkProjectionLiteral(td *ir.TypeDef, label string, pred *ir.ProjectionPre
 	if forms != 1 {
 		r.errorf(td.Owner, "%s: @projection %s carries exactly one of isNull, notNull and equals", td.Name, label)
 	}
-	if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
+	if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || pred.InFunction != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
 		r.errorf(td.Owner, "%s: @projection %s literal rule carries only column and when; it reads no setting", td.Name, label)
 	}
 	_, _, field, problem := scope.resolve(pred.Column)

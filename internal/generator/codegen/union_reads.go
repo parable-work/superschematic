@@ -14,7 +14,9 @@ import (
 //
 //   - the payload is a JSON object, and a @strictJSON member's holds no key
 //     the member does not declare;
-//   - each required field (ReadField.Required) is present and not null;
+//   - each required field (ReadField.Required) is present and not null,
+//     except a required-null field (ReadNull, D130), which is present and
+//     null;
 //   - each field present and not null has the field's JSON kind at every
 //     list level and in every map value, none of whose elements or values
 //     is null: a string, a number, a boolean, an object or an array, an
@@ -57,7 +59,7 @@ type ReadField struct {
 	Depth int
 	Map   bool
 	// Kind is the kind of each value: ReadString, ReadNumber, ReadBoolean,
-	// ReadEnum, ReadScalar, ReadObject, ReadUnion or ReadAny.
+	// ReadEnum, ReadScalar, ReadObject, ReadUnion, ReadAny or ReadNull.
 	Kind string
 	// Values are an enum's serialized values.
 	Values []string
@@ -84,6 +86,9 @@ const (
 	ReadAny        = "any"
 	ReadJSONObject = "jsonObject"
 	ReadJSONArray  = "jsonArray"
+	// ReadNull is a required-null field's (D130): the payload holds it
+	// with null, and no other value reads.
+	ReadNull = "null"
 )
 
 // ReadUnion is one union of the predicate. With a Discriminator, the member
@@ -256,6 +261,11 @@ func (b *readModelBuilder) objectType(name string) error {
 			Required: ReadRequired(field),
 			Depth:    field.TypeRef.ArrayDepth(),
 			Map:      field.TypeRef.IsMap,
+		}
+		if field.RequiredNull {
+			rf.Kind = ReadNull
+			read.Fields = append(read.Fields, rf)
+			continue
 		}
 		if err := b.kind(&rf, field.TypeRef.Name); err != nil {
 			return fmt.Errorf("codegen: %s.%s: %w", name, field.Name, err)

@@ -91,11 +91,14 @@ type ScalarInfo struct {
 // FieldInfo holds information about a struct field for TypeScript generation.
 // The schema field name is the JSON name; TypeScript keeps it as-is.
 type FieldInfo struct {
-	Name             string
-	TSName           string
-	Type             string
-	TSType           string
-	Required         bool
+	Name     string
+	TSName   string
+	Type     string
+	TSType   string
+	Required bool
+	// RequiredNull marks a field present with null and nothing else (D130):
+	// its TSType is null, and the validator refuses any other value.
+	RequiredNull     bool
 	InternalMetadata bool
 	Secret           bool
 	IsArray          bool
@@ -776,6 +779,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Type:             f.Type,
 			TSType:           f.TargetType,
 			Required:         f.Required,
+			RequiredNull:     f.RequiredNull,
 			InternalMetadata: f.InternalMetadata,
 			Secret:           f.Secret,
 			IsArray:          f.IsArray,

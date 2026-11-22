@@ -66,6 +66,7 @@ mod path;
 pub mod postgres;
 // A queue's client (D53, D65), with the `postgres` feature, and on SQLite
 // with the `sqlite` feature (D53, amended).
+mod principal_ratelimit;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod queue;
 mod ratelimit;
@@ -126,6 +127,7 @@ pub use params::{
     QueryValues, ScalarCheck, ScalarConstraints, ScalarParse,
 };
 pub use path::path_is_percent_encoded;
+pub use principal_ratelimit::{PrincipalRateLimitStore, RateLimitDecision};
 pub use ratelimit::{client_key, ClientIp, RateLimiter, RateLimits};
 pub use request_id::{request_id_of, request_ids};
 pub use response::{

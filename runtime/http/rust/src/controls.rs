@@ -25,17 +25,23 @@
 //!    401 `unauthorized` without a caller, 403 `forbidden` when the
 //!    caller's permissions cover none of the route's. The caller reaches
 //!    the handler as a [`Principal`] request extension.
-//! 5. `@timeout`, around the handler and its extractors: 504
+//! 5. A `@rateLimit` that counts per principal (D131), after the
+//!    permission check whose caller it counts: 400
+//!    `rate_limit_principal_missing` without one, 503
+//!    `rate_limit_unavailable` when its store fails, 429
+//!    `too_many_requests` with `Retry-After` past the limit.
+//! 6. `@timeout`, around the handler and its extractors: 504
 //!    `gateway_timeout`, and the handler's future is dropped.
 //!
 //! A webhook verifier (`@hmacVerified`) runs before all of them; the
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
 //! returned. Each refusal is the problem of [`error_response`].
 
+use crate::principal_ratelimit::PrincipalLimit;
 use crate::service_auth::service_step;
 use crate::{
-    error_response, ApiError, Authenticator, Principal, RateLimiter, ServiceAuthenticator,
-    ServiceCaller, ServiceMode,
+    error_response, ApiError, Authenticator, Principal, PrincipalRateLimitStore, RateLimiter,
+    ServiceAuthenticator, ServiceCaller, ServiceMode,
 };
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Request};
@@ -59,6 +65,7 @@ pub struct RouteControls {
     body_limit: Option<usize>,
     service: Option<ServiceStep>,
     authorization: Option<Authorization>,
+    principal_limit: Option<PrincipalLimit>,
     timeout: Option<Duration>,
     /// The route is served with no transport under it (D116): its rate
     /// limit, body limit and timeout are its host's.
@@ -211,6 +218,26 @@ impl RouteControls {
         self
     }
 
+    /// `@rateLimit({ requestsPerMinute, key: 'principal' })` (D131): at
+    /// most `requests_per_minute` requests a minute for each principal the
+    /// permission check admits, counted in `store` under `bucket`, the
+    /// route's method and path. It runs after the permission check, and
+    /// under a host too: the host counts clients, not principals.
+    #[must_use]
+    pub fn principal_rate_limit(
+        mut self,
+        store: Arc<dyn PrincipalRateLimitStore>,
+        bucket: &str,
+        requests_per_minute: u32,
+    ) -> Self {
+        self.principal_limit = Some(PrincipalLimit {
+            store,
+            bucket: bucket.into(),
+            requests_per_minute,
+        });
+        self
+    }
+
     /// `@timeout({ seconds })`.
     #[must_use]
     pub fn timeout_seconds(mut self, seconds: u64) -> Self {
@@ -230,6 +257,11 @@ impl RouteControls {
         if let Some(timeout) = self.timeout.filter(|_| !self.hostless) {
             route = route.route_layer(from_fn(move |request: Request, next: Next| {
                 time_out(timeout, request, next)
+            }));
+        }
+        if let Some(limit) = self.principal_limit {
+            route = route.route_layer(from_fn(move |request: Request, next: Next| {
+                limit.clone().run(request, next)
             }));
         }
         if self.service.is_some() || self.authorization.is_some() {
@@ -521,6 +553,89 @@ mod tests {
         assert_eq!(
             (status, body),
             (StatusCode::OK, Value::String("ben".to_string()))
+        );
+    }
+
+    /// Counts per (bucket, principal), refusing past the limit with a
+    /// 30.5 s retry, or fails every take.
+    #[derive(Default)]
+    struct Counts {
+        counts: Mutex<std::collections::HashMap<(String, String), u32>>,
+        fail: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl crate::PrincipalRateLimitStore for Counts {
+        async fn take(
+            &self,
+            bucket: &str,
+            principal: &str,
+            limit: u32,
+            window: Duration,
+        ) -> Result<crate::RateLimitDecision, Box<dyn std::error::Error + Send + Sync>> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("store down".into());
+            }
+            assert_eq!(window, Duration::from_secs(60));
+            let mut counts = self.counts.lock().unwrap();
+            let count = counts
+                .entry((bucket.to_string(), principal.to_string()))
+                .or_default();
+            *count += 1;
+            Ok(crate::RateLimitDecision {
+                allowed: *count <= limit,
+                retry_after: Duration::from_millis(30_500),
+            })
+        }
+    }
+
+    /// D131: each principal the permission check admits spends its own
+    /// budget; past it the route answers 429 with Retry-After rounded up;
+    /// the permission check refuses a request with no caller before the
+    /// limit counts; a store failure answers 503; and a route whose
+    /// authenticator admits a principal with no subject refuses 400.
+    #[tokio::test]
+    async fn a_principal_limit_counts_each_admitted_caller_after_the_permission_check() {
+        let log = Log::default();
+        let store = Arc::new(Counts::default());
+        let app = app(
+            RouteControls::new()
+                .authorize(tokens(&log), &[])
+                .principal_rate_limit(store.clone(), "POST /op", 2),
+            &log,
+        );
+        for _ in 0..2 {
+            assert_eq!(send(&app, Some("ana"), "").await.0, StatusCode::OK);
+        }
+        let (status, retry_after, body) = send(&app, Some("ana"), "").await;
+        assert_eq!(
+            (status, retry_after.as_deref(), code(&body)),
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                Some("31"),
+                "too_many_requests"
+            )
+        );
+        assert_eq!(
+            body["detail"],
+            "This principal exceeded 2 requests per minute"
+        );
+        assert_eq!(send(&app, Some("ben"), "").await.0, StatusCode::OK);
+
+        assert_eq!(send(&app, None, "").await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(store.counts.lock().unwrap().len(), 2);
+
+        let (status, _, body) = send(&app, Some(":"), "").await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::BAD_REQUEST, "rate_limit_principal_missing")
+        );
+
+        store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let (status, _, body) = send(&app, Some("ben"), "").await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::SERVICE_UNAVAILABLE, "rate_limit_unavailable")
         );
     }
 

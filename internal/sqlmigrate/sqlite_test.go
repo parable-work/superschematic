@@ -87,6 +87,9 @@ func refusedSchemas(t *testing.T) []struct {
 			addField(s, "Order", &ir.FieldDef{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}})
 			typeNamed(s, "Order").Indexes = append(typeNamed(s, "Order").Indexes, ir.IndexDef{Keys: []string{"tags"}})
 		}), "the index idx_order_tags of Order is a GIN index, which the sqlite dialect does not support"},
+		{"nullsNotDistinct", shop(func(s *ir.Schema) {
+			typeNamed(s, "Label").Indexes = []ir.IndexDef{{Keys: []string{"id"}, Name: "one", Unique: true, NullsNotDistinct: true}}
+		}), "the index uq_label_one of Label makes nulls collide (nullsNotDistinct), which the sqlite dialect does not support"},
 		{"GIST index", shop(func(s *ir.Schema) {
 			addField(s, "Label", &ir.FieldDef{Name: "path", TypeRef: scalar(s, "LTREE")})
 			typeNamed(s, "Label").Indexes = []ir.IndexDef{{Keys: []string{"path"}}}

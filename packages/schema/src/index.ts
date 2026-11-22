@@ -29,6 +29,8 @@ export type {
   Default,
   Nullable,
   PlatformDefault,
+  RequiredNull,
+  Runtime,
   Secret,
   Validate,
   ValidateConfig,

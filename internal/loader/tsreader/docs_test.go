@@ -107,6 +107,9 @@ func TestOperationMCPDecoratorsLoadIntoIR(t *testing.T) {
 	if open.Docs.ReplayMode != ir.DocsReplayModeIdempotent || len(open.Docs.IdempotencyKeyPointers) != 1 || open.Docs.IdempotencyKeyPointers[0] != "/requestId" {
 		t.Fatalf("openReturn replay = %+v", open.Docs)
 	}
+	if open.MCP == nil || !open.MCP.Additive || get.MCP.Additive {
+		t.Fatalf("openReturn declares @mcp additive and getOrder does not: %+v, %+v", open.MCP, get.MCP)
+	}
 	del := operationNamed(t, schema, "deleteOrder")
 	if del.MCP == nil || !del.MCP.Hidden || del.MCP.HiddenReason != "Staff console only." || del.Docs != nil {
 		t.Fatalf("deleteOrder mcp = %+v", del.MCP)

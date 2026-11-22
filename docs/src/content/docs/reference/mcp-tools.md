@@ -56,7 +56,7 @@ export class OrderQueries {
 }
 ```
 
-A visible tool takes `{ handle, invocationPolicy?, _meta? }`; a hidden
+A visible tool takes `{ handle, invocationPolicy?, additive?, _meta? }`; a hidden
 operation takes `{ hidden: true, reason }`.
 
 | Key | Visible | Hidden | Rule |
@@ -65,6 +65,7 @@ operation takes `{ hidden: true, reason }`.
 | `hidden` | `false` or absent | `true` | |
 | `reason` | not allowed | required | why the operation is not a tool; non-blank, no surrounding whitespace |
 | `invocationPolicy` | optional | not allowed | `"auto"` (the default) or `"ask"`; see [the invocation policy](#the-invocation-policy) |
+| `additive` | optional | not allowed | `true` when the operation writes only by adding: it never changes or deletes data that exists. Its tool's annotations then say `destructiveHint: false`. Refused on a `read_only` operation, which writes nothing (D123) |
 | `_meta` | optional | not allowed | an object copied into the tool's MCP `_meta` as written |
 
 A visible tool must also declare `@docs`: the tool's display name is the
@@ -195,7 +196,8 @@ When the `api` generator builds an API it resolves each operation's record:
 a visible tool gets `name` from the `@docs` title, `description` from the
 `@docs` description and `icon: { name }` from `@icon`, and keeps its
 invocation policy, or gets the policy's default when IR that did not come
-through the loader has none; a hidden record keeps its reason. An
+through the loader has none, and `annotations` from its replay mode and
+`additive` (below); a hidden record keeps its reason. An
 operation whose result is a `FileDownload`
 ([Downloads](/superschematic/guides/api-routes/#downloads)) and that
 declares no `@mcp` gets a hidden record, `It answers a file, which is no
@@ -211,6 +213,18 @@ then fails the build when two visible tools of the API:
 
 Hidden operations take no part in either check. Tools of different APIs
 are the consumer's to reconcile.
+
+A visible tool's `annotations` are the hints an MCP host reads (D123).
+Safety is never inferred from the HTTP method or the operation's name:
+
+| Annotation | `true` when |
+| --- | --- |
+| `readOnlyHint` | the `@docs` replay mode is `read_only` |
+| `destructiveHint` | the replay mode is not `read_only` and `@mcp` does not say `additive: true`. The MCP specification reads `false` as "only additive updates", so a tool that may write is destructive, the specification's default, unless it declares that it only adds |
+| `idempotentHint` | the replay mode is `idempotent` |
+
+`additive: true` on a `read_only` operation fails the build:
+`apigen: visible operation order.getOrder declares @mcp additive, but a read_only operation writes nothing`.
 
 ## The tool documents
 
@@ -250,6 +264,7 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   "handle": "get_order",
   "description": "Returns one order by its identifier.",
   "invocationPolicy": "auto",
+  "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": false},
   "_meta": {"superschematic/operation-guidance": {...}, "ui": {"resourceUri": "ui://orders/detail"}},
   "icon": {
     "name": "receipt"
@@ -258,7 +273,8 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
 ```
 
 - `mcp` is `{ hidden, hiddenReason }` for a hidden operation. A visible
-  tool carries its invocation policy after `description`. Its `_meta` is
+  tool carries its invocation policy after `description`, then its
+  `annotations`. Its `_meta` is
   the declared `_meta` plus its `@docs` guidance under
   `superschematic/operation-guidance`; `icon` is present when the
   operation has `@icon`, with `family` and `style` when a tool hook set
@@ -1021,7 +1037,7 @@ A distribution's own invocation policy is
 | Field | Core default | Rule |
 | --- | --- | --- |
 | `Extension` | | the registering extension; required |
-| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`), nor `hiddenBy`, which the engine's hidden record uses |
+| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `additive`, `_meta`, `name`, `description`, `icon`, `annotations`), nor `hiddenBy`, which the engine's hidden record uses |
 | `Values` | `auto`, `ask` | at least one; lowercase letters, digits, `_` and `-`, starting with a letter; each once; in the order `tools/index.ts` lists them |
 | `Default` | `auto` | one of `Values` |
 | `Confirm` | `ask` | the values whose tools an API's MCP endpoint runs only once the person confirms the call, each one of `Values`, once; empty confirms every value but `Default` |

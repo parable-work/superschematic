@@ -99,6 +99,78 @@ func TestProjectionWithoutRowRulesPassesVerification(t *testing.T) {
 	}
 }
 
+// TestAJoinWithNoEqualityNeedsABaseOfOneRow: a join with no equality pairs
+// every joined row with every base row, so it is allowed only when the
+// first rule binds the base's key to a setting: the base is then one row,
+// and each joined row appears once (D122).
+func TestAJoinWithNoEqualityNeedsABaseOfOneRow(t *testing.T) {
+	unconditioned := func(mutate func(p *ir.ProjectionPredicate)) *ir.Schema {
+		return projectionSchema(func(_ *ir.Schema, td *ir.TypeDef) {
+			td.Projection.Joins[0].On = nil
+			first := &ir.ProjectionPredicate{Column: "base.id", Setting: "app.preference_id"}
+			if mutate != nil {
+				mutate(first)
+			}
+			td.Projection.Predicates = []*ir.ProjectionPredicate{first, {Column: "base.account", Setting: "app.account_id"}}
+		})
+	}
+	if errs := projectionErrors(t, unconditioned(nil)); len(errs) != 0 {
+		t.Fatalf("beside a base bound by its key: unexpected errors: %v", errs)
+	}
+	want := "AppPreference: @join channel needs at least one alias.field equality, unless the first where rule binds the base's key to a setting"
+	for name, mutate := range map[string]func(p *ir.ProjectionPredicate){
+		"another column": func(p *ir.ProjectionPredicate) { p.Column = "base.account" },
+		"optional":       func(p *ir.ProjectionPredicate) { p.Optional = true },
+		"guarded": func(p *ir.ProjectionPredicate) {
+			p.When = &ir.ProjectionCondition{Column: "base.scope", Equals: "user"}
+		},
+		"not the first":  nil,
+		"a literal rule": func(p *ir.ProjectionPredicate) { p.Setting, p.NotNull = "", true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema := unconditioned(mutate)
+			if name == "not the first" {
+				preds := schema.Types["AppPreference"].Projection.Predicates
+				preds[0], preds[1] = preds[1], preds[0]
+			}
+			if errs := projectionErrors(t, schema); !containsMessage(errs, want) {
+				t.Fatalf("want %q, got %v", want, errs)
+			}
+		})
+	}
+}
+
+// TestProjectionSetRuleVerification: a set rule names schema.function, a
+// column of the view's tables and the settings it reads, and carries
+// nothing else (D127).
+func TestProjectionSetRuleVerification(t *testing.T) {
+	with := func(rule *ir.ProjectionPredicate) *ir.Schema {
+		return projectionSchema(func(_ *ir.Schema, td *ir.TypeDef) {
+			td.Projection.Predicates = append(td.Projection.Predicates, rule)
+		})
+	}
+	if errs := projectionErrors(t, with(&ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", RequiredSettings: []string{"app.user_id"}})); len(errs) != 0 {
+		t.Fatalf("a sound set rule: %v", errs)
+	}
+	for _, tc := range []struct {
+		name string
+		rule *ir.ProjectionPredicate
+		want string
+	}{
+		{"bare name", &ir.ProjectionPredicate{Column: "base.id", InFunction: "visible_ids", RequiredSettings: []string{"app.user_id"}}, `inFunction must name schema.function, got "visible_ids"`},
+		{"unknown column", &ir.ProjectionPredicate{Column: "base.absent", InFunction: "app.visible_ids", RequiredSettings: []string{"app.user_id"}}, `column "base.absent"`},
+		{"no settings", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids"}, "set rule takes column, inFunction and requiredSettings only"},
+		{"with args", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", Args: []string{"base.id"}, RequiredSettings: []string{"app.user_id"}}, "set rule takes column, inFunction and requiredSettings only"},
+		{"bad setting", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", RequiredSettings: []string{"user"}}, `required setting must be a dotted custom Postgres setting name, got "user"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := projectionErrors(t, with(tc.rule)); !containsMessage(errs, tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, errs)
+			}
+		})
+	}
+}
+
 // TestProjectionWithoutPoolPassesVerification: a plain view beside the
 // tables, with no pool and no row rule, which the ORMs read (D90).
 func TestProjectionWithoutPoolPassesVerification(t *testing.T) {

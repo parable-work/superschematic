@@ -13,6 +13,7 @@
         "handle": "problem_schedules_cancel_schedule",
         "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.cancel-schedule",
@@ -55,6 +56,7 @@
         "handle": "problem_schedules_list_schedules",
         "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.list-schedules",
@@ -101,6 +103,7 @@
         "handle": "problem_schedules_pause_schedule",
         "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.pause-schedule",
@@ -143,6 +146,7 @@
         "handle": "problem_schedules_report_run",
         "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.report-run",
@@ -188,6 +192,7 @@
         "handle": "problem_schedules_resume_schedule",
         "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.resume-schedule",
@@ -230,6 +235,7 @@
         "handle": "problem_schedules_set_schedule",
         "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.schedules.set-schedule",
@@ -276,6 +282,7 @@
         "handle": "problem_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "problem.status.transition",

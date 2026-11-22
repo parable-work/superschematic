@@ -282,6 +282,7 @@ no field fails the build. The other options shape the index:
 | `lists` | an `ivfflat` index's lists (1 to 32768, 100 unless set) |
 | `where` | makes the index partial: a SQL predicate over the table's columns, without `WHERE`. On a unique index of a soft-deletable table it is ANDed with `deleted_at IS NULL` |
 | `expression` | indexes a SQL expression over the table's columns, such as `lower(email)`, in place of the keys' columns; the keys name the fields it reads and give the index its default name |
+| `nullsNotDistinct` | on a unique index, nulls collide: two rows whose keys are both null conflict, as Postgres's `NULLS NOT DISTINCT` does. Without it a unique index takes any number of rows with a null key. It needs `unique: true`, and the sqlite dialect refuses it (D125) |
 | `concurrently` | how a migration plan builds the index on a table that holds rows: `true`, the default, builds it concurrently, outside a transaction; `false` builds it inside the step's transaction, which blocks writes while it builds |
 
 `where` and `expression` are SQL, written once for every dialect the

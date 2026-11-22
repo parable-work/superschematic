@@ -53,20 +53,106 @@ impl fmt::Display for ConfigError {
 impl Error for ConfigError {}
 {{- if .TypeName }}
 
+/// Lookup reads one environment variable, as env::var does.
+type Lookup<'a> = dyn Fn(&str) -> Result<String, env::VarError> + 'a;
+
 /// LoadConfig loads {{ .TypeName }} from process environment.
 pub fn load_config() -> Result<{{ .TypeName }}, ConfigError> {
     dotenvy::dotenv().ok();
+    load_config_from(&|key| env::var(key))
+}
 
+/// Loads {{ .TypeName }} from lookup.
+fn load_config_from(lookup: &Lookup<'_>) -> Result<{{ .TypeName }}, ConfigError> {
     Ok({{ .TypeName }} {
 {{- range .Fields }}
         {{ toRustFieldName .Key }}: {{ rustLoaderExpr . }},
 {{- end }}
     })
 }
+{{- if hasRuntime .Fields }}
+
+/// The Runtime<T> fields of {{ .TypeName }}: a deployment can change them
+/// while the process runs (D129).
+#[allow(dead_code)]
+pub const LIVE_FIELDS: &[&str] = &[
+{{- range .Fields }}
+{{- if .Runtime }}
+    "{{ .Key }}",
+{{- end }}
+{{- end }}
+];
+
+/// LiveConfig holds the {{ .TypeName }} in effect behind a tokio watch
+/// channel. Its Runtime<T> fields change when apply takes new values, such as
+/// the ones a settings watch reads. Every other field keeps the value
+/// load_config read at start. Read a Runtime<T> field through current, or a
+/// receiver from subscribe, where it is used, not from a copy made at start.
+#[allow(dead_code)]
+pub struct LiveConfig {
+    sender: tokio::sync::watch::Sender<std::sync::Arc<{{ .TypeName }}>>,
+}
 
 #[allow(dead_code)]
-fn require_string(key: &str) -> Result<String, ConfigError> {
-    match env::var(key) {
+impl LiveConfig {
+    /// Holds boot, the config load_config returned.
+    pub fn new(boot: {{ .TypeName }}) -> Self {
+        let (sender, _) = tokio::sync::watch::channel(std::sync::Arc::new(boot));
+        Self { sender }
+    }
+
+    /// The config in effect.
+    pub fn current(&self) -> std::sync::Arc<{{ .TypeName }}> {
+        self.sender.borrow().clone()
+    }
+
+    /// A receiver that sees each config apply puts in effect.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<std::sync::Arc<{{ .TypeName }}>> {
+        self.sender.subscribe()
+    }
+
+    /// The names of the Runtime<T> fields, LIVE_FIELDS.
+    pub fn fields(&self) -> &'static [&'static str] {
+        LIVE_FIELDS
+    }
+
+    /// Sets each Runtime<T> field that values names to that value, given as
+    /// env text, and each other Runtime<T> field to its value in the
+    /// environment. It parses the values as load_config does and returns an
+    /// error for a refused value; the config in effect then does not change.
+    /// A key that is not a Runtime<T> field is ignored. It returns whether a
+    /// value changed; receivers then see the new config.
+    pub fn apply(
+        &self,
+        values: &std::collections::HashMap<String, String>,
+    ) -> Result<bool, ConfigError> {
+        let next = load_config_from(&|key| match values.get(key) {
+            Some(value) if LIVE_FIELDS.contains(&key) => Ok(value.clone()),
+            _ => env::var(key),
+        })?;
+        Ok(self.sender.send_if_modified(|current| {
+            let mut merged = (**current).clone();
+            let mut changed = false;
+{{- range .Fields }}
+{{- if .Runtime }}
+            if merged.{{ toRustFieldName .Key }} != next.{{ toRustFieldName .Key }} {
+                merged.{{ toRustFieldName .Key }} = next.{{ toRustFieldName .Key }};
+                changed = true;
+            }
+{{- end }}
+{{- end }}
+            if changed {
+                *current = std::sync::Arc::new(merged);
+            }
+            changed
+        }))
+    }
+}
+{{- end }}
+
+#[allow(dead_code)]
+fn require_string(lookup: &Lookup<'_>, key: &str) -> Result<String, ConfigError> {
+    match lookup(key) {
         Ok(value) if !value.is_empty() => Ok(value),
         Ok(_) | Err(env::VarError::NotPresent) => Err(ConfigError::new(format!(
             "required environment variable {key} is not set"
@@ -78,14 +164,14 @@ fn require_string(key: &str) -> Result<String, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn string_or_default(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
+fn string_or_default(lookup: &Lookup<'_>, key: &str, default: &str) -> String {
+    lookup(key).unwrap_or_else(|_| default.to_string())
 }
 
 {{- if usesRustInt .Fields }}
 #[allow(dead_code)]
-fn require_i64(key: &str) -> Result<i64, ConfigError> {
-    let value = require_string(key)?;
+fn require_i64(lookup: &Lookup<'_>, key: &str) -> Result<i64, ConfigError> {
+    let value = require_string(lookup, key)?;
     value.parse::<i64>().map_err(|err| {
         ConfigError::new(format!(
             "environment variable {key} must be a valid integer: {err}"
@@ -94,8 +180,8 @@ fn require_i64(key: &str) -> Result<i64, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn i64_or_default(key: &str, default: i64) -> Result<i64, ConfigError> {
-    match env::var(key) {
+fn i64_or_default(lookup: &Lookup<'_>, key: &str, default: i64) -> Result<i64, ConfigError> {
+    match lookup(key) {
         Ok(value) => value.parse::<i64>().map_err(|err| {
             ConfigError::new(format!(
                 "environment variable {key} must be a valid integer: {err}"
@@ -111,8 +197,8 @@ fn i64_or_default(key: &str, default: i64) -> Result<i64, ConfigError> {
 
 {{- if usesRustBool .Fields }}
 #[allow(dead_code)]
-fn require_bool(key: &str) -> Result<bool, ConfigError> {
-    let value = require_string(key)?;
+fn require_bool(lookup: &Lookup<'_>, key: &str) -> Result<bool, ConfigError> {
+    let value = require_string(lookup, key)?;
     value.parse::<bool>().map_err(|err| {
         ConfigError::new(format!(
             "environment variable {key} must be a valid boolean: {err}"
@@ -121,8 +207,8 @@ fn require_bool(key: &str) -> Result<bool, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn bool_or_default(key: &str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(key) {
+fn bool_or_default(lookup: &Lookup<'_>, key: &str, default: bool) -> Result<bool, ConfigError> {
+    match lookup(key) {
         Ok(value) => value.parse::<bool>().map_err(|err| {
             ConfigError::new(format!(
                 "environment variable {key} must be a valid boolean: {err}"
@@ -138,8 +224,8 @@ fn bool_or_default(key: &str, default: bool) -> Result<bool, ConfigError> {
 
 {{- if usesRustFloat .Fields }}
 #[allow(dead_code)]
-fn require_f64(key: &str) -> Result<f64, ConfigError> {
-    let value = require_string(key)?;
+fn require_f64(lookup: &Lookup<'_>, key: &str) -> Result<f64, ConfigError> {
+    let value = require_string(lookup, key)?;
     value.parse::<f64>().map_err(|err| {
         ConfigError::new(format!(
             "environment variable {key} must be a valid float: {err}"
@@ -148,8 +234,8 @@ fn require_f64(key: &str) -> Result<f64, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn f64_or_default(key: &str, default: f64) -> Result<f64, ConfigError> {
-    match env::var(key) {
+fn f64_or_default(lookup: &Lookup<'_>, key: &str, default: f64) -> Result<f64, ConfigError> {
+    match lookup(key) {
         Ok(value) => value.parse::<f64>().map_err(|err| {
             ConfigError::new(format!(
                 "environment variable {key} must be a valid float: {err}"
@@ -165,14 +251,14 @@ fn f64_or_default(key: &str, default: f64) -> Result<f64, ConfigError> {
 
 {{- if usesRustEnum .Fields }}
 #[allow(dead_code)]
-fn require_enum(key: &str, allowed: &[&str]) -> Result<String, ConfigError> {
-    let value = require_string(key)?;
+fn require_enum(lookup: &Lookup<'_>, key: &str, allowed: &[&str]) -> Result<String, ConfigError> {
+    let value = require_string(lookup, key)?;
     validate_enum(key, value, allowed)
 }
 
 #[allow(dead_code)]
-fn enum_or_default(key: &str, allowed: &[&str], default: &str) -> Result<String, ConfigError> {
-    match env::var(key) {
+fn enum_or_default(lookup: &Lookup<'_>, key: &str, allowed: &[&str], default: &str) -> Result<String, ConfigError> {
+    match lookup(key) {
         Ok(value) => validate_enum(key, value, allowed),
         Err(env::VarError::NotPresent) => validate_enum(key, default.to_string(), allowed),
         Err(err) => Err(ConfigError::new(format!(

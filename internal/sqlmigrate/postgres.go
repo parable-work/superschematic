@@ -309,6 +309,9 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 		method = "BTREE"
 	}
 	fmt.Fprintf(&b, "%s ON %s USING %s (%s)", q(idx.Name), q(table), method, strings.Join(columns, ", "))
+	if idx.NullsNotDistinct {
+		b.WriteString(" NULLS NOT DISTINCT")
+	}
 	if idx.With != "" {
 		b.WriteString(" WITH (" + idx.With + ")")
 	}

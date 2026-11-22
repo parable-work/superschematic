@@ -212,6 +212,9 @@ export const operationSpecs = {
 {{- end }}
 {{- if .RateLimitPerMinute }}
     rateLimitPerMinute: {{ .RateLimitPerMinute }},
+{{- if .RateLimitPrincipal }}
+    rateLimitKey: 'principal',
+{{- end }}
 {{- end }}
 {{- if .TimeoutSeconds }}
     timeoutSeconds: {{ .TimeoutSeconds }},
@@ -262,6 +265,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
   rateLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation timeouts in seconds; overrides the schema's @timeout (0 disables). */
   timeouts?: Partial<Record<OperationName, number>>;
+{{- if .HasPrincipalRateLimit }}
+  /**
+   * Counts the requests of every route whose @rateLimit counts per
+   * principal (D131), so each limit holds across replicas.
+   */
+  principalRateLimitStore: PrincipalRateLimitStore;
+{{- end }}
 {{- if .HasBehaviors }}
   /**
    * The repositories of {{ .Deps.Database }} (Deps.orm), which run the behavior
@@ -373,7 +383,7 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
 {{ $runtime = "runtime" -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
-{{- else if .RouterNeedsORM -}}
+{{- else if or .RouterNeedsORM .HasPrincipalRateLimit -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
 {{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {

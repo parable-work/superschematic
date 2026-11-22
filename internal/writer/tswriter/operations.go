@@ -316,7 +316,11 @@ func (e *emitter) emitMiddlewareDecorators(indent string, mw *ir.MiddlewareConfi
 		return
 	}
 	if mw.RateLimit != nil {
-		fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d })\n", indent, e.use("rateLimit"), *mw.RateLimit)
+		if mw.RateLimitKey != "" {
+			fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d, key: %q })\n", indent, e.use("rateLimit"), *mw.RateLimit, mw.RateLimitKey)
+		} else {
+			fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d })\n", indent, e.use("rateLimit"), *mw.RateLimit)
+		}
 	}
 	if mw.BodyLimit != nil {
 		fmt.Fprintf(&e.body, "%s@%s({ megabytes: %d })\n", indent, e.use("bodyLimit"), *mw.BodyLimit)
@@ -438,7 +442,7 @@ func operationDocsLiteral(docs *ir.OperationDocs) string {
 }
 
 // operationMCPLiteral renders an @mcp record as the object literal the
-// decorator takes: { handle, <policy key>?, _meta? } for a visible tool,
+// decorator takes: { handle, <policy key>?, additive?, _meta? } for a visible tool,
 // { hidden: true, reason } for a hidden one. The invocation policy is
 // written under the key the record carries.
 func operationMCPLiteral(mcp *ir.OperationMCP) string {
@@ -448,6 +452,9 @@ func operationMCPLiteral(mcp *ir.OperationMCP) string {
 	parts := []string{"handle: " + quote(mcp.Handle)}
 	if mcp.Invocation.Value != "" {
 		parts = append(parts, mcp.Invocation.Key+": "+quote(mcp.Invocation.Value))
+	}
+	if mcp.Additive {
+		parts = append(parts, "additive: true")
 	}
 	if len(mcp.Meta) > 0 {
 		parts = append(parts, "_meta: "+valueLiteral(mcp.Meta))

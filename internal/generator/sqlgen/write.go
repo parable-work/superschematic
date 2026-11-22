@@ -2,7 +2,9 @@ package sqlgen
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +69,60 @@ func WriteProjections(schema *ir.Schema, output *DDLOutput, outputDir, migration
 		if err := os.WriteFile(filepath.Join(artifactsDir, view.Relation+".docs.json"), docs, 0o644); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ReplayPreviousViews gives each view whose declaration took a new stamp
+// the up statements of its last earlier migration in migrationsDir, the
+// service's own, committed migrations directory, so its down migration
+// replays them (D128). The earlier up file is the one whose name ends in
+// the view's suffix and whose stamp sorts last before the view's; stamps
+// are fixed-width, so they sort as text. Its leading comment lines are
+// left out. An empty migrationsDir, or one that holds no earlier file,
+// leaves the view's down migration a drop.
+func ReplayPreviousViews(views []ProjectionView, migrationsDir string) error {
+	if migrationsDir == "" || len(views) == 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(migrationsDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", migrationsDir, err)
+	}
+	for i := range views {
+		view := &views[i]
+		suffix := strings.TrimPrefix(view.UpFileName, view.Migration)
+		previous, file := "", ""
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, suffix) {
+				continue
+			}
+			stamp := strings.TrimSuffix(name, suffix)
+			if !migrationStampPattern.MatchString(stamp) {
+				continue
+			}
+			if stamp < view.Migration && stamp > previous {
+				previous, file = stamp, name
+			}
+		}
+		if file == "" {
+			view.PreviousMigration, view.PreviousUp = "", ""
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(migrationsDir, file))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", file, err)
+		}
+		lines := strings.Split(string(body), "\n")
+		for len(lines) > 0 && strings.HasPrefix(lines[0], "--") {
+			lines = lines[1:]
+		}
+		view.PreviousMigration = previous
+		view.PreviousUp = strings.TrimRight(strings.Join(lines, "\n"), "\n")
 	}
 	return nil
 }

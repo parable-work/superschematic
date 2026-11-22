@@ -293,6 +293,15 @@ func TestMCPDecoratorWritesTheRecord(t *testing.T) {
 		t.Fatalf("Invocation = %+v, want %+v", ask.MCP.Invocation, want)
 	}
 
+	// additive marks a tool that writes only by adding (D123).
+	add := &ir.FieldDef{Name: "addNote"}
+	if err := applyOperation(t, "mcp", add, map[string]any{"handle": "add_note", "additive": true}); err != nil {
+		t.Fatal(err)
+	}
+	if !add.MCP.Additive {
+		t.Fatalf("additive was not recorded: %+v", add.MCP)
+	}
+
 	// A hidden operation has no policy.
 	hidden := &ir.FieldDef{Name: "uploadReceipt"}
 	if err := applyOperation(t, "mcp", hidden, map[string]any{"hidden": true, "reason": "Browser upload only."}); err != nil {
@@ -320,6 +329,8 @@ func TestMCPDecoratorRejectsBadConfig(t *testing.T) {
 		{name: "unknown policy value", args: []any{map[string]any{"handle": "get_order", "invocationPolicy": "always"}}, want: `invalid @mcp config: invocationPolicy "always" is not one of "auto", "ask"`},
 		{name: "policy not a string", args: []any{map[string]any{"handle": "get_order", "invocationPolicy": false}}, want: "@mcp invocationPolicy must be a string literal"},
 		{name: "policy on a hidden operation", args: []any{map[string]any{"hidden": true, "reason": "x", "invocationPolicy": "ask"}}, want: "invalid @mcp config: a hidden operation must not declare invocationPolicy"},
+		{name: "additive not a bool", args: []any{map[string]any{"handle": "get_order", "additive": "yes"}}, want: "@mcp additive must be a boolean literal"},
+		{name: "additive on a hidden operation", args: []any{map[string]any{"hidden": true, "reason": "x", "additive": true}}, want: "invalid @mcp config: a hidden operation must not declare additive"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			op := &ir.FieldDef{Name: "getOrder"}

@@ -36,18 +36,25 @@ impl fmt::Display for ConfigError {
 
 impl Error for ConfigError {}
 
+/// Lookup reads one environment variable, as env::var does.
+type Lookup<'a> = dyn Fn(&str) -> Result<String, env::VarError> + 'a;
+
 /// LoadConfig loads ShopConfig from process environment.
 pub fn load_config() -> Result<ShopConfig, ConfigError> {
     dotenvy::dotenv().ok();
+    load_config_from(&|key| env::var(key))
+}
 
+/// Loads ShopConfig from lookup.
+fn load_config_from(lookup: &Lookup<'_>) -> Result<ShopConfig, ConfigError> {
     Ok(ShopConfig {
-        storefront_region: string_or_default("STOREFRONT_REGION", "eu"),
+        storefront_region: string_or_default(lookup, "STOREFRONT_REGION", "eu"),
     })
 }
 
 #[allow(dead_code)]
-fn require_string(key: &str) -> Result<String, ConfigError> {
-    match env::var(key) {
+fn require_string(lookup: &Lookup<'_>, key: &str) -> Result<String, ConfigError> {
+    match lookup(key) {
         Ok(value) if !value.is_empty() => Ok(value),
         Ok(_) | Err(env::VarError::NotPresent) => Err(ConfigError::new(format!(
             "required environment variable {key} is not set"
@@ -59,8 +66,8 @@ fn require_string(key: &str) -> Result<String, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn string_or_default(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
+fn string_or_default(lookup: &Lookup<'_>, key: &str, default: &str) -> String {
+    lookup(key).unwrap_or_else(|_| default.to_string())
 }
 
 /// The API's configuration: the settings of its @envVars type (ShopConfig)

@@ -165,6 +165,8 @@ def _reads_value(field: _ReadField, value: Any) -> bool:
         return _reads_type(field.ref, value)
     if kind == "union":
         return isinstance(value, dict) and pick_union_member(field.ref, value) >= 0
+    if kind == "null":
+        return False
     return True
 
 
@@ -193,6 +195,8 @@ def _reads_type(name: str, value: Any) -> bool:
     for field in read.fields:
         field_value = value.get(field.name)
         if field_value is None:
+            if field.kind == "null" and field.name in value:
+                continue
             if field.required:
                 return False
             continue

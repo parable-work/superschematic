@@ -37,19 +37,26 @@ impl fmt::Display for ConfigError {
 
 impl Error for ConfigError {}
 
+/// Lookup reads one environment variable, as env::var does.
+type Lookup<'a> = dyn Fn(&str) -> Result<String, env::VarError> + 'a;
+
 /// LoadConfig loads ShopConfig from process environment.
 pub fn load_config() -> Result<ShopConfig, ConfigError> {
     dotenvy::dotenv().ok();
+    load_config_from(&|key| env::var(key))
+}
 
+/// Loads ShopConfig from lookup.
+fn load_config_from(lookup: &Lookup<'_>) -> Result<ShopConfig, ConfigError> {
     Ok(ShopConfig {
-        storefront_region: string_or_default("STOREFRONT_REGION", "eu"),
-        max_cart_items: i64_or_default("MAX_CART_ITEMS", 0)?,
+        storefront_region: string_or_default(lookup, "STOREFRONT_REGION", "eu"),
+        max_cart_items: i64_or_default(lookup, "MAX_CART_ITEMS", 0)?,
     })
 }
 
 #[allow(dead_code)]
-fn require_string(key: &str) -> Result<String, ConfigError> {
-    match env::var(key) {
+fn require_string(lookup: &Lookup<'_>, key: &str) -> Result<String, ConfigError> {
+    match lookup(key) {
         Ok(value) if !value.is_empty() => Ok(value),
         Ok(_) | Err(env::VarError::NotPresent) => Err(ConfigError::new(format!(
             "required environment variable {key} is not set"
@@ -61,12 +68,12 @@ fn require_string(key: &str) -> Result<String, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn string_or_default(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
+fn string_or_default(lookup: &Lookup<'_>, key: &str, default: &str) -> String {
+    lookup(key).unwrap_or_else(|_| default.to_string())
 }
 #[allow(dead_code)]
-fn require_i64(key: &str) -> Result<i64, ConfigError> {
-    let value = require_string(key)?;
+fn require_i64(lookup: &Lookup<'_>, key: &str) -> Result<i64, ConfigError> {
+    let value = require_string(lookup, key)?;
     value.parse::<i64>().map_err(|err| {
         ConfigError::new(format!(
             "environment variable {key} must be a valid integer: {err}"
@@ -75,8 +82,8 @@ fn require_i64(key: &str) -> Result<i64, ConfigError> {
 }
 
 #[allow(dead_code)]
-fn i64_or_default(key: &str, default: i64) -> Result<i64, ConfigError> {
-    match env::var(key) {
+fn i64_or_default(lookup: &Lookup<'_>, key: &str, default: i64) -> Result<i64, ConfigError> {
+    match lookup(key) {
         Ok(value) => value.parse::<i64>().map_err(|err| {
             ConfigError::new(format!(
                 "environment variable {key} must be a valid integer: {err}"

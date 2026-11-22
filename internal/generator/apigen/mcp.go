@@ -11,9 +11,9 @@ import (
 // resolveOperationMCP returns a copy of the operation's @mcp record with the
 // generated presentation filled in. A visible tool takes its name and
 // description from @docs, which it must declare, its icon from @icon when
-// it has one, and its invocation policy from the record, or the policy's
-// default when the record has none. A hidden record carries only its
-// reason. The loader checks the same rules and fills in the same default;
+// it has one, its invocation policy from the record, or the policy's
+// default when the record has none, and its annotations from its replay
+// mode and @mcp additive (D123). A hidden record carries only its reason. The loader checks the same rules and fills in the same default;
 // they are applied again here for IR that did not come through it.
 func resolveOperationMCP(op *ir.FieldDef, namespace string, invocation ToolInvocationPolicy) (*ir.OperationMCP, error) {
 	if op.MCP == nil && op.FileDownload != nil {
@@ -44,6 +44,10 @@ func resolveOperationMCP(op *ir.FieldDef, namespace string, invocation ToolInvoc
 	resolved.Meta = maps.Clone(op.MCP.Meta)
 	resolved.Name = op.Docs.Title
 	resolved.Description = op.Docs.Description
+	if resolved.Additive && op.Docs.ReplayMode == ir.DocsReplayModeReadOnly {
+		return nil, fmt.Errorf("apigen: visible operation %s.%s declares @mcp additive, but a read_only operation writes nothing", namespace, op.Name)
+	}
+	resolved.Annotations = ir.ResolveMCPToolAnnotations(op.Docs.ReplayMode, resolved.Additive)
 	if op.Icon != "" {
 		if err := ir.ValidateOperationIcon(op.Icon); err != nil {
 			return nil, fmt.Errorf("apigen: operation %s.%s has an invalid @icon: %w", namespace, op.Name, err)

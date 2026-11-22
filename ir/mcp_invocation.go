@@ -63,7 +63,7 @@ func (p MCPInvocation) validate() error {
 var mcpInvocationKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // mcpRecordKeys are the keys OperationMCP writes itself.
-var mcpRecordKeys = []string{"handle", "hidden", "hiddenReason", "_meta", "name", "description", "icon"}
+var mcpRecordKeys = []string{"handle", "hidden", "hiddenReason", "additive", "_meta", "name", "description", "icon", "annotations"}
 
 // mcpReservedKeys are the keys an invocation policy key cannot be: the
 // record's own, the authoring key @mcp reads the hidden reason from, and
@@ -74,7 +74,8 @@ var mcpReservedKeys = append(slices.Clone(mcpRecordKeys), "reason", "hiddenBy")
 // ValidateMCPInvocationKey checks a key an invocation policy may be written
 // under: a letter, then letters, digits or underscores, and not one of the
 // keys the mcp record, @mcp or the engine's record already use (handle,
-// hidden, hiddenReason, hiddenBy, reason, _meta, name, description, icon).
+// hidden, hiddenReason, hiddenBy, reason, additive, _meta, name,
+// description, icon, annotations).
 func ValidateMCPInvocationKey(key string) error {
 	if !mcpInvocationKeyPattern.MatchString(key) {
 		return fmt.Errorf("invocation policy key %q must be a letter followed by letters, digits or underscores", key)
@@ -94,10 +95,12 @@ type operationMCPHead struct {
 }
 
 type operationMCPTail struct {
-	Meta        map[string]any `json:"_meta,omitempty" yaml:"_meta,omitempty"`
-	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
-	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
-	Icon        *MCPIcon       `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Additive    bool                `json:"additive,omitempty" yaml:"additive,omitempty"`
+	Meta        map[string]any      `json:"_meta,omitempty" yaml:"_meta,omitempty"`
+	Name        string              `json:"name,omitempty" yaml:"name,omitempty"`
+	Description string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Icon        *MCPIcon            `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Annotations *MCPToolAnnotations `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 }
 
 // operationMCPFields is every key but the invocation policy, for decoding.
@@ -111,12 +114,12 @@ func (m OperationMCP) head() operationMCPHead {
 }
 
 func (m OperationMCP) tail() operationMCPTail {
-	return operationMCPTail{Meta: m.Meta, Name: m.Name, Description: m.Description, Icon: m.Icon}
+	return operationMCPTail{Additive: m.Additive, Meta: m.Meta, Name: m.Name, Description: m.Description, Icon: m.Icon, Annotations: m.Annotations}
 }
 
 func (m *OperationMCP) setFields(f operationMCPFields) {
 	m.Handle, m.Hidden, m.HiddenReason = f.Handle, f.Hidden, f.HiddenReason
-	m.Meta, m.Name, m.Description, m.Icon = f.Meta, f.Name, f.Description, f.Icon
+	m.Additive, m.Meta, m.Name, m.Description, m.Icon, m.Annotations = f.Additive, f.Meta, f.Name, f.Description, f.Icon, f.Annotations
 }
 
 // encodable reports a policy the encoders cannot write: a value with no
@@ -129,8 +132,8 @@ func (m OperationMCP) encodable() error {
 }
 
 // MarshalJSON writes handle, hidden and hiddenReason, then the invocation
-// policy under its key when it has a value, then _meta, name, description
-// and icon: the order the struct declares them in.
+// policy under its key when it has a value, then additive, _meta, name,
+// description, icon and annotations: the order the struct declares them in.
 func (m OperationMCP) MarshalJSON() ([]byte, error) {
 	if err := m.encodable(); err != nil {
 		return nil, err
@@ -271,12 +274,14 @@ func (m OperationMCP) MarshalYAML() (any, error) {
 		values = append(values, m.Invocation.Value)
 	}
 	fields = append(fields,
+		reflect.StructField{Name: "Additive", Type: reflect.TypeFor[bool](), Tag: `yaml:"additive,omitempty"`},
 		reflect.StructField{Name: "Meta", Type: reflect.TypeFor[map[string]any](), Tag: `yaml:"_meta,omitempty"`},
 		reflect.StructField{Name: "Name", Type: reflect.TypeFor[string](), Tag: `yaml:"name,omitempty"`},
 		reflect.StructField{Name: "Description", Type: reflect.TypeFor[string](), Tag: `yaml:"description,omitempty"`},
 		reflect.StructField{Name: "Icon", Type: reflect.TypeFor[*MCPIcon](), Tag: `yaml:"icon,omitempty"`},
+		reflect.StructField{Name: "Annotations", Type: reflect.TypeFor[*MCPToolAnnotations](), Tag: `yaml:"annotations,omitempty"`},
 	)
-	values = append(values, m.Meta, m.Name, m.Description, m.Icon)
+	values = append(values, m.Additive, m.Meta, m.Name, m.Description, m.Icon, m.Annotations)
 	record := reflect.New(reflect.StructOf(fields)).Elem()
 	for i, value := range values {
 		record.Field(i).Set(reflect.ValueOf(value))

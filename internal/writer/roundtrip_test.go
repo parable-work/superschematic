@@ -246,6 +246,42 @@ func TestTSWriterRoundTripsJobs(t *testing.T) {
 	}
 }
 
+// TestTSWriterRoundTripsProjectionOptions: the TS writer writes a view's
+// sourceSchema (D126), replica (D121) and a set rule (D127), a join with
+// no equality (D122)
+// and a unique index whose nulls collide (D125), and the reader reads them
+// back.
+func TestTSWriterRoundTripsProjectionOptions(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-projection")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	def := schema.Types["AppPreference"].Projection
+	def.SourceSchema = "archive"
+	replica := false
+	def.Replica = &replica
+	def.Predicates = append([]*ir.ProjectionPredicate{{Column: "base.id", Setting: "app.preference_id"}}, def.Predicates...)
+	def.Predicates = append(def.Predicates, &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_preference_ids", RequiredSettings: []string{"app.user_id"}})
+	for _, j := range def.Joins {
+		if j.Alias == "channel" {
+			j.On = nil
+		}
+	}
+	pref := schema.Types["Preference"]
+	pref.Indexes = append(pref.Indexes, ir.IndexDef{Keys: []string{"account", "slotKey"}, Name: "one_slot", Unique: true, NullsNotDistinct: true})
+	// The TS writer has no form for a default on Generic.Int64; the fixture's
+	// revision default is not what this test is about.
+	for _, fd := range pref.Fields {
+		if fd.TypeRef.Name == "Generic.Int64" {
+			fd.Default = nil
+		}
+	}
+	want := normalizeIR(t, schema)
+	if got := normalizeIR(t, writeAndReload(t, schema, FormatTS)); got != want {
+		t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 // TestTSWriterRoundTripsKeyedQueuesAndTriggers: the TS writer writes a
 // queue's key, onDuplicate and serialize and a table's @enqueueOnChange
 // (D80), the queue's class before a table that names it, which TypeScript

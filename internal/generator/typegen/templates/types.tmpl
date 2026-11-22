@@ -62,6 +62,26 @@ type HistoryRecord[T any] struct {
 }
 {{- end}}
 
+{{- if .HasRequiredNull}}
+
+// RequiredNull is a JSON field value that only accepts and emits null
+// (D130).
+type RequiredNull struct{}
+
+// MarshalJSON writes null.
+func (RequiredNull) MarshalJSON() ([]byte, error) {
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON accepts null and nothing else.
+func (*RequiredNull) UnmarshalJSON(data []byte) error {
+	if !bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return fmt.Errorf("expected null")
+	}
+	return nil
+}
+{{- end}}
+
 {{- if .HasInputFieldWrappers}}
 	// InputField preserves tri-state input semantics during JSON decoding.
 	// - Omitted key: Set=false
@@ -1946,9 +1966,13 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 	}
 	data = declaredData
 {{- end}}
+{{- if or .StrictJSON (hasRequiredNullFields .Fields)}}
 {{- if .StrictJSON}}
 	// @strictJSON: reject an undeclared key before any field decoder can
 	// drop it, and a required field that is absent or null.
+{{- else}}
+	// A RequiredNull field is present with null (D130): refuse its absence.
+{{- end}}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return fmt.Errorf("decode {{.Name}}: %w", err)
@@ -1956,6 +1980,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 	if fields == nil {
 		return fmt.Errorf("decode {{.Name}}: expected an object")
 	}
+{{- if .StrictJSON}}
 	for key := range fields {
 		switch key {
 {{- range .Fields}}
@@ -1965,8 +1990,14 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("decode {{.Name}}: unknown field %q", key)
 		}
 	}
+{{- end}}
+{{- $strict := .StrictJSON}}
 {{- range .Fields}}
-{{- if .Required}}
+{{- if .RequiredNull}}
+	if _, ok := fields["{{.Name}}"]; !ok {
+		return fmt.Errorf("{{.Name}} is required")
+	}
+{{- else if and $strict .Required}}
 	if raw, ok := fields["{{.Name}}"]; {{if .HasDefault}}ok &&{{else}}!ok ||{{end}} bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return fmt.Errorf("{{.Name}} is required")
 	}

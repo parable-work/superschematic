@@ -21,6 +21,9 @@
 {{- with $tool.MCP.Invocation.Value}},
         "{{$.Invocation.Key}}": "{{escapeJSON .}}"
 {{- end}}
+{{- with $tool.MCP.Annotations}},
+        "annotations": {{jsonValue .}}
+{{- end}}
 {{- if $tool.MCP.Meta}},
         "_meta": {{jsonValue $tool.MCP.Meta}}
 {{- end}}

@@ -4691,6 +4691,10 @@
           "default": false,
           "type": "boolean"
         },
+        "requiredNull": {
+          "default": false,
+          "type": "boolean"
+        },
         "restMethod": {
           "default": "",
           "type": "string"
@@ -4698,6 +4702,10 @@
         "restPath": {
           "default": "",
           "type": "string"
+        },
+        "runtime": {
+          "default": false,
+          "type": "boolean"
         },
         "searchField": {
           "default": false,
@@ -5044,6 +5052,10 @@
           "default": "",
           "type": "string"
         },
+        "nullsNotDistinct": {
+          "default": false,
+          "type": "boolean"
+        },
         "ops": {
           "default": "",
           "type": "string"
@@ -5111,6 +5123,26 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "MCPToolAnnotations": {
+      "additionalProperties": false,
+      "properties": {
+        "destructiveHint": {
+          "type": "boolean"
+        },
+        "idempotentHint": {
+          "type": "boolean"
+        },
+        "readOnlyHint": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint"
       ],
       "type": "object"
     },
@@ -5203,6 +5235,10 @@
         },
         "rateLimit": {
           "type": "integer"
+        },
+        "rateLimitKey": {
+          "default": "",
+          "type": "string"
         },
         "timeout": {
           "type": "integer"
@@ -5357,6 +5393,13 @@
         "_meta": {
           "default": {},
           "type": "object"
+        },
+        "additive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "annotations": {
+          "$ref": "#/$defs/MCPToolAnnotations"
         },
         "description": {
           "default": "",
@@ -5644,7 +5687,14 @@
           },
           "type": "array"
         },
+        "replica": {
+          "type": "boolean"
+        },
         "source": {
+          "type": "string"
+        },
+        "sourceSchema": {
+          "default": "",
           "type": "string"
         }
       },
@@ -5784,6 +5834,10 @@
           "$ref": "#/$defs/ProjectionLiteral"
         },
         "function": {
+          "default": "",
+          "type": "string"
+        },
+        "inFunction": {
           "default": "",
           "type": "string"
         },

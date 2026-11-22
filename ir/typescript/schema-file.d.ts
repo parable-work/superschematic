@@ -285,8 +285,10 @@ export interface FieldDef {
   relation?: RelationDef;
   requireOwnership?: boolean;
   required?: boolean;
+  requiredNull?: boolean;
   restMethod?: string;
   restPath?: string;
+  runtime?: boolean;
   searchField?: boolean;
   secret?: boolean;
   serviceCallers?: ServiceCallers;
@@ -386,6 +388,7 @@ export interface IndexDef {
   m?: number;
   method?: string;
   name?: string;
+  nullsNotDistinct?: boolean;
   ops?: string;
   unique?: boolean;
   where?: string;
@@ -404,6 +407,12 @@ export interface MCPIcon {
   family?: string;
   name: string;
   style?: string;
+}
+
+export interface MCPToolAnnotations {
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  readOnlyHint: boolean;
 }
 
 export interface MemoryStoreDeclaration {
@@ -428,6 +437,7 @@ export interface MemoryStorePart {
 export interface MiddlewareConfig {
   bodyLimit?: number;
   rateLimit?: number;
+  rateLimitKey?: string;
   timeout?: number;
 }
 
@@ -463,6 +473,8 @@ export interface OperationFilter {
 
 export interface OperationMCP {
   _meta?: { [key: string]: unknown };
+  additive?: boolean;
+  annotations?: MCPToolAnnotations;
   description?: string;
   handle?: string;
   hidden: boolean;
@@ -545,7 +557,9 @@ export interface ProjectionDef {
   name: string;
   pool?: string;
   predicates?: ProjectionPredicate[];
+  replica?: boolean;
   source: string;
+  sourceSchema?: string;
 }
 
 export interface ProjectionFunctionCall {
@@ -584,6 +598,7 @@ export interface ProjectionPredicate {
   column?: string;
   equals?: ProjectionLiteral;
   function?: string;
+  inFunction?: string;
   isNull?: boolean;
   notNull?: boolean;
   optional?: boolean;

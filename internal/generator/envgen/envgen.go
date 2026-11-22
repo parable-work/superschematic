@@ -67,6 +67,9 @@ type ConfigOutput struct {
 	// HasDefaults indicates whether the config class declares at least one
 	// default value.
 	HasDefaults bool
+	// HasRuntime indicates whether any field is Runtime<T>: the loaders then
+	// write the Live handle (D129).
+	HasRuntime bool
 	// EnvConfig writes EnvConfig, the API's settings and derived fields
 	// together, and LoadEnvConfig: the config the Go API's Deps holds. Set
 	// by Options.Derived.
@@ -219,6 +222,9 @@ type ConfigField struct {
 	// Secret indicates the field carries @secret in the IR. Deploy values
 	// must bind such fields with a secretRef, never a literal.
 	Secret bool
+	// Runtime marks a Runtime<T> field: the Live handle of each loader
+	// changes it while the process runs (D129).
+	Runtime bool
 	// OptionalBool marks an optional boolean without a default, which the
 	// types module declares as *bool; the loader leaves it nil when unset.
 	OptionalBool bool
@@ -419,6 +425,9 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		if configField.HasDefault {
 			output.HasDefaults = true
 		}
+		if configField.Runtime {
+			output.HasRuntime = true
+		}
 	}
 
 	output.NeedsTypes = true
@@ -481,6 +490,7 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 		IsScalar:    isScalar,
 		Description: codegen.DocText(field.Description, field.Comment),
 		Secret:      field.Secret,
+		Runtime:     field.Runtime,
 		OptionalBool: codegen.GoOptionalBoolIsPointer(
 			typeName, field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default),
 	}
@@ -871,13 +881,13 @@ func buildLoaderExpr(field ConfigField) string {
 	if field.IsEnum {
 		allowedLiteral := formatStringSlice(field.EnumValues)
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("requireEnum(%s, %s)", keyLiteral, allowedLiteral)
+			return fmt.Sprintf("requireEnum(lookup, %s, %s)", keyLiteral, allowedLiteral)
 		}
 		defaultLiteral := `""`
 		if field.HasDefault {
 			defaultLiteral = fmt.Sprintf("%q", field.DefaultValue)
 		}
-		return fmt.Sprintf("enumOrDefault(%s, %s, %s)", keyLiteral, allowedLiteral, defaultLiteral)
+		return fmt.Sprintf("enumOrDefault(lookup, %s, %s, %s)", keyLiteral, allowedLiteral, defaultLiteral)
 	}
 
 	// A scalar field reads the raw string, which the loader passes to the
@@ -897,46 +907,46 @@ func buildPrimitiveLoaderExpr(primitiveType string, field ConfigField) string {
 	switch primitiveType {
 	case "String", "string":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("requireString(%s)", keyLiteral)
+			return fmt.Sprintf("requireString(lookup, %s)", keyLiteral)
 		}
 		defaultLiteral := `""`
 		if field.HasDefault {
 			defaultLiteral = fmt.Sprintf("%q", field.DefaultValue)
 		}
-		return fmt.Sprintf("stringOrDefault(%s, %s)", keyLiteral, defaultLiteral)
+		return fmt.Sprintf("stringOrDefault(lookup, %s, %s)", keyLiteral, defaultLiteral)
 
 	case "Int", "int":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("requireInt(%s)", keyLiteral)
+			return fmt.Sprintf("requireInt(lookup, %s)", keyLiteral)
 		}
 		defaultInt := 0
 		if field.HasDefault {
 			parsed, _ := strconv.Atoi(field.DefaultValue)
 			defaultInt = parsed
 		}
-		return fmt.Sprintf("intOrDefault(%s, %d)", keyLiteral, defaultInt)
+		return fmt.Sprintf("intOrDefault(lookup, %s, %d)", keyLiteral, defaultInt)
 
 	case "Boolean", "bool":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("requireBool(%s)", keyLiteral)
+			return fmt.Sprintf("requireBool(lookup, %s)", keyLiteral)
 		}
 		defaultBool := false
 		if field.HasDefault {
 			parsed, _ := strconv.ParseBool(field.DefaultValue)
 			defaultBool = parsed
 		}
-		return fmt.Sprintf("boolOrDefault(%s, %t)", keyLiteral, defaultBool)
+		return fmt.Sprintf("boolOrDefault(lookup, %s, %t)", keyLiteral, defaultBool)
 	}
 
 	// Default to string for unknown types
 	if field.Required && !field.HasDefault {
-		return fmt.Sprintf("requireString(%s)", keyLiteral)
+		return fmt.Sprintf("requireString(lookup, %s)", keyLiteral)
 	}
 	defaultLiteral := `""`
 	if field.HasDefault {
 		defaultLiteral = fmt.Sprintf("%q", field.DefaultValue)
 	}
-	return fmt.Sprintf("stringOrDefault(%s, %s)", keyLiteral, defaultLiteral)
+	return fmt.Sprintf("stringOrDefault(lookup, %s, %s)", keyLiteral, defaultLiteral)
 }
 
 // buildDefaultExpr builds the default value expression for a config field.

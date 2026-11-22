@@ -115,6 +115,12 @@ export interface OperationSpec {
   readonly bodyLimitBytes?: number;
   /** @rateLimit: requests per minute per client (the Go runtime's per-route, per-IP limiter); 429 past it. */
   readonly rateLimitPerMinute?: number;
+  /**
+   * What @rateLimit counts per: absent for the client, 'principal' for the
+   * caller the permission gate admits (D131), counted in
+   * RouterRuntimeOptions.principalRateLimitStore under `<METHOD> <path>`.
+   */
+  readonly rateLimitKey?: 'principal';
   /** @timeout: seconds the operation may take before the adapter answers 504 (the Go runtime's Timeout middleware). */
   readonly timeoutSeconds?: number;
   /** @hmacVerified: the provider whose webhook verifier checks the request before every other step. */

@@ -164,6 +164,7 @@ export abstract class TenantView {
 @index(["id"], { unique: "yes" })
 // @ts-expect-error missing arguments
 @index()
+@index(["id"], { nullsNotDistinct: true })
 export abstract class Tenant {
   @key
   id: string;
@@ -173,6 +174,7 @@ export abstract class Tenant {
 				`a.schema.ts:2:16: @index name "Not Snake" must be a lowercase identifier (e.g. digest)`,
 				"a.schema.ts:4:16: @index unique must be a boolean literal",
 				"a.schema.ts:6:1: @index takes one array argument and an optional unique flag or options object",
+				"a.schema.ts:7:16: @index nullsNotDistinct requires unique: true",
 			},
 		},
 		{
