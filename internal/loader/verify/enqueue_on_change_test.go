@@ -89,7 +89,7 @@ func TestEnqueueOnChangeRefusedInIR(t *testing.T) {
 	}
 	schema.Types["Pane"] = &ir.TypeDef{Name: "Pane", Role: ir.RoleEmbeddedStruct, EnqueueOnChange: []*ir.EnqueueOnChange{on(&ir.EnqueueOnChange{Message: map[string]string{"lineId": "id"}})}}
 	r := &Result{}
-	checkEnqueueOnChange(schema, r)
+	checkEnqueueOnChange(schema, Input{}, r)
 	var got []string
 	for _, d := range r.Errors {
 		got = append(got, d.Msg)
@@ -121,7 +121,7 @@ func TestEnqueueOnChangeRefusedInIR(t *testing.T) {
 		EnqueueOnChange: []*ir.EnqueueOnChange{on(&ir.EnqueueOnChange{Message: map[string]string{"lineId": "id"}})}}
 	delete(missing.Types, "Pane")
 	r = &Result{}
-	checkEnqueueOnChange(missing, r)
+	checkEnqueueOnChange(missing, Input{}, r)
 	got = nil
 	for _, d := range r.Errors {
 		got = append(got, d.Msg)
@@ -152,7 +152,7 @@ func TestEnqueueOnChangeLeavesADefaultedFieldToItsColumn(t *testing.T) {
 			EnqueueOnChange: []*ir.EnqueueOnChange{{Queue: "Counted", On: []string{"insert"}, Message: map[string]string{"lineId": "id"}}},
 		}
 		r := &Result{}
-		checkEnqueueOnChange(schema, r)
+		checkEnqueueOnChange(schema, Input{}, r)
 		var got []string
 		for _, d := range r.Errors {
 			got = append(got, d.Msg)

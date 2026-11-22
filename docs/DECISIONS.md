@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D131 is the highest so far.
+  the highest number any branch has used. D132 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -197,7 +197,6 @@ the prebuilt families published and pinned (every key and digest in
 - A CHECK for a `pattern`, for the list rules (lists of an enum among
   them; `sqlutil.ColumnCheck` skips lists), and for a scalar's own bounds
   such as Money's range.
-- An opt-out of the checks, to load legacy values first.
 - A plan that takes raw SQL down around a change to the columns it reads:
   a materialized view over a column the plan retypes fails the step
   (L 11280).

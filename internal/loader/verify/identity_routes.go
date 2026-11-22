@@ -133,7 +133,7 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 	}
 	checkIdentityRouteNames(schema, r)
 	if schema.Kind == ir.SchemaKindAPI {
-		checkIdentityRoutesAuthDB(schema, in.AuthDB, sessions, admin, r)
+		checkIdentityRoutesAuthDB(schema, in.AuthDB, sessions, admin, sqlutil.DDLPolicyOf(in.Naming.OrDefault()), r)
 		checkSeededRoles(schema, in.AuthDB, sessions, in.Naming.OrDefault().IdentityPermissionPrefix, r)
 	}
 }
@@ -236,7 +236,7 @@ func checkIdentityRouteNames(schema *ir.Schema, r *Result) {
 // and, for @userAdministration, a UserRole table. The routes that create
 // users, register and the administration routes, need the User table to
 // take a row from its key, login and name alone.
-func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.OperationSet, r *Result) {
+func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.OperationSet, policy sqlutil.DDLPolicy, r *Result) {
 	first := sessions
 	if first == nil {
 		first = admin
@@ -272,7 +272,7 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 		creators = append(creators, admin.Name+"'s @userAdministration")
 	}
 	if len(creators) > 0 {
-		checkUserCreatable(authDB, user, strings.Join(creators, " and "), schema.AuthDB, r)
+		checkUserCreatable(authDB, user, strings.Join(creators, " and "), schema.AuthDB, policy, r)
 	}
 }
 
@@ -280,12 +280,17 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 // from its key, login and name alone, the fields the routes that create
 // users write (D50, v1): every other field must be optional, take a
 // default its column carries (D83), be generated, or be an audit
-// timestamp sqlgen defaults to now (D88).
-func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string, r *Result) {
+// timestamp sqlgen defaults to now (D88), as the naming file's [sql]
+// table gives defaults (policy).
+func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string, policy sqlutil.DDLPolicy, r *Result) {
 	written := map[string]bool{user.User.Login: true, user.User.NameField(): true}
 	scalarTypes := sqlutil.ScalarSQLTypes(db)
 	for _, fd := range user.Fields {
-		if fd.Key || written[fd.Name] || !needsValueOnCreate(db, user, fd, scalarTypes) {
+		if fd.Key || written[fd.Name] || !needsValueOnCreate(db, user, fd, scalarTypes, policy) {
+			continue
+		}
+		if policy.NoColumnDefaults {
+			r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default its column carries; make it optional, or give a date or time Default<T, \"now\"> (the naming file's sql.column_defaults is \"off\", so no other default is its column's)", creators, user.Name, fd.Name, authDB)
 			continue
 		}
 		r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member, or \"now\" for a date or time", creators, user.Name, fd.Name, authDB)
@@ -294,10 +299,10 @@ func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string
 
 // needsValueOnCreate reports whether an insert must write fd, a field of
 // the table td: a required column with no generated value and no default
-// sqlgen gives it, from its Default<T, V> (sqlutil.ColumnDefault) or, for
-// an audit timestamp, its type (sqlutil.ImpliedNowDefault).
-func needsValueOnCreate(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
-	if _, ok := sqlutil.ColumnDefault(fd, sqlutil.ColumnType(db, fd, scalarTypes)); ok {
+// sqlgen gives it, from its Default<T, V> (DDLPolicy.ColumnDefault) or,
+// for an audit timestamp, its type (DDLPolicy.ImpliedNowDefault).
+func needsValueOnCreate(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string, policy sqlutil.DDLPolicy) bool {
+	if _, ok := policy.ColumnDefault(fd, sqlutil.ColumnType(db, fd, scalarTypes)); ok {
 		return false
 	}
 	switch {
@@ -307,15 +312,16 @@ func needsValueOnCreate(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTy
 		// The rows that hold the relation are another table's.
 		return false
 	}
-	return !sqlDefaultsToNow(db, td, fd, scalarTypes)
+	return !sqlDefaultsToNow(db, td, fd, scalarTypes, policy)
 }
 
 // sqlDefaultsToNow reports whether sqlgen gives fd's required column the
 // CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME default with no
 // Default<T, "now">: a single date, time or timestamp column that is an
-// audit timestamp (sqlutil.ImpliedNowDefault, D88).
-func sqlDefaultsToNow(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
-	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil || !sqlutil.ImpliedNowDefault(td, fd) {
+// audit timestamp (DDLPolicy.ImpliedNowDefault, D88), or any such column
+// under now_defaults = "required".
+func sqlDefaultsToNow(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string, policy sqlutil.DDLPolicy) bool {
+	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil || !policy.ImpliedNowDefault(td, fd) {
 		return false
 	}
 	return sqlutil.NowDefault(sqlutil.ColumnType(db, fd, scalarTypes), fd.TypeRef.Name) != ""

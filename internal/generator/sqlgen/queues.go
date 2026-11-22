@@ -32,8 +32,8 @@ func QueueTableName(td *ir.TypeDef) string {
 }
 
 // convertQueueToTable builds the table of the queue typeDef declares.
-func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string]*ir.Schema, scalarMapping map[string]string, compositeDefaults map[string]*ir.CompositeDefaultDef) (Table, error) {
-	message, err := convertTypeToTable(typeDef, schema, deps, scalarMapping, compositeDefaults)
+func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string]*ir.Schema, scalarMapping map[string]string, compositeDefaults map[string]*ir.CompositeDefaultDef, policy sqlutil.DDLPolicy) (Table, error) {
+	message, err := convertTypeToTable(typeDef, schema, deps, scalarMapping, compositeDefaults, policy)
 	if err != nil {
 		return Table{}, err
 	}

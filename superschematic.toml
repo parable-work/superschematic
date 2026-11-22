@@ -146,3 +146,14 @@ memory_store = "{SERVICE}_MEMORY_STORE"
 # name.
 [implementation_paths]
 go = "go/{service}"
+
+# What the DDL adds to a column beyond its type, and the text of the errors
+# a @stateMachine's Postgres guard raises ({column} is table.column, the two
+# % signs the old and the new value). A project whose databases another
+# compiler built sets them so create.sql gives the catalog they hold.
+[sql]
+column_checks = "on"
+column_defaults = "on"
+now_defaults = "declared"
+state_guard_terminal = "{column} is terminal at %: it cannot move to %"
+state_guard_refused = "{column} cannot move from % to %"

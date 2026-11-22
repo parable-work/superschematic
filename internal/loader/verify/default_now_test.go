@@ -67,13 +67,13 @@ func TestUnmappedTimestampNeedsDefaultNow(t *testing.T) {
 		EnqueueOnChange: []*ir.EnqueueOnChange{{Queue: "Placed", On: []string{"insert"}, Message: map[string]string{"orderId": "id"}}},
 	}
 	r := &Result{}
-	checkEnqueueOnChange(schema, r)
+	checkEnqueueOnChange(schema, Input{}, r)
 	if len(r.Errors) != 1 || r.Errors[0].Msg != `@enqueueOnChange(Placed) on Order: Placed's field placedAt is required and its column has no default, so the message maps it to a field of Order` {
 		t.Fatalf("errors = %+v", r.Errors)
 	}
 	schema.Types["Order"].EnqueueOnChange[0].Message["placedAt"] = "placedAt"
 	r = &Result{}
-	checkEnqueueOnChange(schema, r)
+	checkEnqueueOnChange(schema, Input{}, r)
 	if len(r.Errors) != 0 {
 		t.Fatalf("a mapped placedAt: errors = %+v", r.Errors)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -35,12 +36,26 @@ func TestSQLOptions(t *testing.T) {
 		SourceSchema:        "ledger",
 		MetadataKeyPrefix:   "acme.",
 		HistoryActorSetting: "acme.actor_id",
+		StateGuardTerminal:  naming.DefaultGuardTerminal,
+		StateGuardRefused:   naming.DefaultGuardRefused,
 	}, SQLOptions(cfg, outputs, deps, names))
 
+	// The naming's [sql] table reaches the DDL policy and the guard
+	// messages.
+	names.SQL = naming.SQLConfig{
+		ColumnChecks: naming.SQLOff, ColumnDefaults: naming.SQLOff, NowDefaults: naming.SQLNowRequired,
+		StateGuardTerminal: "{column} stays at % and not %", StateGuardRefused: "{column} goes from % only, not to %",
+	}
+	opts := SQLOptions(cfg, outputs, deps, names)
+	assert.Equal(t, sqlutil.DDLPolicy{NoColumnChecks: true, NoColumnDefaults: true, NowOnEveryRequiredTime: true}, opts.DDL)
+	assert.Equal(t, "{column} stays at % and not %", opts.StateGuardTerminal)
+	assert.Equal(t, "{column} goes from % only, not to %", opts.StateGuardRefused)
+
 	// A zero naming is the defaults, as a build's is.
-	opts := SQLOptions(&schemaconfig.SchemaConfig{Name: "shop-db"}, nil, nil, naming.Naming{})
+	opts = SQLOptions(&schemaconfig.SchemaConfig{Name: "shop-db"}, nil, nil, naming.Naming{})
 	assert.Equal(t, sqlgen.DefaultMetadataKeyPrefix, opts.MetadataKeyPrefix)
 	assert.Equal(t, sqlgen.DefaultHistoryActorSetting, opts.HistoryActorSetting)
+	assert.Equal(t, sqlutil.DDLPolicy{}, opts.DDL)
 	assert.Empty(t, opts.ViewOwner)
 	assert.Empty(t, opts.SourceSchema)
 }

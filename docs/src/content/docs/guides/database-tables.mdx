@@ -94,7 +94,11 @@ held to them:
   code's.
 
 A check is named `ck_<table>_<column>`, and `NULL` passes it. A list, a
-map and a JSON value get neither a default nor a check. Which value of an
+map and a JSON value get neither a default nor a check. A project whose
+databases another compiler built can turn the checks and the
+`Default<T, V>` defaults off, and give every required date, time or
+timestamp the time of the insert, in the naming file's
+[`[sql]` table](/superschematic/reference/naming/#sql). Which value of an
 enum column may follow which is a `@stateMachine`'s to say
 ([State machines](#state-machines)). A decimal's
 `precision` and `scale` are its column's type, `NUMERIC(p,s)`, which
