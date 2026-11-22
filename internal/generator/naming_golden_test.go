@@ -43,12 +43,14 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	// Naming without a fixture value would otherwise keep its default and the
 	// scan below would pass without exercising it. AuthProvider selects a
 	// registered provider rather than naming an output, and the core
-	// registers only one, so it is exempt.
+	// registers only one, so it is exempt. TypeComments and PrivateRemarks
+	// say how the reader reads a comment and name no output, so they are
+	// exempt too.
 	defaults := reflect.ValueOf(naming.Default())
 	fixture := reflect.ValueOf(names)
 	for i := 0; i < fixture.NumField(); i++ {
 		field := fixture.Type().Field(i)
-		if field.Type.Kind() != reflect.String || field.Name == "AuthProvider" {
+		if field.Type.Kind() != reflect.String || field.Name == "AuthProvider" || field.Name == "TypeComments" || field.Name == "PrivateRemarks" {
 			continue
 		}
 		if fixture.Field(i).String() == defaults.Field(i).String() {

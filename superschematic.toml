@@ -78,6 +78,14 @@ history_actor_setting = "superschematic.history_actor_id"
 # "session"; an extension that registers another provider names it here.
 auth_provider = "session"
 
+# How the TypeScript reader reads a declaration's comment: "attached" reads
+# the comments no blank line parts from it, without section banners;
+# "leading" reads every comment above it as written. And whether it leaves
+# each @privateRemarks section out of every comment ("drop") or not
+# ("keep").
+type_comments = "attached"
+private_remarks = "keep"
+
 # The TypeScript packages a .schema.ts file may import symbols from. A
 # distribution that republishes them under its own names lists those names
 # here and maps each to the declaring package in [package_aliases]:

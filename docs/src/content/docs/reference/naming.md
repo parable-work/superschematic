@@ -342,6 +342,37 @@ starting with a digit. Any other value fails the load. Unset, the types
 carry no tag line; unlike most keys, an empty value has no default to fall
 back to.
 
+### `type_comments`
+
+Default: `attached`
+
+How the TypeScript reader reads the comment of a declaration: a class, an
+interface, a type alias or an enum. `attached` reads the comments that no
+blank line parts from it, without the rules and banners that mark a
+file's sections. `leading` reads every comment above it, up to the
+previous token, as written: a comment that a blank line parts from it, a
+rule and a banner are all part of it. A field, a method and an enum member
+read their comment as `attached` says under either value. Every output
+that carries a comment carries what the reader reads: the doc comments
+of the generated code, the descriptions of the OpenAPI and JSON Schema
+documents, and a table's `COMMENT ON TABLE`.
+
+Set `leading` when the schemas' comments came from a compiler that read
+them that way, so the comments in a database's catalog stay the same.
+Any other value fails the load.
+
+### `private_remarks`
+
+Default: `keep`
+
+`drop` leaves each `@privateRemarks` section out of every comment the
+TypeScript reader reads, as TSDoc leaves it out of the published docs. A
+section runs from the line that starts with the tag to the next line that
+starts with another block tag (an `@` and a letter), or to the end of the
+comment, and the empty lines it leaves at the end go with it. `keep`
+reads the section as the rest of the comment. Any other value fails the
+load.
+
 ### `auth_provider`
 
 Default: `session`

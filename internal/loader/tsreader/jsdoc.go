@@ -153,6 +153,56 @@ func triviaComment(trivia string) string {
 	return strings.Join(undecorated(lines), "\n")
 }
 
+// leadingTriviaComment is the lines of every comment in trivia, each
+// line's comment markers stripped, as written: a comment a blank line
+// parts from the node is kept, and so are its rules and banners. It is a
+// declaration's comment under the naming file's type_comments =
+// "leading".
+func leadingTriviaComment(trivia string) string {
+	var lines []string
+	for _, raw := range strings.Split(trivia, "\n") {
+		if s, ok := commentLine(strings.TrimSpace(raw)); ok {
+			lines = append(lines, s)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// privateRemarksTag starts the part of a comment that is for the schema's
+// authors only, as TSDoc's @privateRemarks does.
+const privateRemarksTag = "@privateRemarks"
+
+// withoutPrivateRemarks is comment without its @privateRemarks sections,
+// under the naming file's private_remarks = "drop". A section runs from
+// the line of the tag to the next line that opens another block tag (an
+// @ and a letter), or to the end of the comment. When a section goes, so
+// do the empty lines it leaves at the end. A comment with no tag comes
+// back as it was.
+func withoutPrivateRemarks(comment string) string {
+	lines := strings.Split(comment, "\n")
+	kept := lines[:0:0]
+	private, dropped := false, false
+	for _, line := range lines {
+		switch {
+		case line == privateRemarksTag || strings.HasPrefix(line, privateRemarksTag+" "):
+			private, dropped = true, true
+			continue
+		case private && len(line) > 1 && line[0] == '@' && unicode.IsLetter(rune(line[1])):
+			private = false
+		}
+		if !private {
+			kept = append(kept, line)
+		}
+	}
+	if !dropped {
+		return comment
+	}
+	for len(kept) > 0 && kept[len(kept)-1] == "" {
+		kept = kept[:len(kept)-1]
+	}
+	return strings.Join(kept, "\n")
+}
+
 // ruleRunes are the characters a rule, or a banner's runs, are drawn
 // with.
 const ruleRunes = "-=*#~_+/"

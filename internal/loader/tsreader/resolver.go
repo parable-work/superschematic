@@ -313,13 +313,13 @@ func (w *walker) recordExternalEnum(id symbolIdentity) {
 		return
 	}
 	enum := id.decl.AsEnumDeclaration()
-	def := &ir.EnumDef{Name: id.name, Owner: id.pkg, Comment: leadingComment(id.decl)}
+	def := &ir.EnumDef{Name: id.name, Owner: id.pkg, Comment: w.typeComment(id.decl)}
 	for _, node := range enum.Members.Nodes {
 		member := node.AsEnumMember()
 		valueName := node.Name().Text()
 		value := ir.EnumValueDef{Name: valueName}
 		var err error
-		if value.Title, value.Comment, err = memberTitle(node); err != nil {
+		if value.Title, value.Comment, err = w.memberTitle(node); err != nil {
 			w.addErr(errorAtNode(node, "enum %s member %s: %v", id.name, valueName, err))
 		}
 		if member.Initializer != nil {

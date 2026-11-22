@@ -233,7 +233,31 @@ type Naming struct {
 	// SQL is the [sql] table: what the generated DDL adds to a column
 	// beyond its type, and the text of the errors its triggers raise.
 	SQL SQLConfig `toml:"sql"`
+
+	// TypeComments is how the TypeScript reader reads the comment of a
+	// declaration: a class, an interface, a type alias or an enum.
+	// "attached" (default) reads the comments no blank line parts from
+	// it, without the rules and banners that mark a file's sections
+	// (D100). "leading" reads every comment above it, up to the previous
+	// token, as written. A member's comment is read as "attached" says
+	// under either value. Every output that carries a comment, a table's
+	// COMMENT among them, carries what the reader reads.
+	TypeComments string `toml:"type_comments"`
+
+	// PrivateRemarks is "keep" (default) or "drop". "drop" leaves each
+	// @privateRemarks section out of every comment the TypeScript reader
+	// reads, as TSDoc leaves it out of the published docs: from the tag's
+	// line to the next block tag or the end of the comment.
+	PrivateRemarks string `toml:"private_remarks"`
 }
+
+// The values of type_comments and private_remarks.
+const (
+	TypeCommentsAttached = "attached"
+	TypeCommentsLeading  = "leading"
+	PrivateRemarksKeep   = "keep"
+	PrivateRemarksDrop   = "drop"
+)
 
 // SQLConfig is the [sql] table of superschematic.toml. Its defaults are
 // the core's DDL (D83, D88, D118). A project whose databases another
@@ -930,6 +954,8 @@ func Default() Naming {
 			Site:       "web/" + ServicePathPlaceholder,
 			RustApp:    "apps/" + AppPathPlaceholder,
 		},
+		TypeComments:   TypeCommentsAttached,
+		PrivateRemarks: PrivateRemarksKeep,
 		SQL: SQLConfig{
 			ColumnChecks:       SQLOn,
 			ColumnDefaults:     SQLOn,
@@ -1000,6 +1026,8 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.ImplementationPaths.Rust, d.ImplementationPaths.Rust)
 	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)
 	fill(&n.ImplementationPaths.RustApp, d.ImplementationPaths.RustApp)
+	fill(&n.TypeComments, d.TypeComments)
+	fill(&n.PrivateRemarks, d.PrivateRemarks)
 	fill(&n.SQL.ColumnChecks, d.SQL.ColumnChecks)
 	fill(&n.SQL.ColumnDefaults, d.SQL.ColumnDefaults)
 	fill(&n.SQL.NowDefaults, d.SQL.NowDefaults)
@@ -1381,6 +1409,12 @@ func Parse(data []byte, name string) (Naming, error) {
 	}
 	if err := n.SQL.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {
+		return Naming{}, fmt.Errorf("naming: %s: type_comments is %q: use %q or %q", name, n.TypeComments, TypeCommentsAttached, TypeCommentsLeading)
+	}
+	if n.PrivateRemarks != PrivateRemarksKeep && n.PrivateRemarks != PrivateRemarksDrop {
+		return Naming{}, fmt.Errorf("naming: %s: private_remarks is %q: use %q or %q", name, n.PrivateRemarks, PrivateRemarksKeep, PrivateRemarksDrop)
 	}
 	n = n.OrDefault()
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {
