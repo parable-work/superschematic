@@ -82,6 +82,16 @@ writes them, and `test/corpus.test.ts` does not list them.
   operation, params]`), which the replayer runs as a command without a row
   on the one use whose behavior declares the operation on the table, and
   a transcript writes as a `command` step that names no row.
+- `core-comments-beside.json` (D103, step 4): Comments on a table, every
+  write beside the row (D77's primitive 1): a post that moves no version of
+  the row and asks no other behavior's guard, so another principal posts
+  while one holds the row's lease and its holder posts with no token, a
+  precondition presented to a post refused, a moderator's edit of another's
+  message and what it replaced; code blocks held to their lines and their
+  path, the config's kinds and its longest body, an attachment block, a
+  retry by clientId, the edit window; and the config members a table's
+  Comments waits for, refused at define. The engine's recordings
+  (`core-comments.json`) hold the rest of batch 1.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -105,8 +115,9 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs` and
-`runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs` replay each file on
+`runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/comments_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
 `hand_written_transcript`, which also holds each command's row version

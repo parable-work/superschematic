@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 24] = [
+const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -116,6 +116,9 @@ const TRANSCRIPTS: [(&str, usize); 24] = [
     ("core-numbering", NUMBERING_FLOOR),
     ("core-lease-numbering", LEASE_NUMBERING_FLOOR),
     ("core-revisions", REVISIONS_FLOOR),
+    ("core-comments", COMMENTS_FLOOR),
+    ("core-comments-beside", COMMENTS_BESIDE_FLOOR),
+    ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -142,10 +145,11 @@ const REACTIONS_CHANGES_FLOOR: usize = 62;
 /// opens and reads.
 const WORKFLOW_PRINCIPALS_FLOOR: usize = 101;
 
-/// core-constants' floor, as the core's milestone states it: 39 steps, 20
-/// commands (5 creates and 15 updates, its object, list and string fields
-/// among their values) and 19 checks (D104).
-const CONSTANTS_FLOOR: usize = 39;
+/// core-constants' floor, as the core's milestone states it: 49 steps, 26
+/// commands (6 creates, 15 updates, its object, list and string fields
+/// among their values, and 5 operations, in the scenario that composes
+/// Comments and Revisions, D103's step 4) and 23 checks (D104).
+const CONSTANTS_FLOOR: usize = 49;
 
 /// core-staterules' floor, as the core's milestone states it: 88 steps, 49
 /// commands (transitions, test.Recorder's operations, each a write of the
@@ -153,10 +157,11 @@ const CONSTANTS_FLOOR: usize = 39;
 /// StateRules') and 39 checks (D104, D103's step 4).
 const STATERULES_FLOOR: usize = 88;
 
-/// core-approvals' floor, as the core's milestone states it: 122 steps, 93
-/// commands (71 of them operations, the sign-offs kept in a sub-table, and
-/// 5 changes) and 29 checks (D104).
-const APPROVALS_FLOOR: usize = 122;
+/// core-approvals' floor, as the core's milestone states it: 146 steps, 113
+/// commands (86 of them operations, the sign-offs kept in a sub-table, and
+/// 5 changes) and 33 checks (D104), the scenario beside Comments and
+/// Revisions among them (D103's step 4).
+const APPROVALS_FLOOR: usize = 146;
 
 /// core-freezes-and-sign-offs' floor, as the core's milestone states it:
 /// 115 steps of the scenarios written by hand (D104), 75 commands, each
@@ -164,16 +169,17 @@ const APPROVALS_FLOOR: usize = 122;
 /// date-times, and 40 checks.
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
-/// core-lease's floor, as the core's milestone states it: 464 steps, 345
-/// commands (243 operations of a row, 84 of the commands presenting Lease's
+/// core-lease's floor, as the core's milestone states it: 474 steps, 354
+/// commands (252 operations of a row, 86 of the commands presenting Lease's
 /// token as its precondition, 3 deadlines the runner ran: a lease's expiry,
 /// and 8 calls of expireHolder, each a command without a row, 2 of them
-/// refused, D104) and 119 checks (D104), the scenario that composes
-/// Dependencies among them (D104's step 4); its directives held as
-/// sub-table rows and its expiry as an armed deadline. What the recording
-/// composed beside Lease that the core does not run (Comments, Queue, the
-/// runner's sweep cadence) the transcript leaves out with its reasons.
-const LEASE_FLOOR: usize = 464;
+/// refused, D104) and 120 checks (D104), the scenario that composes
+/// Dependencies among them (D104's step 4) and Comments' posts beside the
+/// row (D103's step 4); its directives held as sub-table rows and its
+/// expiry as an armed deadline. What the recording composed beside Lease
+/// that the core does not run (Queue, the runner's sweep cadence) the
+/// transcript leaves out with its reasons.
+const LEASE_FLOOR: usize = 474;
 
 /// core-presence's floor, as the core's milestone states it: 141 steps, 89
 /// commands (8 of them deadlines the runner ran: a miss, 3 of which wrote
@@ -266,10 +272,30 @@ const NUMBERING_FLOOR: usize = 104;
 /// core-lease-numbering's floor: 14 steps, 8 commands and 6 checks.
 const LEASE_NUMBERING_FLOOR: usize = 14;
 
-/// core-revisions' floor (D103's step 4): 104 steps, 69 commands and 35
+/// core-revisions' floor (D103's step 4): 112 steps, 75 commands and 37
 /// checks, each revision and proposal a row of a sub-table of the use, and
 /// each approval an operation's write of the row's own fields.
-const REVISIONS_FLOOR: usize = 104;
+const REVISIONS_FLOOR: usize = 112;
+
+/// core-comments' floor (D103's step 4): 238 steps, 203 commands and 35
+/// checks, each message, edit and reaction a row of a sub-table of the use,
+/// each write beside the row, and each conversation's high-water marks a
+/// row of the use's shared table.
+const COMMENTS_FLOOR: usize = 238;
+
+/// core-comments-beside's floor (D103's step 4): 25 steps, 19 commands and
+/// 6 checks, each command's row version held to the one the lease's acquire
+/// left, which a write beside the row does not move.
+const COMMENTS_BESIDE_FLOOR: usize = 25;
+
+/// core-derived-provenance's floor (D73 on the core, D103's step 4): 75
+/// steps of the scenarios written by hand, 49 commands, each holding its
+/// row's version, and 26 checks: Derived's derivations and Provenance's
+/// records each a row of a sub-table of the use, Derived's pulls and
+/// settles commands without a row over a read across the table, a
+/// settle's writes of the rows it reaches through applyDerived, and
+/// Provenance's inReview an owned column.
+const DERIVED_PROVENANCE_FLOOR: usize = 75;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

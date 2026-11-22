@@ -1344,8 +1344,11 @@ impl Behavior for Count {
 // the patch changed them; its validation refuses the title `bad`, its guard
 // vetoes an update to the title `held`, naming the precondition it was
 // handed, and its after-change hook keeps the title the operation's change
-// heard as before (`none` when it heard none). peek, read-only, and a
-// create's after-change hook try to write the fields too.
+// heard as before (`none` when it heard none), and where each field it
+// changed came from (`from`, D73). peek, read-only, and a create's
+// after-change hook try to write the fields too. score writes the title
+// with update_attributed and the confidence its parameters give, or the
+// attribution `as` gives whole.
 struct Editor;
 
 impl Behavior for Editor {
@@ -1354,7 +1357,9 @@ impl Behavior for Editor {
     fn declaration(&self) -> Declaration {
         Declaration::new("Editor")
             .field("heard")
+            .field("from")
             .operation("retitle", true)
+            .operation("score", true)
             .operation("peek", false)
             .veto("held")
             .preconditions()
@@ -1395,6 +1400,14 @@ impl Behavior for Editor {
     }
 
     fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        if name == "score" {
+            let patch = json!({ "title": params["title"] });
+            let attribution = match params.get("as") {
+                Some(given) => given.clone(),
+                None => json!({ "title": { "confidence": params["confidence"] } }),
+            };
+            return cx.update_attributed(&patch, &attribution).map(Value::Bool);
+        }
         let mut patch = Map::new();
         if let Some(title) = params.get("title") {
             patch.insert("title".into(), title.clone());
@@ -1411,13 +1424,103 @@ impl Behavior for Editor {
             Change::Create if cx.own_field("title") == Some(json!("init")) => {
                 cx.update(&json!({"title": "later"})).map(|_| ())
             }
-            Change::Operation { before, .. } => {
+            Change::Operation {
+                before,
+                attribution,
+                ..
+            } => {
                 let heard = before
                     .and_then(|fields| fields.get("title").cloned())
                     .unwrap_or_else(|| json!("none"));
-                cx.set("heard", heard)
+                cx.set("heard", heard)?;
+                match attribution {
+                    Some(attribution) => cx.set("from", Value::Object((*attribution).clone())),
+                    None => Ok(()),
+                }
             }
             _ => Ok(()),
+        }
+    }
+}
+
+// Thread: notes kept beside the row (D77's primitive 1): `jot` inserts a
+// note and moves a shared count of the row's notes, `stamp` sets an owned
+// field, `move` calls another row, and `peek` reads; its guard vetoes a note
+// whose text is "no", and holds a note to its own use's precondition when
+// one is presented.
+struct Thread;
+
+impl Behavior for Thread {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Thread")
+            .field("stamped")
+            .sub_table(TableDecl::new("notes", "note", ["text"]))
+            .sub_table(TableDecl::new("counts", "row", ["notes"]).shared())
+            .beside_operation("jot")
+            .beside_operation("stamp")
+            .beside_operation("move")
+            .operation("peek", false)
+            .veto("refused")
+            .preconditions()
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let Some(params) = request.operation_of("Thread", "jot") else {
+            return Ok(None);
+        };
+        if params.get("text") == Some(&json!("no")) {
+            return Ok(Some(Veto::new("it says no").with_code("refused")));
+        }
+        if let Some(entry) = view.precondition() {
+            return Ok(Some(
+                Veto::new(format!("presented {entry}")).with_code("refused"),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        match name {
+            "jot" => {
+                let key = cx.key().unwrap_or_default().to_owned();
+                let notes = cx.sub_rows("notes")?.len() + 1;
+                let note = format!("{notes:03}");
+                cx.insert_row(
+                    "notes",
+                    &note,
+                    object(json!({ "text": params.get("text") })),
+                )?;
+                match cx.shared_row("counts", &key)? {
+                    Some(found) => cx.update_shared(
+                        "counts",
+                        &key,
+                        found.version,
+                        object(json!({ "notes": notes })),
+                    )?,
+                    None => cx.insert_shared("counts", &key, object(json!({ "notes": notes })))?,
+                }
+                Ok(json!({ "note": note }))
+            }
+            "stamp" => {
+                cx.set("stamped", true)?;
+                Ok(Value::Null)
+            }
+            "move" => {
+                cx.create_row(
+                    "Order",
+                    "o9",
+                    &object(json!({"title": "Lamp"})),
+                    &Map::new(),
+                )?;
+                Ok(Value::Null)
+            }
+            _ => Ok(json!(cx.sub_rows("notes")?.len())),
         }
     }
 }
@@ -1447,6 +1550,7 @@ fn core() -> superschematic_rules::Core {
         .with(Dial)
         .with(Count)
         .with(Editor)
+        .with(Thread)
 }
 
 fn alice() -> Caller {
@@ -2744,13 +2848,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -4925,6 +5029,87 @@ fn a_shared_table_is_read_by_key_and_written_held_to_its_version() {
     );
 }
 
+/// An operation's write of its row's own fields says where each changed
+/// field came from (D73): the writing behavior, with the confidence an
+/// attributed update gives, which its after-change hooks hear; a field it
+/// leaves as it was is not among them, and an attribution of another shape
+/// is a defect.
+#[test]
+fn an_operations_write_of_own_fields_is_attributed_to_its_behavior() {
+    let core = core();
+    let spec = TypeSpec::new("Page")
+        .with(UseSpec::on_type("Editor", None))
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::new("body", "string"));
+    let page = || {
+        Memory::default().with(
+            "Page",
+            "p1",
+            row(json!({"title": "Old", "body": "b"}), json!({}), 4),
+        )
+    };
+    let score = |params: Value| command(alice(), invoke("p1", "Editor", "score", params));
+    let written = changed(core.drive(
+        &spec,
+        &score(json!({"title": "New", "confidence": 0.5})),
+        &mut page(),
+    ));
+    assert_eq!(
+        serde_json::to_value(&written.rows).unwrap()[0]["owned"]["Editor"]["from"],
+        json!({"title": {"behavior": "Editor", "confidence": 0.5}})
+    );
+    // A plain update names the behavior alone.
+    let retitled = changed(core.drive(
+        &spec,
+        &command(
+            alice(),
+            invoke("p1", "Editor", "retitle", json!({"title": "New"})),
+        ),
+        &mut page(),
+    ));
+    assert_eq!(
+        serde_json::to_value(&retitled.rows).unwrap()[0]["owned"]["Editor"]["from"],
+        json!({"title": {"behavior": "Editor"}})
+    );
+    // A patch that changes nothing attributes nothing.
+    let unchanged = changed(core.drive(
+        &spec,
+        &score(json!({"title": "Old", "confidence": 0.5})),
+        &mut page(),
+    ));
+    assert!(
+        serde_json::to_value(&unchanged.rows).unwrap()[0]["owned"]["Editor"]
+            .get("from")
+            .is_none()
+    );
+    for (attribution, ends) in [
+        (
+            json!({"body": {}}),
+            "update_attributed() attributes body, which its patch does not write",
+        ),
+        (
+            json!({"title": {"confidence": 2}}),
+            "update_attributed()'s confidence for title is a number from 0 to 1",
+        ),
+        (
+            json!({"title": {"source": "x"}}),
+            "update_attributed()'s attribution of title has source; it takes confidence",
+        ),
+        (
+            json!([]),
+            "update_attributed()'s attribution is an object of entries by own field",
+        ),
+    ] {
+        let defect = refused(core.drive(
+            &spec,
+            &score(json!({"title": "New", "as": attribution})),
+            &mut page(),
+        ));
+        assert_eq!(defect.code, Code::BehaviorError);
+        assert!(defect.message.ends_with(ends), "{}", defect.message);
+    }
+}
+
 #[test]
 fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
     let core = core();
@@ -4954,7 +5139,8 @@ fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
     assert_eq!(
         serde_json::to_value(&written.rows).unwrap(),
         json!([{"kind": "update", "type": "Page", "key": "p1", "expectedVersion": 4,
-                "own": {"title": "New", "body": null}, "owned": {"Editor": {"heard": "Old"}}}])
+                "own": {"title": "New", "body": null}, "owned": {"Editor": {"heard": "Old",
+                "from": {"title": {"behavior": "Editor"}, "body": {"behavior": "Editor"}}}}}])
     );
     // A patch that changes nothing writes no own field and asks no guard,
     // and the operation's change hears no fields before it.
@@ -5018,5 +5204,88 @@ fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
         ),
         "{}",
         hook.message
+    );
+}
+
+// ---- an operation beside its row ----
+
+/// An operation beside its row (D77's primitive 1) asks its own use's
+/// guard alone, writes no row and runs no after-change hook, so a guard
+/// that vetoes every write of the row (Freeze's) neither refuses it nor
+/// hears it; its change set holds its sub-table and shared-table rows. It
+/// takes its own use's precondition and no other's, and a write of an owned
+/// field or of another row from it is a defect.
+#[test]
+fn an_operation_beside_its_row_writes_its_own_tables_alone() {
+    let core = core();
+    let spec = TypeSpec::new("Order")
+        .with(UseSpec::on_type("Freeze", json!({})))
+        .with(UseSpec::on_type("Fence", json!({})))
+        .with(UseSpec::on_type("Thread", json!({})));
+    let frozen = row(
+        json!({"title": "Desk", "frozen": true}),
+        json!({"Fence": {"token": 3}}),
+        7,
+    );
+    let mut memory = Memory::default().with("Order", "o1", frozen);
+    let jot = |text: &str| {
+        command(
+            alice(),
+            invoke("o1", "Thread", "jot", json!({ "text": text })),
+        )
+    };
+    let changes = changed(core.drive(&spec, &jot("hi"), &mut memory));
+    assert!(changes.rows.is_empty(), "no row write: {:?}", changes.rows);
+    assert!(changes.events.is_empty(), "no after-change hook ran");
+    assert_eq!(changes.result, json!({"note": "001"}));
+    assert_eq!(
+        serde_json::to_value(&changes.sub_rows).unwrap(),
+        json!([{"row": {"type": "Order", "key": "o1"}, "useId": "Thread", "table": "notes", "key": "001", "change": {"kind": "insert", "values": {"text": "hi"}}}])
+    );
+    assert_eq!(
+        serde_json::to_value(&changes.shared_rows).unwrap(),
+        json!([{"type": "Order", "useId": "Thread", "table": "counts", "key": "o1", "change": {"kind": "insert", "values": {"notes": 1}}}])
+    );
+
+    // Its own use's guard is asked.
+    let refusal = refused(core.drive(&spec, &jot("no"), &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Thread vetoes jot of Order o1: it says no"
+    );
+
+    // Another use's precondition is refused before the row is read; its
+    // own use's reaches its guard.
+    let fenced = jot("hi").with_preconditions(object(json!({"Fence": {"token": 3}})));
+    let refusal = refused(core.drive(&spec, &fenced, &mut memory));
+    assert_eq!(
+        refusal.error_json(),
+        json!({"class": "PreconditionsError", "code": "invalid_argument", "message": "preconditions of Order: /Fence: operation jot of behavior Thread is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Fence", "details": {"issues": [{"path": "/Fence", "message": "operation jot of behavior Thread is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Fence"}]}})
+    );
+    let own = jot("hi").with_preconditions(object(json!({"Thread": {"x": 1}})));
+    let refusal = refused(core.drive(&spec, &own, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Thread vetoes jot of Order o1: presented {\"x\":1}"
+    );
+
+    // A write of an owned field, or of another row, is a defect.
+    for (operation, made) in [("stamp", "set(stamped)"), ("move", "set(token)")] {
+        let call = command(alice(), invoke("o1", "Thread", operation, json!({})));
+        let refusal = refused(core.drive(&spec, &call, &mut memory));
+        assert_eq!(refusal.code, Code::BehaviorError, "{operation}");
+        assert_eq!(
+            refusal.message,
+            format!("behavior Thread: operation {operation} writes beside its row, its use's own tables alone, and made {made}"),
+            "{operation}"
+        );
+    }
+
+    // A read-only operation is asked of every guard, as any read is.
+    let peek = command(alice(), invoke("o1", "Thread", "peek", json!({})));
+    let refusal = refused(core.drive(&spec, &peek, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Freeze vetoes peek of Order o1: it is frozen"
     );
 }

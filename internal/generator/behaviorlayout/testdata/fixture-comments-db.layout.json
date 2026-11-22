@@ -1,0 +1,705 @@
+{
+  "types": {
+    "Review": {
+      "type": "Review",
+      "table": "review",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Comments",
+          "behavior": "Comments",
+          "member": "comments",
+          "fields": [],
+          "operations": [
+            {
+              "name": "post",
+              "writes": true
+            },
+            {
+              "name": "edit",
+              "writes": true
+            },
+            {
+              "name": "deleteMessage",
+              "writes": true
+            },
+            {
+              "name": "purge",
+              "writes": true
+            },
+            {
+              "name": "react",
+              "writes": true
+            },
+            {
+              "name": "unreact",
+              "writes": true
+            },
+            {
+              "name": "pin",
+              "writes": true
+            },
+            {
+              "name": "unpin",
+              "writes": true
+            },
+            {
+              "name": "resolve",
+              "writes": true
+            },
+            {
+              "name": "reopen",
+              "writes": true
+            },
+            {
+              "name": "listMessages",
+              "writes": false
+            },
+            {
+              "name": "getMessage",
+              "writes": false
+            },
+            {
+              "name": "listEdits",
+              "writes": false
+            },
+            {
+              "name": "listReactions",
+              "writes": false
+            },
+            {
+              "name": "listPinned",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "messages",
+              "table": "review_comments_messages",
+              "row": "review_id",
+              "key": {
+                "name": "message",
+                "field": "message",
+                "column": "message",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "thread",
+                  "field": "thread",
+                  "column": "thread",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "quotes",
+                  "field": "quotes",
+                  "column": "quotes",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "author",
+                  "field": "author",
+                  "column": "author",
+                  "type": "string"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "field": "body",
+                  "column": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "blocks",
+                  "field": "blocks",
+                  "column": "blocks",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "mentions",
+                  "field": "mentions",
+                  "column": "mentions",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "createdAt",
+                  "field": "createdAt",
+                  "column": "created_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "postedAt",
+                  "field": "postedAt",
+                  "column": "posted_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "stand",
+                  "field": "stand",
+                  "column": "stand",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "editedAt",
+                  "field": "editedAt",
+                  "column": "edited_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "edits",
+                  "field": "edits",
+                  "column": "edits",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "pinned",
+                  "field": "pinned",
+                  "column": "pinned",
+                  "type": "boolean"
+                },
+                {
+                  "name": "clientId",
+                  "field": "clientId",
+                  "column": "client_id",
+                  "type": "string"
+                },
+                {
+                  "name": "resolvedBy",
+                  "field": "resolvedBy",
+                  "column": "resolved_by",
+                  "type": "string"
+                },
+                {
+                  "name": "resolvedAt",
+                  "field": "resolvedAt",
+                  "column": "resolved_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "edits",
+              "table": "review_comments_edits",
+              "row": "review_id",
+              "key": {
+                "name": "edit",
+                "field": "edit",
+                "column": "edit",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "number",
+                  "field": "number",
+                  "column": "number",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "body",
+                  "field": "body",
+                  "column": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "blocks",
+                  "field": "blocks",
+                  "column": "blocks",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "mentions",
+                  "field": "mentions",
+                  "column": "mentions",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "by",
+                  "field": "by",
+                  "column": "by",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "reactions",
+              "table": "review_comments_reactions",
+              "row": "review_id",
+              "key": {
+                "name": "reaction",
+                "field": "reaction",
+                "column": "reaction",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "emoji",
+                  "field": "emoji",
+                  "column": "emoji",
+                  "type": "string"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "conversations",
+              "table": "review_comments_conversations",
+              "key": {
+                "name": "conversation",
+                "field": "conversation",
+                "column": "conversation",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "lastMessage",
+                  "field": "lastMessage",
+                  "column": "last_message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastReaction",
+                  "field": "lastReaction",
+                  "column": "last_reaction",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastStand",
+                  "field": "lastStand",
+                  "column": "last_stand",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Review",
+        "uses": [
+          {
+            "behavior": "Comments",
+            "config": {
+              "blocks": [
+                "ref",
+                "code"
+              ],
+              "maxBodyLength": 2000,
+              "pinPermission": "reviews.pin",
+              "resolvePermission": "reviews.resolve"
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Ticket": {
+      "type": "Ticket",
+      "table": "ticket",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Comments",
+          "behavior": "Comments",
+          "member": "comments",
+          "fields": [],
+          "operations": [
+            {
+              "name": "post",
+              "writes": true
+            },
+            {
+              "name": "edit",
+              "writes": true
+            },
+            {
+              "name": "deleteMessage",
+              "writes": true
+            },
+            {
+              "name": "purge",
+              "writes": true
+            },
+            {
+              "name": "react",
+              "writes": true
+            },
+            {
+              "name": "unreact",
+              "writes": true
+            },
+            {
+              "name": "pin",
+              "writes": true
+            },
+            {
+              "name": "unpin",
+              "writes": true
+            },
+            {
+              "name": "resolve",
+              "writes": true
+            },
+            {
+              "name": "reopen",
+              "writes": true
+            },
+            {
+              "name": "listMessages",
+              "writes": false
+            },
+            {
+              "name": "getMessage",
+              "writes": false
+            },
+            {
+              "name": "listEdits",
+              "writes": false
+            },
+            {
+              "name": "listReactions",
+              "writes": false
+            },
+            {
+              "name": "listPinned",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "messages",
+              "table": "ticket_comments_messages",
+              "row": "ticket_id",
+              "key": {
+                "name": "message",
+                "field": "message",
+                "column": "message",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "thread",
+                  "field": "thread",
+                  "column": "thread",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "quotes",
+                  "field": "quotes",
+                  "column": "quotes",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "author",
+                  "field": "author",
+                  "column": "author",
+                  "type": "string"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "field": "body",
+                  "column": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "blocks",
+                  "field": "blocks",
+                  "column": "blocks",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "mentions",
+                  "field": "mentions",
+                  "column": "mentions",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "createdAt",
+                  "field": "createdAt",
+                  "column": "created_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "postedAt",
+                  "field": "postedAt",
+                  "column": "posted_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "stand",
+                  "field": "stand",
+                  "column": "stand",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "editedAt",
+                  "field": "editedAt",
+                  "column": "edited_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "edits",
+                  "field": "edits",
+                  "column": "edits",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "pinned",
+                  "field": "pinned",
+                  "column": "pinned",
+                  "type": "boolean"
+                },
+                {
+                  "name": "clientId",
+                  "field": "clientId",
+                  "column": "client_id",
+                  "type": "string"
+                },
+                {
+                  "name": "resolvedBy",
+                  "field": "resolvedBy",
+                  "column": "resolved_by",
+                  "type": "string"
+                },
+                {
+                  "name": "resolvedAt",
+                  "field": "resolvedAt",
+                  "column": "resolved_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "edits",
+              "table": "ticket_comments_edits",
+              "row": "ticket_id",
+              "key": {
+                "name": "edit",
+                "field": "edit",
+                "column": "edit",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "number",
+                  "field": "number",
+                  "column": "number",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "body",
+                  "field": "body",
+                  "column": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "blocks",
+                  "field": "blocks",
+                  "column": "blocks",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "mentions",
+                  "field": "mentions",
+                  "column": "mentions",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "by",
+                  "field": "by",
+                  "column": "by",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "reactions",
+              "table": "ticket_comments_reactions",
+              "row": "ticket_id",
+              "key": {
+                "name": "reaction",
+                "field": "reaction",
+                "column": "reaction",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "emoji",
+                  "field": "emoji",
+                  "column": "emoji",
+                  "type": "string"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "conversations",
+              "table": "ticket_comments_conversations",
+              "key": {
+                "name": "conversation",
+                "field": "conversation",
+                "column": "conversation",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "lastMessage",
+                  "field": "lastMessage",
+                  "column": "last_message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastReaction",
+                  "field": "lastReaction",
+                  "column": "last_reaction",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastStand",
+                  "field": "lastStand",
+                  "column": "last_stand",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Ticket",
+        "uses": [
+          {
+            "behavior": "Comments",
+            "config": {
+              "editWindowMs": 900000,
+              "moderatePermission": "tickets.moderate"
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  }
+}

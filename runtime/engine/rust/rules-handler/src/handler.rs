@@ -20,6 +20,7 @@ use superschematic_rules::{
     ValidationIssue,
 };
 
+use crate::access::{Action as AccessAction, Policy, ALLOW_ALL};
 use crate::bridge::{self, row_of, rows_of, Bridge, Ran};
 use crate::declarations::Declarations;
 use crate::document::{self, document_refusal, Kind, Model, OnDelete};
@@ -29,6 +30,7 @@ use crate::store::{
 };
 use crate::validate::{self, Mode};
 use crate::values::{base62, uuid_of};
+use crate::view::{with_view, Scope};
 
 /// How long a fire a guard vetoed waits before it falls due again (D103's
 /// release): a minute.
@@ -108,7 +110,8 @@ pub enum Request {
         #[serde(default)]
         cursor: Option<String>,
     },
-    /// A use's operation of a row.
+    /// A use's operation of a row. A use id left empty names the one use
+    /// of the type whose behavior declares the operation.
     Operation {
         #[serde(rename = "type")]
         type_name: String,
@@ -121,7 +124,8 @@ pub enum Request {
         #[serde(default)]
         preconditions: Map<String, Value>,
     },
-    /// A use's operation of the table as a whole (D104).
+    /// A use's operation of the table as a whole (D104), its use resolved
+    /// as an operation's of a row is.
     TableOperation {
         #[serde(rename = "type")]
         type_name: String,
@@ -154,6 +158,12 @@ pub enum Request {
         #[serde(default)]
         seq: Option<i64>,
     },
+    /// The types with a live version the caller may read, each with its
+    /// version, in name order.
+    Types,
+    /// The tools a caller may call, made from the live types and their
+    /// uses' operations ([`crate::tools`]), as MCP lists them.
+    Tools,
 }
 
 /// What a request runs with beside itself: its caller, the time in epoch
@@ -185,11 +195,13 @@ pub struct Done {
     pub unit: Unit,
 }
 
-/// The handler: the core it runs the behaviors on, and the behaviors'
-/// declarations.
+/// The handler: the core it runs the behaviors on, the behaviors'
+/// declarations, and the access policy it asks before each request a
+/// caller makes ([`crate::access`]).
 pub struct Handler<'a> {
     core: &'a Core,
     declarations: &'a Declarations,
+    policy: &'a Policy,
 }
 
 /// The reads a run has and the ones it still needs.
@@ -199,7 +211,7 @@ pub(crate) struct Reads<'a> {
 }
 
 impl<'a> Reads<'a> {
-    fn ask(&mut self, read: StoreRead) -> Option<&'a StoreAnswer> {
+    pub fn ask(&mut self, read: StoreRead) -> Option<&'a StoreAnswer> {
         let answer = self.answers.get(&read);
         if answer.is_none() && !self.need.contains(&read) {
             self.need.push(read);
@@ -345,7 +357,7 @@ fn refused(refusal: Refusal) -> HandlerStep {
     })
 }
 
-fn done(response: Value, writes: Vec<StoreWrite>) -> HandlerStep {
+pub(crate) fn done(response: Value, writes: Vec<StoreWrite>) -> HandlerStep {
     HandlerStep::Done(Done {
         response: Ok(response),
         unit: Unit { writes },
@@ -372,9 +384,26 @@ impl Handler<'_> {
 }
 
 impl<'a> Handler<'a> {
-    /// A handler over a core and the declarations of the behaviors it runs.
+    /// A handler over a core and the declarations of the behaviors it
+    /// runs, which allows every caller everything (`"allowAll"`).
     pub fn new(core: &'a Core, declarations: &'a Declarations) -> Self {
-        Handler { core, declarations }
+        Handler {
+            core,
+            declarations,
+            policy: &ALLOW_ALL,
+        }
+    }
+
+    /// The handler with the access policy it asks.
+    #[must_use]
+    pub fn with_policy(mut self, policy: &'a Policy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// The access policy the handler asks.
+    pub fn policy(&self) -> &Policy {
+        self.policy
     }
 
     /// Runs a request over the store's answers so far: the reads it needs,
@@ -386,13 +415,16 @@ impl<'a> Handler<'a> {
             answers,
             need: Vec::new(),
         };
+        if let Err(refusal) = self.admit(request, context) {
+            return refused(refusal);
+        }
         let outcome = match request {
             Request::Define { document } => self.define(document, context),
             Request::Publish { type_name, discard } => {
                 crate::publish::publish(self, context, type_name, *discard, &mut reads)
             }
             Request::Describe { type_name } => self.describe(type_name, &mut reads),
-            Request::Get { type_name, id } => self.get(type_name, id, &mut reads),
+            Request::Get { type_name, id } => self.get(type_name, id, context, &mut reads),
             Request::Create {
                 type_name,
                 data,
@@ -419,8 +451,8 @@ impl<'a> Handler<'a> {
                 type_name,
                 filter,
                 sort,
-                *limit,
-                cursor.as_deref(),
+                (*limit, cursor.as_deref()),
+                context,
                 &mut reads,
             ),
             Request::Operation {
@@ -474,6 +506,8 @@ impl<'a> Handler<'a> {
                 change,
                 seq,
             } => self.change(type_name, id, change, *seq, context, &mut reads),
+            Request::Types => self.types(context, &mut reads),
+            Request::Tools => self.tools(context, &mut reads),
         };
         outcome.unwrap_or_else(refused)
     }
@@ -520,6 +554,7 @@ impl<'a> Handler<'a> {
 
     fn define(&self, document: &Value, context: &Context) -> Result<HandlerStep, Refusal> {
         let model = document::read(document, self.declarations)?;
+        self.ask(&context.caller, AccessAction::Define, &model.name, None)?;
         self.define_check(&model, context)?;
         Ok(done(
             json!({"type": model.name, "defined": true}),
@@ -546,6 +581,7 @@ impl<'a> Handler<'a> {
         &self,
         type_name: &str,
         id: &str,
+        context: &Context,
         reads: &mut Reads<'_>,
     ) -> Result<HandlerStep, Refusal> {
         let live = self.live(reads)?;
@@ -555,7 +591,14 @@ impl<'a> Handler<'a> {
         };
         let model = live.model(type_name)?;
         let row = row.ok_or_else(|| not_found(type_name, id))?;
-        Ok(done(filter::render(model, row), Vec::new()))
+        let Some(views) = self.views(&live, model, &[row], Scope::Row, context, reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let view = views.into_iter().next().unwrap_or_default();
+        Ok(done(
+            with_view(filter::render(model, row), view),
+            Vec::new(),
+        ))
     }
 
     /// The key a create writes: the one its data names, in its stored form,
@@ -957,8 +1000,8 @@ impl<'a> Handler<'a> {
         type_name: &str,
         filter_given: &Value,
         sort: &[Sort],
-        limit: Option<usize>,
-        cursor: Option<&str>,
+        (limit, cursor): (Option<usize>, Option<&str>),
+        context: &Context,
         reads: &mut Reads<'_>,
     ) -> Result<HandlerStep, Refusal> {
         let Some(live) = self.live(reads)? else {
@@ -1006,7 +1049,14 @@ impl<'a> Handler<'a> {
         } else {
             None
         };
-        let items: Vec<Value> = kept.iter().map(|row| filter::render(model, row)).collect();
+        let Some(views) = self.views(&live, model, &kept, Scope::Table, context, reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let items: Vec<Value> = kept
+            .iter()
+            .zip(views)
+            .map(|(row, view)| with_view(filter::render(model, row), view))
+            .collect();
         Ok(done(
             json!({"items": items, "next": next.unwrap_or(Value::Null)}),
             Vec::new(),
@@ -1027,6 +1077,8 @@ impl<'a> Handler<'a> {
             return Ok(take(reads).wait());
         };
         let model = live.model(type_name)?;
+        let action = self.resolve_use(model, action)?;
+        self.ask_operation(model, &action, &context.caller)?;
         self.run_core(
             &live,
             model,
@@ -1272,7 +1324,7 @@ impl<'a> Handler<'a> {
 }
 
 // take moves the reads a run needs out of it, for its answer.
-fn take<'r>(reads: &mut Reads<'r>) -> Reads<'r> {
+pub(crate) fn take<'r>(reads: &mut Reads<'r>) -> Reads<'r> {
     Reads {
         answers: reads.answers,
         need: std::mem::take(&mut reads.need),

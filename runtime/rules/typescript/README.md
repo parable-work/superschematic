@@ -76,7 +76,8 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   (`hearsChanges`), and the entry a caller presents it as a precondition
   (`preconditionSchema`), in the order Workflow, Reactions, Constants,
   StateRules, Approvals, Timers, Lease, Presence, Budget, Retries, Seats,
-  Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering, Revisions.
+  Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering, Revisions,
+  Derived, Provenance.
   A sub-table kept for the table as a whole rather than per row says
   `scope: 'schema'` (Numbering's `counts`, D103's step 4). An operation the core runs on the table as
   a whole says `scope: 'schema'` (Pool's `pick`, Lease's `expireHolder`),

@@ -53,7 +53,25 @@
   },
   "fields": [
     { "name": "fields", "description": "By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited." },
-    { "name": "inReview", "description": "Whether any recorded field is proposed. A list filters on it." }
+    { "name": "inReview", "description": "Whether any recorded field is proposed. A list filters on it.", "type": "boolean" }
+  ],
+  "tables": [
+    {
+      "name": "records",
+      "description": "On a table, one row per recorded field of the row, keyed by the field's name: the last write's source, who made it and for whom, when, the confidence its attribution gave, and its review. Every write of the row keeps them in line; a delete of the row deletes them.",
+      "key": "field",
+      "fields": [
+        { "name": "field", "description": "The recorded field's name.", "type": "string" },
+        { "name": "source", "description": "caller for a caller's create or update, else the name of the behavior whose operation wrote it.", "type": "string" },
+        { "name": "bySubject", "description": "The subject of the caller whose write it records.", "type": "string" },
+        { "name": "forSubject", "description": "The subject the caller acted for (D77); absent when it acted for no one.", "type": "string" },
+        { "name": "writtenAt", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "confidence", "description": "The confidence the write's attribution gave, from 0 to 1.", "type": "number" },
+        { "name": "review", "description": "proposed, accepted, rejected or edited; absent for a write that entered no review.", "type": "string" },
+        { "name": "reviewedBy", "description": "The subject of the reviewer, or of the caller whose write edited a proposal.", "type": "string" },
+        { "name": "reviewedAt", "description": "When the review settled, in epoch milliseconds.", "type": "Temporal.DateTime" }
+      ]
+    }
   ],
   "operations": [
     {

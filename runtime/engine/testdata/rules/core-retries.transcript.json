@@ -19,7 +19,10 @@
     "Rollups",
     "Dependencies",
     "Numbering",
-    "Revisions"
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance"
   ],
   "scenarios": [
     {

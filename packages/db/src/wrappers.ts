@@ -551,6 +551,46 @@ export interface RevisionsOn {
  */
 export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
 
+/** A kind of block a table's Comments takes on a message (D77, D103's step 4): ref, another row; action, a card for what the poster did; code, a place in code at a revision. An attachment block waits for attachments on the core. */
+export type CommentsBlockKind = "ref" | "action" | "code";
+
+/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, and the permissions that moderate, pin and resolve. Every member is optional. Streamed replies, read state and deliveries, attachments and code anchors wait for the core, so their members are not a table's. */
+export interface CommentsOn {
+  /** The longest body a post or an edit gives, in code points: 1 to 40000, 40000 when absent. */
+  readonly maxBodyLength?: number;
+  /** How long after a message's postedAt its author may edit it, in milliseconds, at least 1000; no limit when absent. A caller holding moderatePermission is not held to it. */
+  readonly editWindowMs?: number;
+  /** The block kinds a post or an edit may give, each once; every kind when absent, none when empty. */
+  readonly blocks?: readonly CommentsBlockKind[];
+  /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
+  readonly moderatePermission?: string;
+  /** The permission a caller needs to pin and unpin. Absent, any caller the route lets call them may. */
+  readonly pinPermission?: string;
+  /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
+  readonly resolvePermission?: string;
+}
+
+/**
+ * A conversation on each of a table's rows (D77, D103's step 4):
+ * `export abstract class Ticket implements Comments<Ticket, { moderatePermission: "tickets.moderate" }>`.
+ * The type stays a table. Its messages, each top-level or a reply in the
+ * thread of a top-level one, are rows of a sub-table of the use
+ * (ticket_comments_messages), what each edit replaced another
+ * (ticket_comments_edits), and the reactions a third
+ * (ticket_comments_reactions); each conversation's high-water marks are a
+ * row of a table of the use's own, kept for the table as a whole
+ * (ticket_comments_conversations), which a delete of the row leaves, so a
+ * row re-created with the key never reuses a message id. Every write is
+ * beside the row: it moves no version of the row and asks no other
+ * behavior's guard, so a lease another principal holds stops no reply. Its
+ * operations (comments.post, edit, deleteMessage, purge, react, unreact,
+ * pin, unpin, resolve, reopen, listMessages, getMessage, listEdits,
+ * listReactions, listPinned) change and read them. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Comments<T, C extends CommentsOn> = NonNullable<unknown>;
+
 /** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
 export type ScheduleKind = "after" | "every" | "cron";
 
@@ -694,3 +734,65 @@ export interface DependenciesOn<T> {
  * the table itself.
  */
 export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;
+
+/** One derived field of DerivedOn<T> (D73): the table's own fields it is derived from, never itself or another derived field; what the model is asked; the label of its model; and the states of the table's Workflow it is derived in. */
+export interface DerivedFieldOn<T> {
+  readonly from: readonly Extract<keyof T, string>[];
+  /** What the model is asked, given the inputs: 1 to 4000 characters. */
+  readonly instruction: string;
+  /** A label the deployment maps to a provider's model, which the core only compares. */
+  readonly model: string;
+  /** The states of the table's one Workflow in which the field is derived; every state when absent. */
+  readonly states?: readonly string[];
+}
+
+/** Derived's config on a table (D73, D103's step 4): the derived fields, by the table's own field, the permission a deriver needs and how many failed attempts a field takes. */
+export interface DerivedOn<T> {
+  readonly fields: { readonly [F in Extract<keyof T, string>]?: DerivedFieldOn<T> };
+  /** The permission a deriver needs to pull, settle and apply values. */
+  readonly permission: string;
+  /** How many failed attempts a field takes before it waits for its inputs to move: 1 to 10, 3 when absent. */
+  readonly maxAttempts?: number;
+}
+
+/**
+ * Own fields a model outside the core fills (D73, D103's step 4):
+ * `export abstract class Ticket implements Derived<Ticket, { fields: { category: { from: ["subject", "body"]; instruction: "Classify the request."; model: "standard" } }; permission: "tickets.derive" }>`.
+ * The type stays a table, and a derived field is an own field of it, typed
+ * by the table, whose JSON Schema is the output a deriver asks for. Derived
+ * keeps each derived field's hashes, override and attempts in a sub-table
+ * (ticket_derived_derivations); a deriver pulls the stale fields with
+ * derived.staleDerivations and settles its answers with
+ * derived.settleDerivations, operations of the table as a whole, which
+ * write each row's values through derived.applyDerived; a caller's write of
+ * a derived field overrides it until derived.rederive. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Derived<T, C extends DerivedOn<T>> = NonNullable<unknown>;
+
+/** Provenance's config on a table (D73, D103's step 4): the fields it records, which writes enter review, and the states of the table's Workflow a move into which requires fields out of review. */
+export interface ProvenanceOn<T> {
+  /** The table's own fields it records; every one when absent. */
+  readonly fields?: readonly Extract<keyof T, string>[];
+  /** Which writes enter review: the behaviors whose writes are proposed, the confidence at or above which one is accepted with no reviewer, and the permission a reviewer needs. */
+  readonly review?: { readonly sources: readonly string[]; readonly below?: number; readonly permission: string };
+  /** By state of the table's one Workflow, the recorded fields a move into it requires out of review, or all. */
+  readonly gates?: Readonly<Record<string, { readonly reviewed: readonly Extract<keyof T, string>[] | "all" }>>;
+}
+
+/**
+ * Who set each of a table's own fields last, and through what (D73, D103's
+ * step 4): `export abstract class Ticket implements Provenance<Ticket, { review: { sources: ["Derived"]; permission: "tickets.review" } }>`.
+ * The type stays a table. Provenance records each field's last write, its
+ * source (caller, or the behavior whose operation wrote it), who made it and
+ * for whom, when and with what confidence, in a sub-table
+ * (ticket_provenance_records); with review, a write from a source is
+ * proposed until a reviewer accepts or rejects it (provenance.accept,
+ * reject), and the owned column provenance_in_review, which a list filters
+ * on, holds whether any field is proposed. A gate holds a move of the
+ * table's Workflow into its state while a field it lists is proposed. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
+ */
+export type Provenance<T, C extends ProvenanceOn<T>> = NonNullable<unknown>;

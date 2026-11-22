@@ -79,6 +79,106 @@ fn refused(type_name: &str, message: impl std::fmt::Display) -> Refusal {
     Refusal::invalid_argument(format!("filter of {type_name}: {message}"))
 }
 
+/// The member of a filter that holds a query string's filters as text
+/// (`filter[field]=value`, `filter[field][op]=value`, D106's `FilterBy`):
+/// a list of `[field, op, text]`, each typed by its field ([`from_query`]).
+/// No field takes the name, which is not one.
+pub const QUERY: &str = "$query";
+
+/// A query string's filters as a filter: each `[field, op, text]` of
+/// `given` its field's operation with the text read as the field's kind
+/// (a number, a boolean, text), as the generated servers read the bracket
+/// form. `in` and `notIn` take a list separated by commas, each item
+/// trimmed and an empty one dropped; `isNull` takes `true` or `false`; and
+/// `contains`, the runtimes' text match, is an `ilike` of the text anywhere.
+pub fn from_query(model: &Model, given: &Value) -> Result<Value, Refusal> {
+    let Value::Array(entries) = given else {
+        return Err(refused(&model.name, "the query's filters are a list"));
+    };
+    let mut all = Vec::new();
+    for entry in entries {
+        let triple: Option<(&str, &str, &str)> = match entry.as_array().map(Vec::as_slice) {
+            Some([Value::String(field), Value::String(op), Value::String(text)]) => {
+                Some((field, op, text))
+            }
+            _ => None,
+        };
+        let Some((field, op, text)) = triple else {
+            return Err(refused(
+                &model.name,
+                "each of the query's filters is [field, op, text]",
+            ));
+        };
+        let Some((_, kind, _)) = place_of(model, field) else {
+            return Err(refused(
+                &model.name,
+                format!("{} has no field {field} a filter takes", model.name),
+            ));
+        };
+        let typed = |text: &str| -> Result<Value, Refusal> {
+            let text = text.trim();
+            let fail = |what: &str| {
+                refused(
+                    &model.name,
+                    format!("filter[{field}]: {text:?} is not {what}"),
+                )
+            };
+            Ok(match &kind {
+                Kind::Number | Kind::Integer => {
+                    let number: serde_json::Number = text.parse().map_err(|_| fail("a number"))?;
+                    if kind == Kind::Integer && number.as_i64().is_none() {
+                        return Err(fail("a whole number"));
+                    }
+                    Value::Number(number)
+                }
+                Kind::Bool => match text {
+                    "true" => Value::Bool(true),
+                    "false" => Value::Bool(false),
+                    _ => return Err(fail("true or false")),
+                },
+                Kind::Json => {
+                    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_owned()))
+                }
+                _ => Value::String(text.to_owned()),
+            })
+        };
+        let (op, value) = match op {
+            "in" | "notIn" => {
+                let items: Result<Vec<Value>, Refusal> = text
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .map(typed)
+                    .collect();
+                (op.to_owned(), Value::Array(items?))
+            }
+            "isNull" => match text.trim() {
+                "true" => (op.to_owned(), Value::Bool(true)),
+                "false" => (op.to_owned(), Value::Bool(false)),
+                other => {
+                    return Err(refused(
+                        &model.name,
+                        format!("filter[{field}][isNull]: {other:?} is not true or false"),
+                    ))
+                }
+            },
+            "contains" => (
+                "ilike".to_owned(),
+                Value::String(format!("%{}%", text.trim())),
+            ),
+            _ => (op.to_owned(), typed(text)?),
+        };
+        let mut ops = Map::new();
+        ops.insert(op, value);
+        let mut member = Map::new();
+        member.insert(field.to_owned(), Value::Object(ops));
+        all.push(Value::Object(member));
+    }
+    let mut filter = Map::new();
+    filter.insert("allOf".into(), Value::Array(all));
+    Ok(Value::Object(filter))
+}
+
 /// What a filter may name of a type: each own field, each owned field by
 /// the name a row's response gives it, and the key.
 fn place_of(model: &Model, name: &str) -> Option<(Place, Kind, bool)> {
@@ -148,6 +248,10 @@ pub fn compile(
                 if !every {
                     conds.push(Cond::AnyOf(branches));
                 }
+            }
+            QUERY => {
+                let typed = from_query(model, member)?;
+                conds.extend(compile(model, models, &typed)?);
             }
             "searchText" => {
                 return Err(refused(

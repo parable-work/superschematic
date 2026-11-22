@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
@@ -176,16 +177,43 @@ func ReadModel(data []byte) (*sqlmigrate.Model, error) {
 // is a plan with no readers: the documents are one DB service's, and the
 // services that read its tables are not among them.
 func Plan(sources []Source, from *sqlmigrate.Model, dialect sqlmigrate.Dialect, renames []sqlmigrate.Rename, env Env) (*sqlmigrate.Plan, error) {
+	_, planned, err := planDocuments(sources, from, dialect, renames, env)
+	return planned, err
+}
+
+// planDocuments is Plan with the schema the documents load as.
+func planDocuments(sources []Source, from *sqlmigrate.Model, dialect sqlmigrate.Dialect, renames []sqlmigrate.Rename, env Env) (*ir.Schema, *sqlmigrate.Plan, error) {
 	schema, to, err := Documents(sources, dialect, env)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if from != nil {
 		if err := CheckModel(from, schema.Name, dialect); err != nil {
-			return nil, fmt.Errorf("from: %w", err)
+			return nil, nil, fmt.Errorf("from: %w", err)
 		}
 	}
-	return sqlmigrate.Diff(from, to, sqlmigrate.Options{Renames: renames})
+	diffed, err := sqlmigrate.Diff(from, to, sqlmigrate.Options{Renames: renames})
+	if err != nil {
+		return nil, nil, err
+	}
+	return schema, diffed, nil
+}
+
+// Layout is the layout document of the tables of a schema Load read, as a
+// runtime handler serves them (behaviorlayout.RuntimeOf, D117), in
+// canonical JSON: what a runtime environment records next to the model a
+// publish takes its database to, so that no part of it derives the layout
+// again.
+func Layout(schema *ir.Schema, env Env) (json.RawMessage, error) {
+	layout, err := behaviorlayout.RuntimeOf(schema, env.registry())
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(layout)
+	if err != nil {
+		return nil, err
+	}
+	return ir.CanonicalJSON(data)
 }
 
 // ParseHazardClasses reads hazard class names, or all for every class, in

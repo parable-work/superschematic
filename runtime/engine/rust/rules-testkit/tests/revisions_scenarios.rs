@@ -6,20 +6,20 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-revisions.json` the replayer maps and compares: 146
+/// The steps of `core-revisions.json` the replayer maps and compares: 155
 /// of its 210, in its 16 scenarios, test.Hold's among them, whose port
-/// vetoes every update once held, so an approval's update meets it. The 64
-/// it skips: the two scenarios whose access policy is not allowAll (51
-/// steps: listProposals asks the policy for read, and propose checks the
-/// proposer may read each type it cites), which the reference host does
-/// not apply, since a table's API authorizes; the scenario beside Comments,
-/// which the core does not run (D103, step 4), 9 steps; the three proposes
-/// the store's own-field validation refuses (a title too long, a required
+/// vetoes every update once held, so an approval's update meets it, and
+/// the scenario beside Comments, which the core runs since D103's step 4.
+/// The 55 it skips: the two scenarios whose access policy is not allowAll
+/// (51 steps: listProposals asks the policy for read, and propose checks
+/// the proposer may read each type it cites), which the reference host
+/// does not apply, since a table's API authorizes; the three proposes the
+/// store's own-field validation refuses (a title too long, a required
 /// title cleared, a field the type does not have), which a table's request
 /// types and database hold; and a read of the event log after an update
 /// that changed nothing, which the engine answered with no write and the
 /// core writes as any update.
-const FLOOR: usize = 146;
+const FLOOR: usize = 155;
 
 #[test]
 fn revisions_scenarios_replay_on_the_core() {

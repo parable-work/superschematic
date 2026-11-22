@@ -19,7 +19,10 @@
     "Rollups",
     "Dependencies",
     "Numbering",
-    "Revisions"
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance"
   ],
   "scenarios": [
     {
@@ -38505,7 +38508,12 @@
           "versions": [
             {
               "name": "Pool",
-              "uses": [],
+              "uses": [
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                }
+              ],
               "fields": [
                 {
                   "name": "title",
@@ -38524,6 +38532,10 @@
             {
               "name": "Pool",
               "uses": [
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                },
                 {
                   "behavior": "Budget",
                   "config": {
@@ -38555,6 +38567,10 @@
               "name": "Pool",
               "uses": [
                 {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                },
+                {
                   "behavior": "Budget",
                   "config": {
                     "meters": {
@@ -38585,6 +38601,10 @@
             {
               "name": "Pool",
               "uses": [
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                },
                 {
                   "behavior": "Budget",
                   "config": {
@@ -38623,7 +38643,12 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Pool",
-            "uses": [],
+            "uses": [
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
             "fields": [
               {
                 "name": "title",
@@ -38658,7 +38683,12 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Pool",
-            "uses": [],
+            "uses": [
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
             "fields": [
               {
                 "name": "title",
@@ -38729,6 +38759,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -38765,7 +38799,12 @@
               "kind": "publish",
               "from": {
                 "name": "Pool",
-                "uses": [],
+                "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  }
+                ],
                 "fields": [
                   {
                     "name": "title",
@@ -38793,6 +38832,10 @@
           "spec": {
             "name": "Pool",
             "uses": [
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
               {
                 "behavior": "Budget",
                 "config": {
@@ -38830,7 +38873,12 @@
               "kind": "publish",
               "from": {
                 "name": "Pool",
-                "uses": [],
+                "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  }
+                ],
                 "fields": [
                   {
                     "name": "title",
@@ -38912,6 +38960,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -38950,6 +39002,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {
@@ -38990,6 +39046,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -39028,6 +39088,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {
@@ -39068,6 +39132,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -39105,6 +39173,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {
@@ -39159,7 +39231,12 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Pool",
-            "uses": [],
+            "uses": [
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
             "fields": [
               {
                 "name": "title",
@@ -39186,6 +39263,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {
@@ -39315,6 +39396,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -39352,6 +39437,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {
@@ -39393,6 +39482,10 @@
             "name": "Pool",
             "uses": [
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Budget",
                 "config": {
                   "meters": {
@@ -39430,6 +39523,10 @@
               "from": {
                 "name": "Pool",
                 "uses": [
+                  {
+                    "behavior": "Comments",
+                    "anchor": "type"
+                  },
                   {
                     "behavior": "Budget",
                     "config": {

@@ -69,6 +69,17 @@
 //! the use keeps for the table as a whole; and the history of a row's own
 //! fields with a review step whose approval writes them through an
 //! update's rules.
+//! [`Comments`], the wave after: a conversation on each row, its messages,
+//! edits and reactions sub-tables of the row, every write of it beside the
+//! row (D77's primitive 1,
+//! [`superschematic_rules::OperationDecl::beside`]), so it moves no
+//! version of the row and asks no other behavior's guard.
+//! [`Derived`] and [`Provenance`], the wave after it (D73): own fields a
+//! model outside the core fills, pulled and settled by a deriver through
+//! operations of the table as a whole and written through an update the
+//! core attributes ([`superschematic_rules::Cx::update_attributed`]); and
+//! who set each own field last and through what, with a review a Workflow
+//! state may require.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -97,9 +108,11 @@ pub mod approvals;
 pub mod budget;
 pub mod calendar;
 pub mod capacity;
+pub mod comments;
 pub mod constants;
 mod declared;
 pub mod dependencies;
+pub mod derived;
 mod flow;
 pub mod lease;
 mod moves;
@@ -108,6 +121,7 @@ mod paging;
 mod periods;
 pub mod pool;
 pub mod presence;
+pub mod provenance;
 pub mod reactions;
 pub mod reconcile;
 pub mod retries;
@@ -124,16 +138,19 @@ pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
 pub use budget::{Budget, BudgetConfig, BudgetMeter, BudgetReset, BudgetScope, INTEGER_SEGMENTS};
+pub use comments::{Comments, CommentsConfig};
 pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
     ONE_WAY_NUMBERS,
 };
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
+pub use derived::{Derived, DerivedConfig, DerivedField};
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
 pub use numbering::{Numbering, NumberingConfig};
 pub use pool::{Pool, PoolConfig};
 pub use presence::{Presence, PresenceConfig};
+pub use provenance::{Provenance, ProvenanceConfig, ProvenanceReview};
 pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule, ReactionsTerminal,
     ReactionsThen, ReactionsWhen,
@@ -162,7 +179,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 18] = [
+pub const NAMES: [&str; 21] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -181,6 +198,9 @@ pub const NAMES: [&str; 18] = [
     dependencies::NAME,
     numbering::NAME,
     revisions::NAME,
+    comments::NAME,
+    derived::NAME,
+    provenance::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -188,7 +208,7 @@ pub const NAMES: [&str; 18] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 18] = [
+pub const DECLARATIONS: [&str; 21] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -207,6 +227,9 @@ pub const DECLARATIONS: [&str; 18] = [
     dependencies::DECLARATION,
     numbering::DECLARATION,
     revisions::DECLARATION,
+    comments::DECLARATION,
+    derived::DECLARATION,
+    provenance::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -237,6 +260,9 @@ pub fn core() -> Core {
         .with(Dependencies)
         .with(Numbering)
         .with(Revisions)
+        .with(Comments)
+        .with(Derived)
+        .with(Provenance)
 }
 
 #[cfg(test)]

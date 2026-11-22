@@ -153,7 +153,7 @@ affects; a check of what only a generator finds (a worker whose queue is
 no `@queue` class); an editor integration over `--json`.
 
 **D73** (L 9887). Derived inputs from linked instances. Derived's `from`
-takes own fields only.
+takes own fields only, on the engine and on a table.
 
 **D74** (L 10738, 10794).
 - Go derivers, a deriver over an HTTP engine, a model-label construct, a
@@ -168,8 +168,8 @@ takes own fields only.
 
 **D77** (L 10239). Vectors over messages; Search's every-schema search on
 namespace operations; `readable()` asked per operation; a notifier and an
-agent dispatcher as stack workers; a conversation UI. D103's step 4 ports
-Comments and may plan these on tables.
+agent dispatcher as stack workers; a conversation UI. Comments runs on
+the core now (D103's status lists what its port left).
 
 **D78** (L 10885). Go and TypeScript apps; the Topcoat asset bundle in the
 app image (so a deployed live list is a GET form); an app on Cloudflare; a
@@ -628,11 +628,20 @@ table) and Revisions (proposals reviewed into a write of the row's own
 fields), with two more primitives of the core: a use's shared table
 (`"scope": "schema"`, `ReadRequest::SharedRow`, `ChangeSet.shared_rows`,
 each write fenced on its version) and an operation's write of its row's
-own fields (`Cx::update`, held to an update's validation and guards).
-Development mode runs all eighteen. Left: the rest of step 4 (Comments,
-Derived, Provenance, Holds, Stock, Calendar and Payments, each held to the
-test, and the folded Links, Search, Queue and Branches removed), and steps
-5 to 7, whose step 6 D117 renames development mode. What the built steps left follows. The
+own fields (`Cx::update`, held to an update's validation and guards);
+and of Comments, its messages, edits and reactions sub-tables of the row
+and its conversation's marks a shared table, with the core's operation
+beside its row (`"beside": true`), which asks only its own use's guard
+and writes no row, so a post leaves the row's version as it was; and of
+Derived (each field's source, override, attempts and failure a sub-table
+of the row, settled by table operations a deriver calls) and Provenance
+(who wrote each field, by which behavior and with what confidence, and a
+review that gates the Workflow), with the core's attributed write
+(`Cx::update_attributed`), a caller's `actingFor` and a field's schema.
+Development mode runs all twenty-one. Left: the rest of step 4
+(Holds, Stock, Calendar and Payments, each held to the test, and the
+folded Links, Search, Queue and Branches removed), and steps 5 to 7, whose
+step 6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
 Four of step 4's ports met the test as follows, and each waits on a choice:
@@ -682,6 +691,31 @@ serves no Rollups `values` either; Retries' `resultField` and Budget's
 Reactions rule on `Revisions.pendingProposals`, which the build refuses;
 and an update command that changes nothing, which still writes and moves
 the version, as the engine's did not.
+
+What Comments left: streamed replies (`begin`, `appendDraft`, `finish`,
+`interrupt`, `composing`), which need signals; read state, the inbox and
+deliveries (`markRead`, `follow`, `unread`, `readUpTo`), which need
+namespace operations; `searchMessages`, attachment blocks and
+`moveAnchor`, which need no new primitive; `via` and `for` on a message,
+which need the calling service and the subject acted for on the core's
+caller; events for a beside write, which no change queue hears; reads of
+a conversation by page, where every operation reads its sub-tables
+whole; a beside write that races its row's delete, which fails on the
+foreign key as a database error rather than `not_found`; and the
+declaration's descriptions, which still describe the engine's features.
+`examples/engine-notes` waits for streamed replies and read state. The core's caller now carries `actingFor`, so a message's `for` can be recorded.
+
+What Derived and Provenance left: a deriver deployable over a table that
+implements Derived (`internal/stack` takes a `@deriver` over such a table,
+the TypeScript and Rust deriver entrypoints open the database's
+repository as the deriver, a `DerivationSource` maps to the table's
+operations, and its answers are typed from the table's own fields); an
+index for a deriver's pull, which scans rows a page at a time until a
+declaration may list a column (step 7); raw writes, which neither hears;
+the computed `fields` and `stale` served by the repositories and the API;
+a server that sets `actingFor` from its principal; an extraction schema
+for an object or JSON field; `usage`, which is taken and not stored; and
+a `status` member for a table with several Workflows.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
@@ -1043,9 +1077,9 @@ context is written out.
 - `Queue` folds into `@queue`: its claim a declared read and Lease's
   `acquire`. The recordings that compose Presence or Budget beside Queue
   wait for it, as does `checkReserve`'s `hears` (L 14883, 15070, 17235).
-- Comments on the core: an operation scoped to a namespace runs no
-  command, and `@behaviorOperations` warns and leaves it out (L 17127,
-  17262).
+- An operation scoped to a namespace runs no command on the core, and
+  `@behaviorOperations` warns and leaves it out: Comments' read state,
+  inbox and deliveries wait for it (L 17127, 17262).
 - Step 5's question: whether Constants' constancy and `oneWay`, and
   StateRules' required and frozen fields, become declarative rules.
   Constants still requires at least one field (L 15306, 17044, 17103).
@@ -1203,22 +1237,29 @@ from.
 Built, in part: its layout, `runtime/engine/rust/rules-handler` (the pure
 handler: define, publish, describe, the instance requests, a list's
 filters, sorts and pages, unique fields, relations, the behaviors'
-operations, deadlines and changes) and `rules-dev` (its hosts over a
-SQLite file, a SQLite database in memory and a Postgres schema), with a
-publish under no compatibility rule that lists the rows a version fails
-and discards them when told to (`docs/src/content/docs/guides/development-mode.md`).
-Every rules transcript replays over the layout. Left:
+operations and the fields they compute at a read, deadlines and changes,
+the access policy as data in D58's form, routes over HTTP with no
+transport under them, the event stream and the tools) and `rules-dev`
+(its hosts over a SQLite file, a SQLite database in memory and a Postgres
+schema, an axum server behind the `server` feature with MCP, and the
+`superschematic-dev` binary), with a publish under no compatibility rule
+that lists the rows a version fails and discards them when told to
+(`docs/src/content/docs/guides/development-mode.md`). Every rules
+transcript replays over the layout, and the recorded access steps through
+its policy. Left:
 
-- The event stream and MCP. The event queue is written and nothing serves
-  it.
-- The access policy as data: define, publish and the instance requests
-  are open to any caller, and only the behaviors' permissions are checked.
-- Routes over HTTP. Requests are a typed JSON enum.
 - The library in TypeScript, Go and Python over the handler (WebAssembly
-  or the C ABI), and the prebuilt image (D103's step 6).
+  with a JSON ABI, or the C ABI), and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
-  engine-notes waits for Comments on the core, and engine-jobs for the
-  choice on Blueprint (D103's status).
+  engine-notes waits for Comments' streamed replies and read state, and
+  engine-jobs for the choice on Blueprint (D103's status).
+- The policy asked of a behavior's reads of other types (Dependencies'
+  blockers, Revisions' evidence, Rollups' links), as the engine asked
+  them; the runner's requests made by a system principal the policy sees.
+- `If-Match` on an update, a delete and an operation (the `Preconditions`
+  header is served); routes for a draft, a version, a lookup, namespaces,
+  behaviors, search and values; a notifier under the event stream, which
+  polls; acting for a subject (D77); MCP confirmations (D93).
 - A scalar's own rules beyond its kind (superscalar's normalization, a
   pattern); `searchText`, `referencedBy`, vectors, a relation that holds a
   list, and namespaces; D50's user, role and session shapes and the
@@ -1238,6 +1279,33 @@ Every rules transcript replays over the layout. Left:
 | The plan is applied by the environment's migration runner, the one a deploy uses, and never over a serving connection: the process itself on a SQLite file (D116), `superschematic-migrate` beside a local Postgres, the migration job on gcp (D46). Servers keep D46's grants of SELECT, INSERT, UPDATE and DELETE, which the runner extends to a new table as it does after a deploy's phase. | DDL granted to every server, D58's engine role, which D103 removed; a role per server that owns one schema, which each new platform then has to learn |
 | The handler and the adapter are D103's: the pure request handler, with the access policy as data, and the adapter answering the core's reads and applying its change sets. The adapter reads the build-time layout from the recorded model where a compiled server reads it from generated code. | Generated repositories, which need the build this mode has none of |
 | A runtime type has every schema feature whose effect is DDL a plan carries and reads the handler makes from the layout: relations, unique fields, indexes, constraints, search fields, vectors, and the views of reports and projections. What needs code a build or a person writes stays compiled's: an operation with a body, a queue's handler, a job. | D103's list for runtime types, which was drawn for the JSON layout |
+
+Built, on a SQLite file and a local Postgres:
+`runtime/engine/rust/rules-runtime` serves the handler over each type's
+own table, laid out by `behaviorlayout.RuntimeOf`, which the plan request
+returns with `layout: true` and the database records beside its model in
+`superschematic_runtime`. A publish plans from the recorded model through
+`migrate plan --request`, refuses a plan from another model and a hazard
+nobody allowed, and applies expand and contract through the Rust runner on
+SQLite and `superschematic-migrate apply --plan -` on Postgres; every
+server reads the new layout once the model's hash moves, and answers
+`busy` while a plan is in progress. The plan is a route and a tool
+(`docs/src/content/docs/guides/runtime-mode.md`). A publish's tables equal
+a build's. Left:
+
+- A platform whose runner is a job: the plan delivered to the job (through
+  the state bucket, as D46's job document is), a wait that polls the
+  recorded model rather than holding a lock across machines, the record
+  written in the transaction of the plan's last step (an `apply --record`),
+  and the job's grants extended to the new tables.
+- The handler's list filters, sorts, unique checks and relation checks in
+  SQL. Runtime mode reads every row of a type.
+- Soft deletes (the layout's `live`), the `createdBy` stamp, and the access
+  policy, event stream, MCP and HTTP routes development mode serves.
+- The server roles' grants on Postgres: locally one role owns everything.
+- CI: the scenarios need `bin/superschematic` and `bin/superschematic-migrate`,
+  and pass with a message without them, which the engine-rust job builds
+  neither of.
 
 ### Moving between modes
 
@@ -1283,15 +1351,17 @@ and an embedded environment is compiled.
 2. The planner from documents: `migrate plan` over schema documents and a
    recorded model, and the plan as a route and a tool. Built:
    `migrate plan --documents` and `--request` (`internal/migrateplan`,
-   `docs/src/content/docs/reference/migrations.mdx`). Left: the plan as a
-   route and a tool of the handler; a Postgres plan of documents with
+   `docs/src/content/docs/reference/migrations.mdx`), and the plan as a
+   route and a tool of runtime mode. Left: a Postgres plan of documents with
    `@query` declarations, which is refused; documents that import another
    service's types, which are refused; what a config carries beyond the
    dialect (`viewOwner`, `sourceSchema`, platform defaults, sidecar files);
    and readers, so a plan from documents has no `api-breaking` hazard.
 3. Runtime mode on a SQLite file and a local Postgres: the adapter's
    layout read from a recorded model, the handler over it, and a publish
-   through the runner. Then a platform whose runner is a job.
+   through the runner. Then a platform whose runner is a job. Built on
+   SQLite and a local Postgres; what is left is under "Runtime mode"
+   above.
 4. The moves: development to runtime with rows, runtime to compiled by
    the recorded model, and D103's step 7.
 

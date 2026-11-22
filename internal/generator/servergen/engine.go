@@ -217,7 +217,11 @@ type EngineProject struct {
 // engine's workspace reaches by path: its runtime/engine/rust is the
 // binding's ../rust, so the binding is <root>/runtime/engine/go.
 // superscalar's core inherits its lints from its workspace's manifest,
-// which names every crate under crates/ a member.
+// which names every crate under crates/ a member. Cargo reads the manifest
+// of every member's path dependency, an optional one too, to load the
+// workspace: development mode's server (rules-dev's server feature, D117)
+// reaches the Rust http runtime, and runtime mode (rules-runtime) the
+// Rust migration runner.
 var engineCrates = []string{
 	"runtime/engine-workqueue/rust",
 	"runtime/engine-commerce/rust",
@@ -225,6 +229,8 @@ var engineCrates = []string{
 	"runtime/schema/rust",
 	"runtime/versiongraph/rust-engine",
 	"runtime/versiongraph/rust",
+	"runtime/http/rust",
+	"runtime/migrate/rust",
 	"third_party/superscalar/Cargo.toml",
 	"third_party/superscalar/crates",
 }

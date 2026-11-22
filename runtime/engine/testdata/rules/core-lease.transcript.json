@@ -19,7 +19,10 @@
     "Rollups",
     "Dependencies",
     "Numbering",
-    "Revisions"
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance"
   ],
   "scenarios": [
     {
@@ -94,6 +97,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -167,6 +174,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -249,6 +260,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -478,6 +493,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -551,6 +570,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -633,6 +656,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -991,6 +1018,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -1064,6 +1095,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -1146,6 +1181,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -1837,6 +1876,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -1910,6 +1953,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -1992,6 +2039,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -2323,6 +2374,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -2390,6 +2445,10 @@
                   "config": {
                     "overridePermission": "jobs.override"
                   },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
                   "anchor": "type"
                 }
               ],
@@ -2464,6 +2523,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -2546,6 +2609,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -2938,6 +3005,10 @@
                   "overridePermission": "jobs.override"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -3022,6 +3093,10 @@
                 "config": {
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -3366,6 +3441,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -3439,6 +3518,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -3521,6 +3604,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -3874,6 +3961,10 @@
                     "acquirePermission": "jobs.work"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -3950,6 +4041,10 @@
                 "config": {
                   "acquirePermission": "jobs.work"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -4035,6 +4130,10 @@
                 "config": {
                   "acquirePermission": "jobs.work"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -4302,6 +4401,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -4375,6 +4478,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -4457,6 +4564,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -4797,6 +4908,196 @@
         },
         {
           "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Taking over?"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "otto",
+              "state": "posted",
+              "body": "Taking over?",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "otto"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "listMessages",
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "id": 1,
+                  "author": "otto",
+                  "state": "posted",
+                  "body": "Taking over?",
+                  "blocks": [],
+                  "mentions": [],
+                  "reactions": {},
+                  "createdAt": 1000000,
+                  "postedAt": 1000000,
+                  "stand": 1,
+                  "edits": 0,
+                  "pinned": false,
+                  "replies": 0,
+                  "participants": [
+                    "otto"
+                  ]
+                }
+              ],
+              "before": null,
+              "after": null
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
           "step": 11,
           "call": "instances.invoke",
           "database": "{{dir:1}}/engine.db",
@@ -4815,7 +5116,7 @@
               "operation": "expire",
               "params": {}
             },
-            "request": "request-6"
+            "request": "request-8"
           },
           "expect": {
             "result": {
@@ -4838,6 +5139,27 @@
                   "status": "queued",
                   "enteredAt": 1000000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -4870,7 +5192,7 @@
                 "title": "Build the site"
               }
             },
-            "request": "request-7"
+            "request": "request-9"
           },
           "expect": {
             "row": {
@@ -4890,6 +5212,135 @@
                   "status": "queued",
                   "enteredAt": 1000000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Started."
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "author": "wren",
+              "state": "posted",
+              "body": "Started.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 2,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "wren"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Build the site"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -4924,7 +5375,7 @@
                 "to": "running"
               }
             },
-            "request": "request-8"
+            "request": "request-11"
           },
           "expect": {
             "result": {
@@ -4950,6 +5401,42 @@
                 }
               }
             },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
             "deadlines": [
               {
                 "useId": "Lease",
@@ -4966,21 +5453,6 @@
           "step": 1,
           "call": "open",
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
-          "step": 10,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
-          "step": 13,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
         },
         {
           "step": 15,
@@ -5072,6 +5544,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -5151,6 +5627,10 @@
                   ],
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -5239,6 +5719,10 @@
                   ],
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -5647,6 +6131,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -5720,6 +6208,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -5802,6 +6294,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -6291,6 +6787,10 @@
                 {
                   "behavior": "Lease",
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -6364,6 +6864,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -6446,6 +6950,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -6723,6 +7231,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -6804,6 +7316,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -6894,6 +7410,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -7344,6 +7864,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -7425,6 +7949,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -7515,6 +8043,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -8078,6 +8610,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -8159,6 +8695,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -8249,6 +8789,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -8676,6 +9220,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -8740,6 +9288,10 @@
                 },
                 {
                   "behavior": "Lease",
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
                   "anchor": "type"
                 }
               ],
@@ -8830,6 +9382,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -8928,6 +9484,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -9596,6 +10156,10 @@
               {
                 "behavior": "Lease",
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -9677,6 +10241,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -9938,6 +10506,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -10026,6 +10598,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -10123,6 +10699,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -10563,6 +11143,10 @@
                   "anchor": "type"
                 },
                 {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                },
+                {
                   "behavior": "Dependencies",
                   "anchor": "type"
                 }
@@ -10730,6 +11314,10 @@
                 "anchor": "type"
               },
               {
+                "behavior": "Comments",
+                "anchor": "type"
+              },
+              {
                 "behavior": "Dependencies",
                 "anchor": "type"
               }
@@ -10828,6 +11416,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               },
               {
@@ -11813,6 +12405,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -11894,6 +12490,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -11984,6 +12584,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -12555,6 +13159,10 @@
                     "maxHoldField": "timeLimitMs"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -12634,6 +13242,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -12722,6 +13334,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -13250,6 +13866,10 @@
                     "maxHoldField": "timeLimitMs"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -13329,6 +13949,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -13417,6 +14041,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -13972,6 +14600,10 @@
                     "maxHoldField": "timeLimitMs"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -14051,6 +14683,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -14139,6 +14775,10 @@
                   "maxHoldMs": 25000,
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -14578,6 +15218,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -14655,6 +15299,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -14741,6 +15389,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -15672,6 +16324,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -15749,6 +16405,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -15835,6 +16495,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -16615,6 +17279,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -16692,6 +17360,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -16778,6 +17450,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -17697,6 +18373,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -17774,6 +18454,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -17860,6 +18544,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -18512,6 +19200,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -18589,6 +19281,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -18675,6 +19371,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -19409,6 +20109,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -19477,6 +20181,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -19541,6 +20249,10 @@
                 },
                 {
                   "behavior": "Lease",
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
                   "anchor": "type"
                 }
               ],
@@ -19619,6 +20331,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -19705,6 +20421,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -20073,6 +20793,10 @@
                   "overridePermission": "jobs.override"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -20157,6 +20881,10 @@
                 "config": {
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -20415,6 +21143,10 @@
               {
                 "behavior": "Lease",
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -20496,6 +21228,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -20797,6 +21533,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -20874,6 +21614,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -20960,6 +21704,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -21293,6 +22041,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -21374,6 +22126,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -21464,6 +22220,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -21935,6 +22695,172 @@
         },
         {
           "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Done, I think."
+              }
+            },
+            "request": "request-8",
+            "preconditions": {
+              "Lease": {
+                "token": 1
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "PreconditionsError",
+              "message": "preconditions of Job: /Lease: operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/Lease",
+                    "message": "operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Done, I think."
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "wren",
+              "state": "posted",
+              "body": "Done, I think.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1060000,
+              "postedAt": 1060000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "wren"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
           "step": 13,
           "call": "instances.delete",
           "database": "{{dir:1}}/engine.db",
@@ -21950,7 +22876,7 @@
               "kind": "delete",
               "key": "j1"
             },
-            "request": "request-8",
+            "request": "request-10",
             "preconditions": {
               "Lease": {
                 "token": 1
@@ -21993,6 +22919,27 @@
                 }
               }
             },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
             "deadlines": [
               {
                 "useId": "Lease",
@@ -22025,7 +22972,7 @@
                 "title": "Stale"
               }
             },
-            "request": "request-9",
+            "request": "request-11",
             "preconditions": {
               "Lease": {
                 "token": 2
@@ -22068,6 +23015,27 @@
                 }
               }
             },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
             "deadlines": [
               {
                 "useId": "Lease",
@@ -22100,7 +23068,7 @@
                 "to": "done"
               }
             },
-            "request": "request-10",
+            "request": "request-12",
             "preconditions": {
               "Lease": {
                 "token": 3
@@ -22129,6 +23097,27 @@
                   "status": "done",
                   "enteredAt": 1060000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -22161,7 +23150,7 @@
                 "title": "Unfenced"
               }
             },
-            "request": "request-11"
+            "request": "request-13"
           },
           "expect": {
             "row": {
@@ -22181,6 +23170,129 @@
                   "status": "done",
                   "enteredAt": 1060000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "listMessages",
+              "params": {}
+            },
+            "request": "request-14",
+            "preconditions": {
+              "Lease": {
+                "token": 1
+              }
+            }
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "id": 1,
+                  "author": "wren",
+                  "state": "posted",
+                  "body": "Done, I think.",
+                  "blocks": [],
+                  "mentions": [],
+                  "reactions": {},
+                  "createdAt": 1060000,
+                  "postedAt": 1060000,
+                  "stand": 1,
+                  "edits": 0,
+                  "pinned": false,
+                  "replies": 0,
+                  "participants": [
+                    "wren"
+                  ]
+                }
+              ],
+              "before": null,
+              "after": null
+            },
+            "row": {
+              "own": {
+                "title": "Unfenced"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -22213,7 +23325,7 @@
               "operation": "heartbeat",
               "params": {}
             },
-            "request": "request-12",
+            "request": "request-15",
             "preconditions": {
               "Lease": {
                 "token": 1
@@ -22256,6 +23368,27 @@
                 }
               }
             },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
             "deadlines": [
               {
                 "useId": "Lease",
@@ -22286,7 +23419,7 @@
               "operation": "release",
               "params": {}
             },
-            "request": "request-13",
+            "request": "request-16",
             "preconditions": {
               "Lease": {
                 "token": 1
@@ -22329,6 +23462,27 @@
                 }
               }
             },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Done, I think.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
             "deadlines": [
               {
                 "useId": "Lease",
@@ -22347,24 +23501,9 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 11,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
-          "step": 12,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
           "step": 16,
           "call": "instances.get",
           "reason": "a read of rows, which the transcript holds after each command that names one"
-        },
-        {
-          "step": 18,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
         }
       ]
     },
@@ -22448,6 +23587,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -22529,6 +23672,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -22619,6 +23766,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -23090,6 +24241,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -23173,6 +24328,10 @@
                   "requireToken": true,
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -23265,6 +24424,10 @@
                   "requireToken": true,
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -23903,6 +25066,337 @@
         },
         {
           "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Beside."
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "otto",
+              "state": "posted",
+              "body": "Beside.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1060000,
+              "postedAt": 1060000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "otto"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Fenced"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Beside, for the holder too."
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "author": "wren",
+              "state": "posted",
+              "body": "Beside, for the holder too.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1060000,
+              "postedAt": 1060000,
+              "stand": 2,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "wren"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Fenced"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "listMessages",
+              "params": {}
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "id": 1,
+                  "author": "otto",
+                  "state": "posted",
+                  "body": "Beside.",
+                  "blocks": [],
+                  "mentions": [],
+                  "reactions": {},
+                  "createdAt": 1060000,
+                  "postedAt": 1060000,
+                  "stand": 1,
+                  "edits": 0,
+                  "pinned": false,
+                  "replies": 0,
+                  "participants": [
+                    "otto"
+                  ]
+                },
+                {
+                  "id": 2,
+                  "author": "wren",
+                  "state": "posted",
+                  "body": "Beside, for the holder too.",
+                  "blocks": [],
+                  "mentions": [],
+                  "reactions": {},
+                  "createdAt": 1060000,
+                  "postedAt": 1060000,
+                  "stand": 2,
+                  "edits": 0,
+                  "pinned": false,
+                  "replies": 0,
+                  "participants": [
+                    "wren"
+                  ]
+                }
+              ],
+              "before": null,
+              "after": null
+            },
+            "row": {
+              "own": {
+                "title": "Fenced"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "holder": "wren",
+                  "acquiredAt": 1060000,
+                  "renewedAt": 1060000,
+                  "expiresAt": 1120000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1120000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
           "step": 17,
           "call": "instances.update",
           "database": "{{dir:1}}/engine.db",
@@ -23923,7 +25417,7 @@
                 "title": "Overridden"
               }
             },
-            "request": "request-11"
+            "request": "request-14"
           },
           "expect": {
             "row": {
@@ -23943,6 +25437,42 @@
                   "status": "running",
                   "enteredAt": 1060000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -23975,7 +25505,7 @@
               "operation": "heartbeat",
               "params": {}
             },
-            "request": "request-12",
+            "request": "request-15",
             "preconditions": {
               "Lease": {
                 "token": 3
@@ -24004,6 +25534,42 @@
                   "status": "running",
                   "enteredAt": 1060000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -24036,7 +25602,7 @@
               "operation": "expire",
               "params": {}
             },
-            "request": "request-13"
+            "request": "request-16"
           },
           "expect": {
             "result": {
@@ -24059,6 +25625,42 @@
                   "status": "running",
                   "enteredAt": 1060000
                 }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
               }
             },
             "deadlines": [
@@ -24092,7 +25694,7 @@
               },
               "params": {}
             },
-            "request": "request-14"
+            "request": "request-17"
           },
           "expect": {
             "key": "j2",
@@ -24133,7 +25735,7 @@
               "operation": "release",
               "params": {}
             },
-            "request": "request-15",
+            "request": "request-18",
             "preconditions": {
               "Lease": {
                 "token": 3
@@ -24160,6 +25762,42 @@
                   "enteredAt": 1060000
                 }
               }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
             }
           }
         },
@@ -24183,7 +25821,7 @@
                 "title": "Free"
               }
             },
-            "request": "request-16"
+            "request": "request-19"
           },
           "expect": {
             "row": {
@@ -24204,6 +25842,42 @@
                   "enteredAt": 1060000
                 }
               }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Beside.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Beside, for the holder too.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1060000,
+                      "postedAt": 1060000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
             }
           }
         }
@@ -24213,21 +25887,6 @@
           "step": 1,
           "call": "open",
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
-        },
-        {
-          "step": 14,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
-          "step": 15,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
-        },
-        {
-          "step": 16,
-          "call": "instances.invoke",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
         },
         {
           "step": 21,
@@ -24322,6 +25981,10 @@
                     "requireToken": true
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -24404,6 +26067,10 @@
                   },
                   "requireToken": true
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -24495,6 +26162,10 @@
                   },
                   "requireToken": true
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -24845,6 +26516,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -24921,6 +26596,10 @@
                 "config": {
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -25006,6 +26685,10 @@
                 "config": {
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -26090,6 +27773,10 @@
                     }
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -26178,6 +27865,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -26275,6 +27966,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -27065,6 +28760,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -27147,6 +28846,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -27238,6 +28941,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -27881,6 +29588,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -27964,6 +29675,10 @@
                   "maxHoldMs": 90000,
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -28056,6 +29771,10 @@
                   "maxHoldMs": 90000,
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -29303,6 +31022,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -29385,6 +31108,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -29476,6 +31203,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -29767,6 +31498,10 @@
                     "maxHoldField": "timeLimitMs"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -29850,6 +31585,10 @@
                   "overridePermission": "jobs.override",
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -29942,6 +31681,10 @@
                   "overridePermission": "jobs.override",
                   "maxHoldField": "timeLimitMs"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -30919,6 +32662,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -31001,6 +32748,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -31092,6 +32843,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -31564,6 +33319,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -31646,6 +33405,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -31737,6 +33500,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -32526,6 +34293,10 @@
                     "overridePermission": "jobs.override"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -32590,6 +34361,10 @@
                 },
                 {
                   "behavior": "Lease",
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
                   "anchor": "type"
                 }
               ],
@@ -32673,6 +34448,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -32764,6 +34543,10 @@
                   },
                   "overridePermission": "jobs.override"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -33354,6 +35137,10 @@
               {
                 "behavior": "Lease",
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -33435,6 +35222,10 @@
               },
               {
                 "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -33786,6 +35577,10 @@
                     "directPermission": "jobs.direct"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -33863,6 +35658,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -33949,6 +35748,10 @@
                   "overridePermission": "jobs.override",
                   "directPermission": "jobs.direct"
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -34817,6 +36620,10 @@
                     "maxHoldField": "timeLimitMs"
                   },
                   "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
                 }
               ],
               "fields": [
@@ -34893,6 +36700,10 @@
                 "config": {
                   "heartbeatMs": 60000
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -34999,6 +36810,10 @@
                   "heartbeatMs": 5000
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -35103,6 +36918,10 @@
                   "ttlMs": 10000,
                   "heartbeatMs": 5001
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -35213,6 +37032,10 @@
                   }
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -35321,6 +37144,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -35431,6 +37258,10 @@
                   }
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -35539,6 +37370,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -35650,6 +37485,10 @@
                   }
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -35758,6 +37597,10 @@
                     ]
                   }
                 },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
                 "anchor": "type"
               }
             ],
@@ -35892,6 +37735,116 @@
         },
         {
           "kind": "check",
+          "step": 12,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "config": {
+                  "exempt": [
+                    "Revisions.approve"
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Job: behavior Lease config: exempt names Revisions.approve, but the type does not list Revisions (it lists Workflow, Lease, Comments)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Lease",
+                    "index": 1,
+                    "behavior": "Lease",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Job: behavior Lease config: exempt names Revisions.approve, but the type does not list Revisions (it lists Workflow, Lease, Comments)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
           "step": 13,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
@@ -35940,6 +37893,10 @@
                   ]
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -35970,7 +37927,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600011,
+            "now": 1767225600012,
             "action": {
               "kind": "define"
             }
@@ -36044,6 +38001,10 @@
                   "maxHoldField": "deadline"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -36074,7 +38035,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600012,
+            "now": 1767225600013,
             "action": {
               "kind": "define"
             }
@@ -36148,6 +38109,10 @@
                   "maxHoldField": "title"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -36178,7 +38143,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600013,
+            "now": 1767225600014,
             "action": {
               "kind": "define"
             }
@@ -36248,7 +38213,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600014,
+            "now": 1767225600015,
             "action": {
               "kind": "define"
             }
@@ -36333,6 +38298,10 @@
                   "maxHoldField": "timeLimitMs"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -36363,7 +38332,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600015,
+            "now": 1767225600016,
             "action": {
               "kind": "define"
             }
@@ -36429,6 +38398,10 @@
                   "maxHoldField": "timeLimitMs"
                 },
                 "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
               }
             ],
             "fields": [
@@ -36459,7 +38432,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600016,
+            "now": 1767225600017,
             "action": {
               "kind": "publish",
               "from": null
@@ -36473,11 +38446,6 @@
           "step": 1,
           "call": "open",
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
-        },
-        {
-          "step": 12,
-          "call": "schemas.define",
-          "reason": "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation"
         }
       ]
     },
