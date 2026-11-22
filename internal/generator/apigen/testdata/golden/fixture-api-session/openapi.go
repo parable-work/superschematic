@@ -29,12 +29,49 @@ const openAPISpec = `{
         ],
         "type": "object"
       },
-      "Error": {
+      "ProblemDetails": {
+        "description": "An error response in the Problem Details format (RFC 9457).",
         "properties": {
-          "error": {
+          "code": {
+            "description": "The stable error code, when the problem has one.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What went wrong with this request.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Structured facts about the refusal, such as the entity or the path it concerns. Only some refusals have it."
+          },
+          "errors": {
+            "description": "The fields or filters that failed validation. Only a validation or filter error has it."
+          },
+          "requestId": {
+            "description": "The ID of the request, when the problem has one.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "example": 400,
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short summary, usually the text of the HTTP status.",
+            "example": "Bad Request",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem type. It is ` + "`" + `about:blank` + "`" + `: the status and ` + "`" + `code` + "`" + ` identify the problem.",
+            "example": "about:blank",
             "type": "string"
           }
         },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
         "type": "object"
       },
       "ResponseMeta": {
@@ -144,23 +181,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "security": [
@@ -215,23 +252,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "summary": "customHandler",
@@ -317,23 +354,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "security": [
@@ -396,23 +433,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "security": [
@@ -486,23 +523,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "security": [
@@ -583,23 +620,23 @@ const openAPISpec = `{
           },
           "400": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Bad request"
+            "description": "The request is not valid. ` + "`" + `detail` + "`" + ` says why."
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             },
-            "description": "Internal server error"
+            "description": "The request failed on the server."
           }
         },
         "security": [
