@@ -2,7 +2,6 @@ package rustsdkgen
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -255,7 +254,7 @@ func endpointToTool(
 		endpoint.Page,
 		endpoint.Filter,
 	)
-	parametersJSON, _ := json.Marshal(parameters)
+	parametersJSON, _ := parameters.DigestJSON(keys.DigestInternalTypes)
 
 	bindingStatus := "ready"
 	if endpoint.HasFileUpload {
