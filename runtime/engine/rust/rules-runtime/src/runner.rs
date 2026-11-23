@@ -24,14 +24,13 @@
 //! [`Runtime`]: crate::Runtime
 
 use std::io::Read as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::Refusal;
 
-use crate::conn::apply_refusal;
 use crate::values::{internal, Dialect};
 
 /// One publish's plan, as a runner applies it.
@@ -366,7 +365,7 @@ impl PlanRunner for JobRunner {
 /// `superschematic-migrate apply --plan - --record <file>`, beside it.
 #[cfg(feature = "postgres")]
 pub(crate) fn apply_postgres(
-    migrate: &Path,
+    migrate: &std::path::Path,
     url: &str,
     plan: &[u8],
     record: &[u8],
@@ -400,7 +399,7 @@ pub(crate) fn apply_postgres(
     } else {
         runner_error(&stderr).unwrap_or(stderr)
     };
-    Err(apply_refusal(said))
+    Err(crate::conn::apply_refusal(said))
 }
 
 #[cfg(test)]
