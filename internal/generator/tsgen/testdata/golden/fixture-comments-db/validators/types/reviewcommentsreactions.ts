@@ -73,6 +73,8 @@ export function validateReviewCommentsReactions(value: ReviewCommentsReactions |
 
   expectString(errors, "subject", value.subject);
 
+  expectString(errors, "forSubject", value.forSubject);
+
   if (value.at !== null && value.at !== undefined) {
     const [valid, fieldErrors] = validateTemporalDateTime(value.at);
     if (!valid && fieldErrors) {
@@ -102,6 +104,7 @@ const ReviewCommentsReactionsKnownFields = new Set<string>([
   'message',
   'emoji',
   'subject',
+  'forSubject',
   'at',
 ]);
 

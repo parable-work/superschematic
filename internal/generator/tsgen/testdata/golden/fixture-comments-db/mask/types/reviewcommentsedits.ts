@@ -19,6 +19,7 @@ export function maskSecretsReviewCommentsEdits(value: ReviewCommentsEdits): Revi
     blocks: value.blocks,
     mentions: value.mentions,
     by: value.by !== undefined ? value.by : null,
+    forSubject: value.forSubject !== undefined ? value.forSubject : null,
     at: value.at,
   };
 }

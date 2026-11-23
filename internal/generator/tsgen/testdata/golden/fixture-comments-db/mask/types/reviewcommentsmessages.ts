@@ -16,6 +16,7 @@ export function maskSecretsReviewCommentsMessages(value: ReviewCommentsMessages)
     thread: value.thread,
     quotes: value.quotes,
     author: value.author !== undefined ? value.author : null,
+    forSubject: value.forSubject !== undefined ? value.forSubject : null,
     state: value.state !== undefined ? value.state : null,
     body: value.body !== undefined ? value.body : null,
     blocks: value.blocks,
@@ -28,6 +29,9 @@ export function maskSecretsReviewCommentsMessages(value: ReviewCommentsMessages)
     pinned: value.pinned !== undefined ? value.pinned : null,
     clientId: value.clientId !== undefined ? value.clientId : null,
     resolvedBy: value.resolvedBy !== undefined ? value.resolvedBy : null,
+    resolvedFor: value.resolvedFor !== undefined ? value.resolvedFor : null,
     resolvedAt: value.resolvedAt,
+    draftLength: value.draftLength,
+    lastAppendAt: value.lastAppendAt,
   };
 }

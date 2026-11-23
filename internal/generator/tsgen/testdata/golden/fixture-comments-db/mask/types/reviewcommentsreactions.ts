@@ -16,6 +16,7 @@ export function maskSecretsReviewCommentsReactions(value: ReviewCommentsReaction
     message: value.message,
     emoji: value.emoji !== undefined ? value.emoji : null,
     subject: value.subject !== undefined ? value.subject : null,
+    forSubject: value.forSubject !== undefined ? value.forSubject : null,
     at: value.at,
   };
 }

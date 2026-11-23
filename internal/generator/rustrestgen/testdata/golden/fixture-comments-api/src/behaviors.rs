@@ -139,6 +139,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "state",
                   "field": "state",
                   "column": "state",
@@ -214,9 +220,217 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "draftLength",
+                  "field": "draftLength",
+                  "column": "draft_length",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastAppendAt",
+                  "field": "lastAppendAt",
+                  "column": "last_append_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "drafts",
+              "table": "review_comments_drafts",
+              "row": "review_id",
+              "key": {
+                "name": "chunk",
+                "field": "chunk",
+                "column": "chunk",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "chunkOffset",
+                  "field": "chunkOffset",
+                  "column": "chunk_offset",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "text",
+                  "field": "text",
+                  "column": "text",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "name": "reads",
+              "table": "review_comments_reads",
+              "row": "review_id",
+              "key": {
+                "name": "subject",
+                "field": "subject",
+                "column": "subject",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "upTo",
+                  "field": "upTo",
+                  "column": "up_to",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "readAt",
+                  "field": "readAt",
+                  "column": "read_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "follows",
+              "table": "review_comments_follows",
+              "row": "review_id",
+              "key": {
+                "name": "follow",
+                "field": "follow",
+                "column": "follow",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "thread",
+                  "field": "thread",
+                  "column": "thread",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "followed",
+                  "field": "followed",
+                  "column": "followed",
+                  "type": "boolean"
+                },
+                {
+                  "name": "readUpTo",
+                  "field": "readUpTo",
+                  "column": "read_up_to",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "deliveries",
+              "table": "review_comments_deliveries",
+              "row": "review_id",
+              "key": {
+                "name": "delivery",
+                "field": "delivery",
+                "column": "delivery",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "mention",
+                  "field": "mention",
+                  "column": "mention",
+                  "type": "boolean"
+                },
+                {
+                  "name": "reply",
+                  "field": "reply",
+                  "column": "reply",
+                  "type": "boolean"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "dueAt",
+                  "field": "dueAt",
+                  "column": "due_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "token",
+                  "field": "token",
+                  "column": "token",
+                  "type": "string"
+                },
+                {
+                  "name": "claimedBy",
+                  "field": "claimedBy",
+                  "column": "claimed_by",
+                  "type": "string"
+                },
+                {
+                  "name": "attempts",
+                  "field": "attempts",
+                  "column": "attempts",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "error",
+                  "field": "error",
+                  "column": "error",
+                  "type": "string"
+                },
+                {
+                  "name": "createdAt",
+                  "field": "createdAt",
+                  "column": "created_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "settledAt",
+                  "field": "settledAt",
+                  "column": "settled_at",
                   "type": "Temporal.DateTime",
                   "convert": "epochMillis"
                 }
@@ -270,6 +484,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -305,6 +525,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {
@@ -492,6 +718,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "state",
                   "field": "state",
                   "column": "state",
@@ -567,9 +799,217 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "draftLength",
+                  "field": "draftLength",
+                  "column": "draft_length",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastAppendAt",
+                  "field": "lastAppendAt",
+                  "column": "last_append_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "drafts",
+              "table": "ticket_comments_drafts",
+              "row": "ticket_id",
+              "key": {
+                "name": "chunk",
+                "field": "chunk",
+                "column": "chunk",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "chunkOffset",
+                  "field": "chunkOffset",
+                  "column": "chunk_offset",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "text",
+                  "field": "text",
+                  "column": "text",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "name": "reads",
+              "table": "ticket_comments_reads",
+              "row": "ticket_id",
+              "key": {
+                "name": "subject",
+                "field": "subject",
+                "column": "subject",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "upTo",
+                  "field": "upTo",
+                  "column": "up_to",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "readAt",
+                  "field": "readAt",
+                  "column": "read_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "follows",
+              "table": "ticket_comments_follows",
+              "row": "ticket_id",
+              "key": {
+                "name": "follow",
+                "field": "follow",
+                "column": "follow",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "thread",
+                  "field": "thread",
+                  "column": "thread",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "followed",
+                  "field": "followed",
+                  "column": "followed",
+                  "type": "boolean"
+                },
+                {
+                  "name": "readUpTo",
+                  "field": "readUpTo",
+                  "column": "read_up_to",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "deliveries",
+              "table": "ticket_comments_deliveries",
+              "row": "ticket_id",
+              "key": {
+                "name": "delivery",
+                "field": "delivery",
+                "column": "delivery",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "message",
+                  "field": "message",
+                  "column": "message",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "mention",
+                  "field": "mention",
+                  "column": "mention",
+                  "type": "boolean"
+                },
+                {
+                  "name": "reply",
+                  "field": "reply",
+                  "column": "reply",
+                  "type": "boolean"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "dueAt",
+                  "field": "dueAt",
+                  "column": "due_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "token",
+                  "field": "token",
+                  "column": "token",
+                  "type": "string"
+                },
+                {
+                  "name": "claimedBy",
+                  "field": "claimedBy",
+                  "column": "claimed_by",
+                  "type": "string"
+                },
+                {
+                  "name": "attempts",
+                  "field": "attempts",
+                  "column": "attempts",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "error",
+                  "field": "error",
+                  "column": "error",
+                  "type": "string"
+                },
+                {
+                  "name": "createdAt",
+                  "field": "createdAt",
+                  "column": "created_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "settledAt",
+                  "field": "settledAt",
+                  "column": "settled_at",
                   "type": "Temporal.DateTime",
                   "convert": "epochMillis"
                 }
@@ -623,6 +1063,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -658,6 +1104,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {

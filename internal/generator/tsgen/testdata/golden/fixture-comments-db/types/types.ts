@@ -34,6 +34,56 @@ export interface ReviewCommentsConversations {
 }
 
 /**
+ * ReviewCommentsDeliveries - On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.
+ */
+export interface ReviewCommentsDeliveries {
+  /** The Review row the rows are of; deleting it deletes them. */
+  review: Review;
+  /** The message's id in ten digits zero-padded, a dot, and the subject. */
+  delivery: string;
+  /** The id of the message. */
+  message?: GenericInt64 | null;
+  /** The subject that should hear of it, as the mention or the follow gave it. */
+  subject?: string | null;
+  /** Whether a reason is the mention. */
+  mention?: boolean | null;
+  /** Whether a reason is the follow of its thread. */
+  reply?: boolean | null;
+  /** pending, claimed, failed, sent or dropped. */
+  state?: string | null;
+  /** When it is next due, in epoch milliseconds: at once while pending, the claim's expiry while claimed, the next attempt once failed; absent once sent or dropped. */
+  dueAt?: TemporalDateTime | null;
+  /** The claim's token while claimed. */
+  token?: string | null;
+  /** The subject of the last claimer. */
+  claimedBy?: string | null;
+  /** The claims it has had. */
+  attempts?: GenericInt64 | null;
+  /** The last failure's, or the reason it was dropped. */
+  error?: string | null;
+  /** When it was made, or returned to pending by an edit, in epoch milliseconds. */
+  createdAt?: TemporalDateTime | null;
+  /** When it was last settled or dropped, in epoch milliseconds. */
+  settledAt?: TemporalDateTime | null;
+}
+
+/**
+ * ReviewCommentsDrafts - On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.
+ */
+export interface ReviewCommentsDrafts {
+  /** The Review row the rows are of; deleting it deletes them. */
+  review: Review;
+  /** The message's id and the chunk's offset, each in ten digits zero-padded, joined by a dot, so the key's order is theirs. */
+  chunk: string;
+  /** The id of the composing message. */
+  message?: GenericInt64 | null;
+  /** The draft's length in code points before the chunk: the offset of its draft signal. */
+  chunkOffset?: GenericInt64 | null;
+  /** The chunk's text, never empty. */
+  text?: string | null;
+}
+
+/**
  * ReviewCommentsEdits - On a table, one row per edit of a message, keyed by the message and the edit's number: what the message held before the edit, who made it and when. A delete or a purge of the message deletes them, and so does a delete of the row.
  */
 export interface ReviewCommentsEdits {
@@ -53,8 +103,30 @@ export interface ReviewCommentsEdits {
   mentions?: GenericJSON | null;
   /** The subject of the caller who made the edit. */
   by?: string | null;
+  /** The subject the editor acted for, when the caller acted for someone (D77). */
+  forSubject?: string | null;
   /** When, in epoch milliseconds. */
   at?: TemporalDateTime | null;
+}
+
+/**
+ * ReviewCommentsFollows - On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:<name>; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.
+ */
+export interface ReviewCommentsFollows {
+  /** The Review row the rows are of; deleting it deletes them. */
+  review: Review;
+  /** The thread's id in ten digits zero-padded, a dot, and the subject. */
+  follow: string;
+  /** The id of the thread's top-level message. */
+  thread?: GenericInt64 | null;
+  /** The follower's subject. */
+  subject?: string | null;
+  /** Whether the subject follows the thread. */
+  followed?: boolean | null;
+  /** The subject's marker on the thread's replies: a stand. */
+  readUpTo?: GenericInt64 | null;
+  /** When it last changed, in epoch milliseconds. */
+  updatedAt?: TemporalDateTime | null;
 }
 
 /**
@@ -69,11 +141,13 @@ export interface ReviewCommentsMessages {
   thread?: GenericInt64 | null;
   /** The id of the message of the thread a reply quotes, when it quotes one. */
   quotes?: GenericInt64 | null;
-  /** The subject of the caller who posted it. */
+  /** The subject of the caller who posted or began it. */
   author?: string | null;
-  /** posted, or deleted once deleted. */
+  /** The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved. */
+  forSubject?: string | null;
+  /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
-  /** The text, Markdown; empty once deleted. */
+  /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */
   body?: string | null;
   /** The blocks as posted or last edited, in order. */
   blocks?: GenericJSON | null;
@@ -95,8 +169,14 @@ export interface ReviewCommentsMessages {
   clientId?: string | null;
   /** For a top-level message whose thread is resolved, the subject who resolved it. */
   resolvedBy?: string | null;
+  /** The subject its resolver acted for, when the caller acted for someone (D77). */
+  resolvedFor?: string | null;
   /** When its thread was resolved, in epoch milliseconds. */
   resolvedAt?: TemporalDateTime | null;
+  /** While composing, the draft's length in code points; absent otherwise. */
+  draftLength?: GenericInt64 | null;
+  /** While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it. */
+  lastAppendAt?: TemporalDateTime | null;
 }
 
 /**
@@ -113,8 +193,24 @@ export interface ReviewCommentsReactions {
   emoji?: string | null;
   /** The subject of the caller who reacted. */
   subject?: string | null;
+  /** The subject the caller acted for, when it acted for someone (D77). */
+  forSubject?: string | null;
   /** When, in epoch milliseconds. */
   at?: TemporalDateTime | null;
+}
+
+/**
+ * ReviewCommentsReads - On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.
+ */
+export interface ReviewCommentsReads {
+  /** The Review row the rows are of; deleting it deletes them. */
+  review: Review;
+  /** The reader's subject. */
+  subject: string;
+  /** The conversation marker: a stand. */
+  upTo?: GenericInt64 | null;
+  /** When it last moved, in epoch milliseconds. */
+  readAt?: TemporalDateTime | null;
 }
 
 /**
@@ -145,6 +241,56 @@ export interface TicketCommentsConversations {
 }
 
 /**
+ * TicketCommentsDeliveries - On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.
+ */
+export interface TicketCommentsDeliveries {
+  /** The Ticket row the rows are of; deleting it deletes them. */
+  ticket: Ticket;
+  /** The message's id in ten digits zero-padded, a dot, and the subject. */
+  delivery: string;
+  /** The id of the message. */
+  message?: GenericInt64 | null;
+  /** The subject that should hear of it, as the mention or the follow gave it. */
+  subject?: string | null;
+  /** Whether a reason is the mention. */
+  mention?: boolean | null;
+  /** Whether a reason is the follow of its thread. */
+  reply?: boolean | null;
+  /** pending, claimed, failed, sent or dropped. */
+  state?: string | null;
+  /** When it is next due, in epoch milliseconds: at once while pending, the claim's expiry while claimed, the next attempt once failed; absent once sent or dropped. */
+  dueAt?: TemporalDateTime | null;
+  /** The claim's token while claimed. */
+  token?: string | null;
+  /** The subject of the last claimer. */
+  claimedBy?: string | null;
+  /** The claims it has had. */
+  attempts?: GenericInt64 | null;
+  /** The last failure's, or the reason it was dropped. */
+  error?: string | null;
+  /** When it was made, or returned to pending by an edit, in epoch milliseconds. */
+  createdAt?: TemporalDateTime | null;
+  /** When it was last settled or dropped, in epoch milliseconds. */
+  settledAt?: TemporalDateTime | null;
+}
+
+/**
+ * TicketCommentsDrafts - On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.
+ */
+export interface TicketCommentsDrafts {
+  /** The Ticket row the rows are of; deleting it deletes them. */
+  ticket: Ticket;
+  /** The message's id and the chunk's offset, each in ten digits zero-padded, joined by a dot, so the key's order is theirs. */
+  chunk: string;
+  /** The id of the composing message. */
+  message?: GenericInt64 | null;
+  /** The draft's length in code points before the chunk: the offset of its draft signal. */
+  chunkOffset?: GenericInt64 | null;
+  /** The chunk's text, never empty. */
+  text?: string | null;
+}
+
+/**
  * TicketCommentsEdits - On a table, one row per edit of a message, keyed by the message and the edit's number: what the message held before the edit, who made it and when. A delete or a purge of the message deletes them, and so does a delete of the row.
  */
 export interface TicketCommentsEdits {
@@ -164,8 +310,30 @@ export interface TicketCommentsEdits {
   mentions?: GenericJSON | null;
   /** The subject of the caller who made the edit. */
   by?: string | null;
+  /** The subject the editor acted for, when the caller acted for someone (D77). */
+  forSubject?: string | null;
   /** When, in epoch milliseconds. */
   at?: TemporalDateTime | null;
+}
+
+/**
+ * TicketCommentsFollows - On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:<name>; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.
+ */
+export interface TicketCommentsFollows {
+  /** The Ticket row the rows are of; deleting it deletes them. */
+  ticket: Ticket;
+  /** The thread's id in ten digits zero-padded, a dot, and the subject. */
+  follow: string;
+  /** The id of the thread's top-level message. */
+  thread?: GenericInt64 | null;
+  /** The follower's subject. */
+  subject?: string | null;
+  /** Whether the subject follows the thread. */
+  followed?: boolean | null;
+  /** The subject's marker on the thread's replies: a stand. */
+  readUpTo?: GenericInt64 | null;
+  /** When it last changed, in epoch milliseconds. */
+  updatedAt?: TemporalDateTime | null;
 }
 
 /**
@@ -180,11 +348,13 @@ export interface TicketCommentsMessages {
   thread?: GenericInt64 | null;
   /** The id of the message of the thread a reply quotes, when it quotes one. */
   quotes?: GenericInt64 | null;
-  /** The subject of the caller who posted it. */
+  /** The subject of the caller who posted or began it. */
   author?: string | null;
-  /** posted, or deleted once deleted. */
+  /** The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved. */
+  forSubject?: string | null;
+  /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
-  /** The text, Markdown; empty once deleted. */
+  /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */
   body?: string | null;
   /** The blocks as posted or last edited, in order. */
   blocks?: GenericJSON | null;
@@ -206,8 +376,14 @@ export interface TicketCommentsMessages {
   clientId?: string | null;
   /** For a top-level message whose thread is resolved, the subject who resolved it. */
   resolvedBy?: string | null;
+  /** The subject its resolver acted for, when the caller acted for someone (D77). */
+  resolvedFor?: string | null;
   /** When its thread was resolved, in epoch milliseconds. */
   resolvedAt?: TemporalDateTime | null;
+  /** While composing, the draft's length in code points; absent otherwise. */
+  draftLength?: GenericInt64 | null;
+  /** While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it. */
+  lastAppendAt?: TemporalDateTime | null;
 }
 
 /**
@@ -224,6 +400,22 @@ export interface TicketCommentsReactions {
   emoji?: string | null;
   /** The subject of the caller who reacted. */
   subject?: string | null;
+  /** The subject the caller acted for, when it acted for someone (D77). */
+  forSubject?: string | null;
   /** When, in epoch milliseconds. */
   at?: TemporalDateTime | null;
+}
+
+/**
+ * TicketCommentsReads - On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.
+ */
+export interface TicketCommentsReads {
+  /** The Ticket row the rows are of; deleting it deletes them. */
+  ticket: Ticket;
+  /** The reader's subject. */
+  subject: string;
+  /** The conversation marker: a stand. */
+  upTo?: GenericInt64 | null;
+  /** When it last moved, in epoch milliseconds. */
+  readAt?: TemporalDateTime | null;
 }
