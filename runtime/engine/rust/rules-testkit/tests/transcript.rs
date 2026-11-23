@@ -377,6 +377,18 @@ const COMMENTS_BESIDE_FLOOR: usize = 25;
 /// reads of rows. An adapter's replay holds its own count to this one.
 const DERIVED_PROVENANCE_FLOOR: usize = 75;
 
+/// The steps `core-holds.transcript.json` holds, of the engine's
+/// `commerce-holds.json` (D70 on the core, D103's step 4).
+const HOLDS_FLOOR: usize = 71;
+
+/// The steps `core-holds-timers.transcript.json` holds, of the engine's
+/// `commerce-holds-timers.json` (D70 on the core, D103's step 4).
+const HOLDS_TIMERS_FLOOR: usize = 14;
+
+/// The steps `core-commerce.transcript.json` holds, of the hand-written
+/// `core-commerce.json` (D70 on the core, D103's step 4).
+const COMMERCE_FLOOR: usize = 66;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -406,6 +418,12 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ),
         ("core-revisions", "core-revisions", REVISIONS_FLOOR),
         ("core-comments", "core-comments", COMMENTS_FLOOR),
+        ("core-holds", "commerce-holds", HOLDS_FLOOR),
+        (
+            "core-holds-timers",
+            "commerce-holds-timers",
+            HOLDS_TIMERS_FLOOR,
+        ),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -459,6 +477,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-pool", POOL_FLOOR, true),
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
+        ("core-commerce", COMMERCE_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

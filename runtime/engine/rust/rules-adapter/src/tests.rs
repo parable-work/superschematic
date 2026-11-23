@@ -1825,21 +1825,20 @@ fn a_read_of_sub_table_rows_selects_the_rows_of_the_row_in_key_order_converted_a
     assert!(store.queries().iter().any(|(text, _)| text
         == r#"SELECT "key" AS c0, "body" AS c1, "at" AS c2 FROM "order_toy_notes" WHERE "order_id" = ?1 ORDER BY "key""#));
 
-    // A store whose locks are fenced has no check of one under a lock yet.
+    // A store whose locks are fenced holds a read of sub-table rows under a
+    // lock to its row's version, which the run read under the lock too, so
+    // the read is answered (D103's step 4: Stock's records, Calendar's
+    // bookings).
     let fenced = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).fenced();
-    let refused = refusal(block(run::execute(
+    let executed = block(run::execute(
         &host,
         &fenced,
         "Order",
         toy_op("lockedNotes", json!({})),
         &ExecuteOptions::default(),
-    )));
-    assert_eq!(
-        refused,
-        Refusal::internal(
-            "rules: a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)"
-        )
-    );
+    ))
+    .expect("read under the lock");
+    assert!(executed.result.is_array(), "{}", executed.result);
 }
 
 #[test]

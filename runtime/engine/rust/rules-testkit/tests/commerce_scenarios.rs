@@ -5,9 +5,34 @@
 //! engine's Links link is a to-one relation on a table, so a `link` hold
 //! reads the relation's own field. Every step the replayer maps must answer
 //! as the engine did, each refusal compared whole, and the steps it maps
-//! must not drop below each file's floor.
+//! must not drop below each file's floor. The hand-written
+//! `core-commerce.json` holds what the engine recorded none of: a link hold
+//! over a relation, a direct call of the contract that changes nothing,
+//! two claims for the last unit, and each one's define refusals.
 
-use superschematic_rules_testkit::{ported, replay_path, scenario_path};
+use superschematic_rules_testkit::{hand_written_path, ported, replay_path, scenario_path};
+
+/// The steps of the hand-written `core-commerce.json` the replayer maps and
+/// compares: all of its scenarios' steps, the `open` steps among them.
+const CORE_COMMERCE_FLOOR: usize = 83;
+
+#[test]
+fn core_commerce_replays_every_step_on_the_reference_host() {
+    let report = replay_path(&hand_written_path("core-commerce"), &ported)
+        .unwrap_or_else(|error| panic!("{error}"));
+    println!("{}", report.details());
+    assert!(
+        report.mismatches().is_empty(),
+        "the core answered otherwise than the file writes:\n{}",
+        report.details()
+    );
+    assert!(
+        report.checked() >= CORE_COMMERCE_FLOOR,
+        "{} steps checked, under the floor of {CORE_COMMERCE_FLOOR}:\n{}",
+        report.checked(),
+        report.details()
+    );
+}
 
 fn replays(name: &str, floor: usize) {
     let report =

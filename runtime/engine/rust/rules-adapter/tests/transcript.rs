@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 27] = [
+const TRANSCRIPTS: [(&str, usize); 30] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -119,6 +119,9 @@ const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-comments", COMMENTS_FLOOR),
     ("core-comments-beside", COMMENTS_BESIDE_FLOOR),
     ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR),
+    ("core-holds", HOLDS_FLOOR),
+    ("core-holds-timers", HOLDS_TIMERS_FLOOR),
+    ("core-commerce", COMMERCE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -296,6 +299,23 @@ const COMMENTS_BESIDE_FLOOR: usize = 25;
 /// settle's writes of the rows it reaches through applyDerived, and
 /// Provenance's inReview an owned column.
 const DERIVED_PROVENANCE_FLOOR: usize = 75;
+
+/// core-holds' floor (D70 on the core, D103's step 4): 71 steps of the
+/// engine's commerce-holds.json, 55 commands and 16 checks, each take a
+/// supply's lock and each supply's write of a claim's item a call on the
+/// supply's row, its records and movements rows of its sub-tables.
+const HOLDS_FLOOR: usize = 71;
+
+/// core-holds-timers' floor (D70 on the core, D103's step 4): 14 steps, 10
+/// commands and 4 checks, a hold let go by the Timers deadline that moves
+/// its claim to expired.
+const HOLDS_TIMERS_FLOOR: usize = 14;
+
+/// core-commerce's floor (D70 on the core, D103's step 4): 66 steps of the
+/// scenarios written by hand, 43 commands and 23 checks: a link hold over a
+/// relation, two claims for the last unit, a delete that releases, and the
+/// define refusals.
+const COMMERCE_FLOOR: usize = 66;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

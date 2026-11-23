@@ -22,7 +22,9 @@
     "Revisions",
     "Comments",
     "Derived",
-    "Provenance"
+    "Provenance",
+    "Stock",
+    "Holds"
   ],
   "scenarios": [
     {
