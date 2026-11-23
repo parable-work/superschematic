@@ -1,0 +1,41 @@
+{
+  "name": "@superschematic/rules-handler",
+  "version": "0.0.0",
+  "description": "Development mode's request handler (D117, D103's step 6) for a server written by hand: superschematic-rules-handler built for WebAssembly, the host loop over a store (each request in one transaction, its reads answered and its unit applied, run again when its rows moved, then busy), the change queue and the deadlines run after each request, the routes over the Fetch API's Request and Response (dev.http), a typed dev.request, the event stream and the tools an MCP endpoint serves. The entry imports nothing and runs in Bun, Node, Workers and a browser over any store; ./sqlite opens the development layout on bun:sqlite, a file or :memory:, with the tables superschematic-rules-dev's SqliteStore creates. Ships the compiled ESM and the wasm module.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js"
+    },
+    "./superschematic_rules_handler_wasm.wasm": "./dist/superschematic_rules_handler_wasm.wasm"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "dist/superschematic_rules_handler_wasm.wasm"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-wasm.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run build && tsc --noEmit -p tsconfig.test.json && bun test test && node test/node.mjs"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/parable-work/superschematic",
+    "directory": "runtime/rules-handler/typescript"
+  }
+}
