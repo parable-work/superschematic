@@ -18,17 +18,21 @@
 //!    with each hazard's id;
 //! 4. has the environment's runner apply the plan, expand and contract back
 //!    to back: the Rust runner, `superschematic-migrate`'s crate, on a
-//!    connection of its own to a SQLite file, and the Go runner's binary,
-//!    `superschematic-migrate apply --plan -`, beside a Postgres database;
-//! 5. records the documents and the layout next to the model, in
-//!    `superschematic_runtime`, beside the runner's two state tables.
+//!    connection of its own to a SQLite file, the Go runner's binary,
+//!    `superschematic-migrate apply --plan -`, beside a Postgres database,
+//!    or a job on another machine ([`runner`], [`JobRunner`]);
+//! 5. has the runner record the documents and the layout next to the
+//!    model, in `superschematic_runtime`, beside its two state tables, in
+//!    the transaction that finishes the plan.
 //!
 //! Every request reads the model the database is at in its transaction,
 //! and reads the record again when that hash has moved, so every server of
 //! the environment follows a publish with no restart. A plan in progress
 //! serves no request. [`Runtime::plan`] answers a publish's plan, its steps
 //! and each step's hazards, without applying it: the plan as a route and a
-//! tool ([`Runtime::answer`], [`tools`]).
+//! tool ([`Runtime::answer`], [`tools`]). A list's page, a unique key's
+//! holders and the rows a delete reaches are queries of the type's table,
+//! and a soft-deletable table serves its live rows alone.
 //!
 //! ```no_run
 //! use serde_json::json;

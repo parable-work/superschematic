@@ -223,7 +223,7 @@ fn cards() -> Vec<Value> {
         json!({"title": "Banana", "points": 1, "ratio": 0.25, "done": false, "due": "2026-01-15T12:30:00.250Z", "day": "2026-01-03", "size": "M", "meta": "x", "projectId": p2, "labelId": "blue"}),
         json!({"title": "cherry", "points": 3, "done": false, "due": "2026-02-28T23:00:00-02:00", "size": "L", "meta": [1, 2], "owner": uuid(901)}),
         json!({"title": "apricot", "points": -4, "ratio": 1.75, "day": "2025-12-31", "size": "M", "meta": 3, "projectId": p1}),
-        json!({"title": "Éclair", "points": 8, "ratio": 0.5, "done": true, "due": "2026-07-04T00:00:00Z", "size": "S", "labelId": "red"}),
+        json!({"title": "\u{c9}clair", "points": 8, "ratio": 0.5, "done": true, "due": "2026-07-04T00:00:00Z", "size": "S", "labelId": "red"}),
         json!({"title": "date", "ratio": 0.125, "done": true, "day": "2026-02-01", "meta": {"b": 2, "a": 1}, "owner": owner}),
         json!({"title": "apple", "points": 5, "due": "2026-03-01T00:00:00Z", "size": "L", "projectId": p2}),
         json!({"title": "zest", "points": 3, "ratio": 0.5, "done": false, "due": "2025-06-01T00:00:00Z", "day": "2026-01-03", "labelId": "blue"}),
