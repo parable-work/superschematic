@@ -13,7 +13,7 @@ import { Database } from 'bun:sqlite';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
-import type { Caller, Dev } from '../dist/index.js';
+import type { Caller, Dev, SqliteStore } from '../dist/index.js';
 import { openDev } from '../dist/sqlite.js';
 import { checkout, scratch } from './support.ts';
 
@@ -113,7 +113,7 @@ function tables(path: string): unknown[] {
 }
 
 function close(dev: Dev): void {
-  (dev.store as unknown as { connection: { close(): void } }).connection.close();
+  (dev.store as SqliteStore).close();
 }
 
 test("a file superschematic-dev wrote is read and written on by this host", async () => {

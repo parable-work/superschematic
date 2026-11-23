@@ -150,6 +150,12 @@ export class SqliteStore implements Store {
     }
   }
 
+  /** Closes the connection, when it can be closed. */
+  close(): void {
+    this.#statements.clear();
+    (this.connection as Partial<{ close(): void }>).close?.();
+  }
+
   #statement(sql: string): SqliteStatement {
     let statement = this.#statements.get(sql);
     if (statement === undefined) {
