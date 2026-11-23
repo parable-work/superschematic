@@ -1310,11 +1310,7 @@ fn refund_for(cx: &Cx<'_, PaymentsConfig>, params: &Value) -> Hook<Value> {
     let mine = row_ref(cx);
     let points_here = theirs.field.as_ref().is_some_and(|(field, target)| {
         *target == mine.schema
-            && row
-                .own
-                .get(field)
-                .and_then(superschematic_rules::key_of)
-                == Some(mine.id.clone())
+            && row.own.get(field).and_then(superschematic_rules::key_of) == Some(mine.id.clone())
     });
     if !points_here {
         return Err(refuse(format!(
