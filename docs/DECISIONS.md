@@ -638,10 +638,16 @@ of the row, settled by table operations a deriver calls) and Provenance
 (who wrote each field, by which behavior and with what confidence, and a
 review that gates the Workflow), with the core's attributed write
 (`Cx::update_attributed`), a caller's `actingFor` and a field's schema.
-Development mode runs all twenty-one. Left: the rest of step 4
-(Holds, Stock, Calendar and Payments, each held to the test, and the
-folded Links, Search, Queue and Branches removed), and steps 5 to 7, whose
-step 6 D117 renames development mode. What the built steps left follows. The
+Since then, the commerce wave: Stock and Calendar implement the `Supply`
+contract (`holdFor`, `commitFor`, `releaseFor`, `returnFor` as operations
+of the supply's row, `checkHold` answered), Holds asks it and Payments
+pays for a claim, each held to the test and passing it; a supply's write
+takes the lock its row names, and on SQLite and D1 every adapter checks a
+sub-table read made under a lock against its row's version, refusing one
+of a use that writes beside its rows or through an operation of the
+namespace. Development mode runs all twenty-five. Left of step 4: the
+folded Links, Search, Queue and Branches removed, and the folds below
+chosen. Then steps 5 to 7, whose step 6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
 Four of step 4's ports met the test as follows, and each waits on a choice:
@@ -710,6 +716,18 @@ describe the engine's features. Streamed replies, read state, the inbox
 signals (`Cx::signal`, `Action::Signal`, never stored) and operations of
 the namespace (`Action::NamespaceOperation`), and `examples/engine-notes`
 runs on development mode.
+
+What the commerce wave left: `Stock.low` in a list's filter, which needs
+a column the core sets; a Payments event applied once per namespace, as
+the engine applied it, where a table applies it once per table and
+provider; D70's invocation policy for money operations, and hiding the
+adapter's own operations, on a table (`enginedoc.MoneyOperations` covers
+engine types alone); a supply key held as a UUID in two forms, which the
+holder check compares as text; Stock's ledger read whole for its next
+number, where a count would do; Calendar's exclusion constraint on
+Postgres, which D83's DDL has no form for (and which says capacity 1
+alone); two claims raced through a Go or a Rust API server; and the
+Reservation bundle (step 5).
 
 What Derived and Provenance left: a deriver deployable over a table that
 implements Derived (`internal/stack` takes a `@deriver` over such a table,
@@ -1125,9 +1143,6 @@ context is written out.
   pick of members with no value, more than 2,000 members
   (`pool_too_large`), and the extra rounds of a pick across pages
   (L 17382).
-- D70's `Supply` as a contract of the core: Holds and Stock, and a
-  contract an operation answers. `registry.Contracts` holds `Capacity`
-  alone (L 16758, 17418).
 - An operation's idempotency key, left for an entry of its own (L 15063;
   D116 left it too).
 - Event order on SQLite: one command's events share a millisecond's
