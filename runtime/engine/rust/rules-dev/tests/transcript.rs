@@ -358,6 +358,7 @@ impl<'s, S: Inspect> Scenario<'s, S> {
             specs,
             hearing: &hearing,
             own: None,
+            readable: None,
         };
         for _ in 0..8 {
             store.begin()?;

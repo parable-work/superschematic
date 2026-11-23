@@ -52,7 +52,7 @@ pub(super) struct Follow {
 }
 
 impl Follow {
-    fn of(row: &SubRow) -> Follow {
+    pub(super) fn of(row: &SubRow) -> Follow {
         Follow {
             thread: row.value("thread").and_then(whole).unwrap_or_default(),
             subject: text(row, "subject"),

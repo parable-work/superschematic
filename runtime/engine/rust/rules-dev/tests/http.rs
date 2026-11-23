@@ -395,6 +395,155 @@ fn the_tools_are_made_from_the_live_types_and_called_by_their_handles() {
     );
 }
 
+/// An operation of the namespace as a whole (D77's primitive 3): Comments'
+/// inbox over every type that composes Comments and that the caller may
+/// read, its mentions, the threads it follows and the conversations it has
+/// read, newest first; a type the policy hides is left out, and the policy
+/// is asked about the behavior's operation, a read here.
+#[test]
+fn the_inbox_reads_across_every_type_that_composes_comments_that_the_caller_may_read() {
+    let policy = Policy::from_json(&json!({"rules": [
+        {"behavior": ["Comments"], "action": "read", "allow": true},
+        {"schema": "Memo", "subject": "carol", "allow": false},
+        {"allow": true}
+    ]}))
+    .expect("it reads");
+    let mut dev = dev().with_policy(policy);
+    let admin = Caller::new("admin", Vec::<String>::new());
+    for name in ["Review", "Memo"] {
+        let document = json!({"name": name,
+            "fields": [{"name": "title", "typeRef": {"name": "string"}, "required": true}],
+            "behaviors": [{"name": "Comments"}]});
+        assert_eq!(
+            call(
+                &mut dev,
+                Some(&admin),
+                "POST",
+                "/schemas",
+                Some((JSON, document))
+            )
+            .status,
+            200
+        );
+        assert_eq!(
+            call(
+                &mut dev,
+                Some(&admin),
+                "POST",
+                &format!("/schemas/{name}/publish"),
+                None
+            )
+            .status,
+            200
+        );
+        let created = call(
+            &mut dev,
+            Some(&admin),
+            "POST",
+            &format!("/schemas/{name}/instances"),
+            Some((JSON, json!({"id": "x1", "data": {"title": "Plan"}}))),
+        );
+        assert_eq!(created.status, 201, "{:?}", created.json());
+    }
+    let alice = Caller::new("alice", Vec::<String>::new());
+    let bob = Caller::new("bob", Vec::<String>::new());
+    let carol = Caller::new("carol", Vec::<String>::new());
+    let post = |dev: &mut Dev, caller: &Caller, name: &str, params: Value| {
+        let response = call(
+            dev,
+            Some(caller),
+            "POST",
+            &format!("/schemas/{name}/instances/x1/operations/post"),
+            Some((JSON, params)),
+        );
+        assert_eq!(response.status, 200, "{:?}", response.json());
+    };
+    post(
+        &mut dev,
+        &alice,
+        "Review",
+        json!({"body": "Look,   carol\nand bob.", "mentions": ["carol", "bob"]}),
+    );
+    post(
+        &mut dev,
+        &bob,
+        "Review",
+        json!({"body": "A reply.", "thread": 1}),
+    );
+    post(
+        &mut dev,
+        &alice,
+        "Memo",
+        json!({"body": "A memo for carol.", "mentions": ["carol"]}),
+    );
+    let inbox = |dev: &mut Dev, caller: &Caller, params: Value| {
+        call(
+            dev,
+            Some(caller),
+            "POST",
+            "/behaviors/Comments/operations/inbox",
+            Some((JSON, params)),
+        )
+    };
+    // carol is mentioned in both, follows the review's thread as a mention
+    // does, and may not read the memo, so its mention is left out.
+    let read = inbox(&mut dev, &carol, json!({}));
+    assert_eq!(read.status, 200, "{:?}", read.json());
+    let items = read.json()["data"]["items"].clone();
+    let listed: Vec<(String, String, i64, i64)> = items
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| {
+            (
+                item["kind"].as_str().unwrap_or_default().to_owned(),
+                item["schema"].as_str().unwrap_or_default().to_owned(),
+                item["message"].as_i64().unwrap_or_default(),
+                item["unread"].as_i64().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("mention".to_owned(), "Review".to_owned(), 1, 1),
+            ("thread".to_owned(), "Review".to_owned(), 2, 1)
+        ]
+    );
+    assert_eq!(items[0]["excerpt"], "Look, carol and bob.");
+    // alice wrote the conversation's top-level message and follows its
+    // thread, where bob replied; the memo's thread is hers alone.
+    let alices = inbox(&mut dev, &alice, json!({"kinds": ["thread"]}));
+    assert_eq!(
+        alices.json()["data"]["items"][0]["author"],
+        "bob",
+        "{:?}",
+        alices.json()
+    );
+    // A page's cursor reads on; parameters are held to the schema.
+    let first = inbox(&mut dev, &carol, json!({"limit": 1}));
+    let next = first.json()["data"]["next"].clone();
+    assert!(next.is_string(), "{:?}", first.json());
+    let second = inbox(&mut dev, &carol, json!({"limit": 1, "cursor": next}));
+    assert_eq!(second.json()["data"]["items"][0]["kind"], "thread");
+    let refused = inbox(&mut dev, &carol, json!({"cursor": "nope"}));
+    assert_eq!(refused.status, 400);
+    assert_eq!(
+        refused.json()["detail"],
+        "operation inbox of behavior Comments: /cursor: is not a cursor this operation returned"
+    );
+    // A behavior's question the policy does not allow is refused.
+    let strict = Policy::from_json(&json!({"rules": [{"schema": "Review", "allow": true}]}))
+        .expect("it reads");
+    let mut closed = dev.with_policy(strict);
+    let forbidden = inbox(&mut closed, &carol, json!({}));
+    assert_eq!(forbidden.status, 403, "{:?}", forbidden.json());
+    assert_eq!(
+        forbidden.json()["detail"],
+        "carol may not call inbox (read) of behavior Comments in namespace default"
+    );
+}
+
 // ids_of is a member of each item of a page (`items`) or of the event
 // queue's (`events`).
 fn ids_of(response: &HttpResponse, member: &str) -> Vec<String> {

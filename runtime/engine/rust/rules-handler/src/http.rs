@@ -20,6 +20,7 @@
 //! | POST | `/namespaces/default/schemas/{type}/instances/{id}/operations/{operation}` | a use's operation of a row |
 //! | POST | `/namespaces/default/schemas/{type}/operations/{operation}` | a use's operation of the table |
 //! | POST | `/namespaces/default/schemas/{type}/instances/{id}/signals/{behavior}/{name}` | a caller's signal about a row (D77's primitive 2, [`crate::signals`]): its data the body, 204 |
+//! | POST | `/namespaces/default/behaviors/{behavior}/operations/{operation}` | an operation of the namespace as a whole (D77's primitive 3), over the types that compose the behavior and that the caller may read |
 //! | GET | `/namespaces/default/events` | the event queue: a page, or server-sent events ([`crate::events`]), with signals beside them on `signals=1` |
 //! | POST, GET, DELETE | `/namespaces/default/mcp` | the MCP endpoint, which the host serves |
 //!
@@ -656,6 +657,17 @@ fn route_inner(request: &HttpRequest, request_id: &str) -> Result<Routed, HttpRe
                     type_name: (*name).to_owned(),
                     use_id,
                     operation,
+                    params,
+                },
+                Answer::Data,
+            )
+        }
+        ("POST", ["behaviors", behavior, "operations", op]) => {
+            let params = optional_body(request, request_id)?;
+            handle(
+                Request::NamespaceOperation {
+                    behavior: (*behavior).to_owned(),
+                    operation: (*op).to_owned(),
                     params,
                 },
                 Answer::Data,

@@ -178,6 +178,17 @@ pub enum Request {
         #[serde(default)]
         data: Value,
     },
+    /// An operation of the namespace as a whole (D77's primitive 3): of a
+    /// behavior, over every live type that composes it and that the caller
+    /// may read, keyed by the caller. The policy is asked about the
+    /// behavior's operation (`{ action, behavior, operation }`), `write` or
+    /// `read` as its declaration says it writes.
+    NamespaceOperation {
+        behavior: String,
+        operation: String,
+        #[serde(default)]
+        params: Value,
+    },
 }
 
 /// What a request runs with beside itself: its caller, the time in epoch
@@ -529,6 +540,11 @@ impl<'a> Handler<'a> {
                 name,
                 data,
             } => self.signal(type_name, id, behavior, name, data, context, &mut reads),
+            Request::NamespaceOperation {
+                behavior,
+                operation,
+                params,
+            } => self.namespace_operation(behavior, operation, params, context, &mut reads),
         };
         outcome.unwrap_or_else(refused)
     }
@@ -1111,6 +1127,75 @@ impl<'a> Handler<'a> {
         )
     }
 
+    /// Runs an operation of the namespace as a whole through the core (D77's
+    /// primitive 3), on no type, over the live types that compose its
+    /// behavior and that the caller may read, and answers its result.
+    fn namespace_operation(
+        &self,
+        behavior: &str,
+        operation: &str,
+        params: &Value,
+        context: &Context,
+        reads: &mut Reads<'_>,
+    ) -> Result<HandlerStep, Refusal> {
+        let Some(live) = self.live(reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let writes = self
+            .core
+            .declaration(behavior)
+            .and_then(|declared| declared.find_namespace_operation(operation))
+            .map(|declared| declared.writes);
+        // One the core does not run is its to refuse, after the policy is
+        // asked as for a read.
+        let asked = if writes == Some(true) {
+            AccessAction::Write
+        } else {
+            AccessAction::Read
+        };
+        self.ask_behavior(&context.caller, asked, behavior, operation)?;
+        let command = Command::new(
+            context.caller.clone(),
+            context.now,
+            Action::NamespaceOperation {
+                behavior: behavior.to_owned(),
+                operation: operation.to_owned(),
+                params: object_or_empty(params),
+            },
+        )
+        .with_request(context.request.clone());
+        let readable = |schema: &str| self.allows(&context.caller, AccessAction::Read, schema);
+        let bridge = Bridge {
+            core: self.core,
+            specs: &live.specs,
+            hearing: &live.hearing,
+            own: None,
+            readable: Some(&readable),
+        };
+        Ok(
+            match bridge.run(&TypeSpec::new(""), &command, reads.answers) {
+                Ran::Read(need) => {
+                    for read in need {
+                        reads.ask(read);
+                    }
+                    take(reads).wait()
+                }
+                Ran::Refused(refusal) => refused(refusal),
+                Ran::Changed(changed) => {
+                    let signals =
+                        crate::signals::published(&live, &changed.changes.signals, context);
+                    HandlerStep::Done(Done {
+                        response: Ok(changed.changes.result.clone()),
+                        unit: Unit {
+                            writes: changed.writes,
+                            signals,
+                        },
+                    })
+                }
+            },
+        )
+    }
+
     /// Runs a caller's signal through the core, which holds it to its
     /// declaration, and answers null: the unit carries what it sent.
     #[allow(clippy::too_many_arguments)]
@@ -1287,6 +1372,7 @@ impl<'a> Handler<'a> {
             specs: &live.specs,
             hearing: &live.hearing,
             own: Some(&own),
+            readable: None,
         };
         Ok(match bridge.run(&spec, &command, reads.answers) {
             Ran::Read(need) => {

@@ -70,13 +70,16 @@ impl Action {
 }
 
 /// One question the handler asks the policy: who asks, what of which type,
-/// and for a behavior's operation, its name.
+/// and for a behavior's operation, its name; or, for an operation of the
+/// namespace as a whole (D77's primitive 3), its behavior in place of a
+/// type (`schema` empty).
 #[derive(Clone, Copy, Debug)]
 pub struct Question<'a> {
     pub caller: &'a Caller,
     pub action: Action,
     pub schema: &'a str,
     pub operation: Option<&'a str>,
+    pub behavior: Option<&'a str>,
 }
 
 impl Question<'_> {
@@ -90,7 +93,14 @@ impl Question<'_> {
         );
         out.insert("action".into(), Value::from(self.action.as_str()));
         out.insert("namespace".into(), Value::from(NAMESPACE));
-        out.insert("schema".into(), Value::from(self.schema));
+        match self.behavior {
+            Some(behavior) => {
+                out.insert("behavior".into(), Value::from(behavior));
+            }
+            None => {
+                out.insert("schema".into(), Value::from(self.schema));
+            }
+        }
         if let Some(operation) = self.operation {
             out.insert("operation".into(), Value::from(operation));
         }
@@ -101,9 +111,14 @@ impl Question<'_> {
     /// words: `<subject> may not <action> <schema> in namespace default`,
     /// or `call <operation> (<action>) on <schema>` for an operation.
     pub fn refusal(&self) -> Refusal {
-        let what = match self.operation {
-            None => format!("{} {}", self.action.as_str(), self.schema),
-            Some(operation) => format!(
+        let what = match (self.behavior, self.operation) {
+            (Some(behavior), operation) => format!(
+                "call {} ({}) of behavior {behavior}",
+                operation.unwrap_or_default(),
+                self.action.as_str()
+            ),
+            (None, None) => format!("{} {}", self.action.as_str(), self.schema),
+            (None, Some(operation)) => format!(
                 "call {operation} ({}) on {}",
                 self.action.as_str(),
                 self.schema
@@ -151,7 +166,7 @@ impl Placeholder {
             Placeholder::Action => Some(question.action.as_str()),
             Placeholder::Namespace => Some(NAMESPACE),
             Placeholder::Operation => question.operation,
-            Placeholder::Behavior => None,
+            Placeholder::Behavior => question.behavior,
         }
     }
 }
@@ -258,12 +273,28 @@ impl Rule {
             Some(list) => value.is_some_and(|value| list.iter().any(|item| item == value)),
         };
         let caller = question.caller;
+        // A question about an operation of the namespace (D77's primitive
+        // 3) matches only a rule that names its behavior, as the engine's
+        // does, and one that names no schema; any other matches a rule that
+        // names none, or says false.
+        let behavior = match question.behavior {
+            Some(behavior) => {
+                self.schema.is_none()
+                    && match &self.behavior {
+                        Some(Named::Any(any)) => *any,
+                        Some(Named::Names(names)) => names.iter().any(|name| name == behavior),
+                        None => false,
+                    }
+            }
+            None => {
+                named(&self.schema, Some(question.schema))
+                    && matches!(&self.behavior, None | Some(Named::Any(false)))
+            }
+        };
         named(&self.action, Some(question.action.as_str()))
             && named(&self.operation, question.operation)
-            && named(&self.schema, Some(question.schema))
+            && behavior
             && named(&self.namespace, Some(NAMESPACE))
-            // No question here is about a behavior's namespace operation.
-            && matches!(&self.behavior, None | Some(Named::Any(false)))
             && named(&self.subject, Some(&caller.subject))
             // A caller standing in is a service's own principal, whose
             // deployable the handler does not know.
@@ -318,10 +349,20 @@ impl Policy {
     pub fn allows(&self, question: &Question<'_>, matcher: &dyn PermissionMatcher) -> bool {
         match self {
             Policy::AllowAll => true,
-            Policy::Permission => {
-                let required = format!("{}.{}", question.schema, question.action.as_str());
-                matcher.matches(&question.caller.permissions, &[required])
-            }
+            // An operation of the namespace that reads keeps the types the
+            // caller may read, so anyone may call it; one that writes needs
+            // <behavior>.<operation>, as the engine's permission policy.
+            Policy::Permission => match question.behavior {
+                Some(_) if question.action == Action::Read => true,
+                Some(behavior) => {
+                    let required = format!("{behavior}.{}", question.operation.unwrap_or_default());
+                    matcher.matches(&question.caller.permissions, &[required])
+                }
+                None => {
+                    let required = format!("{}.{}", question.schema, question.action.as_str());
+                    matcher.matches(&question.caller.permissions, &[required])
+                }
+            },
             Policy::Rules(rules) => rules
                 .iter()
                 .find(|rule| rule.matches(question))
@@ -598,6 +639,28 @@ impl Handler<'_> {
                 action,
                 schema,
                 operation,
+                behavior: None,
+            },
+            self.core().matcher(),
+        )
+    }
+
+    /// Asks the policy about an operation of the namespace as a whole (D77's
+    /// primitive 3): its behavior and name, `read` or `write`.
+    pub(crate) fn ask_behavior(
+        &self,
+        caller: &Caller,
+        action: Action,
+        behavior: &str,
+        operation: &str,
+    ) -> Result<(), Refusal> {
+        self.policy().require(
+            &Question {
+                caller,
+                action,
+                schema: "",
+                operation: Some(operation),
+                behavior: Some(behavior),
             },
             self.core().matcher(),
         )
@@ -615,6 +678,7 @@ impl Handler<'_> {
             | Request::Operation { .. }
             | Request::TableOperation { .. }
             | Request::Signal { .. }
+            | Request::NamespaceOperation { .. }
             | Request::Types
             | Request::Tools => (None, ""),
             Request::Publish { type_name, .. } => (Some(Action::Publish), type_name.as_str()),
@@ -698,6 +762,7 @@ mod tests {
                 action,
                 schema,
                 operation: None,
+                behavior: None,
             },
             &DottedPermissions,
         )
@@ -782,6 +847,7 @@ mod tests {
             action: Action::Write,
             schema: "Order",
             operation: Some("transition"),
+            behavior: None,
         }
         .refusal();
         assert_eq!(

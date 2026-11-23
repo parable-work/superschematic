@@ -78,6 +78,7 @@
 mod checks;
 pub mod drafts;
 pub mod follows;
+mod inbox;
 mod messages;
 mod params;
 mod reads;
@@ -145,9 +146,8 @@ pub const DEFAULT_MAX_DRAFTS: i64 = 5;
 /// with why: the engine's alone until the core runs what they need. The
 /// build leaves them out of a table's operations too
 /// (`registry.TableLeavesOut`).
-pub const LEFT_OUT_OPERATIONS: [(&str, &str); 5] = [
+pub const LEFT_OUT_OPERATIONS: [(&str, &str); 4] = [
     ("moveAnchor", ANCHORS),
-    ("inbox", NAMESPACE_WIDE),
     ("searchMessages", NAMESPACE_WIDE),
     ("claimDeliveries", NAMESPACE_WIDE),
     ("settleDeliveries", NAMESPACE_WIDE),
@@ -157,8 +157,8 @@ pub const LEFT_OUT_OPERATIONS: [(&str, &str); 5] = [
 /// why: none since streamed replies and read state.
 pub const LEFT_OUT_FIELDS: [(&str, &str); 0] = [];
 
-/// Why the inbox, the claims of deliveries and the search wait.
-pub const NAMESPACE_WIDE: &str = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)";
+/// Why the claims of deliveries and the search wait.
+pub const NAMESPACE_WIDE: &str = "claiming and settling deliveries (claimDeliveries and settleDeliveries) and searchMessages run across a namespace, as the inbox does, and each waits for its port onto the core's operations of the namespace (D77's primitive 3)";
 /// Why moving a code block's anchor waits.
 pub const ANCHORS: &str = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)";
 
@@ -358,6 +358,29 @@ impl Behavior for Comments {
             reads::LIST_REACTIONS => reads::list_reactions(cx, params),
             reads::LIST_PINNED => reads::list_pinned(cx, params),
             _ => Err(cx.defect(format!("{name} is not an operation of Comments"))),
+        }
+    }
+
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        match operation {
+            inbox::INBOX => inbox::params_issues(params),
+            _ => Vec::new(),
+        }
+    }
+
+    // The inbox, across every type that composes Comments and the caller
+    // may read (D77's primitive 3).
+    fn namespace(
+        &self,
+        cx: &superschematic_rules::NamespaceCx<'_>,
+        name: &str,
+        params: &Value,
+    ) -> Hook<Value> {
+        match name {
+            inbox::INBOX => inbox::inbox(cx, params),
+            _ => Err(cx.defect(format!(
+                "{name} is not an operation of Comments' namespace it runs"
+            ))),
         }
     }
 

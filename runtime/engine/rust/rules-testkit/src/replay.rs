@@ -3653,13 +3653,16 @@ fn uses_of(spec: &TypeSpec) -> Value {
 
 // declared summarizes a core declaration as this replayer compares one:
 // its name, its fields, its operations and whether each writes, and its
-// veto codes, each list sorted.
+// veto codes, each list sorted. An operation of the namespace (D77's
+// primitive 3) is left out, as the engine's summary of a schema's
+// behaviors leaves it out.
 fn declared(declaration: &Declaration) -> Value {
     let mut fields = declaration.fields.clone();
     fields.sort();
     let mut operations: Vec<(String, bool)> = declaration
         .operations
         .iter()
+        .filter(|operation| !operation.namespace)
         .map(|operation| (operation.name.clone(), operation.writes))
         .collect();
     operations.sort();
