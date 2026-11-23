@@ -263,7 +263,13 @@ path for when the store is unavailable.
   whose tools include `define_schema` and `publish_schema`. A request's
   caller is the `X-Superschematic-Subject` header, or `--as`, and
   `--policy` takes the engine's access policy (`"permission"` or
-  `{"rules": [...]}`).
+  `{"rules": [...]}`). In a TypeScript server written by hand, mount it
+  with `@superschematic/rules-handler` (`runtime/rules-handler/typescript`,
+  the handler built for WebAssembly): `openDev('dev.db')` from its
+  `./sqlite` entry over the same tables on bun:sqlite, then
+  `dev.request(caller, {kind: 'create', type, data})` or
+  `Bun.serve({fetch: request => dev.http(request)})`, and call
+  `dev.runDue()` on a timer so deadlines fall due.
 - **Schemas that change while the app runs, rows that matter?** Runtime
   mode (D117, the Rust crate `superschematic-rules-runtime`) serves the
   same handler over each type's own table, the table a build writes, in a

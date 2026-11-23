@@ -25,8 +25,8 @@ it for volume either.
 ## What is built
 
 Development mode is two Rust crates in the engine's Cargo workspace,
-`runtime/engine/rust`. Nothing is published yet, so a server depends on
-them by path from a checkout.
+`runtime/engine/rust`, and a TypeScript library over the first. Nothing is
+published yet, so a server depends on them by path from a checkout.
 
 - `superschematic-rules-handler` is the request handler. It is pure: a
   request and its caller go in, and the reads it needs, a response and the
@@ -39,7 +39,12 @@ them by path from a checkout.
   handler's routes over HTTP, and its `superschematic-dev` binary is a
   server you run.
 
-The library in each language and the prebuilt image are later steps.
+- `@superschematic/rules-handler` (`runtime/rules-handler/typescript`) is
+  the request handler built for WebAssembly, with the host loop, the same
+  store over SQLite, the routes and the event stream in TypeScript. See
+  [From TypeScript](#from-typescript).
+
+The libraries in Go and Python and the prebuilt image are later steps.
 
 ```rust
 use serde_json::json;
@@ -219,6 +224,73 @@ The router has no transport under it
 (`superschematic_rules_handler::http`): `route` reads a method, a path, a
 query, headers and a body as a request, and `respond` writes the answer.
 `Dev::http` runs both in one call.
+
+## From TypeScript
+
+`@superschematic/rules-handler` mounts the handler in a TypeScript server
+you write by hand. It is the Rust handler built for WebAssembly, behind a
+JSON ABI that imports nothing (`runtime/engine/rust/rules-handler-wasm`).
+The module reads no clock and draws no random number: the library gives
+each request its time and a fresh UUID. Build it from a checkout, in
+`runtime/rules-handler/typescript`, with `bun install && bun run build`,
+which needs cargo and the `wasm32-unknown-unknown` target.
+
+```ts
+import { devCallers } from '@superschematic/rules-handler';
+import { openDev } from '@superschematic/rules-handler/sqlite';
+
+const dev = await openDev('dev.db', {                // or ':memory:'
+  authenticate: devCallers({ subject: 'developer' }),
+});
+const me = { subject: 'alice', permissions: ['orders'] };
+await dev.request(me, { kind: 'define', document: order });
+await dev.request(me, { kind: 'publish', type: 'Order' });
+const row = await dev.request(me, { kind: 'create', type: 'Order', data: { title: 'Desk' } });
+// row is { id: '...', title: 'Desk', status: 'draft', statusEnteredAt: '...', _version: 1 }
+
+Bun.serve({ fetch: request => dev.http(request) });
+setInterval(() => dev.runDue(), 1000);
+```
+
+- `dev.request(caller, request)` runs one request. A request is the
+  handler's, with the type as `type` and a use as `use`: `{ kind: 'list',
+  type: 'Order', filter, sort, limit }`. Its answer is typed by its kind.
+  A refusal rejects with a `RefusalError`, whose `refusal` carries the
+  code, the status, the class, the message and the details.
+- `dev.http(request)` serves the routes above over the Fetch API's
+  `Request` and `Response`. The event stream is a stream of server-sent
+  events. `prefix` mounts the routes under a path.
+- `authenticate` reads a request's caller. `devCallers()` reads the
+  `X-Superschematic-Subject` and `X-Superschematic-Permissions` headers,
+  with an optional caller for a request that names none. Without a caller
+  a request is `401`.
+- The change queue runs after each request. Deadlines fall due on the
+  clock, so call `dev.runDue()` on a timer, or pass `drain: 'whenAsked'`
+  and call it yourself.
+- `policy` takes the access policy above, in the same JSON.
+- `dev.tools(caller)` and `dev.callTool(caller, name, args)` are the MCP
+  tools. The MCP endpoint needs a transport: pass `mcp` with a `serve`
+  that answers a request over the caller's tools, such as `serveMcp` of
+  `@superschematic/http-runtime/mcp`. Without one, the endpoint is `404`.
+
+The store keeps the tables `superschematic-rules-dev` keeps, so a file
+either host wrote, the other opens. `@superschematic/rules-handler/sqlite`
+opens it on `bun:sqlite`. The package's entry imports nothing and runs in
+Bun, Node, Workers and a browser: `new SqliteStore(connection, layout)`
+takes any synchronous SQLite connection whose statements bind positional
+parameters, such as `node:sqlite`'s `DatabaseSync`, and `new Dev(handler,
+store)` serves it. `serve` and `runDue` are the host loop alone, over a
+store of your own.
+
+A read carries a column's JSON text into the handler as it is, so a number
+wider than a double reaches it unrounded. A write's values come back
+through `JSON.parse` unless you pass a `codec` that keeps them.
+
+`runtime/rules-handler/typescript/examples/serve.ts` is a server on
+`Bun.serve`. The package's tests replay every rules transcript through the
+library, run `superschematic-rules-dev`'s store session to the same
+answers, and read SQLite files across the library and `superschematic-dev`
+both ways.
 
 ## The access policy
 
