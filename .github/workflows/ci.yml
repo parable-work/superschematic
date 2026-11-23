@@ -875,6 +875,17 @@ jobs:
           bun run typecheck
           bun run test
 
+      - name: runtime/rules-handler/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        # Development mode's handler built for wasm32 (D117): every rules
+        # transcript and rules-dev's store session replayed over bun:sqlite,
+        # the routes and the event stream, and SQLite files read across this
+        # host and superschematic-dev, which the tests build.
+        working-directory: runtime/rules-handler/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
         env:
