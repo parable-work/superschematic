@@ -38,7 +38,6 @@ published yet, so a server depends on them by path from a checkout.
   (`Dev::postgres(url, schema)`). With its `server` feature it serves the
   handler's routes over HTTP, and its `superschematic-dev` binary is a
   server you run.
-
 - `@superschematic/rules-handler` (`runtime/rules-handler/typescript`) is
   the request handler built for WebAssembly, with the host loop, the same
   store over SQLite, the routes and the event stream in TypeScript. See
