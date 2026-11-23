@@ -1295,26 +1295,37 @@ own table, laid out by `behaviorlayout.RuntimeOf`, which the plan request
 returns with `layout: true` and the database records beside its model in
 `superschematic_runtime`. A publish plans from the recorded model through
 `migrate plan --request`, refuses a plan from another model and a hazard
-nobody allowed, and applies expand and contract through the Rust runner on
-SQLite and `superschematic-migrate apply --plan -` on Postgres; every
-server reads the new layout once the model's hash moves, and answers
-`busy` while a plan is in progress. The plan is a route and a tool
+nobody allowed, and applies expand and contract through a runner, which
+writes the record and the servers' grants in the transaction that
+finishes the plan (`apply --record`, a job's `record` and
+`privileges.readState`). The runner is in process, or a job: the plan,
+record and job documents go to a store the job reads, and the publish
+polls the recorded model, holding no lock, until it lands, fails with the
+runner's error or times out (`JobRunner`; gcp's `RunRuntimeJob` uploads
+them to the state bucket and runs the migration job, proved on the fake
+Cloud). Every server reads the new layout once the model's hash moves,
+and answers `busy` while a plan is in progress. A list's filters, sorts
+and pages, unique holders and a delete's cascade run in SQL
+(`Reading::Queries`), answering as development mode does; soft deletes
+keep the live rows alone. A server role with D46's grants serves what the
+migrator publishes. The plan is a route and a tool
 (`docs/src/content/docs/guides/runtime-mode.md`). A publish's tables equal
 a build's. Left:
 
-- A platform whose runner is a job: the plan delivered to the job (through
-  the state bucket, as D46's job document is), a wait that polls the
-  recorded model rather than holding a lock across machines, the record
-  written in the transaction of the plan's last step (an `apply --record`),
-  and the job's grants extended to the new tables.
-- The handler's list filters, sorts, unique checks and relation checks in
-  SQL. Runtime mode reads every row of a type.
-- Soft deletes (the layout's `live`), the `createdBy` stamp, and the access
-  policy, event stream, MCP and HTTP routes development mode serves.
-- The server roles' grants on Postgres: locally one role owns everything.
-- CI: the scenarios need `bin/superschematic` and `bin/superschematic-migrate`,
-  and pass with a message without them, which the engine-rust job builds
-  neither of.
+- A runtime environment's server on gcp that publishes through the
+  migration job: no command or extension hook calls `RunRuntimeJob`, and
+  Rust has no GCS or Cloud Run store and launch. A live run then checks the
+  server account's permissions (the runtime prefix of the bucket,
+  `run.jobs.runWithOverrides` on the migration job, `logging.viewer`), the
+  grants inside the plan's last transaction on Cloud SQL, the job's cold
+  start against the publish's timeout, failures reported from real
+  executions, and two servers publishing at once.
+- The behaviors' own reads (a linked row, a holding, a read across a
+  table) in SQL. They read every row of a type.
+- The `createdBy` and `deletedBy` stamps, and unique holders a partial
+  index sees, on a soft-deletable table.
+- The access policy, event stream, MCP and HTTP routes development mode
+  serves.
 
 ### Moving between modes
 
