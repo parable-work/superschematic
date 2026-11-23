@@ -692,18 +692,24 @@ Reactions rule on `Revisions.pendingProposals`, which the build refuses;
 and an update command that changes nothing, which still writes and moves
 the version, as the engine's did not.
 
-What Comments left: streamed replies (`begin`, `appendDraft`, `finish`,
-`interrupt`, `composing`), which need signals; read state, the inbox and
-deliveries (`markRead`, `follow`, `unread`, `readUpTo`), which need
-namespace operations; `searchMessages`, attachment blocks and
-`moveAnchor`, which need no new primitive; `via` and `for` on a message,
-which need the calling service and the subject acted for on the core's
-caller; events for a beside write, which no change queue hears; reads of
-a conversation by page, where every operation reads its sub-tables
-whole; a beside write that races its row's delete, which fails on the
-foreign key as a database error rather than `not_found`; and the
-declaration's descriptions, which still describe the engine's features.
-`examples/engine-notes` waits for streamed replies and read state. The core's caller now carries `actingFor`, so a message's `for` can be recorded.
+What Comments left: claiming and settling deliveries (`claimDeliveries`,
+`settleDeliveries`) and their retention's prune, which are recorded and
+not claimed; `searchMessages`, attachment blocks and `moveAnchor`, which
+need no new primitive (the tools still list `moveAnchor`, which the core
+refuses); `via` on a message, which needs the calling service on the
+core's caller; events for a beside write; reads of a conversation by
+page; the testkit's mapping of `behaviors.invoke`, without which the
+inbox's steps after a claim stay skipped, and transcripts that record
+signals; streamed replies in runtime mode, whose layout gives a Comments
+table no deadline queue (`registry.TableArmsDeadlines`), so a `begin`
+fails at its apply; signals across processes (development mode's hub is
+one process's, and TypeScript's host publishes none yet) and their
+`perSecond` limit; and the declaration's descriptions, which still
+describe the engine's features. Streamed replies, read state, the inbox
+(an operation of the namespace) and `for` are built, on the core's
+signals (`Cx::signal`, `Action::Signal`, never stored) and operations of
+the namespace (`Action::NamespaceOperation`), and `examples/engine-notes`
+runs on development mode.
 
 What Derived and Provenance left: a deriver deployable over a table that
 implements Derived (`internal/stack` takes a `@deriver` over such a table,
@@ -1077,9 +1083,10 @@ context is written out.
 - `Queue` folds into `@queue`: its claim a declared read and Lease's
   `acquire`. The recordings that compose Presence or Budget beside Queue
   wait for it, as does `checkReserve`'s `hears` (L 14883, 15070, 17235).
-- An operation scoped to a namespace runs no command on the core, and
-  `@behaviorOperations` warns and leaves it out: Comments' read state,
-  inbox and deliveries wait for it (L 17127, 17262).
+- An operation of the namespace runs on the core now
+  (`Action::NamespaceOperation`); a build's table still leaves Comments'
+  streamed replies and read state out, and `@behaviorOperations` warns
+  (L 17127, 17262).
 - Step 5's question: whether Constants' constancy and `oneWay`, and
   StateRules' required and frozen fields, become declarative rules.
   Constants still requires at least one field (L 15306, 17044, 17103).
@@ -1260,8 +1267,8 @@ its policy. Left:
   and in a browser, run, and the Go and Python libraries over the C ABI;
   and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
-  engine-notes waits for Comments' streamed replies and read state, and
-  engine-jobs for the choice on Blueprint (D103's status).
+  engine-notes runs there (its differences are in its README), and
+  engine-jobs waits for the choice on Blueprint (D103's status).
 - The policy asked of a behavior's reads of other types (Dependencies'
   blockers, Revisions' evidence, Rollups' links), as the engine asked
   them; the runner's requests made by a system principal the policy sees.
