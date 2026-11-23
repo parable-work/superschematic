@@ -15,7 +15,11 @@
 //! and its `data:` the event as JSON; then, once it has caught up, a
 //! `ready` event whose id and data carry the cursor; then, while it waits,
 //! a comment each heartbeat, so a proxy keeps the connection open and a
-//! dead client is found.
+//! dead client is found. A stream opened with `signals=1` (D77's primitive
+//! 2) also sends each signal its filters keep, on a type its caller may
+//! read, once it has caught up, as `event: signal` with no `id:`
+//! ([`crate::signals`]); the host holds them for it from the moment it
+//! opens, so a reader that opens the stream before it reads misses none.
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{Caller, Refusal};
@@ -50,6 +54,9 @@ pub struct EventsQuery {
     /// Whether the client asked for server-sent events (`Accept:
     /// text/event-stream`).
     pub stream: bool,
+    /// Whether a stream sends signals beside the events (`signals=1`,
+    /// D77's primitive 2).
+    pub signals: bool,
 }
 
 fn cursor_of(text: &str) -> Option<i64> {
@@ -87,6 +94,7 @@ impl EventsQuery {
             kinds: Vec::new(),
             limit: DEFAULT_PAGE,
             stream: wants_stream(request.header("accept")),
+            signals: false,
         };
         let list = |value: &str| -> Vec<String> {
             value
@@ -106,6 +114,13 @@ impl EventsQuery {
                                 "after is an event cursor, a non-negative integer, or head",
                             )?),
                         }
+                }
+                "signals" => {
+                    read.signals = match value.as_str() {
+                        "1" | "true" => true,
+                        "0" | "false" => false,
+                        _ => return Err("signals is 1 or 0".to_owned()),
+                    }
                 }
                 "schema" => read.schema = Some(value.clone()),
                 "instanceId" => read.instance_id = Some(value.clone()),

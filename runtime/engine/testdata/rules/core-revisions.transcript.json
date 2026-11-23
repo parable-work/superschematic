@@ -5497,6 +5497,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1767225600004
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5511,6 +5523,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1767225600004,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5580,6 +5601,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1767225600004
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5594,6 +5627,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1767225600004,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5664,6 +5706,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1767225600004
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5678,6 +5732,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1767225600004,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5766,6 +5829,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1767225600004
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5780,6 +5855,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1767225600004,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5889,6 +5973,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1767225600004
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5903,6 +5999,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1767225600004,
+                      "upTo": 1
                     }
                   }
                 ]

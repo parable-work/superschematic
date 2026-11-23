@@ -182,8 +182,8 @@ func TestCommentsConfigsAreHeldToTheCore(t *testing.T) {
 		config map[string]any
 		want   string
 	}{
-		{"a streamed reply's timeout", map[string]any{"composeTimeoutMs": 60000}, "type Ticket: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core"},
-		{"a delivery's permission", map[string]any{"deliverPermission": "tickets.notify"}, "type Ticket: behavior Comments config: deliverPermission: read state (markRead, follow, the unread field and a listing's readUpTo), the inbox and deliveries each waits for namespace operations on the core"},
+		{"a streamed reply's timeout", map[string]any{"composeTimeoutMs": 60000}, "type Ticket: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals"},
+		{"a delivery's permission", map[string]any{"deliverPermission": "tickets.notify"}, "type Ticket: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace"},
 		{"an anchor's permission", map[string]any{"anchorPermission": "tickets.anchor"}, "type Ticket: behavior Comments config: anchorPermission: moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core"},
 		{"attachments", map[string]any{"attachments": map[string]any{"maxBytes": 1000}}, "type Ticket: behavior Comments config: attachments: an attachment block waits for attachments on the core"},
 		{"an attachment block's kind", map[string]any{"blocks": []any{"ref", "attachment"}}, "type Ticket: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core"},

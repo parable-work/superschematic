@@ -4970,6 +4970,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -4984,6 +4996,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5044,7 +5065,8 @@
                 }
               ],
               "before": null,
-              "after": null
+              "after": null,
+              "readUpTo": 1
             },
             "row": {
               "own": {
@@ -5067,6 +5089,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5081,6 +5115,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5143,6 +5186,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5157,6 +5212,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5216,6 +5280,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5230,6 +5306,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5309,6 +5394,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5338,6 +5445,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -5403,6 +5526,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5432,6 +5577,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -22830,6 +22991,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -22844,6 +23017,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -22921,6 +23103,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -22935,6 +23129,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23017,6 +23220,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23031,6 +23246,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23101,6 +23325,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23115,6 +23351,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23174,6 +23419,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23188,6 +23445,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23253,7 +23519,8 @@
                 }
               ],
               "before": null,
-              "after": null
+              "after": null,
+              "readUpTo": 1
             },
             "row": {
               "own": {
@@ -23276,6 +23543,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23290,6 +23569,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23370,6 +23658,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23384,6 +23684,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -23464,6 +23773,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -23478,6 +23799,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -25128,6 +25458,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25142,6 +25484,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -25221,6 +25572,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25250,6 +25623,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25328,7 +25717,8 @@
                 }
               ],
               "before": null,
-              "after": null
+              "after": null,
+              "readUpTo": 2
             },
             "row": {
               "own": {
@@ -25351,6 +25741,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25380,6 +25792,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25441,6 +25869,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25470,6 +25920,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25538,6 +26004,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25567,6 +26055,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25629,6 +26133,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25658,6 +26184,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25765,6 +26307,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25794,6 +26358,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]
@@ -25845,6 +26425,28 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1060000
+                    }
+                  },
+                  {
+                    "key": "0000000002.wren",
+                    "values": {
+                      "thread": 2,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1060000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -25874,6 +26476,22 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "wren",
+                    "values": {
+                      "readAt": 1060000,
+                      "upTo": 2
                     }
                   }
                 ]

@@ -14,8 +14,11 @@
 #
 # The test (test/notes.test.ts) serves the example on a free port with
 # @hono/node-server, under each runtime, and drives it over HTTP, the event
-# stream and MCP. The CI typescript job runs this script after the engine's
-# own tests.
+# stream and MCP. test/notes.dev.test.ts serves the same schema on
+# development mode (D117), the superschematic-dev server this script builds
+# with cargo unless SUPERSCHEMATIC_DEV names one, and drives it the same
+# way, a streamed reply and read state among it. The CI typescript job runs
+# this script after the engine's own tests.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +32,11 @@ done
 if ! compgen -G "$REPO_ROOT/runtime/engine/typescript/native/superschematic-engine.*.node" >/dev/null; then
   echo "==> build the engine's addon"
   "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null
+fi
+if [[ -z "${SUPERSCHEMATIC_DEV:-}" ]]; then
+  echo "==> build development mode's server (superschematic-dev)"
+  cargo build --quiet --manifest-path "$REPO_ROOT/runtime/engine/rust/Cargo.toml" \
+    -p superschematic-rules-dev --features server --bin superschematic-dev
 fi
 
 echo "==> link them into the example"

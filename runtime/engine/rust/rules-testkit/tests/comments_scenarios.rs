@@ -9,22 +9,26 @@
 
 use superschematic_rules_testkit::{hand_written_path, ported, replay_path, scenario_path};
 
-/// The steps of `core-comments.json` the replayer maps and compares: 276 of
+/// The steps of `core-comments.json` the replayer maps and compares: 411 of
 /// its 502, in batch 1's scenarios whole (posts, retries, blocks, edits,
 /// deletes and purges, reactions, pins, resolves, listMessages' anchors,
 /// the beside writes, a delete of the row that keeps its conversation's
-/// numbers, Comments joining a table with rows) and the start of the
-/// others. The 226 it skips: what a table's Comments leaves out
+/// numbers, Comments joining a table with rows), batch 2's streamed replies
+/// whole but their reads of the event log (begin, appendDraft, finish,
+/// interrupt, maxDrafts, the idle deadline the runner runs), batch 3's read
+/// state (markRead, follow, unread and readUpTo), and batch 4's messages
+/// written for someone, up to the first operation of the namespace. The 91
+/// it skips: what a table's Comments leaves out
 /// (`superschematic_rules_behaviors::comments::LEFT_OUT_OPERATIONS`): the
-/// scenarios of streamed replies, read state, deliveries and the inbox, and
-/// code anchors with attachments, each from its first begin or its define
-/// of a config member a table's Comments waits for; the two scenarios whose
+/// inbox and the claims and settles of deliveries, which halt their
+/// scenarios, and code anchors with attachments, from the define of a
+/// config member a table's Comments waits for; the two scenarios whose
 /// access policy is not allowAll, which the reference host does not apply,
 /// since a table's API authorizes (search across a namespace among them);
 /// the reads of the event log that hold a write beside the row, which the
 /// engine logged with no sequence and no log of a table's rows holds; and
 /// the reads outside the reference host's surface (events.head).
-const FLOOR: usize = 276;
+const FLOOR: usize = 411;
 
 /// The steps of `core-comments-beside.json` the replayer maps and compares:
 /// all of its two scenarios', the `open` steps among them, which count and

@@ -16,6 +16,9 @@ pub(super) const MAX_ACTION_DATA: usize = 8192;
 pub(super) const MAX_EDITS: i64 = 500;
 /// The most distinct emoji a message holds reactions with.
 pub(super) const MAX_EMOJI: usize = 20;
+/// The longest text an appendDraft adds, in bytes written as a JSON string,
+/// its quotes included, so its draft signal fits a signal's 4096 bytes.
+pub(super) const MAX_APPEND_BYTES: usize = 4000;
 
 /// A veto of one of Comments' operations, with its code and details.
 pub(super) fn veto(
@@ -129,6 +132,46 @@ pub(super) fn not_a_thread(view: &View<'_, CommentsConfig>, reply: &Message) -> 
         ),
         json!({ "message": reply.id, "thread": thread }),
     )
+}
+
+/// `composing` for a composing message an operation names, or a post's or
+/// a begin's thread or quotes.
+pub(super) fn composing(view: &View<'_, CommentsConfig>, id: i64) -> Stop {
+    veto(
+        view,
+        "composing",
+        format!(
+            "message {id} of {} is composing: it is being written, and stands once finished",
+            row(view)
+        ),
+        json!({ "message": id }),
+    )
+}
+
+/// `not_composing` for an appendDraft, a finish or an interrupt of a
+/// message that is not composing.
+pub(super) fn not_composing(view: &View<'_, CommentsConfig>, message: &Message) -> Stop {
+    veto(
+        view,
+        "not_composing",
+        format!(
+            "message {} of {} is {}, not composing",
+            message.id,
+            row(view),
+            message.state
+        ),
+        json!({ "message": message.id, "state": message.state }),
+    )
+}
+
+/// The caller's for: the subject it acts for, when it acts for one other
+/// than itself (D77's primitive 4).
+pub(super) fn for_of<'a>(view: &View<'a, CommentsConfig>) -> Option<&'a str> {
+    let caller = view.caller();
+    caller
+        .acting_for
+        .as_deref()
+        .filter(|subject| *subject != caller.subject)
 }
 
 /// `not_author` for a caller who is not the message's author.

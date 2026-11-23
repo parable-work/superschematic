@@ -1244,6 +1244,24 @@ async fn answer_of<S: Store>(
                 read_rows(store, table, equal, tables, after.as_deref(), *limit).await?,
             ))
         }
+        // The layout's types that compose the behavior, in name order: an
+        // operation of the namespace runs over them (D77's primitive 3).
+        // The layout is one database's, and the table's API authorizes, so
+        // the adapter leaves none out (D103).
+        ReadRequest::Composing { behavior } => Ok(Answer::Specs(
+            layout
+                .types
+                .values()
+                .filter(|table| {
+                    table
+                        .spec
+                        .uses
+                        .iter()
+                        .any(|entry| entry.behavior == *behavior)
+                })
+                .map(|table| table.spec.clone())
+                .collect(),
+        )),
         other => Err(internal(format!(
             "the adapter answers no read of this kind: {}",
             json_of(other)

@@ -181,17 +181,22 @@
         },
         {
           "name": "author",
-          "description": "The subject of the caller who posted it.",
+          "description": "The subject of the caller who posted or began it.",
+          "type": "string"
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.",
           "type": "string"
         },
         {
           "name": "state",
-          "description": "posted, or deleted once deleted.",
+          "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "type": "string"
         },
         {
           "name": "body",
-          "description": "The text, Markdown; empty once deleted.",
+          "description": "The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.",
           "type": "string"
         },
         {
@@ -245,8 +250,181 @@
           "type": "string"
         },
         {
+          "name": "resolvedFor",
+          "description": "The subject its resolver acted for, when the caller acted for someone (D77).",
+          "type": "string"
+        },
+        {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "draftLength",
+          "description": "While composing, the draft's length in code points; absent otherwise.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "lastAppendAt",
+          "description": "While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it.",
+          "type": "Temporal.DateTime"
+        }
+      ]
+    },
+    {
+      "name": "drafts",
+      "description": "On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.",
+      "key": "chunk",
+      "fields": [
+        {
+          "name": "chunk",
+          "description": "The message's id and the chunk's offset, each in ten digits zero-padded, joined by a dot, so the key's order is theirs.",
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "description": "The id of the composing message.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "chunkOffset",
+          "description": "The draft's length in code points before the chunk: the offset of its draft signal.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "text",
+          "description": "The chunk's text, never empty.",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "reads",
+      "description": "On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.",
+      "key": "subject",
+      "fields": [
+        {
+          "name": "subject",
+          "description": "The reader's subject.",
+          "type": "string"
+        },
+        {
+          "name": "upTo",
+          "description": "The conversation marker: a stand.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "readAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "type": "Temporal.DateTime"
+        }
+      ]
+    },
+    {
+      "name": "follows",
+      "description": "On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:<name>; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.",
+      "key": "follow",
+      "fields": [
+        {
+          "name": "follow",
+          "description": "The thread's id in ten digits zero-padded, a dot, and the subject.",
+          "type": "string"
+        },
+        {
+          "name": "thread",
+          "description": "The id of the thread's top-level message.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "subject",
+          "description": "The follower's subject.",
+          "type": "string"
+        },
+        {
+          "name": "followed",
+          "description": "Whether the subject follows the thread.",
+          "type": "boolean"
+        },
+        {
+          "name": "readUpTo",
+          "description": "The subject's marker on the thread's replies: a stand.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last changed, in epoch milliseconds.",
+          "type": "Temporal.DateTime"
+        }
+      ]
+    },
+    {
+      "name": "deliveries",
+      "description": "On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.",
+      "key": "delivery",
+      "fields": [
+        {
+          "name": "delivery",
+          "description": "The message's id in ten digits zero-padded, a dot, and the subject.",
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "description": "The id of the message.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "subject",
+          "description": "The subject that should hear of it, as the mention or the follow gave it.",
+          "type": "string"
+        },
+        {
+          "name": "mention",
+          "description": "Whether a reason is the mention.",
+          "type": "boolean"
+        },
+        {
+          "name": "reply",
+          "description": "Whether a reason is the follow of its thread.",
+          "type": "boolean"
+        },
+        {
+          "name": "state",
+          "description": "pending, claimed, failed, sent or dropped.",
+          "type": "string"
+        },
+        {
+          "name": "dueAt",
+          "description": "When it is next due, in epoch milliseconds: at once while pending, the claim's expiry while claimed, the next attempt once failed; absent once sent or dropped.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "token",
+          "description": "The claim's token while claimed.",
+          "type": "string"
+        },
+        {
+          "name": "claimedBy",
+          "description": "The subject of the last claimer.",
+          "type": "string"
+        },
+        {
+          "name": "attempts",
+          "description": "The claims it has had.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "error",
+          "description": "The last failure's, or the reason it was dropped.",
+          "type": "string"
+        },
+        {
+          "name": "createdAt",
+          "description": "When it was made, or returned to pending by an edit, in epoch milliseconds.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "settledAt",
+          "description": "When it was last settled or dropped, in epoch milliseconds.",
           "type": "Temporal.DateTime"
         }
       ]
@@ -292,6 +470,11 @@
           "type": "string"
         },
         {
+          "name": "forSubject",
+          "description": "The subject the editor acted for, when the caller acted for someone (D77).",
+          "type": "string"
+        },
+        {
           "name": "at",
           "description": "When, in epoch milliseconds.",
           "type": "Temporal.DateTime"
@@ -321,6 +504,11 @@
         {
           "name": "subject",
           "description": "The subject of the caller who reacted.",
+          "type": "string"
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject the caller acted for, when it acted for someone (D77).",
           "type": "string"
         },
         {
@@ -359,6 +547,7 @@
       ]
     }
   ],
+  "armsDeadlines": true,
   "operations": [
     {
       "name": "post",

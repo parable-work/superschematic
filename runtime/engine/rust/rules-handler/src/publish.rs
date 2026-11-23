@@ -377,7 +377,7 @@ pub(crate) fn publish(
             "rewritten": rewritten,
             "discarded": discarded,
         })),
-        unit: Unit { writes },
+        unit: Unit::of(writes),
     }))
 }
 

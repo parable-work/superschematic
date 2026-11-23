@@ -1286,9 +1286,6 @@ impl<'r> Run<'r> {
         });
         if ours {
             without_via(expect);
-            if let Some(result) = expect.as_object_mut() {
-                result.remove("readUpTo");
-            }
         }
         Ok(Some(step))
     }
@@ -2109,6 +2106,7 @@ impl<'r> Run<'r> {
             record_of(
                 &engine.host,
                 &engine.creators,
+                cx.caller,
                 type_name,
                 &applied.key,
                 cx.now,
@@ -2431,7 +2429,14 @@ impl<'r> Run<'r> {
             return Done::Skipped("a get without a schema and an id".to_owned());
         };
         let engine = &self.engines[cx.at];
-        let found = record_of(&engine.host, &engine.creators, type_name, key, cx.now);
+        let found = record_of(
+            &engine.host,
+            &engine.creators,
+            cx.caller,
+            type_name,
+            key,
+            cx.now,
+        );
         let predated = self.predated(cx.at, type_name, key);
         self.judge(cx, type_name, 0, Ok(found), move |checks, e, a| {
             compare_record(checks, &without_predated(e, a, &predated), a);
@@ -2520,6 +2525,7 @@ impl<'r> Run<'r> {
                     without_creator(
                         with_views(
                             host,
+                            cx.caller,
                             shape::record(
                                 host.core(),
                                 spec,
@@ -3204,6 +3210,7 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
 fn record_of(
     host: &MemoryHost,
     creators: &BTreeMap<String, Vec<&'static str>>,
+    caller: &Caller,
     type_name: &str,
     key: &str,
     now: i64,
@@ -3213,6 +3220,7 @@ fn record_of(
         (Some(spec), Some(row)) => without_creator(
             with_views(
                 host,
+                caller,
                 shape::record(
                     host.core(),
                     spec,
@@ -3237,8 +3245,15 @@ fn record_of(
 // read of the row runs, the core's Action::Read, merged into each use's
 // behaviors. A read the core refuses adds nothing, and the comparison with
 // the recording names what is missing.
-fn with_views(host: &MemoryHost, mut record: Value, type_name: &str, key: &str, now: i64) -> Value {
-    let Ok(views) = host.read_view(type_name, key, now) else {
+fn with_views(
+    host: &MemoryHost,
+    caller: &Caller,
+    mut record: Value,
+    type_name: &str,
+    key: &str,
+    now: i64,
+) -> Value {
+    let Ok(views) = host.read_view_as(caller, type_name, key, now) else {
         return record;
     };
     let Some(behaviors) = record.get_mut("behaviors").and_then(Value::as_object_mut) else {
@@ -3638,13 +3653,16 @@ fn uses_of(spec: &TypeSpec) -> Value {
 
 // declared summarizes a core declaration as this replayer compares one:
 // its name, its fields, its operations and whether each writes, and its
-// veto codes, each list sorted.
+// veto codes, each list sorted. An operation of the namespace (D77's
+// primitive 3) is left out, as the engine's summary of a schema's
+// behaviors leaves it out.
 fn declared(declaration: &Declaration) -> Value {
     let mut fields = declaration.fields.clone();
     fields.sort();
     let mut operations: Vec<(String, bool)> = declaration
         .operations
         .iter()
+        .filter(|operation| !operation.namespace)
         .map(|operation| (operation.name.clone(), operation.writes))
         .collect();
     operations.sort();

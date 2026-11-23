@@ -57,6 +57,16 @@ pub struct ChangeSet {
     /// use and name replaces an earlier one.
     #[serde(default)]
     pub deadlines: Vec<DeadlineChange>,
+    /// The signals the command sends (D77's primitive 2), in the order it
+    /// sent them: a caller's ([`crate::Action::Signal`]) or an operation's
+    /// ([`crate::Cx::signal`]). They are ephemeral: the host stores none,
+    /// publishes each to the event streams open on its row once the change
+    /// set's transaction commits, stamped with the caller's subject and the
+    /// command's time, and drops them when it rolls back. Delivery is at
+    /// most once and in no order with the events. Absent in JSON when there
+    /// are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<Signal>,
     /// What the call returns: an operation's result, null for the rest.
     #[serde(default)]
     pub result: Value,
@@ -354,6 +364,27 @@ pub struct OutboxEvent {
     pub use_id: String,
     pub payload: Value,
 }
+
+/// A signal a command sends about a row (D77's primitive 2): the row, the
+/// use whose behavior declares it, its name and its data, at most
+/// [`MAX_SIGNAL_DATA_BYTES`] of compact JSON. The host publishes it after the
+/// commit as the engine's stream message: `{ namespace, schema, instanceId,
+/// behavior, name, data, from, at }`, `from` the caller's subject and `at`
+/// the command's time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Signal {
+    pub row: RowRef,
+    pub use_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub data: Value,
+}
+
+/// The most a signal's data may be, in bytes of compact JSON: the engine's
+/// 4 KB, which leaves room for the envelope under a Postgres
+/// notification's limit.
+pub const MAX_SIGNAL_DATA_BYTES: usize = 4096;
 
 /// A deadline of a row a use arms or clears. A deadline is named by its
 /// row, its use and its name; arming one that is armed moves it. The list

@@ -61,7 +61,7 @@ const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-numbering", 104),
     ("core-lease-numbering", 14),
     ("core-revisions", 112),
-    ("core-comments", 238),
+    ("core-comments", 361),
     ("core-comments-beside", 25),
     ("core-derived-provenance", 75),
 ];
@@ -294,7 +294,12 @@ impl<'s, S: Inspect> Scenario<'s, S> {
         }
         let store = self.store(database);
         store.begin().expect("begun");
-        let applied = store.apply(&Unit { writes }).expect("the drop applies");
+        let applied = store
+            .apply(&Unit {
+                signals: Vec::new(),
+                writes,
+            })
+            .expect("the drop applies");
         store.commit().expect("committed");
         assert!(applied, "a drop of a removed use's shared rows moved");
     }
@@ -319,6 +324,7 @@ impl<'s, S: Inspect> Scenario<'s, S> {
             return;
         };
         let unit = Unit {
+            signals: Vec::new(),
             writes: vec![StoreWrite::Update {
                 type_name: type_name.clone(),
                 id: key.clone(),
@@ -352,6 +358,7 @@ impl<'s, S: Inspect> Scenario<'s, S> {
             specs,
             hearing: &hearing,
             own: None,
+            readable: None,
         };
         for _ in 0..8 {
             store.begin()?;
@@ -370,6 +377,7 @@ impl<'s, S: Inspect> Scenario<'s, S> {
                     }
                     Ran::Changed(changed) => {
                         let unit = Unit {
+                            signals: Vec::new(),
                             writes: changed.writes.clone(),
                         };
                         if store.apply(&unit)? {

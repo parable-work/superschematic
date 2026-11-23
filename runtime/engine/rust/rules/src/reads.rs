@@ -132,6 +132,14 @@ pub enum ReadRequest {
         table: String,
         key: String,
     },
+    /// The live versions of the types that compose a behavior and that the
+    /// command's caller may read ([`Answer::Specs`], D77's primitive 3), in
+    /// name order: what an operation of the namespace as a whole runs over.
+    /// The host asks its access policy whether the caller may read each
+    /// type, as the engine's `readable()` did, and leaves out one it may
+    /// not, so a row of a type the caller may not read never reaches the
+    /// operation.
+    Composing { behavior: String },
 }
 
 /// One sub-table of a use, as a read across a table names it (D104): the
@@ -260,6 +268,13 @@ impl ReadRequest {
         }
     }
 
+    /// The types that compose a behavior and that the caller may read.
+    pub fn composing(behavior: impl Into<String>) -> Self {
+        ReadRequest::Composing {
+            behavior: behavior.into(),
+        }
+    }
+
     /// One page of a type's live rows whose own fields hold the values
     /// `equal` gives, each with the sub-tables `tables` names:
     /// [`LINKED_PAGE`] at most, after a key when given (D104).
@@ -385,6 +400,9 @@ pub enum Answer {
     Linked(LinkedRows),
     /// The shared table's row of the key, or `None` when it has none.
     SharedRow(Option<SharedRow>),
+    /// The live versions a [`ReadRequest::Composing`] asks for, in name
+    /// order.
+    Specs(Vec<TypeSpec>),
 }
 
 /// One page of the rows of a type whose own field holds a key, whose use's

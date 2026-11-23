@@ -448,7 +448,7 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		if len(behavior.Tables) > 0 && !slices.Contains(keeping, ref.Name) {
 			keeping = append(keeping, ref.Name)
 		}
-		if behavior.ArmsDeadlines && !slices.Contains(arming, ref.Name) {
+		if registry.TableArmsDeadlines(ref.Name, behavior.ArmsDeadlines) && !slices.Contains(arming, ref.Name) {
 			arming = append(arming, ref.Name)
 		}
 		if len(behavior.Events) > 0 && !slices.Contains(emitting, ref.Name) {

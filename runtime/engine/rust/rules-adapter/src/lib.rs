@@ -151,7 +151,9 @@ pub struct CreateOptions {
 /// What an applied command came to.
 #[derive(Clone, Debug)]
 pub struct Executed {
-    /// The change set applied.
+    /// The change set applied. Its signals (D77's primitive 2) are stored
+    /// nowhere: the caller publishes them to its event streams once its
+    /// transaction commits, and drops them when it rolls back.
     pub changes: ChangeSet,
     /// What the command returns: an operation's result, null for the rest.
     pub result: Value,

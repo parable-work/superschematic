@@ -148,10 +148,22 @@ impl Core {
     /// Runs a command on a type with the answers the host has so far. The
     /// same inputs give the same step: the host adds what a step asks for
     /// and runs again, until the step is done.
+    ///
+    /// An operation of the namespace as a whole
+    /// ([`crate::Action::NamespaceOperation`]) runs on no type: the spec is
+    /// not read, and a host gives any, `TypeSpec::new("")` say.
     pub fn run(&self, spec: &TypeSpec, command: &Command, answers: &Answers) -> Step {
-        let uses = match Run::bind(self, spec) {
-            Ok(uses) => uses,
-            Err(refusal) => return Step::Done(Outcome::Refused(refusal)),
+        let namespace = matches!(
+            command.action,
+            crate::command::Action::NamespaceOperation { .. }
+        );
+        let uses = if namespace {
+            Vec::new()
+        } else {
+            match Run::bind(self, spec) {
+                Ok(uses) => uses,
+                Err(refusal) => return Step::Done(Outcome::Refused(refusal)),
+            }
         };
         let run = Run::new(self, spec, command, answers, &uses);
         let result = run.execute();

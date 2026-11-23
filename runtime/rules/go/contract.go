@@ -129,6 +129,17 @@ const (
 	// gives. It reads rows through the reads across a table and writes them
 	// only through the rows' own operations, and presents no preconditions.
 	ActionTableOperation ActionKind = "tableOperation"
+	// ActionSignal is a caller's signal about a row (D77's primitive 2):
+	// the use whose behavior declares it, its name and its data. The core
+	// holds it to the declaration and the data's size and shape, and writes
+	// nothing; the change set's Signals hold the one sent, which the host
+	// publishes after its commit.
+	ActionSignal ActionKind = "signal"
+	// ActionNamespaceOperation is an operation of the namespace as a whole
+	// (D77's primitive 3), by its behavior and name: it runs on no type and
+	// no row, over the types that compose the behavior and that the caller
+	// may read (ReadKindComposing).
+	ActionNamespaceOperation ActionKind = "namespaceOperation"
 )
 
 // Action is what a command does. MarshalJSON writes exactly its kind's
@@ -164,6 +175,12 @@ type Action struct {
 	// Change is a change command's write of the row Key names:
 	// {"kind","key","change"}.
 	Change *RowChange
+	// Data is a signal's data: {"kind","key","useId","name","data"}, data
+	// {} when nil (D77's primitive 2).
+	Data json.RawMessage
+	// Behavior names an operation of the namespace's behavior:
+	// {"kind","behavior","operation","params"} (D77's primitive 3).
+	Behavior string
 }
 
 // RowChange is a write of a row as the core takes it (D103): what it did
@@ -201,9 +218,9 @@ func (i RowImage) MarshalJSON() ([]byte, error) {
 // operation's, a deadline's, else the kind (change for a change command).
 func (a Action) name() string {
 	switch a.Kind {
-	case ActionOperation, ActionTableOperation:
+	case ActionOperation, ActionTableOperation, ActionNamespaceOperation:
 		return a.Operation
-	case ActionDeadline:
+	case ActionDeadline, ActionSignal:
 		return a.Name
 	default:
 		return string(a.Kind)
@@ -296,6 +313,21 @@ func (a Action) MarshalJSON() ([]byte, error) {
 			Key    string     `json:"key"`
 			Change *RowChange `json:"change"`
 		}{a.Kind, a.Key, a.Change})
+	case ActionSignal:
+		return json.Marshal(struct {
+			Kind  ActionKind      `json:"kind"`
+			Key   string          `json:"key"`
+			UseID string          `json:"useId"`
+			Name  string          `json:"name"`
+			Data  json.RawMessage `json:"data"`
+		}{a.Kind, a.Key, a.UseID, a.Name, rawOr(a.Data, emptyObject)})
+	case ActionNamespaceOperation:
+		return json.Marshal(struct {
+			Kind      ActionKind      `json:"kind"`
+			Behavior  string          `json:"behavior"`
+			Operation string          `json:"operation"`
+			Params    json.RawMessage `json:"params"`
+		}{a.Kind, a.Behavior, a.Operation, rawOr(a.Params, emptyObject)})
 	default:
 		return nil, fmt.Errorf("rules: no action of kind %q", a.Kind)
 	}
@@ -317,6 +349,8 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		At        int64                      `json:"at"`
 		Payload   json.RawMessage            `json:"payload"`
 		Change    *RowChange                 `json:"change"`
+		Data      json.RawMessage            `json:"data"`
+		Behavior  string                     `json:"behavior"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -346,6 +380,10 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("rules: a change of %s holds no write", wire.Key)
 		}
 		out.Key, out.Change = wire.Key, wire.Change
+	case ActionSignal:
+		out.Key, out.UseID, out.Name, out.Data = wire.Key, wire.UseID, wire.Name, wire.Data
+	case ActionNamespaceOperation:
+		out.Behavior, out.Operation, out.Params = wire.Behavior, wire.Operation, wire.Params
 	default:
 		return fmt.Errorf("rules: no action of kind %q", wire.Kind)
 	}
@@ -423,6 +461,12 @@ const (
 	// step 4), UseID, Table and Key naming it: what a rule over the state a
 	// behavior keeps for the table as a whole reads (Numbering's counts).
 	ReadKindSharedRow ReadKind = "sharedRow"
+	// ReadKindComposing is the live versions of the types that compose a
+	// behavior and that the command's caller may read, in name order (D77's
+	// primitive 3): what an operation of the namespace runs over. The
+	// adapter answers its layout's types that compose it, since a table's
+	// API authorizes.
+	ReadKindComposing ReadKind = "composing"
 )
 
 // LinkedPage is how many rows a linked read asks for at a time, the core's
@@ -459,6 +503,9 @@ type ReadRequest struct {
 	Tables []TableRef `json:"tables,omitempty"`
 	After  string     `json:"after,omitempty"`
 	Limit  int        `json:"limit,omitempty"`
+	// Behavior is a composing read's behavior (D77's primitive 3); "" for
+	// every other kind.
+	Behavior string `json:"behavior,omitempty"`
 }
 
 // TableRef is one sub-table of a use, as a read across a table names it:
@@ -512,6 +559,11 @@ func (r ReadRequest) MarshalJSON() ([]byte, error) {
 			After  *string                    `json:"after,omitempty"`
 			Limit  int                        `json:"limit"`
 		}{r.Kind, r.Type, r.Equal, r.Tables, after, r.Limit})
+	case ReadKindComposing:
+		return json.Marshal(struct {
+			Kind     ReadKind `json:"kind"`
+			Behavior string   `json:"behavior"`
+		}{r.Kind, r.Behavior})
 	}
 	type plain ReadRequest
 	return json.Marshal(plain(r))
@@ -591,6 +643,9 @@ type Answer struct {
 	// SharedRow is a shared-row read's answer (D103's step 4), nil for a
 	// key the table holds no row of: {"sharedRow": SharedRow|null}.
 	SharedRow *SharedRow
+	// Specs is a composing read's answer (D77's primitive 3), in name
+	// order: {"specs": [TypeSpec]}.
+	Specs []TypeSpec
 }
 
 // MarshalJSON writes the answer as the variant its kind names.
@@ -631,6 +686,14 @@ func (a Answer) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			SharedRow *SharedRow `json:"sharedRow"`
 		}{a.SharedRow})
+	case ReadKindComposing:
+		specs := a.Specs
+		if specs == nil {
+			specs = []TypeSpec{}
+		}
+		return json.Marshal(struct {
+			Specs []TypeSpec `json:"specs"`
+		}{specs})
 	default:
 		return nil, fmt.Errorf("rules: no answer of kind %q", a.Kind)
 	}
@@ -662,6 +725,9 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 			err = json.Unmarshal(value, &out.Linked)
 		case ReadKindSharedRow:
 			err = json.Unmarshal(value, &out.SharedRow)
+		case "specs":
+			out.Kind = ReadKindComposing
+			err = json.Unmarshal(value, &out.Specs)
 		default:
 			err = fmt.Errorf("rules: no answer of kind %q", variant)
 		}
@@ -1038,5 +1104,20 @@ type ChangeSet struct {
 	SharedRows []SharedRowWrite `json:"sharedRows,omitempty"`
 	Events     []OutboxEvent    `json:"events"`
 	Deadlines  []DeadlineChange `json:"deadlines"`
-	Result     json.RawMessage  `json:"result"`
+	// Signals are what the command sends about its rows (D77's primitive
+	// 2): stored nowhere, the caller publishes them to its event streams
+	// once its transaction commits and drops them when it rolls back. Absent
+	// in JSON for none.
+	Signals []Signal        `json:"signals,omitempty"`
+	Result  json.RawMessage `json:"result"`
+}
+
+// Signal is a signal a command sends about a row (D77's primitive 2): the
+// row, the use whose behavior declares it, its name and its data, at most
+// 4096 bytes of compact JSON.
+type Signal struct {
+	Row   RowRef          `json:"row"`
+	UseID string          `json:"useId"`
+	Name  string          `json:"name"`
+	Data  json.RawMessage `json:"data"`
 }

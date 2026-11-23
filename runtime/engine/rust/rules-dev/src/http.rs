@@ -13,7 +13,9 @@ use superschematic_rules_handler::events::EventsQuery;
 use superschematic_rules_handler::http::{
     refusal_problem, respond, route, unauthorized, HttpRequest, HttpResponse, Routed,
 };
-use superschematic_rules_handler::{serve, tools, Context, Handler, QueuedEvent, Request, Store};
+use superschematic_rules_handler::{
+    serve_publishing, tools, Context, Handler, QueuedEvent, Request, Store,
+};
 
 use crate::Dev;
 
@@ -46,11 +48,13 @@ impl<S: Store> Dev<S> {
             id: uuid::Uuid::new_v4().as_u128(),
         };
         let handler = Handler::new(&self.core, &self.declarations).with_policy(&self.policy);
-        let response = serve(&handler, &mut self.store, request, &context);
+        let published = serve_publishing(&handler, &mut self.store, request, &context)?;
+        // The unit committed: its signals reach the streams open on them.
+        self.publish(&published.signals);
         if self.drain == crate::Drain::AfterEachRequest {
             self.run_due()?;
         }
-        response
+        published.response
     }
 
     /// Serves one HTTP request: `caller` is who the host's authentication

@@ -184,6 +184,58 @@ pub struct Declaration {
     /// whose behavior takes none is refused.
     #[serde(default, skip_serializing_if = "is_false")]
     pub preconditions: bool,
+    /// The signals it declares (D77's primitive 2): messages about one row
+    /// that the host delivers to the event streams open on it once the
+    /// command commits and keeps nowhere. A caller sends one whose access
+    /// is `read` or `write` ([`crate::Action::Signal`]); its operations send
+    /// any ([`crate::Cx::signal`]). Sending one it does not declare is a
+    /// defect, as an undeclared event kind is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<SignalDecl>,
+}
+
+/// One declared signal (D77's primitive 2): its name and who sends it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalDecl {
+    pub name: String,
+    pub access: SignalAccess,
+}
+
+/// Who sends a signal: a caller who may read the row (`read`), one who may
+/// write it (`write`), or only the behavior's own operations (`operation`),
+/// as a streamed reply's `draft` is, whose offsets only its append knows.
+/// The access policy is the host's: the core holds a caller's send of an
+/// `operation` signal refused, and the host asks the policy `read` or
+/// `write` with the operation `signal:<name>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignalAccess {
+    Read,
+    Write,
+    Operation,
+}
+
+impl SignalAccess {
+    /// The access as a declaration file names it: `read`, `write` or
+    /// `operation`; `None` for any other.
+    pub fn parse(text: &str) -> Option<SignalAccess> {
+        match text {
+            "read" => Some(SignalAccess::Read),
+            "write" => Some(SignalAccess::Write),
+            "operation" => Some(SignalAccess::Operation),
+            _ => None,
+        }
+    }
+
+    /// The access as a declaration file names it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SignalAccess::Read => "read",
+            SignalAccess::Write => "write",
+            SignalAccess::Operation => "operation",
+        }
+    }
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -291,6 +343,15 @@ pub struct OperationDecl {
     /// use's sub-tables and shared tables alone.
     #[serde(default, skip_serializing_if = "is_false")]
     pub beside: bool,
+    /// True for an operation of the namespace as a whole (a declaration's
+    /// scope `namespace`, D77's primitive 3), which
+    /// [`crate::Action::NamespaceOperation`] runs: on no type, over every
+    /// type that composes its behavior and that the caller may read, which
+    /// the host answers ([`crate::ReadRequest::Composing`]), keyed by the
+    /// caller. One that writes writes its behavior's sub-tables and shared
+    /// tables of those types' rows alone.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub namespace: bool,
 }
 
 impl Declaration {
@@ -372,6 +433,7 @@ impl Declaration {
             writes,
             table: false,
             beside: false,
+            namespace: false,
         });
         self
     }
@@ -384,8 +446,55 @@ impl Declaration {
             writes: true,
             table: false,
             beside: true,
+            namespace: false,
         });
         self
+    }
+
+    /// The declaration with an operation of the namespace as a whole
+    /// ([`OperationDecl::namespace`], D77's primitive 3).
+    pub fn namespace_operation(mut self, name: impl Into<String>, writes: bool) -> Self {
+        self.operations.push(OperationDecl {
+            name: name.into(),
+            writes,
+            table: false,
+            beside: false,
+            namespace: true,
+        });
+        self
+    }
+
+    /// The declaration with a signal (D77's primitive 2), kept once by its
+    /// name.
+    pub fn signal(mut self, name: impl Into<String>, access: SignalAccess) -> Self {
+        let name = name.into();
+        if self.find_signal(&name).is_none() {
+            self.signals.push(SignalDecl { name, access });
+        }
+        self
+    }
+
+    /// The signal of a name.
+    pub fn find_signal(&self, name: &str) -> Option<&SignalDecl> {
+        self.signals.iter().find(|signal| signal.name == name)
+    }
+
+    /// Whether every write it makes of a row is beside the row (D77's
+    /// primitive 1): it owns no field a column of the row holds (each it
+    /// declares it computes at a read), and it declares a writing operation
+    /// of a row, each beside it. A deadline of its use then fires beside the
+    /// row too, as Comments' idle drafts are interrupted: it moves no
+    /// version of the row and runs no after-change hook, and its writes are
+    /// held as a beside operation's are.
+    pub fn writes_beside_only(&self) -> bool {
+        let mut writing = self
+            .operations
+            .iter()
+            .filter(|operation| operation.writes && !operation.table && !operation.namespace)
+            .peekable();
+        writing.peek().is_some()
+            && writing.all(|operation| operation.beside)
+            && self.fields.iter().all(|field| self.is_computed(field))
     }
 
     /// The declaration with an operation of the table as a whole (D104).
@@ -395,6 +504,7 @@ impl Declaration {
             writes,
             table: true,
             beside: false,
+            namespace: false,
         });
         self
     }
@@ -464,7 +574,15 @@ impl Declaration {
     pub fn find_operation(&self, name: &str) -> Option<&OperationDecl> {
         self.operations
             .iter()
-            .find(|operation| !operation.table && operation.name == name)
+            .find(|operation| !operation.table && !operation.namespace && operation.name == name)
+    }
+
+    /// The operation of the namespace as a whole with a name (D77's
+    /// primitive 3).
+    pub fn find_namespace_operation(&self, name: &str) -> Option<&OperationDecl> {
+        self.operations
+            .iter()
+            .find(|operation| operation.namespace && operation.name == name)
     }
 
     /// The operation of the table as a whole with a name (D104).
@@ -475,11 +593,11 @@ impl Declaration {
     }
 
     /// The names of its operations of a row, or of the table as a whole, in
-    /// order.
+    /// order; an operation of the namespace is neither.
     pub fn operation_names(&self, table: bool) -> Vec<String> {
         self.operations
             .iter()
-            .filter(|operation| operation.table == table)
+            .filter(|operation| operation.table == table && !operation.namespace)
             .map(|operation| operation.name.clone())
             .collect()
     }
@@ -955,6 +1073,39 @@ pub trait Behavior: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Checks a signal's data a caller sends ([`crate::Action::Signal`],
+    /// D77's primitive 2) after the core has held it to the signal's
+    /// declaration and its size, as a signal's paramsSchema would: issues,
+    /// by JSON pointer into the data, refuse the send as `invalid_argument`.
+    /// None by default.
+    fn check_signal(&self, config: &Self::Config, name: &str, data: &Value) -> Vec<SchemaIssue> {
+        let _ = (config, name, data);
+        Vec::new()
+    }
+
+    /// Checks the parameters of an operation of the namespace as a whole
+    /// before it runs, as a paramsSchema would: issues, by JSON pointer into
+    /// the parameters, refuse the call as `invalid_argument`. It has no
+    /// config to read. None by default.
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        let _ = (operation, params);
+        Vec::new()
+    }
+
+    /// Runs one of its declared operations of the namespace as a whole
+    /// ([`crate::Action::NamespaceOperation`], D77's primitive 3) and
+    /// returns its result. It has no config of its own: it reads the types
+    /// that compose the behavior and that the caller may read
+    /// ([`crate::NamespaceCx::composing`]), each use's config among them, and
+    /// their rows through the reads across a table. A behavior that
+    /// declares one implements it here; the default is a defect.
+    fn namespace(&self, cx: &crate::NamespaceCx<'_>, name: &str, params: &Value) -> Hook<Value> {
+        let _ = params;
+        Err(cx.defect(format!(
+            "it declares operation {name} of the namespace and has no handler for it"
+        )))
+    }
+
     /// Answers an operation of the use's own before any use's guard is asked
     /// (D104): `Some(result)` ends the call with that result, writing nothing
     /// and running no handler and no after-change hook, as an operation that
@@ -1267,6 +1418,7 @@ mod tests {
                 writes: false,
                 table: true,
                 beside: false,
+                namespace: false,
             })
         );
         assert!(declaration.find_table_operation("markOut").is_none());

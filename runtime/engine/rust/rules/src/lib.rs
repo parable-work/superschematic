@@ -84,6 +84,7 @@ mod command;
 mod context;
 mod core;
 mod erased;
+mod namespace;
 mod patch;
 mod permissions;
 mod reads;
@@ -93,15 +94,16 @@ mod spec;
 
 pub use behavior::{
     Behavior, Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard,
-    Hook, Listen, OperationDecl, Stop, TableDecl, ValidationRequest,
+    Hook, Listen, OperationDecl, SignalAccess, SignalDecl, Stop, TableDecl, ValidationRequest,
 };
 pub use changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SharedRowChange,
-    SharedRowWrite, SubRowChange, SubRowWrite, WriteKind,
+    SharedRowWrite, Signal, SubRowChange, SubRowWrite, WriteKind, MAX_SIGNAL_DATA_BYTES,
 };
 pub use command::{Action, Caller, Command};
 pub use context::{ConfigCx, Cx, View};
 pub use core::{Core, Outcome, Source, Step, MAX_ROUNDS};
+pub use namespace::{NamespaceCx, NAMESPACE};
 pub use patch::merge_patch;
 pub use permissions::{covers, has_any_permission, DottedPermissions, PermissionMatcher};
 pub use reads::{

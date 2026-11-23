@@ -13,15 +13,17 @@
 //! (`contracts`, each `{ name, role }`, D104). An operation whose `scope` is
 //! `schema` is one of the table as a whole (Lease's expireHolder, Pool's
 //! pick), which a command without a row runs (D104); one whose `scope` is
-//! `namespace` (Comments') is left out, since the core runs no command on a
-//! namespace as a whole. The file stays the one declaration; the core reads
+//! `namespace` (Comments' inbox) is one of the namespace as a whole, which a
+//! command on no type runs (D77's primitive 3); and its signals, each with
+//! its access (D77's primitive 2). The file stays the one declaration; the
+//! core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
 //! an event's payloadSchema among them,
 //! each field's column type and whether a value field is `optional`, which
 //! a table's layout reads) is the file's.
 
 use serde_json::Value;
-use superschematic_rules::{Declaration, TableDecl};
+use superschematic_rules::{Declaration, SignalAccess, TableDecl};
 
 /// The core's declaration of a declaration file's text. A member the file
 /// lacks reads as none, so a file that does not parse declares a behavior
@@ -70,12 +72,9 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     }
     for operation in listed(&file, "operations") {
         // An operation of the table as a whole runs as a command without a
-        // row (D104); one of a namespace as a whole is left out, which the
-        // core runs no command for.
+        // row (D104), and one of the namespace as a whole as a command on
+        // no type (D77's primitive 3).
         let scope = operation.get("scope").and_then(Value::as_str);
-        if scope == Some("namespace") {
-            continue;
-        }
         if let Some(name) = operation.get("name").and_then(Value::as_str) {
             // An operation writes only when it says so, as the engine reads
             // the file.
@@ -83,13 +82,27 @@ pub(crate) fn declaration(text: &str) -> Declaration {
             // A writing operation of a row that says beside writes only its
             // use's own tables (D77's primitive 1, Comments').
             let beside = operation.get("beside") == Some(&Value::Bool(true));
-            declaration = if scope == Some("schema") {
+            declaration = if scope == Some("namespace") {
+                declaration.namespace_operation(name, writes)
+            } else if scope == Some("schema") {
                 declaration.table_operation(name, writes)
             } else if writes && beside {
                 declaration.beside_operation(name)
             } else {
                 declaration.operation(name, writes)
             };
+        }
+    }
+    // The signals it declares, each with who sends it (D77's primitive 2);
+    // one of another access is passed over, which the registry refuses.
+    for signal in listed(&file, "signals") {
+        let name = signal.get("name").and_then(Value::as_str);
+        let access = signal
+            .get("access")
+            .and_then(Value::as_str)
+            .and_then(SignalAccess::parse);
+        if let (Some(name), Some(access)) = (name, access) {
+            declaration = declaration.signal(name, access);
         }
     }
     // The kinds of the events it emits, which an emit is held to (D104).
@@ -223,7 +236,22 @@ mod tests {
     }
 
     #[test]
-    fn a_file_declares_table_operations_and_leaves_out_namespace_ones() {
+    fn a_file_declares_its_signals_with_their_access() {
+        let declared = declaration(
+            r#"{"name": "Tally",
+                "signals": [{"name": "typing", "access": "read"}, {"name": "draft", "access": "operation"},
+                            {"name": "odd", "access": "maybe"}, {"access": "write"}]}"#,
+        );
+        assert_eq!(
+            declared,
+            Declaration::new("Tally")
+                .signal("typing", SignalAccess::Read)
+                .signal("draft", SignalAccess::Operation)
+        );
+    }
+
+    #[test]
+    fn a_file_declares_table_operations_and_namespace_ones() {
         let fenced = declaration(
             r#"{"name": "Tally",
                 "operations": [{"name": "add", "writes": true}, {"name": "sweep", "writes": true, "scope": "schema"},
@@ -235,6 +263,7 @@ mod tests {
             Declaration::new("Tally")
                 .operation("add", true)
                 .table_operation("sweep", true)
+                .namespace_operation("purge", true)
                 .operation("peek", false)
                 .preconditions()
         );
@@ -243,6 +272,9 @@ mod tests {
         assert!(
             fenced.find_operation("purge").is_none()
                 && fenced.find_table_operation("purge").is_none()
+                && fenced
+                    .find_namespace_operation("purge")
+                    .is_some_and(|op| op.writes)
         );
         assert!(!declaration(r#"{"name": "Tally", "preconditionSchema": null}"#).preconditions);
         // A writing operation beside its row says so; beside on one that

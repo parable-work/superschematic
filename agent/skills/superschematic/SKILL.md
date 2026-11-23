@@ -802,12 +802,15 @@ Most are load errors; knowing them saves a build round-trip:
   row: it moves no version or ETag of the row and no other behavior's
   guard is asked, so a Lease does not stop a reply; do not present a Lease
   token to a post, which is refused. Pass `clientId` on a post a client
-  may retry. On a table, streamed replies (`begin`, `appendDraft`,
-  `finish`), read state (`markRead`, `follow`, `unread`), the inbox,
-  deliveries, search, attachments and `moveAnchor` are not there yet: the
-  build refuses their config members (`composeTimeoutMs`,
-  `deliverPermission`, `attachments`, ...) and leaves their operations out.
-  Comments cannot be removed from a table with rows.
+  may retry. Development mode (`superschematic-dev`) also runs streamed
+  replies (`begin`, `appendDraft`, `finish`, `interrupt`, the `draft`
+  signal on its event stream with `signals=1`), read state (`markRead`,
+  `follow`, `unread`, `readUpTo`) and the `inbox`. In a build, a table's
+  generated API serves none of those yet, nor the deliveries' claims,
+  search, attachments or `moveAnchor`: the build refuses their config
+  members (`composeTimeoutMs`, `deliverPermission`, `attachments`, ...) and
+  leaves their operations out. Comments cannot be removed from a table with
+  rows.
 - When a model should fill fields of a row from its other fields (a
   ticket's category, an article's summary), implement Derived on the
   table rather than a worker that writes columns of its own: `implements
