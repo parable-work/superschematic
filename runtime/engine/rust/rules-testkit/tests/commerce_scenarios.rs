@@ -75,3 +75,14 @@ const HOLDS_TIMERS_FLOOR: usize = 20;
 fn holds_timers_scenarios_replay_on_the_core() {
     replays("commerce-holds-timers", HOLDS_TIMERS_FLOOR);
 }
+
+/// The steps of `commerce-calendar.json` the replayer maps and compares:
+/// Calendar's time held through a booking's Holds, its rules in their
+/// order, checkHold, findAvailability over the table, the hours and
+/// closures and the delete that waits for committed time.
+const CALENDAR_FLOOR: usize = 95;
+
+#[test]
+fn calendar_scenarios_replay_on_the_core() {
+    replays("commerce-calendar", CALENDAR_FLOOR);
+}

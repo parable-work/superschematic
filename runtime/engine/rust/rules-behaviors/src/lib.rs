@@ -143,6 +143,7 @@ pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
 pub use budget::{Budget, BudgetConfig, BudgetMeter, BudgetReset, BudgetScope, INTEGER_SEGMENTS};
+pub use calendar::{Calendar, CalendarConfig};
 pub use comments::{Comments, CommentsConfig};
 pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
@@ -186,7 +187,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 23] = [
+pub const NAMES: [&str; 24] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -210,6 +211,7 @@ pub const NAMES: [&str; 23] = [
     provenance::NAME,
     stock::NAME,
     holds::NAME,
+    calendar::behavior::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -217,7 +219,7 @@ pub const NAMES: [&str; 23] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 23] = [
+pub const DECLARATIONS: [&str; 24] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -241,6 +243,7 @@ pub const DECLARATIONS: [&str; 23] = [
     provenance::DECLARATION,
     stock::DECLARATION,
     holds::DECLARATION,
+    calendar::behavior::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -276,6 +279,7 @@ pub fn core() -> Core {
         .with(Provenance)
         .with(Stock)
         .with(Holds)
+        .with(Calendar)
 }
 
 #[cfg(test)]
@@ -341,7 +345,7 @@ mod tests {
             }
         }
         assert_eq!(implementers, [budget::NAME]);
-        assert_eq!(suppliers, [stock::NAME]);
+        assert_eq!(suppliers, [stock::NAME, calendar::behavior::NAME]);
         assert_eq!(askers, [holds::NAME]);
         let config = BudgetConfig::default();
         let params = serde_json::json!({});

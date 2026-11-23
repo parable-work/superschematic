@@ -2435,8 +2435,24 @@ impl<'r> Run<'r> {
                         params,
                     },
                 );
+                let recording = self.recording;
                 self.execute(cx.at, type_name, command)
                     .map(|applied| applied.result().clone())
+                    .map_err(|mut refusal| {
+                        // The engine's veto of an operation of the schema
+                        // names an instance with no id (`of Desk : `), which
+                        // a host writes from the refusal of a command with
+                        // no row, as it writes a namespace the core does not
+                        // know (Calendar's findAvailability).
+                        if recording && refusal.class == "BehaviorVetoError" {
+                            refusal.message = refusal.message.replacen(
+                                &format!(" of {type_name}: "),
+                                &format!(" of {type_name} : "),
+                                1,
+                            );
+                        }
+                        refusal
+                    })
             }
             _ => {
                 return Done::Skipped(format!(
