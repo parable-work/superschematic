@@ -519,26 +519,8 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		}
 		operation["responses"] = map[string]interface{}{
 			"200": success,
-			"400": map[string]interface{}{
-				"description": "Bad request",
-				"content": map[string]interface{}{
-					"application/json": map[string]interface{}{
-						"schema": map[string]interface{}{
-							"$ref": "#/components/schemas/Error",
-						},
-					},
-				},
-			},
-			"500": map[string]interface{}{
-				"description": "Internal server error",
-				"content": map[string]interface{}{
-					"application/json": map[string]interface{}{
-						"schema": map[string]interface{}{
-							"$ref": "#/components/schemas/Error",
-						},
-					},
-				},
-			},
+			"400": problemResponse("The request is not valid. `detail` says why."),
+			"500": problemResponse("The request failed on the server."),
 		}
 
 		// A user model operation declares the errors the identity runtime
@@ -604,14 +586,7 @@ func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescrip
 	schemas := make(map[string]interface{})
 	built := newOpenAPIComponents()
 
-	schemas["Error"] = map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"error": map[string]interface{}{
-				"type": "string",
-			},
-		},
-	}
+	schemas[problemDetailsSchemaName] = problemDetailsSchema()
 
 	schemas["ResponseMeta"] = map[string]interface{}{
 		"type":     "object",

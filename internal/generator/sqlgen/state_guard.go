@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -57,6 +58,12 @@ type StateGuard struct {
 	Terminal []string
 	FromNull []string
 	Moves    []StateGuardMove
+
+	// TerminalMessage and RefusedMessage are the messages the Postgres
+	// function raises, as Options gives them: {column} is the guarded
+	// table.column, and the two % signs the old and the new value.
+	TerminalMessage string
+	RefusedMessage  string
 }
 
 // StateGuardMove is one state of a StateGuard and where it may go: the
@@ -71,7 +78,14 @@ type StateGuardMove struct {
 // tables from the tables as sqlgen built them, sorted by table, then
 // column. A class that is no table is not among tableTypes, so it gets no
 // guard.
-func buildStateGuards(tableTypes []*ir.TypeDef, tables []Table) ([]StateGuard, error) {
+func buildStateGuards(tableTypes []*ir.TypeDef, tables []Table, opts Options) ([]StateGuard, error) {
+	terminal, refused := opts.StateGuardTerminal, opts.StateGuardRefused
+	if terminal == "" {
+		terminal = naming.DefaultGuardTerminal
+	}
+	if refused == "" {
+		refused = naming.DefaultGuardRefused
+	}
 	byName := map[string]*Table{}
 	for i := range tables {
 		byName[tables[i].OriginalName+"/"+tables[i].Name] = &tables[i]
@@ -90,6 +104,7 @@ func buildStateGuards(tableTypes []*ir.TypeDef, tables []Table) ([]StateGuard, e
 			if err != nil {
 				return nil, err
 			}
+			guard.TerminalMessage, guard.RefusedMessage = terminal, refused
 			out = append(out, guard)
 		}
 	}
@@ -190,6 +205,21 @@ func (g StateGuard) name() string {
 	return g.Table + "." + g.Column
 }
 
+// message is the format string of a RAISE from template, or from def when
+// template is empty: its {column} the guard's name, which may hold a %,
+// and its two % signs the places of the old and the new value. Both are
+// in a SQL string literal, so each quote is doubled.
+func (g StateGuard) message(template, def string) string {
+	if template == "" {
+		template = def
+	}
+	parts := strings.Split(template, naming.SQLGuardColumn)
+	for i := range parts {
+		parts[i] = strings.ReplaceAll(parts[i], "'", "''")
+	}
+	return strings.Join(parts, raiseFormat(g.name()))
+}
+
 // raiseFormat is s as the format string of a plpgsql RAISE, which reads a
 // % as a parameter's place.
 func raiseFormat(s string) string {
@@ -221,13 +251,13 @@ func (g StateGuard) FunctionSQL() string {
 	fmt.Fprintf(&b, "BEGIN\n  -- The @stateMachine of %s.%s (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n", g.Origin, g.Field)
 	fmt.Fprintf(&b, "  IF %s IS NOT DISTINCT FROM %s THEN\n    RETURN NEW;\n  END IF;\n", after, before)
 	if len(g.Terminal) > 0 {
-		fmt.Fprintf(&b, "  IF %s IN (%s) THEN\n    RAISE EXCEPTION '%s is terminal at %%: it cannot move to %%', %s, %s\n      USING ERRCODE = 'check_violation';\n  END IF;\n",
-			before, stateLiterals(g.Terminal), raiseFormat(g.name()), before, after)
+		fmt.Fprintf(&b, "  IF %s IN (%s) THEN\n    RAISE EXCEPTION '%s', %s, %s\n      USING ERRCODE = 'check_violation';\n  END IF;\n",
+			before, stateLiterals(g.Terminal), g.message(g.TerminalMessage, naming.DefaultGuardTerminal), before, after)
 	}
 	if listed := g.listed(before, after, "="); len(listed) > 0 {
 		fmt.Fprintf(&b, "  IF %s\n  THEN\n    RETURN NEW;\n  END IF;\n", strings.Join(listed, "\n    OR "))
 	}
-	fmt.Fprintf(&b, "  RAISE EXCEPTION '%s cannot move from %% to %%', %s, %s\n    USING ERRCODE = 'check_violation';\nEND;\n", raiseFormat(g.name()), before, after)
+	fmt.Fprintf(&b, "  RAISE EXCEPTION '%s', %s, %s\n    USING ERRCODE = 'check_violation';\nEND;\n", g.message(g.RefusedMessage, naming.DefaultGuardRefused), before, after)
 	body := b.String()
 	tag := dollarQuote(body)
 	return fmt.Sprintf("CREATE OR REPLACE FUNCTION %s() RETURNS trigger AS %s\n%s%s LANGUAGE plpgsql", sqlutil.QuoteIdentifier(g.FunctionName), tag, body, tag)

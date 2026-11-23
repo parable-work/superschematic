@@ -37,16 +37,7 @@ func addBehaviorErrorResponses(responses map[string]interface{}) {
 		meanings[e.status] = append(meanings[e.status], e.code+": "+e.meaning)
 	}
 	for _, status := range statuses {
-		responses[strconv.Itoa(status)] = map[string]interface{}{
-			"description": strings.Join(meanings[status], " "),
-			"content": map[string]interface{}{
-				"application/json": map[string]interface{}{
-					"schema": map[string]interface{}{
-						"$ref": "#/components/schemas/Error",
-					},
-				},
-			},
-		}
+		responses[strconv.Itoa(status)] = problemResponse(strings.Join(meanings[status], " "))
 	}
 }
 

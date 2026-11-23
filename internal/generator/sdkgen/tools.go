@@ -2,7 +2,6 @@ package sdkgen
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -287,7 +286,7 @@ func endpointToTool(
 		endpoint.Page,
 		endpoint.Filter,
 	)
-	parametersJSON, _ := json.Marshal(parameters)
+	parametersJSON, _ := parameters.DigestJSON(keys.DigestInternalTypes)
 	paramTypes, typeImports := toolParamTSTypes(endpoint, parameters, inputTypeFields, scalars)
 
 	bindingStatus := "ready"

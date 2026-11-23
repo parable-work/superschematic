@@ -44,7 +44,7 @@ func TestSeedRolesRefusedInIR(t *testing.T) {
 	db.Types["Role"].Fields = append(db.Types["Role"].Fields, &ir.FieldDef{Name: "createdBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true})
 	db.Types["Account"].SeedRoles = []*ir.RoleSeed{{Name: "admin", Permissions: []string{"orders"}}}
 	r := &Result{}
-	checkSeedRoles(db, r)
+	checkSeedRoles(db, Input{}, r)
 	want := []string{
 		`Account: @seedRoles seeds the roles of the table that implements UserRole from @superschematic/db, and Account does not`,
 		`Role: @seedRoles role "member"'s permission "orders read" is not dotted segments of letters, digits, _ and -, such as orders.read`,
@@ -58,7 +58,7 @@ func TestSeedRolesRefusedInIR(t *testing.T) {
 	}
 
 	r = &Result{}
-	checkSeedRoles(seededUsers(&ir.RoleSeed{Name: "member", Permissions: []string{"orders.read"}}), r)
+	checkSeedRoles(seededUsers(&ir.RoleSeed{Name: "member", Permissions: []string{"orders.read"}}), Input{}, r)
 	if len(r.Errors) != 0 {
 		t.Errorf("a clean seed: errors = %q", messages(r.Errors))
 	}

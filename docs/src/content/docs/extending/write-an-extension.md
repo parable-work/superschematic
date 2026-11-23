@@ -206,6 +206,27 @@ omits `OutputKey`. It then runs after every listed kind's own pipeline and
 cannot be switched off from a schema config. acme's `acmeManifest` is that
 shape.
 
+A generator that writes one package per service, in a directory named
+after the service, registers that directory, so `build-all`'s dependency
+graph (`dist/.deps.json`, and the naming file's `[deps] copy`) lists its
+packages beside the core's:
+
+```go
+r.RegisterPackageDir(registry.PackageDir{
+    Extension: Name,
+    Language:  registry.LangGo, // go.mod; LangRust, LangPython, LangTypeScript
+    Dir:       "cache/go",      // cache/go/<service>/go.mod
+    Kind:      "cache",
+})
+```
+
+The graph reads each package's manifest as it reads a core package's of
+that language, and gives it the ID `<service>-<Kind>` and the kind `Kind`.
+`Kind` is a lower-case word other than the core's `types`, `sdk`, `api`
+and `orm`, and `Dir` is a clean relative path; a directory is registered
+once. The generator's `Dirs` must include each service's directory there,
+since a package no service's output directories hold fails the build.
+
 ## A decorator
 
 The TypeScript half is a no-op at run time so an author gets completion

@@ -310,7 +310,9 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   the generator encodes it (vendor keys first, then `additionalProperties`,
   `type`, `properties`, `required`; in each property its scalar,
   reference, search and sort keys first, in that order), so a change to
-  the arguments changes the digest.
+  the arguments changes the digest. A tool hook can make the digest
+  hash a `Generic.JSON` property's internal type instead of its type
+  list (`ToolKeys.DigestInternalTypes`, below).
 
 A path or query argument, a body argument or a field of the input type,
 at any depth, that holds a reference (D61), as `RefersTo` writes it or as
@@ -1014,6 +1016,7 @@ SDK language reads what they leave.
 | `Sort` | `x-superschematic-sort` | the key, `true`, of a sorted page's sort argument's property (D60, amended), after the search key in the digest input; empty leaves it out, and the property keeps its `enum` |
 | `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
 | `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
+| `DigestInternalTypes` | `false` | `true` makes the digest input write each `Generic.JSON` property's type as the internal `"type": "any"`, in the place of the property's own keys, where the core writes the type list the documents carry; the documents are the same either way. A distribution sets it when it stores digests that a compiler wrote by that rule, so the digests of its unchanged tools stay the same |
 
 A `Parameters` key may not be empty, repeat, or reuse `type`,
 `additionalProperties`, `properties`, `required`, the scalar key, the

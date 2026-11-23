@@ -13,6 +13,9 @@ package registry
 import (
 	"bytes"
 	"fmt"
+	"path"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -48,6 +51,9 @@ type Registry struct {
 	checks         []CheckSpec
 	openAPIHooks   []OpenAPIHook
 	toolHooks      []ToolHook
+	// packageDirs are the output directories of extension generators that
+	// hold one package per service, for the dependency graph.
+	packageDirs []PackageDir
 	// rateLimitKeys are the principal @rateLimit keys extensions name
 	// (D131), in registration order.
 	rateLimitKeys []RateLimitKey
@@ -550,6 +556,62 @@ func (r *Registry) RegisterToolHook(h ToolHook) error {
 // ToolHooks returns the registered tool hooks in registration order.
 func (r *Registry) ToolHooks() []ToolHook {
 	return append([]ToolHook(nil), r.toolHooks...)
+}
+
+// PackageDir is an output directory, relative to the output root, under
+// which an extension's generator writes one package per service, each in
+// a directory named after the service: "memstore/go" holds
+// memstore/go/<service>/go.mod. build-all's dependency graph (dist/.deps.json)
+// reads each package's manifest there as it reads the core's packages, and
+// gives it the ID <service>-<Kind>.
+type PackageDir struct {
+	// Extension is the registering extension's Name().
+	Extension string
+	// Language is the manifest's language: LangGo (go.mod), LangRust
+	// (Cargo.toml), LangPython (pyproject.toml) or LangTypeScript
+	// (package.json).
+	Language string
+	// Dir is the directory, in slash form.
+	Dir string
+	// Kind is the package kind the graph records, a lower-case word that
+	// is none of the core's: types, sdk, api and orm.
+	Kind string
+}
+
+// packageKind is a package kind of PackageDir.
+var packageKind = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
+
+// RegisterPackageDir adds an extension's package directory to the
+// dependency graph build-all writes. A directory is registered once.
+func (r *Registry) RegisterPackageDir(d PackageDir) error {
+	if err := r.registrable("package directory " + d.Dir); err != nil {
+		return err
+	}
+	switch d.Language {
+	case LangGo, LangRust, LangPython, LangTypeScript:
+	default:
+		return fmt.Errorf("registry: package directory %q: language %q is none of go, rust, python and typescript", d.Dir, d.Language)
+	}
+	if !packageKind.MatchString(d.Kind) || slices.Contains([]string{"types", "sdk", "api", "orm"}, d.Kind) {
+		return fmt.Errorf("registry: package directory %q: kind %q must be a lower-case word other than types, sdk, api and orm", d.Dir, d.Kind)
+	}
+	if d.Dir == "" || path.IsAbs(d.Dir) || path.Clean(d.Dir) != d.Dir || strings.HasPrefix(d.Dir, "..") {
+		return fmt.Errorf("registry: package directory %q must be a clean relative path in slash form", d.Dir)
+	}
+	for _, existing := range r.packageDirs {
+		if existing.Dir == d.Dir {
+			return fmt.Errorf("registry: package directory %q is already registered by %s", d.Dir, existing.Extension)
+		}
+	}
+	r.packageDirs = append(r.packageDirs, d)
+	r.noteExtension(d.Extension)
+	return nil
+}
+
+// PackageDirs returns the registered package directories in registration
+// order.
+func (r *Registry) PackageDirs() []PackageDir {
+	return append([]PackageDir(nil), r.packageDirs...)
 }
 
 // RegisterRateLimitKey adds a principal @rateLimit key under an

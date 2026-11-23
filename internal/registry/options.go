@@ -15,6 +15,13 @@ import (
 // superschematic.toml at the schemas root.
 type Naming = naming.Naming
 
+// TypeCommentsLeading and PrivateRemarksDrop are the naming file's
+// type_comments and private_remarks values the TypeScript reader acts on.
+const (
+	TypeCommentsLeading = naming.TypeCommentsLeading
+	PrivateRemarksDrop  = naming.PrivateRemarksDrop
+)
+
 // Options configures a generator run.
 type Options struct {
 	// OutputRoot is the shadow output root (e.g., schemas/dist).
