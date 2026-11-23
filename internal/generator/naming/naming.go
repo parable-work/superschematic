@@ -229,6 +229,100 @@ type Naming struct {
 	// ImplementationPaths is the [implementation_paths] table: where each
 	// API service's implementation lives, per language.
 	ImplementationPaths ImplementationPathsConfig `toml:"implementation_paths"`
+
+	// SQL is the [sql] table: what the generated DDL adds to a column
+	// beyond its type, and the text of the errors its triggers raise.
+	SQL SQLConfig `toml:"sql"`
+
+	// TypeComments is how the TypeScript reader reads the comment of a
+	// declaration: a class, an interface, a type alias or an enum.
+	// "attached" (default) reads the comments no blank line parts from
+	// it, without the rules and banners that mark a file's sections
+	// (D100). "leading" reads every comment above it, up to the previous
+	// token, as written. A member's comment is read as "attached" says
+	// under either value. Every output that carries a comment, a table's
+	// COMMENT among them, carries what the reader reads.
+	TypeComments string `toml:"type_comments"`
+
+	// PrivateRemarks is "keep" (default) or "drop". "drop" leaves each
+	// @privateRemarks section out of every comment the TypeScript reader
+	// reads, as TSDoc leaves it out of the published docs: from the tag's
+	// line to the next block tag or the end of the comment.
+	PrivateRemarks string `toml:"private_remarks"`
+}
+
+// The values of type_comments and private_remarks.
+const (
+	TypeCommentsAttached = "attached"
+	TypeCommentsLeading  = "leading"
+	PrivateRemarksKeep   = "keep"
+	PrivateRemarksDrop   = "drop"
+)
+
+// SQLConfig is the [sql] table of superschematic.toml. Its defaults are
+// the core's DDL (D83, D88, D118). A project whose databases another
+// compiler built sets it, so the DDL a build writes gives the catalog
+// those databases hold. The migration planner reads the same table, so a
+// plan and create.sql agree.
+type SQLConfig struct {
+	// ColumnChecks is "on" (default) or "off". "on" gives a column the
+	// CHECK of its enum's members and of its Validate bounds (D83). "off"
+	// gives it no CHECK, so the validators alone hold those rules.
+	ColumnChecks string `toml:"column_checks"`
+	// ColumnDefaults is "on" (default) or "off". "on" gives a required
+	// field's column the DEFAULT of its Default<T, V> (D83). "off" gives
+	// it none, so the decoders and the ORMs write the default into each
+	// insert. Default<T, "now"> is a DEFAULT under either value.
+	ColumnDefaults string `toml:"column_defaults"`
+	// NowDefaults is "declared" (default) or "required". "declared"
+	// gives a required date, time or timestamp column the time of the
+	// insert only where something says so (D88). "required" gives it to
+	// every such column that has no other default.
+	NowDefaults string `toml:"now_defaults"`
+	// StateGuardTerminal is the message the Postgres guard of a
+	// @stateMachine raises for a move out of a terminal state (D118).
+	// {column} is the guarded column as table.column, and the two %
+	// signs are the old and the new value, in that order.
+	StateGuardTerminal string `toml:"state_guard_terminal"`
+	// StateGuardRefused is the message the Postgres guard raises for a
+	// move the machine does not list, with the same placeholders.
+	StateGuardRefused string `toml:"state_guard_refused"`
+}
+
+// The values the [sql] keys take, and the placeholder of the guard
+// messages.
+const (
+	SQLOn                = "on"
+	SQLOff               = "off"
+	SQLNowDeclared       = "declared"
+	SQLNowRequired       = "required"
+	SQLGuardColumn       = "{column}"
+	DefaultGuardTerminal = "{column} is terminal at %: it cannot move to %"
+	DefaultGuardRefused  = "{column} cannot move from % to %"
+)
+
+// check refuses a value the [sql] table does not take.
+func (c SQLConfig) check() error {
+	for _, kv := range [][2]string{{"column_checks", c.ColumnChecks}, {"column_defaults", c.ColumnDefaults}} {
+		if kv[1] != "" && kv[1] != SQLOn && kv[1] != SQLOff {
+			return fmt.Errorf("sql.%s is %q: use %q or %q", kv[0], kv[1], SQLOn, SQLOff)
+		}
+	}
+	if c.NowDefaults != "" && c.NowDefaults != SQLNowDeclared && c.NowDefaults != SQLNowRequired {
+		return fmt.Errorf("sql.now_defaults is %q: use %q or %q", c.NowDefaults, SQLNowDeclared, SQLNowRequired)
+	}
+	for _, kv := range [][2]string{{"state_guard_terminal", c.StateGuardTerminal}, {"state_guard_refused", c.StateGuardRefused}} {
+		if kv[1] == "" {
+			continue
+		}
+		if n := strings.Count(kv[1], "%"); n != 2 {
+			return fmt.Errorf("sql.%s %q has %d %% signs: write two, the old value's place and the new value's", kv[0], kv[1], n)
+		}
+		if strings.ContainsAny(kv[1], "\x00\n\r") {
+			return fmt.Errorf("sql.%s %q holds a line break or a NUL: write one line", kv[0], kv[1])
+		}
+	}
+	return nil
 }
 
 // DerivedFieldsConfig is the [derived_fields] table of superschematic.toml:
@@ -860,6 +954,15 @@ func Default() Naming {
 			Site:       "web/" + ServicePathPlaceholder,
 			RustApp:    "apps/" + AppPathPlaceholder,
 		},
+		TypeComments:   TypeCommentsAttached,
+		PrivateRemarks: PrivateRemarksKeep,
+		SQL: SQLConfig{
+			ColumnChecks:       SQLOn,
+			ColumnDefaults:     SQLOn,
+			NowDefaults:        SQLNowDeclared,
+			StateGuardTerminal: DefaultGuardTerminal,
+			StateGuardRefused:  DefaultGuardRefused,
+		},
 		AuthoringPackages: []string{
 			"@superschematic/api",
 			"@superschematic/db",
@@ -923,6 +1026,13 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.ImplementationPaths.Rust, d.ImplementationPaths.Rust)
 	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)
 	fill(&n.ImplementationPaths.RustApp, d.ImplementationPaths.RustApp)
+	fill(&n.TypeComments, d.TypeComments)
+	fill(&n.PrivateRemarks, d.PrivateRemarks)
+	fill(&n.SQL.ColumnChecks, d.SQL.ColumnChecks)
+	fill(&n.SQL.ColumnDefaults, d.SQL.ColumnDefaults)
+	fill(&n.SQL.NowDefaults, d.SQL.NowDefaults)
+	fill(&n.SQL.StateGuardTerminal, d.SQL.StateGuardTerminal)
+	fill(&n.SQL.StateGuardRefused, d.SQL.StateGuardRefused)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -1296,6 +1406,15 @@ func Parse(data []byte, name string) (Naming, error) {
 	}
 	if err := n.ImplementationPaths.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.SQL.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {
+		return Naming{}, fmt.Errorf("naming: %s: type_comments is %q: use %q or %q", name, n.TypeComments, TypeCommentsAttached, TypeCommentsLeading)
+	}
+	if n.PrivateRemarks != PrivateRemarksKeep && n.PrivateRemarks != PrivateRemarksDrop {
+		return Naming{}, fmt.Errorf("naming: %s: private_remarks is %q: use %q or %q", name, n.PrivateRemarks, PrivateRemarksKeep, PrivateRemarksDrop)
 	}
 	n = n.OrDefault()
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {

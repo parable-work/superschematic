@@ -32,7 +32,7 @@ func TestOpenAPIRequiredNullAdmitsOnlyNull(t *testing.T) {
 		nil,
 	)
 	for name := range schemas {
-		if name != "VoidShipmentInput" && name != "Error" && name != "ResponseMeta" {
+		if name != "VoidShipmentInput" && name != problemDetailsSchemaName && name != "ResponseMeta" {
 			t.Fatalf("component %s, want VoidShipmentInput and the standard ones only", name)
 		}
 	}

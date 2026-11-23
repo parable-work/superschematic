@@ -111,6 +111,41 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 	}
 }
 
+// typeComment is the comment of a declaration: a class, an interface, a
+// type alias or an enum. It is leadingComment (D100), or under the naming
+// file's type_comments = "leading" every comment of the declaration's
+// leading trivia as written (leadingTriviaComment). A member's comment is
+// leadingComment under either value.
+func (w *walker) typeComment(node *astNode) string {
+	if w.reg != nil && w.reg.Naming().TypeComments == registry.TypeCommentsLeading {
+		return w.remarks(leadingTriviaComment(leadingTrivia(node)))
+	}
+	return w.remarks(leadingComment(node))
+}
+
+// memberComment is the comment of a field, a method or a member of an
+// interface: leadingComment, under the naming file's private_remarks.
+func (w *walker) memberComment(node *astNode) string {
+	return w.remarks(leadingComment(node))
+}
+
+// memberTitle is the package's memberTitle, its comment under the naming
+// file's private_remarks.
+func (w *walker) memberTitle(node *astNode) (title, comment string, err error) {
+	title, comment, err = memberTitle(node)
+	return title, w.remarks(comment), err
+}
+
+// remarks is comment as the naming file's private_remarks reads it: as
+// written (default), or without its @privateRemarks sections under
+// "drop".
+func (w *walker) remarks(comment string) string {
+	if w.reg != nil && w.reg.Naming().PrivateRemarks == registry.PrivateRemarksDrop {
+		return withoutPrivateRemarks(comment)
+	}
+	return comment
+}
+
 // addErr records a schema error and keeps walking, so authors see every
 // mistake in one pass.
 func (w *walker) addErr(serr *SchemaError) {
@@ -728,7 +763,7 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 	td := &ir.TypeDef{
 		Name:    name,
 		Owner:   w.sp.relPath(file.FileName()),
-		Comment: leadingComment(node),
+		Comment: w.typeComment(node),
 		Role:    w.structRole(name, decorators),
 	}
 	td.IsTrait = td.Role == ir.RoleTrait
@@ -1048,7 +1083,7 @@ func (w *walker) fieldsFromTypeLiteral(node *astNode) ([]*ir.FieldDef, bool) {
 		optional := sig.PostfixToken != nil && sig.PostfixToken.Kind == kindQuestionToken
 		fields = append(fields, &ir.FieldDef{
 			Name:     m.Name().Text(),
-			Comment:  leadingComment(m),
+			Comment:  w.memberComment(m),
 			TypeRef:  info.ref,
 			Required: !info.nullable && !optional,
 			// RequiredNull (D130) has no value type.
@@ -1245,7 +1280,7 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	}
 	fd := &ir.FieldDef{
 		Name:            member.Name().Text(),
-		Comment:         leadingComment(member),
+		Comment:         w.memberComment(member),
 		TypeRef:         info.ref,
 		Required:        !info.nullable && !optional,
 		Default:         info.defaultValue,
@@ -1485,14 +1520,14 @@ func (w *walker) walkEnum(node *astNode) {
 	def := &ir.EnumDef{
 		Name:    name,
 		Owner:   w.cfg.Name,
-		Comment: leadingComment(node),
+		Comment: w.typeComment(node),
 	}
 	for _, m := range enum.Members.Nodes {
 		member := m.AsEnumMember()
 		valueName := m.Name().Text()
 		value := ir.EnumValueDef{Name: valueName}
 		var err error
-		if value.Title, value.Comment, err = memberTitle(m); err != nil {
+		if value.Title, value.Comment, err = w.memberTitle(m); err != nil {
 			w.addErr(errorAtNode(m, "enum %s member %s: %v", name, valueName, err))
 		}
 		if member.Initializer != nil {
@@ -1526,7 +1561,7 @@ func (w *walker) walkTypeAlias(node *astNode) {
 	td := &ir.TypeDef{
 		Name:    name,
 		Owner:   w.sp.relPath(file.FileName()),
-		Comment: leadingComment(node),
+		Comment: w.typeComment(node),
 		Role:    ir.RoleEmbeddedStruct,
 	}
 	for _, m := range alias.Type.AsTypeLiteralNode().Members.Nodes {
@@ -1560,7 +1595,7 @@ func (w *walker) walkTypeAlias(node *astNode) {
 		optional := sig.PostfixToken != nil && sig.PostfixToken.Kind == kindQuestionToken
 		td.Fields = append(td.Fields, &ir.FieldDef{
 			Name:       m.Name().Text(),
-			Comment:    leadingComment(m),
+			Comment:    w.memberComment(m),
 			TypeRef:    info.ref,
 			Required:   !info.nullable && !optional,
 			References: info.references,
@@ -1579,7 +1614,7 @@ func (w *walker) walkTypeAlias(node *astNode) {
 func (w *walker) walkOperationSet(node *astNode, name string, decorators []decoratorRef) {
 	set := &ir.OperationSet{
 		Name:    name,
-		Comment: leadingComment(node),
+		Comment: w.typeComment(node),
 	}
 
 	auth := false
@@ -1702,7 +1737,7 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	// A reference on the result is the loader's refusal, in every form.
 	op := &ir.FieldDef{
 		Name:       m.Name().Text(),
-		Comment:    leadingComment(m),
+		Comment:    w.memberComment(m),
 		TypeRef:    info.ref,
 		Required:   !info.nullable,
 		Encrypted:  info.encrypted,

@@ -342,6 +342,37 @@ starting with a digit. Any other value fails the load. Unset, the types
 carry no tag line; unlike most keys, an empty value has no default to fall
 back to.
 
+### `type_comments`
+
+Default: `attached`
+
+How the TypeScript reader reads the comment of a declaration: a class, an
+interface, a type alias or an enum. `attached` reads the comments that no
+blank line parts from it, without the rules and banners that mark a
+file's sections. `leading` reads every comment above it, up to the
+previous token, as written: a comment that a blank line parts from it, a
+rule and a banner are all part of it. A field, a method and an enum member
+read their comment as `attached` says under either value. Every output
+that carries a comment carries what the reader reads: the doc comments
+of the generated code, the descriptions of the OpenAPI and JSON Schema
+documents, and a table's `COMMENT ON TABLE`.
+
+Set `leading` when the schemas' comments came from a compiler that read
+them that way, so the comments in a database's catalog stay the same.
+Any other value fails the load.
+
+### `private_remarks`
+
+Default: `keep`
+
+`drop` leaves each `@privateRemarks` section out of every comment the
+TypeScript reader reads, as TSDoc leaves it out of the published docs. A
+section runs from the line that starts with the tag to the next line that
+starts with another block tag (an `@` and a letter), or to the end of the
+comment, and the empty lines it leaves at the end go with it. `keep`
+reads the section as the rest of the comment. Any other value fails the
+load.
+
 ### `auth_provider`
 
 Default: `session`
@@ -889,6 +920,65 @@ and scaffolds the package once when the directory is missing, naming it
 directory the template matches as a member, as it has the TypeScript
 implementations, so the site imports the SDKs of the APIs it calls with
 `workspace:*`. A stack's provisioner and deploy build the site there.
+
+## `[sql]`
+
+What the DDL of a DB service adds to a column beyond its type, and the
+text of the errors its triggers raise. The defaults are the core's DDL
+([Database tables](/superschematic/guides/database-tables/)). A project
+whose databases another compiler built sets these keys, so that the
+`create.sql` a build writes gives the catalog those databases hold.
+`migrate plan` reads the same table, so a plan and `create.sql` agree.
+Verification and the Rust ORM read it too: a required column that the
+DDL gives no default is one an insert must write.
+
+### `sql.column_checks`
+
+Default: `on`
+
+`on` gives an enum column the `CHECK` of its members' values, and a
+number or text column the `CHECK` of its `Validate` bounds. `off` gives no
+column a `CHECK`, so the generated validators alone hold those rules. Any
+other value fails the load.
+
+### `sql.column_defaults`
+
+Default: `on`
+
+`on` gives a required field's column the `DEFAULT` of its `Default<T, V>`
+when `V` is text, a number, a boolean or an enum member. `off` gives it
+none, so the decoders fill the default in, and the Rust ORM writes it
+into each insert that leaves the member unset, as it writes an enum's.
+`Default<T, "now">` is a `DEFAULT` under either value. Any other value
+fails the load.
+
+### `sql.now_defaults`
+
+Default: `declared`
+
+`declared` gives a required date, time or timestamp column the time of
+the insert only where something says so: an audit timestamp, a column of
+a table the loader adds, or a field declared `Default<T, "now">`.
+`required` gives it to every required date, time or timestamp column that
+has no other default. Any other value fails the load.
+
+### `sql.state_guard_terminal`
+
+Default: `{column} is terminal at %: it cannot move to %`
+
+The message the Postgres guard of a `@stateMachine` raises for a move out
+of a terminal state. `{column}` is the guarded column as `table.column`,
+and the two `%` signs are the old value and the new one, in that order.
+A value with another number of `%` signs, or with a line break, fails the
+load. SQLite's guard keeps its fixed message, since its `RAISE` takes a
+literal.
+
+### `sql.state_guard_refused`
+
+Default: `{column} cannot move from % to %`
+
+The message the Postgres guard raises for a move the machine does not
+list, with the placeholders of `sql.state_guard_terminal`.
 
 ## `[extension.<name>]`
 

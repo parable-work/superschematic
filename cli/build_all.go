@@ -249,7 +249,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		if err := writeTypeScriptWorkspaceRoot(outputRoot, schemasRoot, services, activeNaming); err != nil {
 			return err
 		}
-		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
+		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services, reg.PackageDirs()); err != nil {
 			return err
 		}
 		hookContext := registry.BuildAllContext{
@@ -404,8 +404,14 @@ func runBuildAllHooks(ctx context.Context, hooks []registry.BuildAllHook, bc reg
 // copyPath is set, to that copy. Every discovered service's expected output
 // directories say which service produced which package: that is each
 // package's service field, and a package under no service's directory fails
-// the build rather than entering the graph unowned.
-func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []buildplan.Service) error {
+// the build rather than entering the graph unowned. dirs are the
+// extensions' package directories (registry.PackageDir), whose packages
+// enter the graph too.
+func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []buildplan.Service, dirs []registry.PackageDir) error {
+	extra := make([]schemadeps.PackageDir, len(dirs))
+	for i, d := range dirs {
+		extra[i] = schemadeps.PackageDir{Language: d.Language, Dir: d.Dir, Kind: d.Kind}
+	}
 	producers := make(map[string]string)
 	for _, service := range services {
 		for _, dir := range service.OutputDirs {
@@ -416,7 +422,7 @@ func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []
 			producers[filepath.ToSlash(rel)] = service.Name
 		}
 	}
-	if err := schemadeps.EmitFromDist(outputRoot, producers, copyPath); err != nil {
+	if err := schemadeps.EmitFromDist(outputRoot, producers, copyPath, extra...); err != nil {
 		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Wrote %s\n", schemadeps.DepsPath(outputRoot))

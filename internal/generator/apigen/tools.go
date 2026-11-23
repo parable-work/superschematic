@@ -64,6 +64,13 @@ type ToolKeys struct {
 	// after additionalProperties in the rendered documents. The core adds
 	// none.
 	Parameters []ToolKeyValue
+	// DigestInternalTypes makes the input schema digest hash each property
+	// of the internal `any` type (Generic.JSON) as "type": "any" in its
+	// place, where the core hashes the type list the documents write (D14,
+	// amended). The documents are the same either way. A distribution sets
+	// it when it stores digests a compiler wrote by that rule, so the
+	// digests of its unchanged tools stay the same. The core leaves it off.
+	DigestInternalTypes bool
 }
 
 // ToolKeyValue is one key of ToolKeys.Parameters. Value must encode as

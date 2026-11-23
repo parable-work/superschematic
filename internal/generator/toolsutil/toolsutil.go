@@ -39,11 +39,63 @@ func (object JSONSchemaObject) MarshalJSON() ([]byte, error) {
 	return encoded, nil
 }
 
+// DigestJSON is the encoding the input schema digest hashes: MarshalJSON's,
+// or, with internalTypes (ToolKeys.DigestInternalTypes), the same with each
+// property of the internal `any` type written as "type": "any" in its place,
+// not as the type list the documents write.
+func (object JSONSchemaObject) DigestJSON(internalTypes bool) ([]byte, error) {
+	if !internalTypes {
+		return json.Marshal(object)
+	}
+	marked := object
+	marked.Properties = internalAnyProperties(object.Properties)
+	return json.Marshal(marked)
+}
+
+// internalAnyProperties is properties, each one marked to encode the
+// internal `any` type as written in the IR, at every depth.
+func internalAnyProperties(properties map[string]JSONSchemaProperty) map[string]JSONSchemaProperty {
+	if properties == nil {
+		return nil
+	}
+	out := make(map[string]JSONSchemaProperty, len(properties))
+	for name, property := range properties {
+		out[name] = property.withInternalAny()
+	}
+	return out
+}
+
+// withInternalAny is property marked to encode the internal `any` type as
+// written, and so is each schema it holds.
+func (property JSONSchemaProperty) withInternalAny() JSONSchemaProperty {
+	property.internalAny = true
+	if property.Items != nil {
+		items := property.Items.withInternalAny()
+		property.Items = &items
+	}
+	property.Properties = internalAnyProperties(property.Properties)
+	if property.OneOf != nil {
+		members := make([]JSONSchemaProperty, len(property.OneOf))
+		for i, member := range property.OneOf {
+			members[i] = member.withInternalAny()
+		}
+		property.OneOf = members
+	}
+	if property.AdditionalProperties != nil && property.AdditionalProperties.Schema != nil {
+		schema := property.AdditionalProperties.Schema.withInternalAny()
+		property.AdditionalProperties = &JSONSchemaAdditionalProperties{Bool: property.AdditionalProperties.Bool, Schema: &schema}
+	}
+	return property
+}
+
 // JSONSchemaProperty represents a property in JSON Schema.
 type JSONSchemaProperty struct {
 	// ScalarType is generator-only semantic provenance and is never serialized.
 	ScalarType string `json:"-"`
 	Nullable   bool   `json:"-"`
+	// internalAny encodes the internal `any` type as "any", the digest
+	// form DigestJSON asks for.
+	internalAny bool
 	// CanonicalScalar is the scalar's schema name; it is written under
 	// ScalarKey, first, when both are set.
 	CanonicalScalar string `json:"-"`
@@ -144,6 +196,11 @@ func (property JSONSchemaProperty) marshalShape() ([]byte, error) {
 			plain
 			Type string `json:"type,omitempty"`
 		}{plain: plain(property)})
+	}
+	if property.Type == "any" && property.internalAny {
+		// The digest form of ToolKeys.DigestInternalTypes: the internal
+		// type in its place, nullable or not.
+		return json.Marshal(plain(property))
 	}
 	if property.Type == "any" {
 		types := append([]string(nil), jsonValueTypes...)

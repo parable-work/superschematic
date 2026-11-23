@@ -182,7 +182,7 @@ func TestEncryptedFieldsStayOutOfQueues(t *testing.T) {
 			&ir.FieldDef{Name: "token", TypeRef: str},
 		)
 		r := &Result{}
-		checkEnqueueOnChange(schema, r)
+		checkEnqueueOnChange(schema, Input{}, r)
 		return errorStrings(r)
 	}
 	for _, tc := range []struct {

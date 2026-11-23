@@ -13,9 +13,11 @@ import (
 // permissions has a permission's form and is listed once; and the table
 // takes a row from a name and permissions alone, as the seed's insert
 // writes it, so every other field is optional, generated, or defaulted by
-// its column. Whether a name fits the name field's scalar is the loader's
-// check of the values a schema writes.
-func checkSeedRoles(schema *ir.Schema, r *Result) {
+// its column, as the naming file's [sql] table gives defaults. Whether a
+// name fits the name field's scalar is the loader's check of the values a
+// schema writes.
+func checkSeedRoles(schema *ir.Schema, in Input, r *Result) {
+	policy := sqlutil.DDLPolicyOf(in.Naming.OrDefault())
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
 		if td == nil || len(td.SeedRoles) == 0 {
@@ -51,7 +53,7 @@ func checkSeedRoles(schema *ir.Schema, r *Result) {
 		scalarTypes := sqlutil.ScalarSQLTypes(schema)
 		written := map[string]bool{ir.IdentityRoleNameField: true, ir.IdentityRolePermissionsField: true}
 		for _, fd := range td.Fields {
-			if fd == nil || fd.Key || written[fd.Name] || !needsValueOnCreate(schema, td, fd, scalarTypes) {
+			if fd == nil || fd.Key || written[fd.Name] || !needsValueOnCreate(schema, td, fd, scalarTypes, policy) {
 				continue
 			}
 			r.errorf(td.Owner, "%s: @seedRoles inserts each role with its name and permissions alone, and %s.%s is required and has no default its column carries; make it optional or give it a Default<T, V>", td.Name, td.Name, fd.Name)

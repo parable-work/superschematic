@@ -25,7 +25,11 @@ var cargoPathRE = regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)\s*=\s*\{\s*path\s*=\
 // lacks a collected package's directory is an error: the graph would name a
 // package no service owns, which is what an output directory left behind by
 // a removed or renamed service looks like.
-func CollectFromDist(distRoot string, producers map[string]string) (*Graph, error) {
+//
+// extra are the package directories extensions register
+// (registry.PackageDir): each one's packages are collected as the core's
+// of their language are, with the ID <service>-<kind>.
+func CollectFromDist(distRoot string, producers map[string]string, extra ...PackageDir) (*Graph, error) {
 	abs, err := filepath.Abs(distRoot)
 	if err != nil {
 		return nil, err
@@ -33,16 +37,16 @@ func CollectFromDist(distRoot string, producers map[string]string) (*Graph, erro
 	g := &Graph{Version: GraphVersion}
 	index := make(map[string]*Package) // language/id
 
-	if err := collectTypeScript(abs, index); err != nil {
+	if err := collectTypeScript(abs, index, extraGroups(extra, "typescript")); err != nil {
 		return nil, err
 	}
-	if err := collectGo(abs, index); err != nil {
+	if err := collectGo(abs, index, extraGroups(extra, "go")); err != nil {
 		return nil, err
 	}
-	if err := collectPython(abs, index); err != nil {
+	if err := collectPython(abs, index, extraGroups(extra, "python")); err != nil {
 		return nil, err
 	}
-	if err := collectRust(abs, index); err != nil {
+	if err := collectRust(abs, index, extraGroups(extra, "rust")); err != nil {
 		return nil, err
 	}
 
@@ -69,11 +73,41 @@ func CollectFromDist(distRoot string, producers map[string]string) (*Graph, erro
 	return g, nil
 }
 
-// EmitFromDist collects the graph with producers (see CollectFromDist) and
-// writes dist/.deps.json. When copyPath is not empty the same bytes are
-// written there too.
-func EmitFromDist(distRoot string, producers map[string]string, copyPath string) error {
-	g, err := CollectFromDist(distRoot, producers)
+// PackageDir is an extension's package directory: Dir, relative to the
+// output root in slash form, holds one package per service, whose manifest
+// is Language's, and the graph gives each the kind Kind.
+type PackageDir struct {
+	Language string
+	Dir      string
+	Kind     string
+}
+
+// packageGroup is one directory a collector reads, and the kind of its
+// packages.
+type packageGroup struct {
+	rel  string
+	kind string
+	// extra marks an extension's directory, whose package IDs are
+	// <service>-<kind>.
+	extra bool
+}
+
+// extraGroups are the extension directories of language.
+func extraGroups(extra []PackageDir, language string) []packageGroup {
+	var out []packageGroup
+	for _, d := range extra {
+		if d.Language == language {
+			out = append(out, packageGroup{rel: d.Dir, kind: d.Kind, extra: true})
+		}
+	}
+	return out
+}
+
+// EmitFromDist collects the graph with producers and extra (see
+// CollectFromDist) and writes dist/.deps.json. When copyPath is not empty
+// the same bytes are written there too.
+func EmitFromDist(distRoot string, producers map[string]string, copyPath string, extra ...PackageDir) error {
+	g, err := CollectFromDist(distRoot, producers, extra...)
 	if err != nil {
 		return err
 	}
@@ -103,17 +137,14 @@ func upsert(index map[string]*Package, p Package) *Package {
 	return &cp
 }
 
-func collectTypeScript(distRoot string, index map[string]*Package) error {
-	typeDirs := []struct {
-		rel  string
-		kind string
-	}{
-		{"types/typescript", "types"},
-		{"sdk/typescript", "sdk"},
+func collectTypeScript(distRoot string, index map[string]*Package, extra []packageGroup) error {
+	typeDirs := append([]packageGroup{
+		{rel: "types/typescript", kind: "types"},
+		{rel: "sdk/typescript", kind: "sdk"},
 		// api/<service> is shared with the Go and Rust servers; only a
 		// TypeScript API package carries a package.json there.
-		{"api", "api"},
-	}
+		{rel: "api", kind: "api"},
+	}, extra...)
 	for _, td := range typeDirs {
 		root := filepath.Join(distRoot, filepath.FromSlash(td.rel))
 		entries, err := os.ReadDir(root)
@@ -144,6 +175,9 @@ func collectTypeScript(distRoot string, index map[string]*Package) error {
 				return fmt.Errorf("schemadeps: parse %s: %w", pkgPath, err)
 			}
 			id := tsPackageID(manifest.Name, td.kind, ent.Name())
+			if td.extra {
+				id = ent.Name() + "-" + td.kind
+			}
 			relPath := filepath.ToSlash(filepath.Join(td.rel, ent.Name()))
 			deps := tsSchemaDeps(manifest.Dependencies)
 			deps = append(deps, tsSchemaDeps(manifest.PeerDependencies)...)
@@ -186,16 +220,13 @@ func tsSchemaDeps(deps map[string]string) []string {
 	return out
 }
 
-func collectGo(distRoot string, index map[string]*Package) error {
-	groups := []struct {
-		rel  string
-		kind string
-	}{
-		{"types/go", "types"},
-		{"sdk/go", "sdk"},
-		{"api", "api"},
-		{"orm", "orm"},
-	}
+func collectGo(distRoot string, index map[string]*Package, extra []packageGroup) error {
+	groups := append([]packageGroup{
+		{rel: "types/go", kind: "types"},
+		{rel: "sdk/go", kind: "sdk"},
+		{rel: "api", kind: "api"},
+		{rel: "orm", kind: "orm"},
+	}, extra...)
 	for _, g := range groups {
 		root := filepath.Join(distRoot, filepath.FromSlash(g.rel))
 		entries, err := os.ReadDir(root)
@@ -219,6 +250,9 @@ func collectGo(distRoot string, index map[string]*Package) error {
 			}
 			moduleLine, requires := parseGoMod(string(data))
 			id := goPackageID(g.kind, ent.Name())
+			if g.extra {
+				id = ent.Name() + "-" + g.kind
+			}
 			relPath := filepath.ToSlash(filepath.Join(g.rel, ent.Name()))
 			var deps []string
 			for _, req := range requires {
@@ -304,14 +338,11 @@ func goModuleToID(module string) (string, bool) {
 	}
 }
 
-func collectPython(distRoot string, index map[string]*Package) error {
-	groups := []struct {
-		rel  string
-		kind string
-	}{
-		{"types/python", "types"},
-		{"sdk/python", "sdk"},
-	}
+func collectPython(distRoot string, index map[string]*Package, extra []packageGroup) error {
+	groups := append([]packageGroup{
+		{rel: "types/python", kind: "types"},
+		{rel: "sdk/python", kind: "sdk"},
+	}, extra...)
 	for _, g := range groups {
 		root := filepath.Join(distRoot, filepath.FromSlash(g.rel))
 		entries, err := os.ReadDir(root)
@@ -343,6 +374,9 @@ func collectPython(distRoot string, index map[string]*Package) error {
 				}
 			}
 			id := pyPackageID(name, g.kind, ent.Name())
+			if g.extra {
+				id = ent.Name() + "-" + g.kind
+			}
 			relPath := filepath.ToSlash(filepath.Join(g.rel, ent.Name()))
 			deps := pySchemaDeps(string(data))
 			upsert(index, Package{
@@ -407,16 +441,13 @@ func pySchemaDeps(content string) []string {
 	return out
 }
 
-func collectRust(distRoot string, index map[string]*Package) error {
-	groups := []struct {
-		rel  string
-		kind string
-	}{
-		{"types/rust", "types"},
-		{"sdk/rust", "sdk"},
+func collectRust(distRoot string, index map[string]*Package, extra []packageGroup) error {
+	groups := append([]packageGroup{
+		{rel: "types/rust", kind: "types"},
+		{rel: "sdk/rust", kind: "sdk"},
 		// Rust API crates live beside Go API modules under dist/api/<schema>.
-		{"api", "api"},
-	}
+		{rel: "api", kind: "api"},
+	}, extra...)
 	for _, g := range groups {
 		root := filepath.Join(distRoot, filepath.FromSlash(g.rel))
 		entries, err := os.ReadDir(root)
@@ -444,6 +475,9 @@ func collectRust(distRoot string, index map[string]*Package) error {
 				continue
 			}
 			id := rustPackageID(name, g.kind, ent.Name())
+			if g.extra {
+				id = ent.Name() + "-" + g.kind
+			}
 			relPath := filepath.ToSlash(filepath.Join(g.rel, ent.Name()))
 			deps := rustSchemaDeps(string(data), distRoot, filepath.Join(root, ent.Name()))
 			upsert(index, Package{
