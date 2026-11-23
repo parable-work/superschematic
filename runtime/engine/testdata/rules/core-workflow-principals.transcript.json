@@ -25,7 +25,8 @@
     "Provenance",
     "Stock",
     "Holds",
-    "Calendar"
+    "Calendar",
+    "Payments"
   ],
   "scenarios": [
     {

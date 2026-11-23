@@ -152,6 +152,10 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // and findAvailability over the desks.
   { file: 'core-bookings', floor: 83 },
   { file: 'core-calendar', floor: 47 },
+  // Payments (D70 on the core): the refund pair, each a call on the other
+  // row, and the hand-written cases.
+  { file: 'core-refunds', floor: 52 },
+  { file: 'core-payments', floor: 73 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

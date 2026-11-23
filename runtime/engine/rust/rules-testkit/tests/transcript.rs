@@ -398,6 +398,16 @@ const BOOKINGS_FLOOR: usize = 83;
 /// `core-calendar.json` (D70 on the core, D103's step 4).
 const CALENDAR_FLOOR: usize = 47;
 
+/// The steps `core-refunds.transcript.json` holds, of the engine's
+/// `commerce-payments-refunds.json` (D70 on the core, D103's step 4): a
+/// refund row's refundFor and settleRefundFor, each a call on the other
+/// row, beside Approvals and Reactions.
+const REFUNDS_FLOOR: usize = 52;
+
+/// The steps `core-payments.transcript.json` holds, of the hand-written
+/// `core-payments.json` (D70 on the core, D103's step 4).
+const PAYMENTS_FLOOR: usize = 73;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -434,6 +444,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
             HOLDS_TIMERS_FLOOR,
         ),
         ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
+        ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -489,6 +500,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
         ("core-commerce", COMMERCE_FLOOR, false),
         ("core-calendar", CALENDAR_FLOOR, false),
+        ("core-payments", PAYMENTS_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

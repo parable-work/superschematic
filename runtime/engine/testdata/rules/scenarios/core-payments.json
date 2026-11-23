@@ -1,0 +1,3456 @@
+{
+  "name": "core-payments",
+  "description": "Payments on a table, D70 with its amendment and D103's step 4: an order opens one attempt per idempotency key, the provider's adapter lists the actions waiting for it across the table and records its events once each, in any order, a capture past what is due over_capture and an event in another currency currency_mismatch; require holds a move until what is due is captured; an attempt in flight locks the amount and, while processing, every move (payment_in_progress); a voidOn state voids what is authorized and opens nothing; a refund draws on what is captured, with its permission and exceeds_refundable; a checkout over Holds owes what its holds total, unknown while a line is pending (total_unknown); a refund row asks the order its relation points at once approved, through refundFor, one refund per approval, and settleRefundFor checks the adapter's outcome against the order's refunds; and each one's define refusals. Cases written by hand in the recorded format. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D103, step 4): runtime/engine/testdata/rules/scenarios/core-payments.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Payments > an order opens one attempt per key, takes the adapter's events once and in any order, moves to placed once paid, and refunds what is captured",
+      "behaviors": [
+        "Payments",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        },
+        "refunder": {
+          "subject": "refunder",
+          "permissions": [
+            "payments.refund"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "require": {
+                          "placed": "paid"
+                        },
+                        "voidOn": [
+                          "cancelled"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        },
+                        "refunds": {
+                          "permission": "payments.refund"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": null,
+            "instanceType": "Order"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Order"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Order",
+            {
+              "title": "o1",
+              "totalCents": 2500
+            },
+            {
+              "id": "o1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o1",
+            "data": {
+              "title": "o1",
+              "totalCents": 2500
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "cart",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 2500,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 2500,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k1"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 2500,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k1"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 2500,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes openPayment of Order o1: Order o1 has nothing outstanding to pay: 2500 due, 0 captured, 2500 in attempts in flight",
+            "details": {
+              "behavior": "Payments",
+              "action": "openPayment",
+              "reason": "Order o1 has nothing outstanding to pay: 2500 due, 0 captured, 2500 in attempts in flight",
+              "vetoCode": "nothing_due",
+              "vetoDetails": {
+                "due": 2500,
+                "captured": 0,
+                "pending": 2500
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not list the payment actions of Order: it needs permission payments.record"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "action": "act_{{id:2}}",
+                "kind": "create",
+                "attempt": "pay_{{id:1}}",
+                "amount": 2500,
+                "currency": "GBP",
+                "id": "o1",
+                "at": 1792573200000
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "cart",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "transition",
+            {
+              "to": "placed"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes transition of Order o1: Order o1 moves to placed once 2500 is captured; 0 is captured and 0 authorized",
+            "details": {
+              "behavior": "Payments",
+              "action": "transition",
+              "reason": "Order o1 moves to placed once 2500 is captured; 0 is captured and 0 authorized",
+              "vetoCode": "unpaid",
+              "vetoDetails": {
+                "state": "placed",
+                "requires": "paid",
+                "due": 2500,
+                "authorized": 0,
+                "captured": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e2",
+              "kind": "captured",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}",
+              "providerRef": "pi_1",
+              "brand": "visa",
+              "last4": "4242"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "providerRef": "pi_1",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 2500,
+              "brand": "visa",
+              "last4": "4242",
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e1",
+              "kind": "processing",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": false,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "providerRef": "pi_1",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 2500,
+              "brand": "visa",
+              "last4": "4242",
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e2",
+              "kind": "captured",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}",
+              "providerRef": "pi_1",
+              "brand": "visa",
+              "last4": "4242"
+            }
+          ],
+          "expect": {
+            "applied": false,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "providerRef": "pi_1",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 2500,
+              "brand": "visa",
+              "last4": "4242",
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e2",
+              "kind": "captured",
+              "amount": 100,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes recordPaymentEvent of Order o1: event e2 of acmepay was recorded before, as captured of 2500 GBP on Order o1",
+            "details": {
+              "behavior": "Payments",
+              "action": "recordPaymentEvent",
+              "reason": "event e2 of acmepay was recorded before, as captured of 2500 GBP on Order o1",
+              "vetoCode": "key_reused",
+              "vetoDetails": {
+                "eventId": "e2",
+                "schema": "Order",
+                "id": "o1"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e3",
+              "kind": "captured",
+              "amount": 1,
+              "currency": "EUR",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes recordPaymentEvent of Order o1: the event is in EUR, and attempt pay_{{id:1}} is in GBP",
+            "details": {
+              "behavior": "Payments",
+              "action": "recordPaymentEvent",
+              "reason": "the event is in EUR, and attempt pay_{{id:1}} is in GBP",
+              "vetoCode": "currency_mismatch",
+              "vetoDetails": {
+                "currency": "EUR",
+                "expected": "GBP"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "expect": {
+            "items": [],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "transition",
+            {
+              "to": "placed"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "placed"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "refundPayment",
+            {
+              "amount": 1000,
+              "reason": "damaged",
+              "idempotencyKey": "r1"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not refund Order o1: it needs permission payments.refund"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "refunder",
+          "args": [
+            "Order",
+            "o1",
+            "refundPayment",
+            {
+              "amount": 1000,
+              "reason": "damaged",
+              "idempotencyKey": "r1"
+            }
+          ],
+          "expect": {
+            "refund": "rf_{{id:3}}",
+            "action": "act_{{id:4}}",
+            "amount": 1000,
+            "currency": "GBP",
+            "status": "requested"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "refunder",
+          "args": [
+            "Order",
+            "o1",
+            "refundPayment",
+            {
+              "amount": 2000,
+              "reason": "all",
+              "idempotencyKey": "r2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes refundPayment of Order o1: Order o1 has 1500 it can refund in one refund, not 2000",
+            "details": {
+              "behavior": "Payments",
+              "action": "refundPayment",
+              "reason": "Order o1 has 1500 it can refund in one refund, not 2000",
+              "vetoCode": "exceeds_refundable",
+              "vetoDetails": {
+                "refundable": 1500,
+                "captured": 2500,
+                "refunded": 0,
+                "pending": 1000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e4",
+              "kind": "refunded",
+              "amount": 1000,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "refund": "rf_{{id:3}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "providerRef": "pi_1",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 2500,
+              "brand": "visa",
+              "last4": "4242",
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "partiallyRefunded"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o1",
+            "data": {
+              "title": "o1",
+              "totalCents": 2500
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "placed",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 2500,
+                "authorized": 0,
+                "captured": 2500,
+                "refunded": 1000,
+                "outstanding": 0,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "partiallyRefunded",
+                "attempts": [
+                  {
+                    "attempt": "pay_{{id:1}}",
+                    "provider": "acmepay",
+                    "providerRef": "pi_1",
+                    "amount": 2500,
+                    "currency": "GBP",
+                    "status": "captured",
+                    "captured": 2500,
+                    "brand": "visa",
+                    "last4": "4242",
+                    "openedAt": 1792573200000,
+                    "updatedAt": 1792573200000
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            {
+              "totalCents": 3000
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o1",
+            "data": {
+              "title": "o1",
+              "totalCents": 3000
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "placed",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 2500,
+                "refunded": 1000,
+                "outstanding": 500,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "partiallyRefunded",
+                "attempts": [
+                  {
+                    "attempt": "pay_{{id:1}}",
+                    "provider": "acmepay",
+                    "providerRef": "pi_1",
+                    "amount": 2500,
+                    "currency": "GBP",
+                    "status": "captured",
+                    "captured": 2500,
+                    "brand": "visa",
+                    "last4": "4242",
+                    "openedAt": 1792573200000,
+                    "updatedAt": 1792573200000
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments > an attempt in flight locks what is due and holds the Workflow while it processes, and a cancelled order voids what is authorized",
+      "behaviors": [
+        "Payments",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        },
+        "refunder": {
+          "subject": "refunder",
+          "permissions": [
+            "payments.refund"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "require": {
+                          "placed": "paid"
+                        },
+                        "voidOn": [
+                          "cancelled"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        },
+                        "refunds": {
+                          "permission": "payments.refund"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": null,
+            "instanceType": "Order"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Order"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Order",
+            {
+              "title": "o2",
+              "totalCents": 2500
+            },
+            {
+              "id": "o2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o2",
+            "data": {
+              "title": "o2",
+              "totalCents": 2500
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "cart",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 2500,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 2500,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k1"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 2500,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            {
+              "totalCents": 2000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes update of Order o2: attempt pay_{{id:1}} is paying 2500 due; totalCents does not change until it is captured, voided or failed",
+            "details": {
+              "behavior": "Payments",
+              "action": "update",
+              "reason": "attempt pay_{{id:1}} is paying 2500 due; totalCents does not change until it is captured, voided or failed",
+              "vetoCode": "amount_locked",
+              "vetoDetails": {
+                "attempt": "pay_{{id:1}}",
+                "due": 2500
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o2",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e1",
+              "kind": "processing",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "processing",
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "pending"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            "transition",
+            {
+              "to": "cancelled"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes transition of Order o2: attempt pay_{{id:1}} is processing at acmepay; Order o2 does not move to cancelled until it is settled",
+            "details": {
+              "behavior": "Payments",
+              "action": "transition",
+              "reason": "attempt pay_{{id:1}} is processing at acmepay; Order o2 does not move to cancelled until it is settled",
+              "vetoCode": "payment_in_progress",
+              "vetoDetails": {
+                "attempt": "pay_{{id:1}}",
+                "to": "cancelled"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o2",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e2",
+              "kind": "authorized",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "authorized",
+              "authorized": 2500,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "authorized"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            "transition",
+            {
+              "to": "cancelled"
+            }
+          ],
+          "expect": {
+            "from": "cart",
+            "to": "cancelled"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "action": "act_{{id:3}}",
+                "kind": "void",
+                "attempt": "pay_{{id:1}}",
+                "amount": 2500,
+                "currency": "GBP",
+                "id": "o2",
+                "at": 1792573200000
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes openPayment of Order o2: Order o2 is cancelled, which voids its payments, so nothing is due",
+            "details": {
+              "behavior": "Payments",
+              "action": "openPayment",
+              "reason": "Order o2 is cancelled, which voids its payments, so nothing is due",
+              "vetoCode": "nothing_due",
+              "vetoDetails": {
+                "state": "cancelled"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2",
+            "voidPayment",
+            {
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "action": "act_{{id:3}}",
+            "kind": "void",
+            "attempt": "pay_{{id:1}}",
+            "amount": 2500,
+            "currency": "GBP"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o2",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e3",
+              "kind": "cancelled",
+              "amount": 2500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 2500,
+              "currency": "GBP",
+              "status": "cancelled",
+              "authorized": 2500,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "unpaid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "expect": {
+            "items": [],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.delete",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o2"
+          ],
+          "expect": true
+        }
+      ]
+    },
+    {
+      "name": "Payments with Holds > a checkout owes what its holds total, not known while a line is pending, and moves to placed once paid",
+      "behaviors": [
+        "Holds",
+        "Payments",
+        "Stock",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        },
+        "refunder": {
+          "subject": "refunder",
+          "permissions": [
+            "payments.refund"
+          ]
+        },
+        "sam": {
+          "subject": "sam",
+          "permissions": [
+            "stock.adjust"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Inventory",
+              "types": {
+                "Inventory": {
+                  "name": "Inventory",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Stock",
+                      "config": {
+                        "permission": "stock.adjust",
+                        "price": {
+                          "field": "priceCents",
+                          "currency": "GBP"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priceCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Inventory",
+            "version": null,
+            "instanceType": "Inventory"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Inventory"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Inventory",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Checkout",
+              "types": {
+                "Checkout": {
+                  "name": "Checkout",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "expired"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "holds": {
+                          "lines": {
+                            "each": {
+                              "field": "lines",
+                              "target": "inventoryId"
+                            },
+                            "schema": "Inventory",
+                            "quantity": {
+                              "field": "quantity"
+                            }
+                          }
+                        },
+                        "takeOn": [
+                          "held"
+                        ],
+                        "commitOn": [
+                          "placed"
+                        ],
+                        "releaseOn": [
+                          "expired"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "holds": true
+                        },
+                        "require": {
+                          "placed": "paid"
+                        },
+                        "voidOn": [
+                          "expired"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "lines",
+                      "typeRef": {
+                        "name": "Line",
+                        "isArray": true
+                      }
+                    }
+                  ]
+                },
+                "Line": {
+                  "name": "Line",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "inventoryId",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "quantity",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Checkout",
+            "version": null,
+            "instanceType": "Checkout"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Checkout"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Checkout",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Inventory",
+            {
+              "title": "tea",
+              "priceCents": 400
+            },
+            {
+              "id": "tea"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Inventory",
+            "id": "tea",
+            "data": {
+              "title": "tea",
+              "priceCents": 400
+            },
+            "behaviors": {
+              "Stock": {
+                "onHand": 0,
+                "held": 0,
+                "available": 0,
+                "low": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "sam",
+          "args": [
+            "Inventory",
+            "tea",
+            "receiveStock",
+            {
+              "quantity": 3,
+              "reason": "delivery"
+            }
+          ],
+          "expect": {
+            "onHand": 3,
+            "held": 0,
+            "available": 3,
+            "movement": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            {
+              "title": "c1",
+              "lines": [
+                {
+                  "inventoryId": "tea",
+                  "quantity": 2
+                }
+              ]
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Checkout",
+            "id": "c1",
+            "data": {
+              "title": "c1",
+              "lines": [
+                {
+                  "inventoryId": "tea",
+                  "quantity": 2
+                }
+              ]
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "cart",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "lines",
+                    "item": 0,
+                    "schema": "Inventory",
+                    "id": "tea",
+                    "quantity": 2,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Payments": {
+                "due": 0,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 0,
+                "overpaid": 0,
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes openPayment of Checkout c1: Checkout c1 owes what its holds total, and that is not known: 1 of its 1 items are pending, whose prices come when they are held",
+            "details": {
+              "behavior": "Payments",
+              "action": "openPayment",
+              "reason": "Checkout c1 owes what its holds total, and that is not known: 1 of its 1 items are pending, whose prices come when they are held",
+              "vetoCode": "total_unknown",
+              "vetoDetails": {
+                "source": "Holds.total"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "cart",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Checkout",
+            "id": "c1",
+            "data": {
+              "title": "c1",
+              "lines": [
+                {
+                  "inventoryId": "tea",
+                  "quantity": 2
+                }
+              ]
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "held",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "lines",
+                    "item": 0,
+                    "schema": "Inventory",
+                    "id": "tea",
+                    "quantity": 2,
+                    "state": "held",
+                    "unitPrice": 400,
+                    "currency": "GBP"
+                  }
+                ],
+                "state": "held",
+                "total": {
+                  "amount": 800,
+                  "currency": "GBP"
+                }
+              },
+              "Payments": {
+                "due": 800,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 800,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 800,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Checkout",
+            "c1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e1",
+              "kind": "captured",
+              "amount": 800,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 800,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 800,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1",
+            "transition",
+            {
+              "to": "placed"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "placed"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Checkout",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Checkout",
+            "id": "c1",
+            "data": {
+              "title": "c1",
+              "lines": [
+                {
+                  "inventoryId": "tea",
+                  "quantity": 2
+                }
+              ]
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "placed",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "lines",
+                    "item": 0,
+                    "schema": "Inventory",
+                    "id": "tea",
+                    "quantity": 2,
+                    "state": "committed",
+                    "unitPrice": 400,
+                    "currency": "GBP"
+                  }
+                ],
+                "state": "committed",
+                "total": {
+                  "amount": 800,
+                  "currency": "GBP"
+                }
+              },
+              "Payments": {
+                "due": 800,
+                "authorized": 0,
+                "captured": 800,
+                "refunded": 0,
+                "outstanding": 0,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "paid",
+                "attempts": [
+                  {
+                    "attempt": "pay_{{id:1}}",
+                    "provider": "acmepay",
+                    "amount": 800,
+                    "currency": "GBP",
+                    "status": "captured",
+                    "captured": 800,
+                    "openedAt": 1792573200000,
+                    "updatedAt": 1792573200000
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments refunds > a refund row asks its order once approved, one approval pays one refund, and the adapter's outcome settles both rows",
+      "behaviors": [
+        "Links",
+        "Payments",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        },
+        "refunder": {
+          "subject": "refunder",
+          "permissions": [
+            "payments.refund"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "require": {
+                          "placed": "paid"
+                        },
+                        "voidOn": [
+                          "cancelled"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        },
+                        "refunds": {
+                          "permission": "payments.refund"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": null,
+            "instanceType": "Order"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Order"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Refund",
+              "types": {
+                "Refund": {
+                  "name": "Refund",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "requested",
+                          "approved",
+                          "issued"
+                        ],
+                        "initial": "requested",
+                        "transitions": [
+                          {
+                            "from": "requested",
+                            "to": "approved"
+                          },
+                          {
+                            "from": "approved",
+                            "to": "issued"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "order": {
+                            "schema": "Order",
+                            "required": true
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "refundOf": {
+                          "link": "order"
+                        },
+                        "amount": {
+                          "field": "amountCents"
+                        },
+                        "currency": "GBP",
+                        "issueOn": [
+                          "approved"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "amountCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    },
+                    {
+                      "name": "reason",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Refund",
+            "version": null,
+            "instanceType": "Refund"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Refund"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Refund",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Order",
+            {
+              "title": "o1",
+              "totalCents": 3000
+            },
+            {
+              "id": "o1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o1",
+            "data": {
+              "title": "o1",
+              "totalCents": 3000
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "cart",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 3000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 3000,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e1",
+              "kind": "captured",
+              "amount": 3000,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 3000,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 3000,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Refund",
+            {
+              "amountCents": 1000,
+              "reason": "damaged"
+            },
+            {
+              "id": "rf-1",
+              "behaviors": {
+                "Links": {
+                  "order": "o1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Refund",
+            "id": "rf-1",
+            "data": {
+              "amountCents": 1000,
+              "reason": "damaged"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "requested",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "order": {
+                    "schema": "Order",
+                    "id": "o1"
+                  }
+                }
+              },
+              "Payments": {
+                "due": 1000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 1000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "refundFor",
+            {
+              "refund": {
+                "schema": "Refund",
+                "id": "rf-1"
+              },
+              "amount": 1000,
+              "idempotencyKey": "Refund:rf-1.0"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 is requested, not in a state that issues it (approved)",
+            "details": {
+              "behavior": "Payments",
+              "action": "refundFor",
+              "reason": "Refund rf-1 is requested, not in a state that issues it (approved)",
+              "vetoCode": "not_linked",
+              "vetoDetails": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Refund",
+            "rf-1",
+            "transition",
+            {
+              "to": "approved"
+            }
+          ],
+          "expect": {
+            "from": "requested",
+            "to": "approved"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Refund",
+            "rf-1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Refund",
+            "id": "rf-1",
+            "data": {
+              "amountCents": 1000,
+              "reason": "damaged"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "approved",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "order": {
+                    "schema": "Order",
+                    "id": "o1"
+                  }
+                }
+              },
+              "Payments": {
+                "due": 1000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 1000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "pending",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "listPaymentActions",
+            {
+              "provider": "acmepay"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "action": "act_{{id:4}}",
+                "kind": "refund",
+                "attempt": "pay_{{id:1}}",
+                "amount": 1000,
+                "currency": "GBP",
+                "id": "o1",
+                "at": 1792573200000,
+                "refund": "rf_{{id:3}}"
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1",
+            "refundFor",
+            {
+              "refund": {
+                "schema": "Refund",
+                "id": "rf-1"
+              },
+              "amount": 1000,
+              "idempotencyKey": "x1"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 asked refund rf_{{id:3}} of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+            "details": {
+              "behavior": "Payments",
+              "action": "refundFor",
+              "reason": "Refund rf-1 asked refund rf_{{id:3}} of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+              "vetoCode": "key_reused",
+              "vetoDetails": {
+                "refund": "rf_{{id:3}}",
+                "idempotencyKey": "Refund:rf-1.0"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Refund",
+            "rf-1",
+            "settleRefundFor",
+            {
+              "of": {
+                "schema": "Order",
+                "id": "o1"
+              },
+              "refund": "rf_{{id:3}}",
+              "status": "succeeded",
+              "amount": 1000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes settleRefundFor of Refund rf-1: Order o1 records refund rf_{{id:3}} requested with 0 refunded, not succeeded with 1000",
+            "details": {
+              "behavior": "Payments",
+              "action": "settleRefundFor",
+              "reason": "Order o1 records refund rf_{{id:3}} requested with 0 refunded, not succeeded with 1000",
+              "vetoCode": "not_linked",
+              "vetoDetails": {
+                "refund": "rf_{{id:3}}",
+                "status": "requested",
+                "refunded": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Order",
+            "o1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e2",
+              "kind": "refunded",
+              "amount": 1000,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "refund": "rf_{{id:3}}"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "amount": 3000,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 3000,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "partiallyRefunded"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Refund",
+            "rf-1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Refund",
+            "id": "rf-1",
+            "data": {
+              "amountCents": 1000,
+              "reason": "damaged"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "approved",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "order": {
+                    "schema": "Order",
+                    "id": "o1"
+                  }
+                }
+              },
+              "Payments": {
+                "due": 1000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 1000,
+                "outstanding": 1000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "refunded",
+                "attempts": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Order",
+            "o1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Order",
+            "id": "o1",
+            "data": {
+              "title": "o1",
+              "totalCents": 3000
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "cart",
+                "enteredAt": 1792573200000
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 3000,
+                "refunded": 1000,
+                "outstanding": 0,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "partiallyRefunded",
+                "attempts": [
+                  {
+                    "attempt": "pay_{{id:1}}",
+                    "provider": "acmepay",
+                    "amount": 3000,
+                    "currency": "GBP",
+                    "status": "captured",
+                    "captured": 3000,
+                    "openedAt": 1792573200000,
+                    "updatedAt": 1792573200000
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments > a config is held to its schema, the type's fields and Workflow, Holds' place, a relation and ISO 4217",
+      "behaviors": [
+        "Payments",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        },
+        "refunder": {
+          "subject": "refunder",
+          "permissions": [
+            "payments.refund"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1: must match \"then\" schema; /types/Order/behaviors/1/config: must match \"then\" schema; /types/Order/behaviors/1/config: must have required property 'currency'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "must have required property 'currency'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "captureOn": [
+                          "placed"
+                        ],
+                        "capture": "manual"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1: must match \"then\" schema; /types/Order/behaviors/1/config: must have required property 'record'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "must have required property 'record'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "ABC",
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: currency \"ABC\" is not an active ISO 4217 currency code",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: currency \"ABC\" is not an active ISO 4217 currency code"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "title"
+                        },
+                        "currency": "GBP",
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: amount.field \"title\" is not an integer field of Order",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: amount.field \"title\" is not an integer field of Order"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "require": {
+                          "cart": "paid"
+                        },
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: require names cart, the Workflow's initial state, which a create enters before anything is paid",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: require names cart, the Workflow's initial state, which a create enters before anything is paid"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "voidOn": [
+                          "lost"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: voidOn names \"lost\", which is not a state of the type's Workflow (cart, held, placed, cancelled)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: voidOn names \"lost\", which is not a state of the type's Workflow (cart, held, placed, cancelled)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "holds": true
+                        },
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: amount.holds reads Holds.total, and the type does not list Holds",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: amount.holds reads Holds.total, and the type does not list Holds"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "refundOf": {
+                          "link": "order"
+                        },
+                        "issueOn": [
+                          "placed"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Order/behaviors/1/config: type Order: behavior Payments config: refundOf.link order is not a to-one relation of Order (it has none), so a refund has no one row to refund",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Order/behaviors/1/config",
+                  "message": "type Order: behavior Payments config: refundOf.link order is not a to-one relation of Order (it has none), so a refund has no one row to refund"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Order",
+              "types": {
+                "Order": {
+                  "name": "Order",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "cart",
+                          "held",
+                          "placed",
+                          "cancelled"
+                        ],
+                        "initial": "cart",
+                        "transitions": [
+                          {
+                            "from": "cart",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "placed"
+                          },
+                          {
+                            "from": "cart",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "totalCents"
+                        },
+                        "currency": "GBP",
+                        "require": {
+                          "placed": "paid"
+                        },
+                        "voidOn": [
+                          "cancelled"
+                        ],
+                        "record": {
+                          "permission": "payments.record"
+                        },
+                        "refunds": {
+                          "permission": "payments.refund"
+                        }
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "totalCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": null,
+            "instanceType": "Order"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Order"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Order",
+            "version": 1,
+            "published": true
+          }
+        }
+      ]
+    }
+  ]
+}

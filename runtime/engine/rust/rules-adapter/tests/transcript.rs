@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 32] = [
+const TRANSCRIPTS: [(&str, usize); 34] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -124,6 +124,8 @@ const TRANSCRIPTS: [(&str, usize); 32] = [
     ("core-commerce", COMMERCE_FLOOR),
     ("core-bookings", BOOKINGS_FLOOR),
     ("core-calendar", CALENDAR_FLOOR),
+    ("core-refunds", REFUNDS_FLOOR),
+    ("core-payments", PAYMENTS_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -331,6 +333,19 @@ const BOOKINGS_FLOOR: usize = 83;
 /// Workflow anchored on its status field, the one place taken once,
 /// closures and the zone refused over held time, and the define refusals.
 const CALENDAR_FLOOR: usize = 47;
+
+/// core-refunds' floor (D70 on the core, D103's step 4): 52 steps of the
+/// engine's commerce-payments-refunds.json, 42 commands and 10 checks: a
+/// refund row's refundFor and settleRefundFor, each a call on the other
+/// row, beside Approvals' sign-offs and Reactions' moves.
+const REFUNDS_FLOOR: usize = 52;
+
+/// core-payments' floor (D70 on the core, D103's step 4): 73 steps of the
+/// scenarios written by hand, 51 commands and 22 checks: attempts, actions,
+/// refunds and issues rows of the use's sub-tables, the provider events
+/// rows of its shared table, and listPaymentActions a command without a row
+/// over a read across the table.
+const PAYMENTS_FLOOR: usize = 73;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

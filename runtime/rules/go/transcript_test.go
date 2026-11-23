@@ -117,6 +117,10 @@ var transcriptFiles = []transcriptFile{
 	// lock, and findAvailability over the desks.
 	{"../../engine/testdata/rules/core-bookings.transcript.json", 83},
 	{"../../engine/testdata/rules/core-calendar.transcript.json", 47},
+	// Payments (D70 on the core): the refund pair, each a call on the
+	// other row, and the hand-written cases.
+	{"../../engine/testdata/rules/core-refunds.transcript.json", 52},
+	{"../../engine/testdata/rules/core-payments.transcript.json", 73},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

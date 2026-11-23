@@ -134,3 +134,25 @@ const PAYMENTS_HOLDS_FLOOR: usize = 76;
 fn payments_holds_scenarios_replay_on_the_core() {
     replays("commerce-payments-holds", PAYMENTS_HOLDS_FLOOR);
 }
+
+/// The steps of the hand-written `core-payments.json` the replayer maps and
+/// compares: all of its scenarios' steps, the `open` steps among them.
+const CORE_PAYMENTS_FLOOR: usize = 84;
+
+#[test]
+fn core_payments_replays_every_step_on_the_reference_host() {
+    let report = replay_path(&hand_written_path("core-payments"), &ported)
+        .unwrap_or_else(|error| panic!("{error}"));
+    println!("{}", report.details());
+    assert!(
+        report.mismatches().is_empty(),
+        "the core answered otherwise than the file writes:\n{}",
+        report.details()
+    );
+    assert!(
+        report.checked() >= CORE_PAYMENTS_FLOOR,
+        "{} steps checked, under the floor of {CORE_PAYMENTS_FLOOR}:\n{}",
+        report.checked(),
+        report.details()
+    );
+}
