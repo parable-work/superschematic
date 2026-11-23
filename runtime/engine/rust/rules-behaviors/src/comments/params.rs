@@ -192,6 +192,27 @@ fn attachments_issues(attachments: &Value, issues: &mut Issues) {
     }
 }
 
+/// What a signal's data breaks of the signal's paramsSchema (D77's
+/// primitive 2): `typing`'s `{ thread? }`, `thread` an integer from 1, and
+/// `viewing`'s `{}`. `draft` is appendDraft's own, which holds its data.
+pub(super) fn signal_issues(name: &str, data: &Value) -> Issues {
+    let mut issues = Issues::default();
+    let Some(given) = data.as_object() else {
+        issues.push("", "type", "must be object");
+        return issues;
+    };
+    let keys: &[&str] = match name {
+        "typing" => &["thread"],
+        "viewing" => &[],
+        _ => return issues,
+    };
+    unknown_keys("", given, keys, &mut issues, false);
+    if let Some(thread) = given.get("thread") {
+        schema::integer_issues("/thread", thread, Some(1), None, &mut issues);
+    }
+    issues
+}
+
 /// What an operation's parameters break of its paramsSchema.
 pub(super) fn params_issues(operation: &str, params: &Value) -> Issues {
     let mut issues = Issues::default();
@@ -215,6 +236,12 @@ pub(super) fn params_issues(operation: &str, params: &Value) -> Issues {
             &["message", "emoji"],
         ),
         "listPinned" => (&["cursor", "limit"], &[]),
+        "begin" => (&["clientId", "quotes", "thread"], &[]),
+        "appendDraft" => (&["message", "text"], &["message", "text"]),
+        "finish" => (&["blocks", "body", "mentions", "message"], &["message"]),
+        "interrupt" => (&["message"], &["message"]),
+        "markRead" => (&["thread", "upTo"], &["upTo"]),
+        "follow" => (&["on", "thread"], &["thread", "on"]),
         _ => return issues,
     };
     unknown_keys("", given, keys, &mut issues, false);
@@ -227,10 +254,18 @@ pub(super) fn params_issues(operation: &str, params: &Value) -> Issues {
             );
         }
     }
-    for member in ["message", "thread", "quotes", "after", "around", "before"] {
+    for member in [
+        "message", "thread", "quotes", "after", "around", "before", "upTo",
+    ] {
         if let Some(value) = given.get(member) {
             schema::integer_issues(&format!("/{member}"), value, Some(1), None, &mut issues);
         }
+    }
+    if given.get("on").is_some_and(|on| !on.is_boolean()) {
+        issues.push("/on", "type", "must be boolean");
+    }
+    if let Some(text) = given.get("text") {
+        string_issues("/text", text, None, Some(4000), None, &mut issues);
     }
     if let Some(limit) = given.get("limit") {
         let maximum = match operation {

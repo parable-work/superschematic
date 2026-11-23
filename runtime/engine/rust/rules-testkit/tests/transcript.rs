@@ -349,12 +349,16 @@ const REVISIONS_FLOOR: usize = 112;
 /// and 203 creates, deletes and invokes, in its 24 scenarios: each
 /// message, edit and reaction a row of a sub-table of the use, each
 /// conversation's high-water marks a row of its shared table, and each
-/// write beside the row, so the row's version stays. The 264 left out are
-/// what the replay skips (streamed replies, read state, deliveries, search,
+/// write beside the row, so the row's version stays; streamed replies, each
+/// composing message's draft a sub-table of chunks and its idle time a
+/// deadline whose fire is beside the row too (D77's primitive 2, 2 deadline
+/// commands); and read state, each reader's marker, follow and delivery a
+/// row of a sub-table. 306 commands and 41 checks. The 155 left out are what
+/// the replay skips (the inbox and deliveries claimed and settled, search,
 /// anchors and attachments, the scenarios with an access policy, the reads
 /// of the event log that hold a write beside the row), opens and reads. An
 /// adapter's replay holds its own count to this one.
-const COMMENTS_FLOOR: usize = 238;
+const COMMENTS_FLOOR: usize = 347;
 
 /// The steps `core-comments-beside.transcript.json` holds, of the
 /// hand-written `core-comments-beside.json`'s 29 (D103's step 4): 6 define

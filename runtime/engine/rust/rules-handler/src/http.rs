@@ -19,7 +19,8 @@
 //! | GET, PATCH, DELETE | `/namespaces/default/schemas/{type}/instances/{id}` | get, update (a merge patch), delete |
 //! | POST | `/namespaces/default/schemas/{type}/instances/{id}/operations/{operation}` | a use's operation of a row |
 //! | POST | `/namespaces/default/schemas/{type}/operations/{operation}` | a use's operation of the table |
-//! | GET | `/namespaces/default/events` | the event queue: a page, or server-sent events ([`crate::events`]) |
+//! | POST | `/namespaces/default/schemas/{type}/instances/{id}/signals/{behavior}/{name}` | a caller's signal about a row (D77's primitive 2, [`crate::signals`]): its data the body, 204 |
+//! | GET | `/namespaces/default/events` | the event queue: a page, or server-sent events ([`crate::events`]), with signals beside them on `signals=1` |
 //! | POST, GET, DELETE | `/namespaces/default/mcp` | the MCP endpoint, which the host serves |
 //!
 //! Development mode keeps one namespace, `default`; a path that names
@@ -111,6 +112,8 @@ pub enum Answer {
     /// A describe answered as the live version's record: its namespace,
     /// name, version and document.
     Schema,
+    /// No content, 204: a signal sent.
+    NoContent,
 }
 
 /// What a request routes to.
@@ -632,6 +635,19 @@ fn route_inner(request: &HttpRequest, request_id: &str) -> Result<Routed, HttpRe
                 Answer::Data,
             )
         }
+        ("POST", ["schemas", name, "instances", id, "signals", behavior, signal]) => {
+            let data = optional_body(request, request_id)?;
+            handle(
+                Request::Signal {
+                    type_name: (*name).to_owned(),
+                    id: (*id).to_owned(),
+                    behavior: (*behavior).to_owned(),
+                    name: (*signal).to_owned(),
+                    data,
+                },
+                Answer::NoContent,
+            )
+        }
         ("POST", ["schemas", name, "operations", op]) => {
             let params = optional_body(request, request_id)?;
             let (use_id, operation) = operation(op);
@@ -693,6 +709,14 @@ pub fn respond(answer: &Answer, outcome: Result<Value, Refusal>, request_id: &st
             });
             envelope(record, 200, Vec::new(), request_id)
         }
+        Answer::NoContent => HttpResponse {
+            status: 204,
+            headers: vec![
+                ("cache-control".to_owned(), "no-store".to_owned()),
+                ("x-request-id".to_owned(), request_id.to_owned()),
+            ],
+            body: Vec::new(),
+        },
     }
 }
 

@@ -259,6 +259,7 @@ fn event(dev: &mut Dev, type_name: &str, id: &str, kind: &str) {
     store.begin().expect("begun");
     let applied = store
         .apply(&Unit {
+            signals: Vec::new(),
             writes: vec![StoreWrite::Event {
                 type_name: type_name.into(),
                 id: id.into(),

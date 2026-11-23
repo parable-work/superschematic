@@ -614,6 +614,7 @@ impl Handler<'_> {
             Request::Define { .. }
             | Request::Operation { .. }
             | Request::TableOperation { .. }
+            | Request::Signal { .. }
             | Request::Types
             | Request::Tools => (None, ""),
             Request::Publish { type_name, .. } => (Some(Action::Publish), type_name.as_str()),
@@ -673,7 +674,9 @@ impl Handler<'_> {
         let Some(declared) = declared else {
             return Ok(());
         };
-        let asked = if declared.writes {
+        // A write of the caller's own state alone says it asks read
+        // (`"asks": "read"`, D77): a reader may mark a row read.
+        let asked = if declared.writes && !declared.asks_read {
             Action::Write
         } else {
             Action::Read

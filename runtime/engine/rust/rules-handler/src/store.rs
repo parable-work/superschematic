@@ -332,16 +332,30 @@ pub enum StoreWrite {
     Dequeue { seq: i64 },
 }
 
-/// The writes a store applies as one unit, in order, all of them or none.
+/// The writes a store applies as one unit, in order, all of them or none,
+/// and the signals the host publishes once they commit (D77's primitive 2):
+/// stored nowhere, dropped with a rollback. Absent in JSON when there are
+/// none.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unit {
     #[serde(default)]
     pub writes: Vec<StoreWrite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<crate::signals::HostSignal>,
 }
 
 impl Unit {
-    /// Whether the unit writes nothing.
+    /// A unit of writes, which sends no signal.
+    pub fn of(writes: Vec<StoreWrite>) -> Self {
+        Unit {
+            writes,
+            signals: Vec::new(),
+        }
+    }
+
+    /// Whether the unit writes nothing; it may still send signals, which a
+    /// store does not apply.
     pub fn is_empty(&self) -> bool {
         self.writes.is_empty()
     }

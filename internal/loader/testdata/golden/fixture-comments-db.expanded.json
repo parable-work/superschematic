@@ -155,6 +155,205 @@
         "rowField": ""
       }
     },
+    "ReviewCommentsDeliveries": {
+      "name": "ReviewCommentsDeliveries",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "review",
+          "description": "The Review row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Review"
+          },
+          "required": true,
+          "relation": {
+            "type": "Review",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "delivery",
+          "description": "The message's id in ten digits zero-padded, a dot, and the subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "message",
+          "description": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The subject that should hear of it, as the mention or the follow gave it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "mention",
+          "description": "Whether a reason is the mention.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "reply",
+          "description": "Whether a reason is the follow of its thread.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "state",
+          "description": "pending, claimed, failed, sent or dropped.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "dueAt",
+          "description": "When it is next due, in epoch milliseconds: at once while pending, the claim's expiry while claimed, the next attempt once failed; absent once sent or dropped.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "token",
+          "description": "The claim's token while claimed.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "claimedBy",
+          "description": "The subject of the last claimer.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "attempts",
+          "description": "The claims it has had.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "error",
+          "description": "The last failure's, or the reason it was dropped.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "createdAt",
+          "description": "When it was made, or returned to pending by an edit, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "settledAt",
+          "description": "When it was last settled or dropped, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "review",
+            "delivery"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Review",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "deliveries",
+        "key": "delivery",
+        "rowField": "review"
+      }
+    },
+    "ReviewCommentsDrafts": {
+      "name": "ReviewCommentsDrafts",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "review",
+          "description": "The Review row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Review"
+          },
+          "required": true,
+          "relation": {
+            "type": "Review",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "chunk",
+          "description": "The message's id and the chunk's offset, each in ten digits zero-padded, joined by a dot, so the key's order is theirs.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "message",
+          "description": "The id of the composing message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "chunkOffset",
+          "description": "The draft's length in code points before the chunk: the offset of its draft signal.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "text",
+          "description": "The chunk's text, never empty.",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "review",
+            "chunk"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Review",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "drafts",
+        "key": "chunk",
+        "rowField": "review"
+      }
+    },
     "ReviewCommentsEdits": {
       "name": "ReviewCommentsEdits",
       "owner": "src/tickets.schema.ts",
@@ -251,6 +450,88 @@
         "rowField": "review"
       }
     },
+    "ReviewCommentsFollows": {
+      "name": "ReviewCommentsFollows",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:\u003cname\u003e; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "review",
+          "description": "The Review row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Review"
+          },
+          "required": true,
+          "relation": {
+            "type": "Review",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "follow",
+          "description": "The thread's id in ten digits zero-padded, a dot, and the subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "thread",
+          "description": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The follower's subject.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "followed",
+          "description": "Whether the subject follows the thread.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "readUpTo",
+          "description": "The subject's marker on the thread's replies: a stand.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last changed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "review",
+            "follow"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Review",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "follows",
+        "key": "follow",
+        "rowField": "review"
+      }
+    },
     "ReviewCommentsMessages": {
       "name": "ReviewCommentsMessages",
       "owner": "src/tickets.schema.ts",
@@ -293,21 +574,28 @@
         },
         {
           "name": "author",
-          "description": "The subject of the caller who posted it.",
+          "description": "The subject of the caller who posted or began it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.",
           "typeRef": {
             "name": "string"
           }
         },
         {
           "name": "state",
-          "description": "posted, or deleted once deleted.",
+          "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "typeRef": {
             "name": "string"
           }
         },
         {
           "name": "body",
-          "description": "The text, Markdown; empty once deleted.",
+          "description": "The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.",
           "typeRef": {
             "name": "string"
           }
@@ -385,6 +673,20 @@
         {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "draftLength",
+          "description": "While composing, the draft's length in code points; absent otherwise.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "lastAppendAt",
+          "description": "While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it.",
           "typeRef": {
             "name": "Temporal.DateTime"
           }
@@ -485,6 +787,67 @@
         "rowField": "review"
       }
     },
+    "ReviewCommentsReads": {
+      "name": "ReviewCommentsReads",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "review",
+          "description": "The Review row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Review"
+          },
+          "required": true,
+          "relation": {
+            "type": "Review",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The reader's subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "upTo",
+          "description": "The conversation marker: a stand.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "readAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "review",
+            "subject"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Review",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "reads",
+        "key": "subject",
+        "rowField": "review"
+      }
+    },
     "Ticket": {
       "name": "Ticket",
       "owner": "src/tickets.schema.ts",
@@ -566,6 +929,205 @@
         "table": "conversations",
         "key": "conversation",
         "rowField": ""
+      }
+    },
+    "TicketCommentsDeliveries": {
+      "name": "TicketCommentsDeliveries",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "ticket",
+          "description": "The Ticket row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Ticket"
+          },
+          "required": true,
+          "relation": {
+            "type": "Ticket",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "delivery",
+          "description": "The message's id in ten digits zero-padded, a dot, and the subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "message",
+          "description": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The subject that should hear of it, as the mention or the follow gave it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "mention",
+          "description": "Whether a reason is the mention.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "reply",
+          "description": "Whether a reason is the follow of its thread.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "state",
+          "description": "pending, claimed, failed, sent or dropped.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "dueAt",
+          "description": "When it is next due, in epoch milliseconds: at once while pending, the claim's expiry while claimed, the next attempt once failed; absent once sent or dropped.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "token",
+          "description": "The claim's token while claimed.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "claimedBy",
+          "description": "The subject of the last claimer.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "attempts",
+          "description": "The claims it has had.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "error",
+          "description": "The last failure's, or the reason it was dropped.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "createdAt",
+          "description": "When it was made, or returned to pending by an edit, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "settledAt",
+          "description": "When it was last settled or dropped, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "ticket",
+            "delivery"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Ticket",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "deliveries",
+        "key": "delivery",
+        "rowField": "ticket"
+      }
+    },
+    "TicketCommentsDrafts": {
+      "name": "TicketCommentsDrafts",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "ticket",
+          "description": "The Ticket row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Ticket"
+          },
+          "required": true,
+          "relation": {
+            "type": "Ticket",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "chunk",
+          "description": "The message's id and the chunk's offset, each in ten digits zero-padded, joined by a dot, so the key's order is theirs.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "message",
+          "description": "The id of the composing message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "chunkOffset",
+          "description": "The draft's length in code points before the chunk: the offset of its draft signal.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "text",
+          "description": "The chunk's text, never empty.",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "ticket",
+            "chunk"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Ticket",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "drafts",
+        "key": "chunk",
+        "rowField": "ticket"
       }
     },
     "TicketCommentsEdits": {
@@ -664,6 +1226,88 @@
         "rowField": "ticket"
       }
     },
+    "TicketCommentsFollows": {
+      "name": "TicketCommentsFollows",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:\u003cname\u003e; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "ticket",
+          "description": "The Ticket row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Ticket"
+          },
+          "required": true,
+          "relation": {
+            "type": "Ticket",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "follow",
+          "description": "The thread's id in ten digits zero-padded, a dot, and the subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "thread",
+          "description": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The follower's subject.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "followed",
+          "description": "Whether the subject follows the thread.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "readUpTo",
+          "description": "The subject's marker on the thread's replies: a stand.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last changed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "ticket",
+            "follow"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Ticket",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "follows",
+        "key": "follow",
+        "rowField": "ticket"
+      }
+    },
     "TicketCommentsMessages": {
       "name": "TicketCommentsMessages",
       "owner": "src/tickets.schema.ts",
@@ -706,21 +1350,28 @@
         },
         {
           "name": "author",
-          "description": "The subject of the caller who posted it.",
+          "description": "The subject of the caller who posted or began it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.",
           "typeRef": {
             "name": "string"
           }
         },
         {
           "name": "state",
-          "description": "posted, or deleted once deleted.",
+          "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "typeRef": {
             "name": "string"
           }
         },
         {
           "name": "body",
-          "description": "The text, Markdown; empty once deleted.",
+          "description": "The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.",
           "typeRef": {
             "name": "string"
           }
@@ -798,6 +1449,20 @@
         {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "draftLength",
+          "description": "While composing, the draft's length in code points; absent otherwise.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "lastAppendAt",
+          "description": "While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it.",
           "typeRef": {
             "name": "Temporal.DateTime"
           }
@@ -895,6 +1560,67 @@
         "behavior": "Comments",
         "table": "reactions",
         "key": "reaction",
+        "rowField": "ticket"
+      }
+    },
+    "TicketCommentsReads": {
+      "name": "TicketCommentsReads",
+      "owner": "src/tickets.schema.ts",
+      "comment": "On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "ticket",
+          "description": "The Ticket row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Ticket"
+          },
+          "required": true,
+          "relation": {
+            "type": "Ticket",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The reader's subject.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "upTo",
+          "description": "The conversation marker: a stand.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "readAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "ticket",
+            "subject"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Ticket",
+        "use": "Comments",
+        "behavior": "Comments",
+        "table": "reads",
+        "key": "subject",
         "rowField": "ticket"
       }
     }

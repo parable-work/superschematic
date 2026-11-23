@@ -135,7 +135,9 @@
                 "threads": {
                   "open": 0,
                   "resolved": 0
-                }
+                },
+                "composing": [],
+                "unread": 0
               }
             }
           }
@@ -439,7 +441,9 @@
                 "threads": {
                   "open": 1,
                   "resolved": 0
-                }
+                },
+                "composing": [],
+                "unread": 0
               }
             }
           }
@@ -496,7 +500,7 @@
                     {
                       "name": "Comments",
                       "config": {
-                        "composeTimeoutMs": 60000
+                        "maxAttempts": 3
                       }
                     }
                   ]
@@ -507,12 +511,12 @@
           "error": {
             "class": "SchemaDocumentError",
             "code": "invalid_schema",
-            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)",
+            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)",
             "details": {
               "issues": [
                 {
                   "path": "/types/Doc/behaviors/0/config",
-                  "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
+                  "message": "type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
                 }
               ]
             }
@@ -653,7 +657,9 @@
                 "threads": {
                   "open": 0,
                   "resolved": 0
-                }
+                },
+                "composing": [],
+                "unread": 0
               }
             }
           }
@@ -991,7 +997,9 @@
                 "threads": {
                   "open": 1,
                   "resolved": 0
-                }
+                },
+                "composing": [],
+                "unread": 0
               }
             }
           }

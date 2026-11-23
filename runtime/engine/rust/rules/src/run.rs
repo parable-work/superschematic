@@ -75,7 +75,7 @@ use crate::behavior::{
 };
 use crate::changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SharedRowChange,
-    SharedRowWrite, SubRowChange, SubRowWrite,
+    SharedRowWrite, Signal, SubRowChange, SubRowWrite, MAX_SIGNAL_DATA_BYTES,
 };
 use crate::command::{Action, Command};
 use crate::context::{listed, ConfigCx};
@@ -278,6 +278,7 @@ pub(crate) struct Pending {
     pub shared_rows: Vec<SharedRowWrite>,
     pub events: Vec<OutboxEvent>,
     pub deadlines: Vec<DeadlineChange>,
+    pub signals: Vec<Signal>,
 }
 
 /// The reads and locks the run asked for that the host has not answered.
@@ -709,7 +710,7 @@ impl<'a> Run<'a> {
     // with_pending applies the run's writes of one sub-table of a use on a
     // row, in order, to its rows as read: an insert adds, an update merges,
     // a delete removes, a null value is no value.
-    fn with_pending(
+    pub(crate) fn with_pending(
         &self,
         at: RowRef,
         use_id: &str,
@@ -763,7 +764,20 @@ impl<'a> Run<'a> {
     ) -> Hook<Option<SharedRow>> {
         self.shared_table(frame, index, "shared_row", table)?;
         let use_id = frame.uses[index].spec.id();
-        let request = ReadRequest::shared_row(&frame.spec.name, use_id, table, key);
+        self.shared_row_of(&frame.spec.name, use_id, table, key)
+    }
+
+    /// The row of a key of a use's shared table by the type and the use, as
+    /// the run has it: the host's with the run's own writes applied. The
+    /// caller holds the table to the use's declaration.
+    pub(crate) fn shared_row_of(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        table: &str,
+        key: &str,
+    ) -> Hook<Option<SharedRow>> {
+        let request = ReadRequest::shared_row(type_name, use_id, table, key);
         let mut row = match self.read(&request)? {
             Answer::SharedRow(row) => row
                 .as_ref()
@@ -771,7 +785,7 @@ impl<'a> Run<'a> {
             _ => return Err(mismatched(&request)),
         };
         for write in self.pending.borrow().shared_rows.iter().filter(|write| {
-            write.type_name == frame.spec.name
+            write.type_name == type_name
                 && write.use_id == use_id
                 && write.table == table
                 && write.key == key
@@ -1231,6 +1245,30 @@ impl<'a> Run<'a> {
         Ok(format!("{request}:{use_id}:{label}:{count}"))
     }
 
+    /// A key an operation of the namespace makes (D77's primitive 3), as
+    /// [`Run::new_key`] makes a use's: by the behavior in place of the use.
+    pub fn namespace_key(&self, behavior: &str, label: &str) -> Hook<String> {
+        if label.is_empty() {
+            return Err(
+                Refusal::defect(behavior, "new_key takes a label: a non-empty string").into(),
+            );
+        }
+        let request = &self.command.request;
+        if request.is_empty() {
+            return Err(Refusal::defect(
+                behavior,
+                "new_key: the command carries no request id to derive a key from, which the host gives with each command",
+            )
+            .into());
+        }
+        let mut keys = self.keys.borrow_mut();
+        let count = keys
+            .entry((String::new(), behavior.to_owned(), label.to_owned()))
+            .or_default();
+        *count += 1;
+        Ok(format!("{request}:{behavior}:{label}:{count}"))
+    }
+
     pub fn defect_of(&self, frame: Frame<'_>, index: usize, message: impl Into<String>) -> Stop {
         Refusal::defect(&frame.uses[index].spec.behavior, message).into()
     }
@@ -1614,7 +1652,128 @@ impl<'a> Run<'a> {
             } => self.deadline(key, use_id, name, payload),
             Action::Change { key, change } => self.change(key, change),
             Action::Read { key } => self.read_view(key),
+            Action::Signal {
+                key,
+                use_id,
+                name,
+                data,
+            } => self.signal(key, use_id, name, data),
+            Action::NamespaceOperation {
+                behavior,
+                operation,
+                params,
+            } => self.namespace_operation(behavior, operation, params),
         }
+    }
+
+    // signal runs a caller's signal about a row (D77's primitive 2): the row
+    // and its use, the signal declared and a caller's to send, its data
+    // within the size and the behavior's check. It writes nothing; the
+    // change set's signals hold the one sent.
+    fn signal(&self, key: &str, use_id: &str, name: &str, data: &Value) -> Hook<ChangeSet> {
+        self.load(key)?;
+        let Some((index, entry)) = self.top.spec.use_of(use_id) else {
+            return Err(self.no_use(self.top, use_id));
+        };
+        let behavior = &entry.behavior;
+        let Some(declared) = self.declaration(self.top, index).find_signal(name) else {
+            return Err(Refusal::not_found(format!(
+                "behavior {behavior} declares no signal {name}"
+            ))
+            .into());
+        };
+        if declared.access == crate::behavior::SignalAccess::Operation {
+            return Err(Refusal::forbidden(format!(
+                "signal {name} of {behavior} is sent by {behavior}'s operations alone"
+            ))
+            .into());
+        }
+        let bytes = serde_json::to_vec(data).map_or(0, |text| text.len());
+        if bytes > MAX_SIGNAL_DATA_BYTES {
+            return Err(Refusal::invalid_argument(format!(
+                "signal {name} of {behavior}: its data is {bytes} bytes of JSON, more than {MAX_SIGNAL_DATA_BYTES}"
+            ))
+            .into());
+        }
+        let bound = &self.top.uses[index];
+        let issues = bound
+            .registered
+            .behavior
+            .check_signal(&*bound.config, name, data)
+            .ok_or_else(|| self.defect_of(self.top, index, CONFIG_OF_ANOTHER_TYPE))?;
+        if !issues.is_empty() {
+            let listed: Vec<String> = issues
+                .iter()
+                .map(|issue| {
+                    if issue.path.is_empty() {
+                        issue.message.clone()
+                    } else {
+                        format!("{} {}", issue.path, issue.message)
+                    }
+                })
+                .collect();
+            return Err(Refusal::invalid_argument(format!(
+                "signal {name} of {behavior}: its data does not match its paramsSchema: {}",
+                listed.join("; ")
+            ))
+            .into());
+        }
+        self.pending.borrow_mut().signals.push(Signal {
+            row: self.top.row_ref(),
+            use_id: use_id.to_owned(),
+            name: name.to_owned(),
+            data: data.clone(),
+        });
+        Ok(self.changes(Value::Null))
+    }
+
+    // namespace_operation runs an operation of the namespace as a whole
+    // (D77's primitive 3): its behavior's declared operation, its parameter
+    // check, and its handler, on no type and no row. Its writes are its
+    // behavior's sub-table and shared rows of the types that compose it.
+    fn namespace_operation(
+        &self,
+        behavior: &str,
+        operation: &str,
+        params: &Value,
+    ) -> Hook<ChangeSet> {
+        let Some(registered) = self.core.find(behavior) else {
+            return Err(Refusal::not_found(format!(
+                "behavior {behavior} is not one this core runs ({})",
+                listed(&self.core.names())
+            ))
+            .into());
+        };
+        let Some(declared) = registered.declaration.find_namespace_operation(operation) else {
+            let names: Vec<String> = registered
+                .declaration
+                .operations
+                .iter()
+                .filter(|op| op.namespace)
+                .map(|op| op.name.clone())
+                .collect();
+            return Err(Refusal::not_found(format!(
+                "behavior {behavior} has no operation {operation} of the namespace (its operations of the namespace: {})",
+                listed(&names)
+            ))
+            .into());
+        };
+        let issues = registered
+            .behavior
+            .check_namespace_params(&declared.name, params);
+        if !issues.is_empty() {
+            return Err(
+                Refusal::operation_params(behavior, behavior, &declared.name, issues).into(),
+            );
+        }
+        let cx = crate::namespace::NamespaceCx {
+            run: self,
+            behavior: &registered.declaration.name,
+            operation: &declared.name,
+            writable: declared.writes,
+        };
+        let result = registered.behavior.namespace(&cx, &declared.name, params)?;
+        Ok(self.changes(result))
     }
 
     // read_view runs a read of a row (D104's step 4): each use's fields it
@@ -1786,10 +1945,18 @@ impl<'a> Run<'a> {
                         .map(|event| format!("emit({})", event.kind))
                 })
                 .or_else(|| {
-                    pending.deadlines.first().map(|change| match change {
-                        DeadlineChange::Arm { name, .. } => format!("arm({name})"),
-                        DeadlineChange::Clear { name, .. } => format!("clear({name})"),
-                    })
+                    // Its own use's deadlines on its row are its own state,
+                    // which a beside write arms and clears (a draft's idle
+                    // time); another row's or another use's are not.
+                    let use_id = frame.uses[index].spec.id();
+                    pending
+                        .deadlines
+                        .iter()
+                        .find(|change| *change.row() != own || change.use_id() != use_id)
+                        .map(|change| match change {
+                            DeadlineChange::Arm { name, .. } => format!("arm({name})"),
+                            DeadlineChange::Clear { name, .. } => format!("clear({name})"),
+                        })
                 })
         };
         match found {
@@ -1828,6 +1995,14 @@ impl<'a> Run<'a> {
             .registered
             .behavior
             .deadline(scope, name, payload)?;
+        // A deadline of a behavior that writes beside its row alone fires
+        // beside it (D77's primitive 1): it moves no version of the row and
+        // runs no after-change hook, and its writes are held as a beside
+        // operation's.
+        if self.declaration(self.top, index).writes_beside_only() {
+            self.beside_writes(self.top, index, &format!("deadline {name}"))?;
+            return Ok(self.changes(Value::Null));
+        }
         self.mark_updated(self.top.row);
         self.after_change(self.top, &Change::Deadline { use_id, name }, name)?;
         Ok(self.changes(Value::Null))
@@ -1998,6 +2173,7 @@ impl<'a> Run<'a> {
             shared_rows: pending.shared_rows,
             events: pending.events,
             deadlines: pending.deadlines,
+            signals: pending.signals,
             result,
         }
     }

@@ -66,6 +66,7 @@ pub mod http;
 mod memory;
 mod publish;
 mod serve;
+pub mod signals;
 pub mod store;
 pub mod tools;
 mod validate;
@@ -80,7 +81,11 @@ pub use handler::{
     Context, Done, Handler, HandlerStep, Request, DEFAULT_LIMIT, MAX_LIMIT, VETOED_RETRY_MS,
 };
 pub use memory::MemoryStore;
-pub use serve::{run_due, serve, Ran as RanDue, MAX_ATTEMPTS, MAX_READ_ROUNDS, MAX_RUNS};
+pub use serve::{
+    run_due, serve, serve_publishing, Published, Ran as RanDue, MAX_ATTEMPTS, MAX_READ_ROUNDS,
+    MAX_RUNS,
+};
+pub use signals::HostSignal;
 pub use store::{
     Armed, Draft, DueDeadline, HeldSubRow, QueuedChange, QueuedEvent, Store, StoreAnswer,
     StoreAnswers, StoreRead, StoreWrite, StoredRow, Unit, Version,

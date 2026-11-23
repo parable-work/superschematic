@@ -222,6 +222,34 @@ pub enum Action {
     Read {
         key: String,
     },
+    /// A caller's signal about a row (D77's primitive 2): the use whose
+    /// behavior declares it, its name and its data. The core holds it to the
+    /// declaration (a signal its operations alone send is `forbidden`), to
+    /// [`crate::MAX_SIGNAL_DATA_BYTES`] and to the behavior's check of the
+    /// data ([`crate::Behavior::check_signal`]), on a row the host has; it
+    /// writes nothing, and the change set's signals hold the one sent. The
+    /// access policy is the host's to ask, `read` or `write` as the
+    /// signal's access says, with the operation `signal:<name>`.
+    Signal {
+        key: String,
+        use_id: String,
+        name: String,
+        #[serde(default = "empty_object")]
+        data: Value,
+    },
+    /// An operation of the namespace as a whole (D77's primitive 3), by its
+    /// behavior and its declared name
+    /// ([`crate::Declaration::find_namespace_operation`]): it runs on no type
+    /// and no row, over the types that compose the behavior and that the
+    /// caller may read ([`crate::ReadRequest::Composing`]), keyed by the
+    /// caller. The spec a host runs it on is not read. It presents no
+    /// preconditions.
+    NamespaceOperation {
+        behavior: String,
+        operation: String,
+        #[serde(default = "empty_object")]
+        params: Value,
+    },
 }
 
 fn empty_object() -> Value {
@@ -230,8 +258,8 @@ fn empty_object() -> Value {
 
 impl Action {
     /// What a refusal names as refused: `define`, `publish`, `create`,
-    /// `update`, `delete`, the operation's name (of a row or of the table),
-    /// the deadline's, or `change`.
+    /// `update`, `delete`, the operation's name (of a row, of the table or of
+    /// the namespace), the deadline's, the signal's, `change` or `read`.
     pub fn name(&self) -> &str {
         match self {
             Action::Define => "define",
@@ -239,10 +267,10 @@ impl Action {
             Action::Create { .. } => "create",
             Action::Update { .. } => "update",
             Action::Delete { .. } => "delete",
-            Action::Operation { operation, .. } | Action::TableOperation { operation, .. } => {
-                operation
-            }
-            Action::Deadline { name, .. } => name,
+            Action::Operation { operation, .. }
+            | Action::TableOperation { operation, .. }
+            | Action::NamespaceOperation { operation, .. } => operation,
+            Action::Deadline { name, .. } | Action::Signal { name, .. } => name,
             Action::Change { .. } => "change",
             Action::Read { .. } => "read",
         }
@@ -250,7 +278,7 @@ impl Action {
 
     /// The action's kind, as its JSON tag writes it: `define`, `publish`,
     /// `create`, `update`, `delete`, `operation`, `tableOperation`,
-    /// `deadline`, `change` or `read`.
+    /// `deadline`, `change`, `read`, `signal` or `namespaceOperation`.
     pub fn kind(&self) -> &'static str {
         match self {
             Action::Define => "define",
@@ -263,21 +291,27 @@ impl Action {
             Action::Deadline { .. } => "deadline",
             Action::Change { .. } => "change",
             Action::Read { .. } => "read",
+            Action::Signal { .. } => "signal",
+            Action::NamespaceOperation { .. } => "namespaceOperation",
         }
     }
 
     /// The row the command runs on: a create's id, or the key the others
     /// name; `None` for a create without one, for an operation of the table
-    /// as a whole and for the define and publish checks.
+    /// or of the namespace as a whole and for the define and publish checks.
     pub fn key(&self) -> Option<&str> {
         match self {
-            Action::Define | Action::Publish { .. } | Action::TableOperation { .. } => None,
+            Action::Define
+            | Action::Publish { .. }
+            | Action::TableOperation { .. }
+            | Action::NamespaceOperation { .. } => None,
             Action::Create { id, .. } => id.as_deref(),
             Action::Update { key, .. }
             | Action::Delete { key }
             | Action::Operation { key, .. }
             | Action::Deadline { key, .. }
             | Action::Change { key, .. }
+            | Action::Signal { key, .. }
             | Action::Read { key } => Some(key),
         }
     }

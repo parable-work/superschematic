@@ -140,10 +140,11 @@ var tableLeavesOut = map[string]map[string]string{
 	"Dependencies": {
 		"listDependents": "the rows a row blocks are a query over every table's blockers, which the behaviors' core cannot enumerate, so the engine serves it alone",
 	},
-	// What a table's Comments leaves out, as the core's comments module
-	// lists it (LEFT_OUT_OPERATIONS): streamed replies wait for signals,
-	// read state for namespace operations, and code anchors for
-	// attachments (D77, D103's step 4).
+	// What a table's Comments leaves out in a build: streamed replies wait
+	// for a table's API to serve signals, and read state for it to answer a
+	// reader's own fields, each of which development mode's server does on
+	// the core; and code anchors, which the core's comments module leaves
+	// out too (LEFT_OUT_OPERATIONS; D77, D103's step 4).
 	"Comments": {
 		"begin":       commentsStreamed,
 		"appendDraft": commentsStreamed,
@@ -155,14 +156,34 @@ var tableLeavesOut = map[string]map[string]string{
 	},
 }
 
-// Why a table's Comments leaves out each part the behaviors' core cannot
-// run yet, in the core's words (D103's step 4).
+// Why a table's Comments leaves out each part a build cannot serve yet
+// (D103's step 4): the core runs streamed replies and read state, which a
+// table's generated API does not serve; and the core's own words for what
+// it runs no command for yet.
 const (
-	commentsStreamed    = "a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
-	commentsReadState   = "read state (markRead, follow, the unread field and a listing's readUpTo), the inbox and deliveries each waits for namespace operations on the core, which the engine read them across a namespace by (D77's primitive 3)"
+	commentsStreamed    = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
+	commentsReadState   = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
+	commentsDeliveries  = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
 	commentsAnchors     = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
 	commentsAttachments = "an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
 )
+
+// tableArmsNoDeadlines are the behaviors whose declarations arm deadlines
+// and whose use on a table arms none, each with why: Comments arms a
+// composing message's idle deadline from a streamed reply, which a table
+// leaves out (commentsStreamed), so a table's Comments keeps no deadline
+// queue for a worker to run. Per-behavior code, as tableLeavesOut is, until
+// step 5 derives it from the behavior's class (D103).
+var tableArmsNoDeadlines = map[string]string{
+	"Comments": commentsStreamed,
+}
+
+// TableArmsDeadlines reports whether a table's use of the behavior name
+// arms deadlines: its declaration says so (armsDeadlines), and a table
+// leaves out none of the operations that arm them (tableArmsNoDeadlines).
+func TableArmsDeadlines(name string, armsDeadlines bool) bool {
+	return armsDeadlines && tableArmsNoDeadlines[name] == ""
+}
 
 // RefusedMember is a member of a behavior's config that a table's use of it
 // refuses, and why.
@@ -179,10 +200,10 @@ var tableRefusesMembers = map[string][]RefusedMember{
 	"Comments": {
 		{"composeTimeoutMs", commentsStreamed},
 		{"maxDrafts", commentsStreamed},
-		{"deliverPermission", commentsReadState},
-		{"maxAttempts", commentsReadState},
-		{"retryBackoffMs", commentsReadState},
-		{"deliveryRetentionMs", commentsReadState},
+		{"deliverPermission", commentsDeliveries},
+		{"maxAttempts", commentsDeliveries},
+		{"retryBackoffMs", commentsDeliveries},
+		{"deliveryRetentionMs", commentsDeliveries},
 		{"anchorPermission", commentsAnchors},
 		{"attachments", commentsAttachments},
 	},

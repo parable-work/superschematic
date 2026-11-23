@@ -34,12 +34,34 @@ pub fn serve<S: Store>(
     request: &Request,
     context: &Context,
 ) -> Result<Value, Refusal> {
+    serve_publishing(handler, store, request, context)?.response
+}
+
+/// What a request served to its response came to: the response, and the
+/// signals its committed unit sent (D77's primitive 2), which the host
+/// publishes to its streams; none when it rolled back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Published {
+    pub response: Result<Value, Refusal>,
+    pub signals: Vec<crate::signals::HostSignal>,
+}
+
+/// Runs one request as [`serve`] does, and answers the signals its unit
+/// sent once the transaction committed: what the host publishes after the
+/// commit, the store having kept none of them. A failure of the store
+/// itself is the error.
+pub fn serve_publishing<S: Store>(
+    handler: &Handler<'_>,
+    store: &mut S,
+    request: &Request,
+    context: &Context,
+) -> Result<Published, Refusal> {
     for _ in 0..MAX_ATTEMPTS {
         store.begin()?;
         match attempt(handler, store, request, context) {
-            Ok(Some(response)) => {
+            Ok(Some((response, signals))) => {
                 store.commit()?;
-                return response;
+                return Ok(Published { response, signals });
             }
             Ok(None) => store.rollback()?,
             Err(refusal) => {
@@ -57,14 +79,16 @@ pub fn serve<S: Store>(
     ))
 }
 
-// attempt runs a request once in the store's transaction: its response
-// when its unit applied, `None` when a fence did not hold.
+// attempt runs a request once in the store's transaction: its response and
+// the signals its unit sent when its unit applied, `None` when a fence did
+// not hold.
+#[allow(clippy::type_complexity)]
 fn attempt<S: Store>(
     handler: &Handler<'_>,
     store: &mut S,
     request: &Request,
     context: &Context,
-) -> Result<Option<Result<Value, Refusal>>, Refusal> {
+) -> Result<Option<(Result<Value, Refusal>, Vec<crate::signals::HostSignal>)>, Refusal> {
     let mut answers = StoreAnswers::new();
     for _ in 0..MAX_READ_ROUNDS {
         match handler.run(request, context, &answers) {
@@ -76,7 +100,7 @@ fn attempt<S: Store>(
             }
             HandlerStep::Done(Done { response, unit }) => {
                 if unit.is_empty() || store.apply(&unit)? {
-                    return Ok(Some(response));
+                    return Ok(Some((response, unit.signals)));
                 }
                 return Ok(None);
             }
@@ -95,11 +119,31 @@ fn kind_of(request: &Request) -> String {
         .unwrap_or_default()
 }
 
-/// One change or deadline the runner ran, and what it came to.
+/// One change or deadline the runner ran, what it came to, and the signals
+/// it sent, which the host publishes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ran {
     pub request: Request,
     pub outcome: Result<Value, Refusal>,
+    pub signals: Vec<crate::signals::HostSignal>,
+}
+
+// served is a runner's request served, its signals beside its outcome.
+fn served<S: Store>(
+    handler: &Handler<'_>,
+    store: &mut S,
+    request: Request,
+    context: &Context,
+) -> Ran {
+    let (outcome, signals) = match serve_publishing(handler, store, &request, context) {
+        Ok(Published { response, signals }) => (response, signals),
+        Err(refusal) => (Err(refusal), Vec::new()),
+    };
+    Ran {
+        request,
+        outcome,
+        signals,
+    }
 }
 
 /// Runs what the change queue holds, first in first out, then the deadlines
@@ -139,8 +183,7 @@ pub fn run_due<S: Store>(
                 change: first.change,
                 seq: Some(first.seq),
             };
-            let outcome = serve(handler, store, &request, &context(fresh));
-            ran.push(Ran { request, outcome });
+            ran.push(served(handler, store, request, &context(fresh)));
             progressed = true;
         }
         for due in store.due(now)? {
@@ -155,8 +198,7 @@ pub fn run_due<S: Store>(
                 at: due.at,
                 payload: due.payload,
             };
-            let outcome = serve(handler, store, &request, &context(fresh));
-            ran.push(Ran { request, outcome });
+            ran.push(served(handler, store, request, &context(fresh)));
             progressed = true;
         }
         if !progressed || store.queued()?.is_empty() {

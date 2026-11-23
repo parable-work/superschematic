@@ -698,6 +698,56 @@ impl<'r, C> Cx<'r, C> {
         Ok(())
     }
 
+    /// Sends one of the use's signals about its row (D77's primitive 2),
+    /// which the host delivers to the event streams open on the row once the
+    /// command commits, and drops when it rolls back or a refused call is
+    /// undone: a streamed reply's `draft`. It writes nothing, so an
+    /// operation beside its row sends it, and it is no write an
+    /// `unchanged()` refuses. A name the declaration does not list
+    /// ([`crate::Declaration::signals`]), and data of more than
+    /// [`crate::MAX_SIGNAL_DATA_BYTES`] of compact JSON, is a defect; the
+    /// data is the behavior's to hold to the signal's paramsSchema. A
+    /// read-only operation sends none.
+    pub fn signal(&self, name: &str, data: Value) -> Hook<()> {
+        self.off_table(&format!("signal({name})"))?;
+        if !self.writable {
+            return Err(self.defect(format!(
+                "signal({name}): a read-only operation sends nothing"
+            )));
+        }
+        let view = &self.view;
+        let declaration = view.run.declaration(view.frame, view.index);
+        if declaration.find_signal(name).is_none() {
+            let names: Vec<String> = declaration
+                .signals
+                .iter()
+                .map(|signal| signal.name.clone())
+                .collect();
+            return Err(self.defect(format!(
+                "signal({name}): it declares no signal {name} (its signals: {})",
+                listed(&names)
+            )));
+        }
+        let bytes = serde_json::to_vec(&data).map_or(0, |text| text.len());
+        if bytes > crate::changes::MAX_SIGNAL_DATA_BYTES {
+            return Err(self.defect(format!(
+                "signal({name}): its data is {bytes} bytes of JSON, more than {}",
+                crate::changes::MAX_SIGNAL_DATA_BYTES
+            )));
+        }
+        view.run
+            .pending
+            .borrow_mut()
+            .signals
+            .push(crate::changes::Signal {
+                row: view.frame.row_ref(),
+                use_id: view.use_id().to_owned(),
+                name: name.to_owned(),
+                data,
+            });
+        Ok(())
+    }
+
     /// Arms one of the use's deadlines on the row, at a time in epoch
     /// milliseconds, with a payload the deadline's command carries back.
     /// Arming one that is armed moves it. A behavior whose declaration

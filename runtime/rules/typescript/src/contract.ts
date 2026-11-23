@@ -78,7 +78,27 @@ export type Action =
   | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
   /** A write of a row the table's change queue hands the core (D103): the row's key and the change. */
-  | { readonly kind: 'change'; readonly key: string; readonly change: RowChange };
+  | { readonly kind: 'change'; readonly key: string; readonly change: RowChange }
+  /** A read of a row (D104's step 4): the fields each use computes through reads, by use id, as the change set's result; a field that is the reader's (Comments' unread) is the caller's. */
+  | { readonly kind: 'read'; readonly key: string }
+  /**
+   * A caller's signal about a row (D77's primitive 2): the use whose
+   * behavior declares it, its name and its data. The core holds it to the
+   * declaration (one its operations alone send is forbidden), to 4096
+   * bytes of compact JSON and to the behavior's check of the data, and
+   * writes nothing: the change set's signals hold the one sent. The access
+   * policy is the host's to ask, read or write as the signal's access says,
+   * with the operation signal:<name>.
+   */
+  | { readonly kind: 'signal'; readonly key: string; readonly useId: string; readonly name: string; readonly data?: unknown }
+  /**
+   * An operation of the namespace as a whole (D77's primitive 3), by its
+   * behavior and its declared name: it runs on no type and no row, over the
+   * types that compose the behavior and that the caller may read, which the
+   * host answers (ReadRequest composing), keyed by the caller. The spec it
+   * runs on is not read.
+   */
+  | { readonly kind: 'namespaceOperation'; readonly behavior: string; readonly operation: string; readonly params?: unknown };
 
 /** What a write did to a row (superschematic_rules::WriteKind). */
 export type WriteKind = 'insert' | 'update' | 'delete';
@@ -141,7 +161,9 @@ export type ReadRequest =
       readonly limit: number;
     }
   /** The row of a key of a use's shared table (Answer sharedRow), a table its behavior keeps for the type's table as a whole rather than per row (D103's step 4: Numbering's counts), with its version. */
-  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string };
+  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string }
+  /** The live versions of the types that compose a behavior and that the command's caller may read (Answer specs, D77's primitive 3), in name order: what an operation of the namespace runs over. The host asks its access policy of each type and leaves out one the caller may not read. */
+  | { readonly kind: 'composing'; readonly behavior: string };
 
 /** One sub-table of a use, as a read across a table names it (superschematic_rules::TableRef, D104): the use's id and the sub-table's declared name. */
 export interface TableRef {
@@ -190,7 +212,9 @@ export type Answer =
   | { readonly spec: TypeSpec | null }
   | { readonly subRows: readonly SubRow[] }
   | { readonly linked: LinkedRows }
-  | { readonly sharedRow: SharedRow | null };
+  | { readonly sharedRow: SharedRow | null }
+  /** The types a composing read asks for (D77's primitive 3), in name order. */
+  | { readonly specs: readonly TypeSpec[] };
 
 /** A key the host locks before it answers the reads a rule across rows decides on. */
 export type LockKey = string;
@@ -311,6 +335,23 @@ export type DeadlineChange =
   | { readonly kind: 'arm'; readonly row: RowRef; readonly useId: string; readonly name: string; readonly at: number; readonly payload: unknown }
   | { readonly kind: 'clear'; readonly row: RowRef; readonly useId: string; readonly name: string };
 
+/**
+ * A signal a command sends about a row (superschematic_rules::Signal, D77's
+ * primitive 2): the row, the use whose behavior declares it, its name and
+ * its data, at most 4096 bytes of compact JSON. The host stores none: it
+ * publishes each to the event streams open on its row once the change
+ * set's transaction commits, as the engine's stream message (event: signal,
+ * no id), { namespace, schema, instanceId, behavior, name, data, from, at },
+ * from the caller's subject and at the command's time, and drops them when
+ * it rolls back.
+ */
+export interface Signal {
+  readonly row: RowRef;
+  readonly useId: string;
+  readonly name: string;
+  readonly data: unknown;
+}
+
 /** Everything one command changes, and what it returns (superschematic_rules::ChangeSet). */
 export interface ChangeSet {
   readonly rows: readonly RowWrite[];
@@ -319,8 +360,18 @@ export interface ChangeSet {
   readonly sharedRows?: readonly SharedRowWrite[];
   readonly events: readonly OutboxEvent[];
   readonly deadlines: readonly DeadlineChange[];
+  /** The signals it sends (D77's primitive 2), published after the commit and stored nowhere; absent for none. */
+  readonly signals?: readonly Signal[];
   /** An operation's result; null for the rest. */
   readonly result: unknown;
+}
+
+/** A signal a behavior declares (D77's primitive 2), as its declaration file has it: its name, the JSON Schema of its data, and who sends it: a caller who may read the row, one who may write it, or only the behavior's own operations. */
+export interface DeclaredSignal {
+  readonly name: string;
+  readonly description?: string;
+  readonly paramsSchema?: unknown;
+  readonly access: 'read' | 'write' | 'operation';
 }
 
 /** A field a behavior declares, as its declaration file has it. */
@@ -410,6 +461,8 @@ export interface BehaviorDeclaration {
   readonly events?: readonly DeclaredEvent[];
   /** The contracts between behaviors it implements or asks (D104): Budget implements Capacity, which Pool asks; absent for none. */
   readonly contracts?: readonly DeclaredContract[];
+  /** The signals it declares (D77's primitive 2): typing, viewing and draft of Comments; absent for none. */
+  readonly signals?: readonly DeclaredSignal[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;
 }

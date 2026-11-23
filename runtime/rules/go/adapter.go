@@ -874,6 +874,27 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 		}
 		spec := table.Spec
 		return Answer{Kind: ReadKindSpec, Spec: &spec}, nil
+	case ReadKindComposing:
+		// The layout's types that compose the behavior, in name order: an
+		// operation of the namespace runs over them (D77's primitive 3). The
+		// layout is one database's and the table's API authorizes, so none is
+		// left out (D103).
+		names := make([]string, 0, len(host.Layout.Types))
+		for name := range host.Layout.Types {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		specs := []TypeSpec{}
+		for _, name := range names {
+			spec := host.Layout.Types[name].Spec
+			for _, use := range spec.Uses {
+				if use.Behavior == request.Behavior {
+					specs = append(specs, spec)
+					break
+				}
+			}
+		}
+		return Answer{Kind: ReadKindComposing, Specs: specs}, nil
 	case ReadKindSubRows:
 		if held > 0 && host.Store.Locks() == LocksFenced {
 			return Answer{}, Internal("a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)")

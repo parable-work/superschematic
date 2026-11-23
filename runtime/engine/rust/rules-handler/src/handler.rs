@@ -164,6 +164,20 @@ pub enum Request {
     /// The tools a caller may call, made from the live types and their
     /// uses' operations ([`crate::tools`]), as MCP lists them.
     Tools,
+    /// A caller's signal about a row (D77's primitive 2): the behavior that
+    /// declares it (or the use's id where two uses compose it), its name and
+    /// its data. It writes nothing; its unit carries the signal, which the
+    /// host publishes to the streams open with signals once it commits
+    /// ([`crate::signals`]).
+    Signal {
+        #[serde(rename = "type")]
+        type_name: String,
+        id: String,
+        behavior: String,
+        name: String,
+        #[serde(default)]
+        data: Value,
+    },
 }
 
 /// What a request runs with beside itself: its caller, the time in epoch
@@ -360,7 +374,7 @@ fn refused(refusal: Refusal) -> HandlerStep {
 pub(crate) fn done(response: Value, writes: Vec<StoreWrite>) -> HandlerStep {
     HandlerStep::Done(Done {
         response: Ok(response),
-        unit: Unit { writes },
+        unit: Unit::of(writes),
     })
 }
 
@@ -508,6 +522,13 @@ impl<'a> Handler<'a> {
             } => self.change(type_name, id, change, *seq, context, &mut reads),
             Request::Types => self.types(context, &mut reads),
             Request::Tools => self.tools(context, &mut reads),
+            Request::Signal {
+                type_name,
+                id,
+                behavior,
+                name,
+                data,
+            } => self.signal(type_name, id, behavior, name, data, context, &mut reads),
         };
         outcome.unwrap_or_else(refused)
     }
@@ -1090,6 +1111,29 @@ impl<'a> Handler<'a> {
         )
     }
 
+    /// Runs a caller's signal through the core, which holds it to its
+    /// declaration, and answers null: the unit carries what it sent.
+    #[allow(clippy::too_many_arguments)]
+    fn signal(
+        &self,
+        type_name: &str,
+        id: &str,
+        behavior: &str,
+        name: &str,
+        data: &Value,
+        context: &Context,
+        reads: &mut Reads<'_>,
+    ) -> Result<HandlerStep, Refusal> {
+        let Some(live) = self.live(reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let model = live.model(type_name)?;
+        let action = self.signal_action(model, behavior, id, name, data, context)?;
+        self.run_core(&live, model, action, &Map::new(), context, reads, |_| {
+            Value::Null
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn deadline(
         &self,
@@ -1116,9 +1160,7 @@ impl<'a> Handler<'a> {
         let Ok(model) = live.model(type_name) else {
             return Ok(HandlerStep::Done(Done {
                 response: Err(not_found(type_name, id)),
-                unit: Unit {
-                    writes: vec![spend],
-                },
+                unit: Unit::of(vec![spend]),
             }));
         };
         let action = Action::Deadline {
@@ -1166,7 +1208,7 @@ impl<'a> Handler<'a> {
                 };
                 HandlerStep::Done(Done {
                     response: Err(refusal),
-                    unit: Unit { writes },
+                    unit: Unit::of(writes),
                 })
             }
             other => other,
@@ -1261,7 +1303,14 @@ impl<'a> Handler<'a> {
                 if reads.waiting() {
                     return Ok(take(reads).wait());
                 }
-                done(respond(&changed), changed.writes)
+                let signals = crate::signals::published(live, &changed.changes.signals, context);
+                HandlerStep::Done(Done {
+                    response: Ok(respond(&changed)),
+                    unit: Unit {
+                        writes: changed.writes,
+                        signals,
+                    },
+                })
             }
         })
     }

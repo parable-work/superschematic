@@ -105,7 +105,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},
 	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
 	{"../../engine/testdata/rules/core-revisions.transcript.json", 112},
-	{"../../engine/testdata/rules/core-comments.transcript.json", 238},
+	{"../../engine/testdata/rules/core-comments.transcript.json", 347},
 	{"../../engine/testdata/rules/core-comments-beside.transcript.json", 25},
 	{"../../engine/testdata/rules/core-derived-provenance.transcript.json", 75},
 }

@@ -11,12 +11,15 @@ const commentsFixture = "../../loader/tsreader/testdata/services/fixture-comment
 
 // The layout of tables that implement Comments (D103's step 4): each use
 // owns no column, since Comments computes its fields at a read; its
-// sub-tables messages, edits and reactions are tables of their own keyed
-// by their declared keys beside the row's key column, and its shared table
-// conversations is keyed by the row's key alone, with the version each
-// write is held to; its operations are the ones a table runs, the
-// streamed replies', read state's, code anchors' and the namespace's left
-// out; and Comments keeps no queue.
+// sub-tables messages, drafts, reads, follows, deliveries, edits and
+// reactions are tables of their own keyed by their declared keys beside
+// the row's key column (a post writes its author's follow and marker, and
+// its deliveries), and its shared table conversations is keyed by the
+// row's key alone, with the version each write is held to; its operations
+// are the ones a table runs, the streamed replies', read state's, code
+// anchors' and the namespace's left out; and Comments keeps no queue,
+// since the streamed replies whose idle deadlines it arms are left out
+// (registry.TableArmsDeadlines).
 func TestLayoutOfComments(t *testing.T) {
 	layout := layoutOfFixture(t, commentsFixture, "fixture-comments-db")
 	for _, name := range []string{"Ticket", "Review"} {
@@ -35,6 +38,10 @@ func TestLayoutOfComments(t *testing.T) {
 		prefix := map[string]string{"Ticket": "ticket", "Review": "review"}[name]
 		if want := []string{
 			"messages " + prefix + "_comments_messages by message",
+			"drafts " + prefix + "_comments_drafts by chunk",
+			"reads " + prefix + "_comments_reads by subject",
+			"follows " + prefix + "_comments_follows by follow",
+			"deliveries " + prefix + "_comments_deliveries by delivery",
 			"edits " + prefix + "_comments_edits by edit",
 			"reactions " + prefix + "_comments_reactions by reaction",
 		}; !slices.Equal(tables, want) {

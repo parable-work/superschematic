@@ -1,21 +1,26 @@
 //! Comments' writing operations, every one beside the row (D77's primitive
 //! 1): post, edit, deleteMessage, purge, react, unreact, pin, unpin,
 //! resolve and reopen (`comments-contract.md`, "Operations", as batches 2
-//! to 5 amend them). Each checks in the order the contract's table lists
-//! and stops at the first refusal, writes only Comments' sub-tables and
-//! its conversation's shared row, and returns the record after, as the
+//! to 5 amend them: a composing message refused, an interrupted one edited
+//! as a posted one, the drafts, deliveries and follows a delete and a purge
+//! drop). Each checks in the order the contract's table lists and stops at
+//! the first refusal, writes only Comments' sub-tables and its
+//! conversation's shared row, and returns the record after, as the
 //! engine's event carried it.
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{Cx, Hook};
 
 use super::checks::{
-    check_block_shapes, check_blocks, check_body, deleted, forbidden, holds, invalid, moderates,
-    not_a_thread, not_author, object, present, veto, whole, MAX_EDITS, MAX_EMOJI,
+    check_block_shapes, check_blocks, check_body, composing, deleted, for_of, forbidden, holds,
+    invalid, moderates, not_a_thread, not_author, object, present, veto, whole, MAX_EDITS,
+    MAX_EMOJI,
 };
+use super::drafts::{clear_idle, remove_drafts};
+use super::follows;
 use super::messages::{
-    edit_key, edits_of, message_key, messages_of, reaction_key, reactions_of, record, Conversation,
-    Message, DELETED, POSTED,
+    edit_key, edits_of, message_key, messages_of, reaction_key, reactions_of, Conversation,
+    Message, Talk, DELETED, POSTED,
 };
 use super::{CommentsConfig, EDITS, MESSAGES, REACTIONS};
 
@@ -33,25 +38,40 @@ pub(super) const REOPEN: &str = "reopen";
 type C<'a, 'r> = &'a Cx<'r, CommentsConfig>;
 
 /// The record of a message after the run's writes, read again.
-fn after(cx: C<'_, '_>, id: i64) -> Hook<Value> {
-    let messages = messages_of(cx)?;
-    let message = present(cx, &messages, id)?;
-    Ok(record(
-        &message,
-        &messages,
-        &reactions_of(cx)?,
-        &cx.caller().subject,
-    ))
+pub(super) fn after(cx: C<'_, '_>, id: i64) -> Hook<Value> {
+    let talk = Talk::of(cx)?;
+    let messages = &talk.messages;
+    let message = present(cx, messages, id)?;
+    Ok(talk.record(&message, &cx.caller().subject))
 }
 
 /// A list member as a write keeps it: as given, `[]` when absent.
-fn listed(value: Option<&Value>) -> Value {
+pub(super) fn listed(value: Option<&Value>) -> Value {
     value.cloned().unwrap_or_else(|| Value::Array(Vec::new()))
 }
 
-/// The thread and quotes a post names: the thread present and top-level;
-/// the message it quotes present, in the thread and not deleted.
-fn check_reply(
+/// A retry of a post or a begin: the record, as it is now, of the present
+/// message of any state its caller posted or began with the clientId, which
+/// writes nothing; `None` for none.
+pub(super) fn retried(cx: C<'_, '_>, client_id: Option<&str>) -> Hook<Option<Value>> {
+    let Some(client_id) = client_id else {
+        return Ok(None);
+    };
+    let talk = Talk::of(cx)?;
+    let subject = &cx.caller().subject;
+    Ok(talk
+        .messages
+        .iter()
+        .find(|message| {
+            message.author == *subject && message.client_id.as_deref() == Some(client_id)
+        })
+        .map(|found| talk.record(found, subject)))
+}
+
+/// The thread and quotes a post or a begin names: the thread present,
+/// top-level and not composing; the message it quotes present, in the
+/// thread, not deleted and not composing.
+pub(super) fn check_reply(
     cx: C<'_, '_>,
     messages: &[Message],
     thread: Option<i64>,
@@ -63,6 +83,9 @@ fn check_reply(
     let top = present(cx, messages, thread)?;
     if !top.top_level() {
         return Err(not_a_thread(cx, &top));
+    }
+    if top.composing() {
+        return Err(composing(cx, thread));
     }
     if let Some(quotes) = quotes {
         let quoted = present(cx, messages, quotes)?;
@@ -76,6 +99,9 @@ fn check_reply(
         }
         if quoted.deleted() {
             return Err(deleted(cx, quotes));
+        }
+        if quoted.composing() {
+            return Err(composing(cx, quotes));
         }
     }
     Ok(())
@@ -93,13 +119,10 @@ pub(super) fn post(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     let quotes = params.get("quotes").and_then(whole);
     let client_id = params.get("clientId").and_then(Value::as_str);
     let messages = messages_of(cx)?;
-    // 1: a retry returns its message as it is now, and writes nothing.
-    if let Some(client_id) = client_id {
-        if let Some(found) = messages.iter().find(|message| {
-            message.author == subject && message.client_id.as_deref() == Some(client_id)
-        }) {
-            return Ok(record(found, &messages, &reactions_of(cx)?, &subject));
-        }
+    // 1: a retry of a post (or a begin) returns its message as it is now,
+    // and writes nothing.
+    if let Some(record) = retried(cx, client_id)? {
+        return Ok(record);
     }
     check_body(cx, POST, Some(body))?;
     if quotes.is_some() && thread.is_none() {
@@ -122,6 +145,9 @@ pub(super) fn post(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
         values.insert("quotes".into(), Value::from(quotes));
     }
     values.insert("author".into(), Value::from(subject.as_str()));
+    if let Some(acted_for) = for_of(cx) {
+        values.insert("forSubject".into(), Value::from(acted_for));
+    }
     values.insert("state".into(), Value::from(POSTED));
     values.insert("body".into(), Value::from(body));
     values.insert("blocks".into(), listed(blocks));
@@ -134,8 +160,14 @@ pub(super) fn post(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     if let Some(client_id) = client_id {
         values.insert("clientId".into(), Value::from(client_id));
     }
+    let stand = conversation.last_stand;
     cx.insert_row(MESSAGES, &message_key(id), values)?;
     conversation.save(cx)?;
+    let posted = messages_of(cx)?
+        .into_iter()
+        .find(|message| message.id == id)
+        .ok_or_else(|| cx.defect("a post's message is not in the run"))?;
+    follows::came_to_stand(cx, &posted, stand)?;
     after(cx, id)
 }
 
@@ -158,6 +190,9 @@ pub(super) fn edit(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     let message = present(cx, &messages, id)?;
     if message.deleted() {
         return Err(deleted(cx, id));
+    }
+    if message.composing() {
+        return Err(composing(cx, id));
     }
     let subject = cx.caller().subject.clone();
     // Whether the caller moderates, asked once and only when it decides.
@@ -210,6 +245,11 @@ pub(super) fn edit(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     kept.insert("at".into(), Value::from(now));
     cx.insert_row(EDITS, &edit_key(id, number), kept)?;
     let mut values = Map::new();
+    // An interrupted message its author edits is posted: the author has
+    // said what it meant. A moderator's edit of another's leaves it.
+    if message.author == subject {
+        values.insert("state".into(), Value::from(POSTED));
+    }
     if let Some(body) = body {
         values.insert("body".into(), Value::from(body));
     }
@@ -223,11 +263,17 @@ pub(super) fn edit(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     values.insert("edits".into(), Value::from(number));
     cx.update_row(MESSAGES, &message_key(id), values)?;
     Conversation::of(cx)?.save(cx)?;
+    if let Some(mentions) = mentions {
+        follows::edited_mentions(cx, &message, mentions)?;
+    }
     after(cx, id)
 }
 
-/// Deletes the edits and reactions of the messages.
-fn remove_edits_and_reactions(cx: C<'_, '_>, ids: &[i64]) -> Hook<()> {
+/// Deletes the edits, reactions and draft chunks of the messages, and
+/// clears the idle deadlines of the composing ones.
+fn remove_edits_and_reactions(cx: C<'_, '_>, messages: &[Message], ids: &[i64]) -> Hook<()> {
+    remove_drafts(cx, ids)?;
+    clear_idle(cx, messages, ids)?;
     for edit in edits_of(cx)? {
         let edited = edit.value("message").and_then(whole).unwrap_or_default();
         if ids.contains(&edited) {
@@ -252,10 +298,11 @@ pub(super) fn delete_message(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     if message.author != cx.caller().subject && !moderates(cx)? {
         return Err(not_author(cx, &message));
     }
-    remove_edits_and_reactions(cx, &[id])?;
+    remove_edits_and_reactions(cx, &messages, &[id])?;
+    follows::removed(cx, &[id], &[])?;
     // It keeps its id, thread, quotes, author, createdAt, postedAt, stand,
     // clientId (so a retry of its post returns it) and a top-level
-    // message's resolve.
+    // message's resolve; a composing message leaves composing.
     let mut values = Map::new();
     values.insert("state".into(), Value::from(DELETED));
     values.insert("body".into(), Value::from(""));
@@ -264,6 +311,8 @@ pub(super) fn delete_message(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     values.insert("editedAt".into(), Value::Null);
     values.insert("edits".into(), Value::from(0));
     values.insert("pinned".into(), Value::from(false));
+    values.insert("draftLength".into(), Value::Null);
+    values.insert("lastAppendAt".into(), Value::Null);
     cx.update_row(MESSAGES, &message_key(id), values)?;
     Conversation::of(cx)?.save(cx)?;
     after(cx, id)
@@ -294,7 +343,13 @@ pub(super) fn purge(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
         .filter(|message| message.id == id || message.thread == Some(id))
         .map(|message| message.id)
         .collect();
-    remove_edits_and_reactions(cx, &ids)?;
+    remove_edits_and_reactions(cx, &messages, &ids)?;
+    let top = messages
+        .iter()
+        .find(|message| message.id == id)
+        .is_some_and(Message::top_level);
+    let threads: Vec<i64> = if top { vec![id] } else { Vec::new() };
+    follows::removed(cx, &ids, &threads)?;
     for gone in &ids {
         cx.delete_row(MESSAGES, &message_key(*gone))?;
     }
@@ -321,6 +376,9 @@ fn reactable(cx: C<'_, '_>, params: &Value) -> Hook<(Message, String)> {
     let message = present(cx, &messages, id)?;
     if message.deleted() {
         return Err(deleted(cx, id));
+    }
+    if message.composing() {
+        return Err(composing(cx, id));
     }
     Ok((message, emoji))
 }
@@ -406,6 +464,9 @@ pub(super) fn pin(cx: C<'_, '_>, params: &Value, pinned: bool) -> Hook<Value> {
         if message.deleted() {
             return Err(deleted(cx, id));
         }
+        if message.composing() {
+            return Err(composing(cx, id));
+        }
         if message.pinned {
             return Err(veto(
                 cx,
@@ -441,6 +502,9 @@ pub(super) fn resolve(cx: C<'_, '_>, params: &Value, resolved: bool) -> Hook<Val
     }
     if top.deleted() {
         return Err(deleted(cx, id));
+    }
+    if top.composing() {
+        return Err(composing(cx, id));
     }
     if top.author != cx.caller().subject && !holds(cx, cx.config().resolve_permission.as_deref())? {
         return Err(not_author(cx, &top));

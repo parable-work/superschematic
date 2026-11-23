@@ -6,7 +6,8 @@ use serde_json::Value;
 use superschematic_rules::{Cx, Hook, Refusal};
 
 use super::checks::{invalid, no_message, not_a_thread, object, present, whole};
-use super::messages::{edits_of, messages_of, reactions_of, record, Message};
+use super::follows;
+use super::messages::{edits_of, messages_of, reactions_of, Message, Talk};
 use super::{CommentsConfig, NAME};
 use crate::paging::{page, page_request, Page};
 
@@ -35,11 +36,12 @@ pub(super) fn list_messages(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
         ));
     }
     let thread = params.get("thread").and_then(whole);
-    let messages = messages_of(cx)?;
+    let talk = Talk::of(cx)?;
+    let messages = &talk.messages;
     let root = match thread {
         None => None,
         Some(thread) => {
-            let top = present(cx, &messages, thread)?;
+            let top = present(cx, messages, thread)?;
             if !top.top_level() {
                 return Err(not_a_thread(cx, &top));
             }
@@ -98,7 +100,6 @@ pub(super) fn list_messages(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
         ),
         _ => (None, None),
     };
-    let reactions = reactions_of(cx)?;
     let subject = &cx.caller().subject;
     let mut members = vec![
         (
@@ -106,32 +107,32 @@ pub(super) fn list_messages(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
             Value::Array(
                 items
                     .iter()
-                    .map(|message| record(message, &messages, &reactions, subject))
+                    .map(|message| talk.record(message, subject))
                     .collect(),
             ),
         ),
         ("before", before.map_or(Value::Null, Value::from)),
         ("after", after.map_or(Value::Null, Value::from)),
     ];
+    // The caller's marker on the listing: the conversation's, or the
+    // thread's with a thread; absent when it has none.
+    if let Some(marker) = follows::read_up_to(cx, thread)? {
+        members.push(("readUpTo", Value::from(marker)));
+    }
     if let Some(root) = root {
-        members.push(("root", record(&root, &messages, &reactions, subject)));
+        members.push(("root", talk.record(&root, subject)));
     }
     Ok(object(members))
 }
 
 pub(super) fn get_message(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
-    let messages = messages_of(cx)?;
+    let talk = Talk::of(cx)?;
     let message = present(
         cx,
-        &messages,
+        &talk.messages,
         params.get("message").and_then(whole).unwrap_or_default(),
     )?;
-    Ok(record(
-        &message,
-        &messages,
-        &reactions_of(cx)?,
-        &cx.caller().subject,
-    ))
+    Ok(talk.record(&message, &cx.caller().subject))
 }
 
 pub(super) fn list_edits(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
@@ -196,20 +197,20 @@ pub(super) fn list_reactions(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
 pub(super) fn list_pinned(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     let request = page_request(params)
         .map_err(|issue| Refusal::operation_params(NAME, cx.use_id(), LIST_PINNED, vec![issue]))?;
-    let messages = messages_of(cx)?;
-    let pinned: Vec<&Message> = messages
+    let talk = Talk::of(cx)?;
+    let pinned: Vec<&Message> = talk
+        .messages
         .iter()
         .filter(|message| message.pinned && message.id > request.after)
         .take(usize::try_from(request.limit + 1).unwrap_or(usize::MAX))
         .collect();
     let found = page(pinned, request.limit, |message| message.id);
-    let reactions = reactions_of(cx)?;
     let subject = &cx.caller().subject;
     Ok(Page {
         items: found
             .items
             .iter()
-            .map(|message| record(message, &messages, &reactions, subject))
+            .map(|message| talk.record(message, subject))
             .collect(),
         next: found.next,
     }

@@ -292,7 +292,7 @@ func expandStorage(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) ([
 		if !ok {
 			return nil, fmt.Errorf("type %s: behavior %s is not registered", td.Name, use.Name)
 		}
-		if behavior.ArmsDeadlines && !slices.Contains(arming, use.Name) {
+		if registry.TableArmsDeadlines(use.Name, behavior.ArmsDeadlines) && !slices.Contains(arming, use.Name) {
 			arming = append(arming, use.Name)
 		}
 		for _, table := range behavior.Tables {

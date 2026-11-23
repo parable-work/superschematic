@@ -372,6 +372,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -386,6 +398,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -462,6 +483,43 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -493,6 +551,15 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -570,6 +637,43 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -601,6 +705,15 @@
                       "stand": 2,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -681,6 +794,43 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -723,6 +873,15 @@
                       "emoji": "eyes",
                       "subject": "otto",
                       "at": 1000000
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -798,6 +957,43 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -840,6 +1036,15 @@
                       "emoji": "eyes",
                       "subject": "otto",
                       "at": 1000000
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -927,6 +1132,34 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "message": 1,
+                      "subject": "wren",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1001000,
+                      "attempts": 0,
+                      "createdAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
                 "edits": [
                   {
                     "key": "0000000001.0000000001",
@@ -938,6 +1171,28 @@
                       "mentions": [],
                       "by": "carol",
                       "at": 1001000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
                     }
                   }
                 ],
@@ -986,6 +1241,15 @@
                       "emoji": "eyes",
                       "subject": "otto",
                       "at": 1000000
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -1057,6 +1321,34 @@
             },
             "subRows": {
               "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "message": 1,
+                      "subject": "wren",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1001000,
+                      "attempts": 0,
+                      "createdAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "0000000002.otto",
+                    "values": {
+                      "message": 2,
+                      "subject": "otto",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000000,
+                      "attempts": 0,
+                      "createdAt": 1000000
+                    }
+                  }
+                ],
                 "edits": [
                   {
                     "key": "0000000001.0000000001",
@@ -1068,6 +1360,28 @@
                       "mentions": [],
                       "by": "carol",
                       "at": 1001000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.otto",
+                    "values": {
+                      "thread": 1,
+                      "subject": "otto",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  },
+                  {
+                    "key": "0000000001.wren",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wren",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000000
                     }
                   }
                 ],
@@ -1116,6 +1430,15 @@
                       "emoji": "eyes",
                       "subject": "otto",
                       "at": 1000000
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "otto",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -1200,7 +1523,7 @@
               {
                 "behavior": "Comments",
                 "config": {
-                  "composeTimeoutMs": 60000
+                  "maxAttempts": 3
                 },
                 "anchor": "type"
               }
@@ -1227,7 +1550,7 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)",
+              "message": "type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)",
               "details": {
                 "issues": [
                   {
@@ -1236,7 +1559,7 @@
                     "behavior": "Comments",
                     "kind": "rule",
                     "path": "/config",
-                    "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
+                    "message": "type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
                   }
                 ]
               }
@@ -1781,6 +2104,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -1808,6 +2143,15 @@
                       "edits": 0,
                       "pinned": false,
                       "clientId": "c1"
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -1880,6 +2224,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -1907,6 +2263,15 @@
                       "edits": 0,
                       "pinned": false,
                       "clientId": "c1"
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -1966,6 +2331,18 @@
             },
             "subRows": {
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000000
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -1993,6 +2370,15 @@
                       "edits": 0,
                       "pinned": false,
                       "clientId": "c1"
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000000,
+                      "upTo": 1
                     }
                   }
                 ]

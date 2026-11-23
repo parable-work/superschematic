@@ -277,11 +277,12 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 /// each approval an operation's write of the row's own fields.
 const REVISIONS_FLOOR: usize = 112;
 
-/// core-comments' floor (D103's step 4): 238 steps, 203 commands and 35
-/// checks, each message, edit and reaction a row of a sub-table of the use,
-/// each write beside the row, and each conversation's high-water marks a
-/// row of the use's shared table.
-const COMMENTS_FLOOR: usize = 238;
+/// core-comments' floor (D103's step 4): 347 steps, 306 commands and 41
+/// checks, each message, edit, reaction, draft chunk, read marker, follow
+/// and delivery a row of a sub-table of the use, each write beside the row,
+/// a composing message's idle deadline fired beside it, and each
+/// conversation's high-water marks a row of the use's shared table.
+const COMMENTS_FLOOR: usize = 347;
 
 /// core-comments-beside's floor (D103's step 4): 25 steps, 19 commands and
 /// 6 checks, each command's row version held to the one the lease's acquire

@@ -140,7 +140,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-numbering', floor: 104 },
   { file: 'core-lease-numbering', floor: 14 },
   { file: 'core-revisions', floor: 112 },
-  { file: 'core-comments', floor: 238 },
+  { file: 'core-comments', floor: 347 },
   { file: 'core-comments-beside', floor: 25 },
   { file: 'core-derived-provenance', floor: 75 },
 ];

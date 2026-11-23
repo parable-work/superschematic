@@ -24,7 +24,7 @@ use superschematic_rules_testkit::{hand_written_path, ported, replay_path, scena
 /// the reads of the event log that hold a write beside the row, which the
 /// engine logged with no sequence and no log of a table's rows holds; and
 /// the reads outside the reference host's surface (events.head).
-const FLOOR: usize = 276;
+const FLOOR: usize = 397;
 
 /// The steps of `core-comments-beside.json` the replayer maps and compares:
 /// all of its two scenarios', the `open` steps among them, which count and
