@@ -26,7 +26,7 @@ use crate::declarations::Declarations;
 use crate::document::{self, document_refusal, Kind, Model, OnDelete};
 use crate::filter::{self, Sort};
 use crate::store::{
-    Draft, StoreAnswer, StoreAnswers, StoreRead, StoreWrite, StoredRow, Unit, Version,
+    Draft, Reading, StoreAnswer, StoreAnswers, StoreRead, StoreWrite, StoredRow, Unit, Version,
 };
 use crate::validate::{self, Mode};
 use crate::values::{base62, uuid_of};
@@ -196,12 +196,14 @@ pub struct Done {
 }
 
 /// The handler: the core it runs the behaviors on, the behaviors'
-/// declarations, and the access policy it asks before each request a
-/// caller makes ([`crate::access`]).
+/// declarations, the access policy it asks before each request a caller
+/// makes ([`crate::access`]), and how it asks its store for what a list, a
+/// unique field and a relation's delete read ([`Reading`]).
 pub struct Handler<'a> {
     core: &'a Core,
     declarations: &'a Declarations,
     policy: &'a Policy,
+    reading: Reading,
 }
 
 /// The reads a run has and the ones it still needs.
@@ -254,6 +256,78 @@ impl<'a> Reads<'a> {
             type_name: type_name.to_owned(),
         });
         None
+    }
+
+    /// The rows a store answers to one of its own queries
+    /// ([`Reading::Queries`]).
+    pub fn queried(&mut self, read: StoreRead) -> Option<&'a [StoredRow]> {
+        match self.ask(read)? {
+            StoreAnswer::Rows(rows) => Some(rows),
+            _ => None,
+        }
+    }
+
+    /// The rows a delete of `target`'s row `id` reaches through `member` of
+    /// `referrer`, as `reading` asks for them: every row of the referrer,
+    /// or the store's own query of them. Either may hold rows whose member
+    /// names another row.
+    pub fn reached(
+        &mut self,
+        reading: Reading,
+        referrer: &str,
+        member: &str,
+        target: &str,
+        id: &str,
+    ) -> Option<&'a [StoredRow]> {
+        match reading {
+            Reading::Rows => self.rows(referrer),
+            Reading::Queries => self.queried(StoreRead::Reached {
+                type_name: referrer.to_owned(),
+                member: member.to_owned(),
+                target: target.to_owned(),
+                id: id.to_owned(),
+            }),
+        }
+    }
+
+    /// The rows a unique key of a write's own fields is held to, one list
+    /// per unique key of the model, as `reading` asks for them: every row
+    /// of the type, or each key's holders, which the store answers (none
+    /// for a key with a field of no value, which holds no row's). `None`
+    /// while the store has not answered them all.
+    pub fn unique_rows(
+        &mut self,
+        reading: Reading,
+        model: &Model,
+        data: &Map<String, Value>,
+    ) -> Option<Vec<&'a [StoredRow]>> {
+        if model.uniques.is_empty() {
+            return Some(Vec::new());
+        }
+        if reading == Reading::Rows {
+            let rows = self.rows(&model.name)?;
+            return Some(vec![rows; model.uniques.len()]);
+        }
+        let asked: Vec<Option<&'a [StoredRow]>> = model
+            .uniques
+            .iter()
+            .map(|unique| {
+                let mut values = Map::new();
+                for name in unique {
+                    let value = data.get(name).filter(|value| !value.is_null())?;
+                    values.insert(name.clone(), value.clone());
+                }
+                Some(values)
+            })
+            .map(|values| match values {
+                Some(values) => self.queried(StoreRead::Holders {
+                    type_name: model.name.clone(),
+                    values,
+                }),
+                None => Some(&[][..]),
+            })
+            .collect();
+        asked.into_iter().collect()
     }
 
     pub fn waiting(&self) -> bool {
@@ -391,6 +465,7 @@ impl<'a> Handler<'a> {
             core,
             declarations,
             policy: &ALLOW_ALL,
+            reading: Reading::default(),
         }
     }
 
@@ -399,6 +474,22 @@ impl<'a> Handler<'a> {
     pub fn with_policy(mut self, policy: &'a Policy) -> Self {
         self.policy = policy;
         self
+    }
+
+    /// The handler with how it asks its store for what a list, a unique
+    /// field and a relation's delete read: every row, as development mode
+    /// does (the default), or the store's own queries, as runtime mode's
+    /// store answers them.
+    #[must_use]
+    pub fn with_reading(mut self, reading: Reading) -> Self {
+        self.reading = reading;
+        self
+    }
+
+    /// How the handler asks its store for a list, a unique field and a
+    /// relation's delete.
+    pub fn reading(&self) -> Reading {
+        self.reading
     }
 
     /// The access policy the handler asks.
@@ -668,14 +759,17 @@ impl<'a> Handler<'a> {
     }
 
     /// The refusal of a write whose unique fields another row holds, as a
-    /// unique index refuses it: `conflict`.
+    /// unique index refuses it: `conflict`. `rows` holds, for each unique
+    /// key of the model in its order, the rows it is held to
+    /// ([`Reads::unique_rows`]).
     fn unique_conflict(
         model: &Model,
         id: &str,
         data: &Map<String, Value>,
-        rows: &[StoredRow],
+        rows: &[&[StoredRow]],
     ) -> Option<Refusal> {
-        for unique in &model.uniques {
+        for (index, unique) in model.uniques.iter().enumerate() {
+            let rows = rows.get(index).copied().unwrap_or_default();
             let values: Option<Vec<&Value>> = unique
                 .iter()
                 .map(|name| data.get(name).filter(|value| !value.is_null()))
@@ -747,11 +841,7 @@ impl<'a> Handler<'a> {
         }
         let relation = Self::relation_issues(model, &own, reads);
         let held = reads.row(type_name, &id);
-        let rows = if model.uniques.is_empty() {
-            Some(&[][..])
-        } else {
-            reads.rows(type_name)
-        };
+        let rows = reads.unique_rows(self.reading, model, &own);
         if reads.waiting() {
             return Ok(take(reads).wait());
         }
@@ -764,7 +854,7 @@ impl<'a> Handler<'a> {
                 format!("{type_name} {id} already exists"),
             ));
         }
-        if let Some(conflict) = Self::unique_conflict(model, &id, &own, rows.unwrap_or_default()) {
+        if let Some(conflict) = Self::unique_conflict(model, &id, &own, &rows.unwrap_or_default()) {
             return Err(conflict);
         }
         let action = Action::Create {
@@ -810,9 +900,9 @@ impl<'a> Handler<'a> {
             .iter()
             .any(|unique| unique.iter().any(|name| patch.contains_key(name)));
         let rows = if touches_unique {
-            reads.rows(type_name)
+            reads.unique_rows(self.reading, model, &merged)
         } else {
-            Some(&[][..])
+            Some(Vec::new())
         };
         if reads.waiting() {
             return Ok(take(reads).wait());
@@ -820,7 +910,7 @@ impl<'a> Handler<'a> {
         if !relation.is_empty() {
             return Err(Refusal::invalid_instance(type_name, relation));
         }
-        if let Some(conflict) = Self::unique_conflict(model, id, &merged, rows.unwrap_or_default())
+        if let Some(conflict) = Self::unique_conflict(model, id, &merged, &rows.unwrap_or_default())
         {
             return Err(conflict);
         }
@@ -846,6 +936,7 @@ impl<'a> Handler<'a> {
         live: &Live,
         start: &[(String, String)],
         skip: &BTreeSet<(String, String)>,
+        reading: Reading,
         reads: &mut Reads<'_>,
     ) -> Result<Option<Cascade>, Refusal> {
         let mut cascade = Cascade::default();
@@ -855,7 +946,7 @@ impl<'a> Handler<'a> {
         let mut nulled: BTreeMap<(String, String), (StoredRow, StoredRow)> = BTreeMap::new();
         while let Some((target, id)) = queue.pop() {
             for (referrer, member, on_delete) in live.referrers(&target) {
-                let Some(rows) = reads.rows(&referrer) else {
+                let Some(rows) = reads.reached(reading, &referrer, &member, &target, &id) else {
                     continue;
                 };
                 for row in rows {
@@ -965,7 +1056,8 @@ impl<'a> Handler<'a> {
         let model = live.model(type_name)?;
         row.ok_or_else(|| not_found(type_name, id))?;
         let start = [(type_name.to_owned(), id.to_owned())];
-        let Some(cascade) = Self::cascade(&live, &start, &BTreeSet::new(), reads)? else {
+        let Some(cascade) = Self::cascade(&live, &start, &BTreeSet::new(), self.reading, reads)?
+        else {
             return Ok(take(reads).wait());
         };
         let action = Action::Delete { key: id.to_owned() };
@@ -1016,32 +1108,54 @@ impl<'a> Handler<'a> {
                 "list of {type_name}: limit must be 1 to {MAX_LIMIT}"
             )));
         }
-        let mut targets = Vec::new();
-        filter::targets(&conds, &mut targets);
-        let rows = reads.rows(type_name);
-        for target in &targets {
-            reads.rows(target);
-        }
-        let Some(rows) = rows.filter(|_| !reads.waiting()) else {
-            return Ok(take(reads).wait());
+        let mut kept: Vec<&StoredRow> = match self.reading {
+            Reading::Rows => {
+                let mut targets = Vec::new();
+                filter::targets(&conds, &mut targets);
+                let rows = reads.rows(type_name);
+                for target in &targets {
+                    reads.rows(target);
+                }
+                let Some(rows) = rows.filter(|_| !reads.waiting()) else {
+                    return Ok(take(reads).wait());
+                };
+                let reach: BTreeMap<String, &[StoredRow]> = targets
+                    .iter()
+                    .map(|target| {
+                        (
+                            target.clone(),
+                            rows_of(reads.answers, target).unwrap_or_default(),
+                        )
+                    })
+                    .collect();
+                let mut kept: Vec<&StoredRow> = rows
+                    .iter()
+                    .filter(|row| filter::keeps(&conds, row, &reach))
+                    .collect();
+                order.sort(&mut kept);
+                if let Some(cursor) = cursor {
+                    kept = order.after(kept, cursor, type_name)?;
+                }
+                kept
+            }
+            // The store answers the page itself, and one row past it,
+            // which says whether more follow.
+            Reading::Queries => {
+                if let Some(cursor) = cursor {
+                    order.read_cursor(cursor, type_name)?;
+                }
+                let Some(rows) = reads.queried(StoreRead::Page {
+                    type_name: type_name.to_owned(),
+                    filter: filter_given.clone(),
+                    sort: sort.to_vec(),
+                    cursor: cursor.map(str::to_owned),
+                    limit: limit + 1,
+                }) else {
+                    return Ok(take(reads).wait());
+                };
+                rows.iter().collect()
+            }
         };
-        let reach: BTreeMap<String, &[StoredRow]> = targets
-            .iter()
-            .map(|target| {
-                (
-                    target.clone(),
-                    rows_of(reads.answers, target).unwrap_or_default(),
-                )
-            })
-            .collect();
-        let mut kept: Vec<&StoredRow> = rows
-            .iter()
-            .filter(|row| filter::keeps(&conds, row, &reach))
-            .collect();
-        order.sort(&mut kept);
-        if let Some(cursor) = cursor {
-            kept = order.after(kept, cursor, type_name)?;
-        }
         let more = kept.len() > limit;
         kept.truncate(limit);
         let next = if more {
@@ -1255,7 +1369,8 @@ impl<'a> Handler<'a> {
             }
             Ran::Refused(refusal) => refused(refusal),
             Ran::Changed(changed) => {
-                if let Some(refusal) = Self::own_writes_refusal(live, &changed, reads) {
+                if let Some(refusal) = Self::own_writes_refusal(live, &changed, self.reading, reads)
+                {
                     return Ok(refused(refusal));
                 }
                 if reads.waiting() {
@@ -1274,6 +1389,7 @@ impl<'a> Handler<'a> {
     fn own_writes_refusal(
         live: &Live,
         changed: &bridge::Changed,
+        reading: Reading,
         reads: &mut Reads<'_>,
     ) -> Option<Refusal> {
         for write in &changed.changes.rows {
@@ -1304,18 +1420,19 @@ impl<'a> Handler<'a> {
             if !touches_unique {
                 continue;
             }
-            let Some(rows) = reads.rows(type_name) else {
-                continue;
-            };
             let after = changed
                 .rows
                 .iter()
                 .rev()
                 .find(|(t, k, _)| t == type_name && k == key)
                 .and_then(|(_, _, row)| row.as_ref());
-            if let Some(conflict) =
-                after.and_then(|after| Self::unique_conflict(model, key, &after.data, rows))
-            {
+            let Some(after) = after else {
+                continue;
+            };
+            let Some(rows) = reads.unique_rows(reading, model, &after.data) else {
+                continue;
+            };
+            if let Some(conflict) = Self::unique_conflict(model, key, &after.data, &rows) {
                 return Some(conflict);
             }
         }

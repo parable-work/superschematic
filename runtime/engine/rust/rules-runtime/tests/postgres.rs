@@ -108,6 +108,45 @@ scenario!(
     "plan",
     common::plan_without_applying
 );
+scenario!(
+    a_list_answers_in_sql_as_development_mode_does_from_every_row,
+    "parity",
+    common::parity::lists_answer_as_development_mode
+);
+
+/// A soft-deletable table serves its live rows alone, and its table keeps
+/// the deleted row, stamped, with its behavior's columns.
+#[test]
+fn a_soft_delete_stamps_the_row_and_serves_the_live_rows_alone() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let Some(database) = Database::new("soft") else {
+        return;
+    };
+    let (shelf, book) = common::parity::soft_deletes(&database.open(), &binaries);
+    let mut client = database.client();
+    let hyphenated = |id: &str| {
+        let n = superschematic_rules_handler::values::uuid_of(id).expect("a UUID");
+        superschematic_rules_runtime::values::hyphenate(n)
+    };
+    let row = client
+        .query_one(
+            "SELECT deleted_at IS NOT NULL FROM shelf WHERE id = $1::text::uuid",
+            &[&hyphenated(&shelf)],
+        )
+        .expect("the shelf's row stays");
+    assert!(row.get::<_, bool>(0));
+    let row = client
+        .query_one(
+            "SELECT deleted_at IS NOT NULL, status, _version FROM book WHERE id = $1::text::uuid",
+            &[&hyphenated(&book)],
+        )
+        .expect("the book's row stays");
+    assert!(row.get::<_, bool>(0));
+    assert_eq!(row.get::<_, String>(1), "out");
+    assert_eq!(row.get::<_, i64>(2), 3);
+}
 
 /// What a database holds of a schema: each table's columns by name with
 /// their type, nullability and default, its constraints and indexes by

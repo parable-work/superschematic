@@ -11,6 +11,8 @@
 
 #![allow(dead_code)]
 
+pub mod parity;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;

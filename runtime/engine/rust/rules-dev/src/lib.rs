@@ -902,6 +902,9 @@ impl Store for SqliteStore {
                         .transpose()?,
                 )
             }
+            StoreRead::Page { .. } | StoreRead::Holders { .. } | StoreRead::Reached { .. } => {
+                return Err(superschematic_rules_handler::store::unqueried(read))
+            }
         })
     }
 

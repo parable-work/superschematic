@@ -185,15 +185,50 @@ fn sqlite_value(value: ValueRef<'_>) -> Value {
     }
 }
 
+/// The functions a list's filter calls on SQLite ([`crate::query`]): the
+/// handler's own `ilike` of a text anywhere, and its equality of two JSON
+/// values, each deterministic, so the planner may use them in an index's
+/// expression too.
+fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function(crate::query::ILIKE, 2, flags, |cx| {
+        let text: Option<String> = cx.get(0)?;
+        let pattern: Option<String> = cx.get(1)?;
+        Ok(match (text, pattern) {
+            (Some(text), Some(pattern)) => i64::from(superschematic_rules_handler::values::ilike(
+                &text,
+                &format!("%{pattern}%"),
+            )),
+            _ => 0,
+        })
+    })?;
+    conn.create_scalar_function(crate::query::JSON_SAME, 2, flags, |cx| {
+        let held: Option<String> = cx.get(0)?;
+        let given: Option<String> = cx.get(1)?;
+        let read = |text: Option<String>| -> Option<Value> {
+            text.and_then(|text| serde_json::from_str(&text).ok())
+        };
+        Ok(match (read(held), read(given)) {
+            (Some(held), Some(given)) => {
+                i64::from(superschematic_rules_handler::values::same(&held, &given))
+            }
+            _ => 0,
+        })
+    })
+}
+
 impl SqliteConn {
     /// The serving connection to a SQLite file, with foreign keys on, as
-    /// the plan's tables expect them.
+    /// the plan's tables expect them, and the functions a list's filter
+    /// calls.
     pub(crate) fn open(path: &Path) -> Result<Self, Refusal> {
         let conn = Connection::open(path).map_err(sqlite_failed)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(sqlite_failed)?;
         conn.execute_batch("PRAGMA foreign_keys = ON")
             .map_err(sqlite_failed)?;
+        register_functions(&conn).map_err(sqlite_failed)?;
         Ok(SqliteConn {
             conn,
             path: path.to_owned(),

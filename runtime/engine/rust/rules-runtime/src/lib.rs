@@ -47,6 +47,7 @@
 
 mod conn;
 mod db;
+mod query;
 mod record;
 mod store;
 pub mod values;
@@ -60,7 +61,7 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{Caller, Code, Core, Refusal};
 use superschematic_rules_adapter::Layout;
 use superschematic_rules_handler::{
-    run_due, serve, Context, Declarations, Handler, RanDue, Request,
+    run_due, serve, Context, Declarations, Handler, RanDue, Reading, Request,
 };
 
 use crate::conn::{run_binary, Conn, SqliteConn};
@@ -299,7 +300,7 @@ impl Runtime {
         let context = self.context(caller);
         let core = self.core.clone();
         let declarations = self.declarations.clone();
-        let handler = Handler::new(&core, &declarations);
+        let handler = Handler::new(&core, &declarations).with_reading(Reading::Queries);
         let response = serve(&handler, &mut self.store, request, &context);
         if self.drain == Drain::AfterEachRequest {
             self.run_due()?;
@@ -312,7 +313,7 @@ impl Runtime {
     pub fn run_due(&mut self) -> Result<Vec<RanDue>, Refusal> {
         let core = self.core.clone();
         let declarations = self.declarations.clone();
-        let handler = Handler::new(&core, &declarations);
+        let handler = Handler::new(&core, &declarations).with_reading(Reading::Queries);
         let mut fresh = || {
             (
                 uuid::Uuid::new_v4().to_string(),

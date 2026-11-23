@@ -2081,6 +2081,7 @@ dependencies = [
  "superschematic-rules",
  "superschematic-rules-adapter",
  "superschematic-rules-behaviors",
+ "superschematic-rules-dev",
  "superschematic-rules-handler",
  "uuid",
 ]

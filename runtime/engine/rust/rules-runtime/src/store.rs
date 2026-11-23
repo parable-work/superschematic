@@ -9,6 +9,14 @@
 //! (a delete's `CASCADE`, a `SET NULL`), and the handler's own cascade then
 //! finds it written. A table with a version column has it moved on by one
 //! at each update, as its trigger would.
+//!
+//! A list's page, a unique key's holders and the rows a delete reaches are
+//! queries of their own ([`crate::query`]), which the handler asks for by
+//! `Reading::Queries`. A soft-deletable table (one with `deletedAt`, the
+//! layout's `live`) serves its live rows alone, as the compiled adapter
+//! does: a delete stamps the row's `deletedAt` with the database's clock
+//! and moves its version, keeping its sub-table rows, and reaches no row
+//! through a foreign key, which an update does not fire.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -25,9 +33,10 @@ use superschematic_rules_handler::{
 
 use crate::conn::Conn;
 use crate::db::{
-    delete_rows, insert_row, json_param, placeholder, quote, select_rows, timestamp, update_rows,
-    Db,
+    delete_rows, insert_row, json_param, placeholder, quote, select_live, select_rows, timestamp,
+    update_live, update_rows, Db,
 };
+use crate::query;
 use crate::record::{self, Record, Served, Types, RECORD_TABLE};
 use crate::values::{
     core_from_column, core_to_column, internal, key_column, key_of, own_from_column, own_to_column,
@@ -57,6 +66,28 @@ pub struct RuntimeStore {
     /// number's queue table and message id.
     queued: BTreeMap<i64, (String, Value)>,
     next_seq: i64,
+    /// Whether the record's table is known to exist: a server role that
+    /// may not create it reads no record until the runner writes one.
+    recorded: bool,
+}
+
+/// The record's table, as a runtime store and the runners create it
+/// (`superschematic-migrate apply --record`).
+pub(crate) fn record_table(dialect: Dialect) -> String {
+    match dialect {
+        Dialect::Sqlite => format!(
+            "CREATE TABLE IF NOT EXISTS {RECORD_TABLE} (
+               service TEXT PRIMARY KEY, model_hash TEXT NOT NULL, documents TEXT NOT NULL,
+               layout TEXT NOT NULL, versions TEXT NOT NULL,
+               published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))"
+        ),
+        Dialect::Postgres => format!(
+            "CREATE TABLE IF NOT EXISTS {RECORD_TABLE} (
+               service TEXT PRIMARY KEY, model_hash TEXT NOT NULL, documents TEXT NOT NULL,
+               layout TEXT NOT NULL, versions TEXT NOT NULL,
+               published_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        ),
+    }
 }
 
 /// The record's row and the runner's state of its service, as a request's
@@ -74,21 +105,12 @@ impl RuntimeStore {
         core: Arc<superschematic_rules::Core>,
         declarations: Arc<Declarations>,
     ) -> Result<Self, Refusal> {
-        let created = match db.dialect() {
-            Dialect::Sqlite => format!(
-                "CREATE TABLE IF NOT EXISTS {RECORD_TABLE} (
-                   service TEXT PRIMARY KEY, model_hash TEXT NOT NULL, documents TEXT NOT NULL,
-                   layout TEXT NOT NULL, versions TEXT NOT NULL,
-                   published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))"
-            ),
-            Dialect::Postgres => format!(
-                "CREATE TABLE IF NOT EXISTS {RECORD_TABLE} (
-                   service TEXT PRIMARY KEY, model_hash TEXT NOT NULL, documents TEXT NOT NULL,
-                   layout TEXT NOT NULL, versions TEXT NOT NULL,
-                   published_at TIMESTAMPTZ NOT NULL DEFAULT now())"
-            ),
-        };
-        db.batch(&created)?;
+        // A server whose role may not create tables (D46's grants) leaves
+        // the table to the runner that writes its first record.
+        let mut recorded = db.has_table(RECORD_TABLE)?;
+        if !recorded {
+            recorded = db.batch(&record_table(db.dialect())).is_ok();
+        }
         Ok(RuntimeStore {
             db,
             core,
@@ -96,7 +118,16 @@ impl RuntimeStore {
             types: Arc::new(Types::default()),
             queued: BTreeMap::new(),
             next_seq: 0,
+            recorded,
         })
+    }
+
+    /// Whether the record's table exists, once it does.
+    fn has_record_table(&mut self) -> Result<bool, Refusal> {
+        if !self.recorded {
+            self.recorded = self.db.has_table(RECORD_TABLE)?;
+        }
+        Ok(self.recorded)
     }
 
     pub(crate) fn dialect(&self) -> Dialect {
@@ -106,6 +137,9 @@ impl RuntimeStore {
     /// The record of the database's last publish, read in the caller's
     /// transaction; `None` before its first.
     pub(crate) fn read_record(&mut self) -> Result<Option<Record>, Refusal> {
+        if !self.has_record_table()? {
+            return Ok(None);
+        }
         let rows = self.db.query(
             &format!(
                 "SELECT service, model_hash, documents, layout, versions FROM {RECORD_TABLE} ORDER BY service"
@@ -174,6 +208,9 @@ impl RuntimeStore {
 
     /// The record's service, its model, and the runner's state of it.
     fn state(&mut self) -> Result<Option<State>, Refusal> {
+        if !self.has_record_table()? {
+            return Ok(None);
+        }
         let rows = self.db.query(
             &format!("SELECT service, model_hash FROM {RECORD_TABLE} ORDER BY service"),
             &[],
@@ -303,24 +340,70 @@ impl RuntimeStore {
         })
     }
 
+    /// A soft-deletable table's `deletedAt` column, which a live row holds
+    /// NULL in.
+    fn live_column(served: &Served) -> Option<&str> {
+        served.table.live.as_ref().map(|live| live.column.as_str())
+    }
+
+    /// A live row of a type by its id.
     fn row(&mut self, served: &Served, id: &str) -> Result<Option<StoredRow>, Refusal> {
         let key = Self::key(served, id)?;
-        let rows = select_rows(
+        let rows = select_live(
             &mut self.db,
             &served.table.table,
             &[(&served.table.key.column, key)],
+            Self::live_column(served),
         )?;
         rows.first()
             .map(|row| self.stored_row(served, row))
             .transpose()
     }
 
+    /// Whether the table holds a row of the id, live or not.
+    fn holds(&mut self, served: &Served, id: &str) -> Result<bool, Refusal> {
+        let key = Self::key(served, id)?;
+        Ok(!select_rows(
+            &mut self.db,
+            &served.table.table,
+            &[(&served.table.key.column, key)],
+        )?
+        .is_empty())
+    }
+
+    /// Every live row of a type, in id order by code point.
     fn rows(&mut self, served: &Served) -> Result<Vec<StoredRow>, Refusal> {
-        let rows = select_rows(&mut self.db, &served.table.table, &[])?;
+        let rows = select_live(
+            &mut self.db,
+            &served.table.table,
+            &[],
+            Self::live_column(served),
+        )?;
         let mut out = rows
             .iter()
             .map(|row| self.stored_row(served, row))
             .collect::<Result<Vec<_>, _>>()?;
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
+    }
+
+    /// The rows of one of the handler's queries ([`crate::query`]), as
+    /// the table's columns read them; none for a query that holds none.
+    fn queried(
+        &mut self,
+        served: &Served,
+        query: Option<(String, Vec<Value>)>,
+    ) -> Result<Vec<StoredRow>, Refusal> {
+        let Some((sql, params)) = query else {
+            return Ok(Vec::new());
+        };
+        let rows = self.db.query(&sql, &params)?;
+        let mut out = rows
+            .iter()
+            .map(|row| self.stored_row(served, row))
+            .collect::<Result<Vec<_>, _>>()?;
+        // In id order, as every row of a type reads, so a delete reaches
+        // its rows in the order development mode's does.
         out.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(out)
     }
@@ -596,7 +679,8 @@ impl RuntimeStore {
                 owned,
             } => {
                 let served = types.get(type_name)?;
-                if self.row(served, id)?.is_some() {
+                // A soft-deleted row keeps its key.
+                if self.holds(served, id)? {
                     return Err(Stop::Refused(Refusal::new(
                         Code::Conflict,
                         format!("{type_name} {id} already exists"),
@@ -617,12 +701,13 @@ impl RuntimeStore {
                 let served = types.get(type_name)?;
                 let set = self.row_columns(served, data, owned, true)?;
                 let bump = (!served.table.version.is_empty()).then_some(served.table.version.as_str());
-                let changed = update_rows(
+                let changed = update_live(
                     &mut self.db,
                     &served.table.table,
                     &set,
                     bump,
                     &[(&served.table.key.column, Self::key(served, id)?)],
+                    Self::live_column(served),
                 )?;
                 if changed != 1 && self.row(served, id)?.is_none() {
                     return Err(Stop::Moved);
@@ -630,17 +715,56 @@ impl RuntimeStore {
             }
             StoreWrite::Delete { type_name, id, .. } => {
                 let served = types.get(type_name)?;
-                self.drop_row(served, id)?;
-                delete_rows(
-                    &mut self.db,
-                    &served.table.table,
-                    &[(&served.table.key.column, Self::key(served, id)?)],
-                )?;
+                let key = Self::key(served, id)?;
+                match Self::live_column(served) {
+                    // A soft delete stamps the live row and keeps its
+                    // sub-table rows, its state for a restore, as the
+                    // compiled adapter's does; its deadlines go.
+                    Some(live) => {
+                        if let Some(queue) = &served.table.deadlines {
+                            delete_rows(&mut self.db, &queue.table, &[(&queue.row_key, key.clone())])?;
+                        }
+                        let stamp = match dialect {
+                            Dialect::Sqlite => "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                            Dialect::Postgres => "now()",
+                        };
+                        let mut sets = vec![format!("{} = {stamp}", quote(live))];
+                        if !served.table.version.is_empty() {
+                            sets.push(format!("{v} = {v} + 1", v = quote(&served.table.version)));
+                        }
+                        self.db.execute(
+                            &format!(
+                                "UPDATE {} SET {} WHERE {} = {} AND {} IS NULL",
+                                quote(&served.table.table),
+                                sets.join(", "),
+                                quote(&served.table.key.column),
+                                placeholder(dialect, 1),
+                                quote(live)
+                            ),
+                            &[key],
+                        )?;
+                    }
+                    None => {
+                        self.drop_row(served, id)?;
+                        delete_rows(
+                            &mut self.db,
+                            &served.table.table,
+                            &[(&served.table.key.column, key)],
+                        )?;
+                    }
+                }
             }
             StoreWrite::Gone { type_name, id } => {
+                // Its deadlines go unless a live row of the id is there, and
+                // its sub-table rows unless any row is, as the adapter's.
                 if let Ok(served) = types.get(type_name) {
-                    if self.row(served, id)?.is_none() {
+                    if !self.holds(served, id)? {
                         self.drop_row(served, id)?;
+                    } else if self.row(served, id)?.is_none() {
+                        if let Some(queue) = &served.table.deadlines {
+                            let key = Self::key(served, id)?;
+                            delete_rows(&mut self.db, &queue.table, &[(&queue.row_key, key)])?;
+                        }
                     }
                 }
             }
@@ -1295,6 +1419,38 @@ impl Store for RuntimeStore {
             } => {
                 let served = types.get(type_name)?;
                 StoreAnswer::Armed(self.armed(served, id, use_id, name)?)
+            }
+            StoreRead::Page {
+                type_name,
+                filter,
+                sort,
+                cursor,
+                limit,
+            } => {
+                let served = types.get(type_name)?;
+                let page = query::page(
+                    &types,
+                    served,
+                    self.dialect(),
+                    (filter, sort, cursor.as_deref(), *limit),
+                )?;
+                let rows = self.queried(served, Some(page))?;
+                StoreAnswer::Rows(query::sorted(&served.model, sort, rows)?)
+            }
+            StoreRead::Holders { type_name, values } => {
+                let served = types.get(type_name)?;
+                let holders = query::holders(served, self.dialect(), values)?;
+                StoreAnswer::Rows(self.queried(served, holders)?)
+            }
+            StoreRead::Reached {
+                type_name,
+                member,
+                target,
+                id,
+            } => {
+                let served = types.get(type_name)?;
+                let reached = query::reached(&types, served, member, target, id, self.dialect())?;
+                StoreAnswer::Rows(self.queried(served, reached)?)
             }
         })
     }
