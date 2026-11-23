@@ -15,8 +15,10 @@ through it; `runtime/engine/README.md` is the reference.
 | `src/main.ts` | Runs the server on port 8787 (`PORT`) over `notes.db` (`NOTES_DB`) |
 | `src/notes.client.ts` | Generated: the typed wrappers `superschematic engine-client` writes for the schema (D49), `notesClient` over the engine's client with the note's own fields, its behaviors' fields, states, operations and veto codes |
 | `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), a post beside the note, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, the same calls through `notesClient`, a refused draft, and a restart that keeps the notes and publishes a compatible change |
+| `src/dev.ts` | The same schema on development mode (D117): runs `superschematic-dev` over a SQLite file with the policy of `src/auth.ts` written as data, and lists what differs from the engine |
+| `test/notes.dev.test.ts` | The same flows on development mode, plus a streamed reply whose draft reaches the event stream as signals, a caller's typing, and a reader's marker and unread count |
 | `scripts/link.sh` | Links the engine and the packages the example imports into `node_modules` |
-| `scripts/check.sh` | Builds the runtimes and the engine, links them, type-checks, and runs the test on Node.js and Bun |
+| `scripts/check.sh` | Builds the runtimes, the engine and `superschematic-dev`, links them, type-checks, and runs both tests on Node.js and Bun |
 
 ## Run it
 
@@ -48,6 +50,36 @@ It listens on `http://127.0.0.1:8787/api` and keeps its data in
 `notes.db` (gitignored). The routes are under
 `/api/namespaces/default`; the MCP endpoint is
 `/api/namespaces/default/mcp`.
+
+## On development mode
+
+The schema runs unchanged on development mode, the server of the
+behaviors' core (`superschematic-dev`, D117), which
+`test/notes.dev.test.ts` drives. `check.sh` builds it with cargo, or uses
+the one `SUPERSCHEMATIC_DEV` names. To run it by hand:
+
+```sh
+cargo run --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-rules-dev \
+  --features server --bin superschematic-dev -- --db notes-dev.db
+curl -X POST http://127.0.0.1:4500/namespaces/default/schemas \
+  -H 'content-type: application/json' --data-binary @examples/engine-notes/schemas/notes.schema.json
+curl -X POST http://127.0.0.1:4500/namespaces/default/schemas/Note/publish
+```
+
+What differs from the engine, as `src/dev.ts` lists it:
+
+- The type is `Note`, as the schema file names it; the engine names the
+  schema `notes`.
+- A row is its own fields beside its behaviors', each named after its
+  behavior (`workflowStatus`, `commentsMessages`); the engine answers
+  `data` and `behaviors` apart.
+- The caller is whoever the `X-Superschematic-Subject` and
+  `X-Superschematic-Permissions` headers say, and the policy is data.
+- The event log holds the events the behaviors emit, which these three do
+  not; the engine logs every write. Signals reach the stream as the
+  engine's do.
+- A publish has no compatibility rule: a draft that adds a required field
+  is taken, and its publish is refused while a stored note lacks the field.
 
 ## The typed client
 
