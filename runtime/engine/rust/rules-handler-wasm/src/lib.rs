@@ -314,6 +314,7 @@ fn answer_json(answer: &Answer) -> Value {
         Answer::Row => json!({ "kind": "row" }),
         Answer::Created { path } => json!({ "kind": "created", "path": path }),
         Answer::Schema => json!({ "kind": "schema" }),
+        Answer::NoContent => json!({ "kind": "noContent" }),
     }
 }
 
@@ -329,10 +330,11 @@ fn answer_of(op: Op, value: &Value) -> Result<Answer, Failure> {
                 .to_owned(),
         }),
         Some("schema") => Ok(Answer::Schema),
+        Some("noContent") => Ok(Answer::NoContent),
         _ => Err((
             "invalid_input",
             format!(
-                "{}: an answer is {{\"kind\": \"data\" | \"row\" | \"created\" | \"schema\"}}, not {value}",
+                "{}: an answer is {{\"kind\": \"data\" | \"row\" | \"created\" | \"schema\" | \"noContent\"}}, not {value}",
                 op.name()
             ),
         )),
@@ -361,6 +363,7 @@ fn query_json(query: &EventsQuery) -> Value {
         "kinds": query.kinds,
         "limit": query.limit,
         "stream": query.stream,
+        "signals": query.signals,
     })
 }
 
@@ -409,6 +412,7 @@ fn query_of(op: Op, value: &Value) -> Result<EventsQuery, Failure> {
         kinds: list("kinds"),
         limit,
         stream: value.get("stream") == Some(&Value::Bool(true)),
+        signals: value.get("signals") == Some(&Value::Bool(true)),
     })
 }
 
@@ -545,6 +549,7 @@ fn bridge(input: BridgeInput) -> Result<Value, Failure> {
         specs: &input.specs,
         hearing: &input.hearing,
         own: None,
+        readable: None,
     };
     Ok(
         match bridge.run(&input.spec, &input.command, &input.answers) {
@@ -709,7 +714,7 @@ mod tests {
         );
         assert_eq!(
             events["events"],
-            json!({"after": "head", "schema": null, "instanceId": null, "behaviors": [], "kinds": ["run"], "limit": 100, "stream": true})
+            json!({"after": "head", "schema": null, "instanceId": null, "behaviors": [], "kinds": ["run"], "limit": 100, "stream": true, "signals": false})
         );
         let mcp = call(
             Op::Route,
