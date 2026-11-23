@@ -99,9 +99,9 @@ The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
 Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
 Revisions, Comments, Derived and Provenance. Blueprint is not ported yet, so
-`examples/engine-jobs` still runs on the engine, and so does
-`examples/engine-notes`, whose reads hold Comments' `composing` and
-`unread`, which wait for the core.
+`examples/engine-jobs` still runs on the engine. `examples/engine-notes`
+runs on both: its `test/notes.dev.test.ts` serves the notes schema with
+`superschematic-dev`.
 
 A get and a list also show the fields a behavior computes at a read,
 which no row holds. They are named as the use's other fields are:
@@ -119,9 +119,21 @@ they stand. `describe` lists them under `computed`.
   refused with `422 invalid_instance` or `409 conflict`.
 - Comments' writes are beside the row: a post, an edit or a reaction
   writes its messages, edits and reactions, and its conversation's row of
-  the type's shared table, and moves no version of the row. Its streamed
-  replies, read state, inbox, deliveries, search and attachments wait for
-  the core.
+  the type's shared table, and moves no version of the row.
+- A Comments reply may stream as it is written: `begin` holds its place,
+  `appendDraft` adds to its draft and sends the `draft` signal (see the
+  event stream below), and `finish` posts it. A draft its author leaves
+  idle for `composeTimeoutMs` is interrupted by its own deadline, keeping
+  what was written. `commentsComposing` names who is writing.
+- Each caller has a read marker: `markRead` moves it and `follow` follows
+  or stops following a thread, both asked of the policy as reads.
+  `commentsUnread` is the caller's own count, and `listMessages` answers
+  the caller's `readUpTo`. A message that comes to stand records a
+  delivery for each subject it mentions and each follower of its thread.
+- Comments' `inbox` runs across every type that composes Comments and that
+  the caller may read (see operations of the namespace below). Claiming and
+  settling deliveries, search, attachments and `moveAnchor` wait for the
+  core.
 - Derived's pulls and settles run on the type as a whole. A derived
   field's output, the JSON Schema its value is held to, comes from the
   type's fields: an enum's values and a primitive's type.
@@ -193,7 +205,9 @@ names another namespace is `404`.
 | `DELETE` | `/namespaces/default/schemas/{type}/instances/{id}` | A delete. |
 | `POST` | `/namespaces/default/schemas/{type}/instances/{id}/operations/{operation}` | A behavior's operation of a row. |
 | `POST` | `/namespaces/default/schemas/{type}/operations/{operation}` | A behavior's operation of the table. |
-| `GET` | `/namespaces/default/events` | The event queue. |
+| `POST` | `/namespaces/default/schemas/{type}/instances/{id}/signals/{behavior}/{name}` | A caller's signal about a row, its data the body. `204`. |
+| `POST` | `/namespaces/default/behaviors/{behavior}/operations/{operation}` | A behavior's operation of the namespace as a whole. |
+| `GET` | `/namespaces/default/events` | The event queue, with signals beside it on `signals=1`. |
 | `POST` | `/namespaces/default/mcp` | The MCP endpoint. |
 
 A success is the envelope `{ "data", "meta": { "requestId" } }`. A row
@@ -262,6 +276,19 @@ policy, as a compiled server's are not.
 
 With `Dev`, pass it with `with_policy`. With the server, pass `--policy`.
 
+An operation of the namespace as a whole, such as Comments' `inbox`, is
+asked of the policy as `{ action, behavior, operation }`, with no schema.
+A rule decides it only when it names the behavior
+(`"behavior": ["Comments"]`, or `true`), so a rule written for types
+grants none. `"permission"` lets one that reads through, and asks
+`<behavior>.<operation>` of one that writes. It runs over the types that
+compose the behavior and that the caller may read, each asked of the
+policy as a read.
+
+An operation that writes only the caller's own state says so in its
+declaration (`"asks": "read"`), and is asked as a read: a reader may
+mark a row read.
+
 ## The event stream
 
 The events behaviors emit, such as Schedules' `run`, are kept in order.
@@ -275,6 +302,32 @@ Each event is one message: `id:` is its cursor and `data:` the event. Once
 the stream has caught up it sends a `ready` event, then each event as it
 is written, and a heartbeat comment while nothing comes. A client that
 reconnects sends `Last-Event-ID` and resumes after it.
+
+### Signals
+
+A signal is a message about one row that the server delivers to the
+streams open on it and keeps nowhere: a Comments draft's next chunk, or a
+reader typing. A stream opened with `signals=1` sends each signal its
+filters keep, on a type its caller may read, once it has caught up:
+
+```text
+event: signal
+data: {"namespace":"default","schema":"Note","instanceId":"launch","behavior":"Comments","name":"draft","data":{"message":2,"offset":0,"text":"Ships "},"from":"bob","at":1795407183572}
+```
+
+A signal has no `id:`, so a reconnect never replays one. It is sent once
+the request that made it commits, at most once, and in no order with the
+events. A stream holds up to 256 for a slow client and drops the oldest.
+Open the stream before you read, so no chunk falls between the read and
+the stream.
+
+A behavior declares its signals and who sends each. Comments' `typing`
+and `viewing` are a caller's, sent with `POST
+.../instances/{id}/signals/Comments/typing`, which the policy is asked
+about as a read with the operation `signal:typing`. Its `draft` is
+`appendDraft`'s alone, and a caller's send of one is `403`. The server
+keeps no rate limit on signals, and a second process over one Postgres
+schema hears none of this one's.
 
 ## MCP
 
