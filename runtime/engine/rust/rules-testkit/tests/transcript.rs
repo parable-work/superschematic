@@ -389,6 +389,15 @@ const HOLDS_TIMERS_FLOOR: usize = 14;
 /// `core-commerce.json` (D70 on the core, D103's step 4).
 const COMMERCE_FLOOR: usize = 66;
 
+/// The steps `core-bookings.transcript.json` holds, of the engine's
+/// `commerce-calendar.json` (D70 on the core, D103's step 4): Calendar's
+/// time held through a booking's Holds.
+const BOOKINGS_FLOOR: usize = 83;
+
+/// The steps `core-calendar.transcript.json` holds, of the hand-written
+/// `core-calendar.json` (D70 on the core, D103's step 4).
+const CALENDAR_FLOOR: usize = 47;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -424,6 +433,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
             "commerce-holds-timers",
             HOLDS_TIMERS_FLOOR,
         ),
+        ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -478,6 +488,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
         ("core-commerce", COMMERCE_FLOOR, false),
+        ("core-calendar", CALENDAR_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

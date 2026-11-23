@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 30] = [
+const TRANSCRIPTS: [(&str, usize); 32] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -122,6 +122,8 @@ const TRANSCRIPTS: [(&str, usize); 30] = [
     ("core-holds", HOLDS_FLOOR),
     ("core-holds-timers", HOLDS_TIMERS_FLOOR),
     ("core-commerce", COMMERCE_FLOOR),
+    ("core-bookings", BOOKINGS_FLOOR),
+    ("core-calendar", CALENDAR_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -316,6 +318,19 @@ const HOLDS_TIMERS_FLOOR: usize = 14;
 /// relation, two claims for the last unit, a delete that releases, and the
 /// define refusals.
 const COMMERCE_FLOOR: usize = 66;
+
+/// core-bookings' floor (D70 on the core, D103's step 4): 83 steps of the
+/// engine's commerce-calendar.json, 63 commands and 20 checks, each booking
+/// a call on its desk's row under the supply's lock, its records, closures
+/// and settings rows of the desk's sub-tables, and findAvailability a
+/// command without a row over a read across the desks.
+const BOOKINGS_FLOOR: usize = 83;
+
+/// core-calendar's floor (D70 on the core, D103's step 4): 47 steps of the
+/// scenarios written by hand, 30 commands and 17 checks: a booking's
+/// Workflow anchored on its status field, the one place taken once,
+/// closures and the zone refused over held time, and the define refusals.
+const CALENDAR_FLOOR: usize = 47;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

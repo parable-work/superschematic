@@ -113,6 +113,10 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-holds.transcript.json", 71},
 	{"../../engine/testdata/rules/core-holds-timers.transcript.json", 14},
 	{"../../engine/testdata/rules/core-commerce.transcript.json", 66},
+	// Calendar's time held through a booking's Holds, under the desk's
+	// lock, and findAvailability over the desks.
+	{"../../engine/testdata/rules/core-bookings.transcript.json", 83},
+	{"../../engine/testdata/rules/core-calendar.transcript.json", 47},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

@@ -86,3 +86,25 @@ const CALENDAR_FLOOR: usize = 95;
 fn calendar_scenarios_replay_on_the_core() {
     replays("commerce-calendar", CALENDAR_FLOOR);
 }
+
+/// The steps of the hand-written `core-calendar.json` the replayer maps and
+/// compares: all of its scenarios' steps, the `open` steps among them.
+const CORE_CALENDAR_FLOOR: usize = 54;
+
+#[test]
+fn core_calendar_replays_every_step_on_the_reference_host() {
+    let report = replay_path(&hand_written_path("core-calendar"), &ported)
+        .unwrap_or_else(|error| panic!("{error}"));
+    println!("{}", report.details());
+    assert!(
+        report.mismatches().is_empty(),
+        "the core answered otherwise than the file writes:\n{}",
+        report.details()
+    );
+    assert!(
+        report.checked() >= CORE_CALENDAR_FLOOR,
+        "{} steps checked, under the floor of {CORE_CALENDAR_FLOOR}:\n{}",
+        report.checked(),
+        report.details()
+    );
+}

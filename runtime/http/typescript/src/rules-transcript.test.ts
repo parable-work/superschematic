@@ -148,6 +148,10 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-holds', floor: 71 },
   { file: 'core-holds-timers', floor: 14 },
   { file: 'core-commerce', floor: 66 },
+  // Calendar's time held through a booking's Holds, under the desk's lock,
+  // and findAvailability over the desks.
+  { file: 'core-bookings', floor: 83 },
+  { file: 'core-calendar', floor: 47 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
