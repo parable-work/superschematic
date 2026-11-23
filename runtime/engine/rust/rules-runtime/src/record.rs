@@ -36,6 +36,32 @@ pub struct Record {
     pub versions: BTreeMap<String, i64>,
 }
 
+impl Record {
+    /// The record as its document, which the runner that applies the
+    /// publish's plan writes in the transaction that finishes it
+    /// (`superschematic-migrate apply --record`, version 1).
+    pub fn document(&self) -> Result<Vec<u8>, Refusal> {
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "service": self.service,
+            "modelHash": self.model_hash,
+            "documents": self.documents,
+            "layout": self.layout,
+            "versions": self.versions,
+        }))
+        .map_err(|error| crate::values::internal(format!("the record is no JSON: {error}")))
+    }
+
+    /// Whether another record holds the same publish: its model, documents
+    /// and versions.
+    pub(crate) fn same(&self, other: &Record) -> bool {
+        self.service == other.service
+            && self.model_hash == other.model_hash
+            && self.documents == other.documents
+            && self.versions == other.versions
+    }
+}
+
 /// One type as the store serves it: the handler's model of its document,
 /// its table's layout, and the column of each own field the model holds.
 #[derive(Clone, Debug)]

@@ -181,29 +181,40 @@ impl RuntimeStore {
         }))
     }
 
-    /// Writes the record of a publish, replacing the one before it, in the
-    /// caller's transaction.
-    pub(crate) fn write_record(&mut self, record: &Record) -> Result<(), Refusal> {
-        let params = [
-            Value::String(record.service.clone()),
-            Value::String(record.model_hash.clone()),
-            Value::String(json_text(&record.documents)?),
-            Value::String(json_text(&record.layout)?),
-            Value::String(json_text(&record.versions)?),
-        ];
-        self.db
-            .execute(&format!("DELETE FROM {RECORD_TABLE}"), &[])?;
-        let p = |n| placeholder(self.dialect(), n);
-        let sql = format!(
-            "INSERT INTO {RECORD_TABLE} (service, model_hash, documents, layout, versions) VALUES ({}, {}, {}, {}, {})",
-            p(1),
-            p(2),
-            p(3),
-            p(4),
-            p(5)
-        );
-        self.db.execute(&sql, &params)?;
-        Ok(())
+    /// Whether a publish a job applies has landed: the runner's state is at
+    /// the record's model with no plan in progress, and the database holds
+    /// the record. A table the runner has not made yet, or not given this
+    /// server's role the reads of, is a publish still to land.
+    pub(crate) fn published(&mut self, record: &Record) -> Result<bool, Refusal> {
+        let read: Result<bool, Refusal> = (|| {
+            if !self.db.has_table("superschematic_schema_state")? {
+                return Ok(false);
+            }
+            let rows = self.db.query(
+                &format!(
+                    "SELECT model_hash, plan_hash FROM superschematic_schema_state WHERE service = {}",
+                    placeholder(self.dialect(), 1)
+                ),
+                &[Value::String(record.service.clone())],
+            )?;
+            let at = rows.first().is_some_and(|row| {
+                row.get("model_hash").and_then(Value::as_str) == Some(record.model_hash.as_str())
+                    && row
+                        .get("plan_hash")
+                        .and_then(Value::as_str)
+                        .is_none_or(str::is_empty)
+            });
+            if !at {
+                return Ok(false);
+            }
+            Ok(self
+                .read_record()?
+                .is_some_and(|recorded| recorded.same(record)))
+        })();
+        match read {
+            Err(refusal) if refusal.class == crate::conn::PRIVILEGE_CLASS => Ok(false),
+            other => other,
+        }
     }
 
     /// The record's service, its model, and the runner's state of it.
@@ -1471,6 +1482,35 @@ impl Store for RuntimeStore {
         self.db.batch("RELEASE SAVEPOINT runtime_unit")?;
         Ok(true)
     }
+}
+
+/// Writes a record into a SQLite file's record table, replacing the one
+/// before it, on the runner's connection in the transaction that finishes
+/// the plan, and creates the table when it is missing: what
+/// `superschematic-migrate apply --record` does on Postgres.
+pub(crate) fn write_sqlite_record(
+    conn: &rusqlite::Connection,
+    record: &Record,
+) -> Result<(), Refusal> {
+    let failed = |error: rusqlite::Error| internal(format!("the record was not written: {error}"));
+    conn.execute_batch(&record_table(Dialect::Sqlite))
+        .map_err(failed)?;
+    conn.execute(&format!("DELETE FROM {RECORD_TABLE}"), [])
+        .map_err(failed)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {RECORD_TABLE} (service, model_hash, documents, layout, versions) VALUES (?1, ?2, ?3, ?4, ?5)"
+        ),
+        [
+            record.service.clone(),
+            record.model_hash.clone(),
+            json_text(&record.documents)?,
+            json_text(&record.layout)?,
+            json_text(&record.versions)?,
+        ],
+    )
+    .map_err(failed)?;
+    Ok(())
 }
 
 /// A value's JSON text, for the record's columns.

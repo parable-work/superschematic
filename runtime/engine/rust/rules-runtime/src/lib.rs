@@ -49,12 +49,13 @@ mod conn;
 mod db;
 mod query;
 mod record;
+pub mod runner;
 mod store;
 pub mod values;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -67,6 +68,10 @@ use superschematic_rules_handler::{
 use crate::conn::{run_binary, Conn, SqliteConn};
 use crate::db::Db;
 pub use crate::record::{type_document, Record, RECORD_TABLE};
+pub use crate::runner::{
+    Applied, Applying, Directory, Execution, JobDatabase, JobRunner, JobStore, Launch, PlanRunner,
+    ProcessLaunch, Started,
+};
 pub use crate::store::RuntimeStore;
 pub use crate::values::Dialect;
 
@@ -175,13 +180,15 @@ struct Checked {
 }
 
 /// The runtime host: the handler over a runtime store in one process, with
-/// the core, the behaviors' declarations, the binaries a publish runs, a
-/// clock and the caller its runner runs the queues as.
+/// the core, the behaviors' declarations, the binaries a publish runs, the
+/// runner that applies its plans (in process unless a [`PlanRunner`] is
+/// given), a clock and the caller its runner runs the queues as.
 pub struct Runtime {
     core: Arc<Core>,
     declarations: Arc<Declarations>,
     store: RuntimeStore,
     binaries: Binaries,
+    plans: Option<Box<dyn PlanRunner>>,
     clock: Box<dyn Fn() -> i64 + Send>,
     runner: Caller,
     drain: Drain,
@@ -220,6 +227,7 @@ impl Runtime {
             declarations,
             store,
             binaries: Binaries::default(),
+            plans: None,
             clock: Box::new(system_millis),
             runner: Caller::new("runtime-runner", Vec::<String>::new()),
             drain: Drain::default(),
@@ -229,6 +237,15 @@ impl Runtime {
     /// The host with the binaries a publish runs.
     pub fn with_binaries(mut self, binaries: Binaries) -> Self {
         self.binaries = binaries;
+        self
+    }
+
+    /// The host with the runner that applies its publishes' plans, such as
+    /// a [`JobRunner`], whose job applies them on another machine. Without
+    /// one a plan is applied in process, the Rust runner on a SQLite file
+    /// and the Go runner's binary beside a Postgres database.
+    pub fn with_plan_runner(mut self, runner: impl PlanRunner + 'static) -> Self {
+        self.plans = Some(Box::new(runner));
         self
     }
 
@@ -568,8 +585,14 @@ impl Runtime {
     /// Publishes the database's schema documents: plans from the recorded
     /// model, refuses what the plan does not allow, applies the plan
     /// through the runner, records the documents and the layout next to
-    /// the model, and serves the new layout from the next request.
+    /// the model, and serves the new layout from the next request. In
+    /// process it holds every request of the database's servers off while
+    /// it runs; a job's publish holds no lock, and the plan in progress
+    /// keeps the requests off ([`JobRunner`]).
     pub fn publish(&mut self, publish: &Publish) -> Result<Value, Refusal> {
+        if self.plans.is_some() {
+            return self.publish_locked(publish);
+        }
         self.store.db.lock_publish()?;
         let published = self.publish_locked(publish);
         let unlocked = self.store.db.unlock_publish();
@@ -614,16 +637,32 @@ impl Runtime {
         // The handler must serve every table over the plan's layout before
         // the plan runs.
         record::serve(&record, &self.core, &self.declarations)?;
-        self.store
-            .db
-            .apply_plan(&checked.document, &checked.plan, &self.binaries)?;
-        self.store.db.begin()?;
-        let written = self.store.write_record(&record);
-        match written {
-            Ok(()) => self.store.db.commit()?,
-            Err(refusal) => {
-                self.store.db.rollback()?;
-                return Err(refusal);
+        // The runner writes the record in the transaction that finishes
+        // the plan, so no server reads the model moved before its layout.
+        match &mut self.plans {
+            None => self.store.db.apply_plan(
+                &checked.document,
+                &checked.plan,
+                &record,
+                &self.binaries,
+            )?,
+            Some(runner) => {
+                let document = record.document()?;
+                let applying = Applying {
+                    service: &checked.service,
+                    dialect: self.store.dialect(),
+                    plan: &checked.document,
+                    plan_hash: &checked.plan.hash,
+                    from: &checked.plan.from,
+                    to: &checked.plan.to,
+                    record: &document,
+                };
+                match runner.apply(&applying)? {
+                    Applied::Done => {}
+                    Applied::Started(started) => {
+                        self.wait(&record, &checked.plan.hash, started)?;
+                    }
+                }
             }
         }
         self.store.serve_record(&record)?;
@@ -633,6 +672,48 @@ impl Runtime {
             members.insert("versions".into(), json!(record.versions));
         }
         Ok(answer)
+    }
+
+    /// Waits for a job to land a publish: polls the model the database
+    /// records until it is the plan's `to` with no plan in progress and the
+    /// record is this publish's, or the execution reports a failure, or the
+    /// wait times out. It holds no lock: the runner's plan in progress
+    /// keeps every server's requests off meanwhile.
+    fn wait(&mut self, record: &Record, plan: &str, mut started: Started) -> Result<(), Refusal> {
+        let deadline = Instant::now() + started.timeout;
+        loop {
+            if self.store.published(record)? {
+                return Ok(());
+            }
+            if let Some(failure) = started.execution.failure()? {
+                // A job may fail after the transaction that finished its plan.
+                if self.store.published(record)? {
+                    return Ok(());
+                }
+                return Err(conn::apply_refusal(format!(
+                    "{} failed: {failure}",
+                    started.execution.name()
+                )));
+            }
+            if Instant::now() >= deadline {
+                return Err(Refusal {
+                    class: "PlanTimeoutError".to_owned(),
+                    ..Refusal::new(
+                        Code::Busy,
+                        format!(
+                            "{} did not finish plan {plan} within {:?}: it may still be running; the database serves the new tables once it does, and a publish of the same documents waits for it again",
+                            started.execution.name(),
+                            started.timeout
+                        ),
+                    )
+                });
+            }
+            std::thread::sleep(
+                started
+                    .poll
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
     }
 }
 

@@ -13,8 +13,14 @@ use serde_json::{Map, Value};
 use superschematic_rules::{Code, Refusal};
 
 use crate::db::Db;
+use crate::record::Record;
 use crate::values::{internal, real, Dialect};
 use crate::Binaries;
+
+/// The class of the refusal of a statement the connection's role holds no
+/// privilege for (Postgres's `42501`): a server whose job has not given its
+/// role the reads of a publish's tables yet.
+pub(crate) const PRIVILEGE_CLASS: &str = "DatabasePrivilegeError";
 
 /// The refusal of a plan the runner refused or a step it failed:
 /// `conflict`, of the class `PlanApplyError`.
@@ -76,23 +82,25 @@ impl Conn {
         }
     }
 
-    /// Applies a plan, expand and contract back to back, through the
-    /// environment's runner: never over the serving connection.
+    /// Applies a plan in process, expand and contract back to back, with
+    /// its record written in the transaction that finishes it: never over
+    /// the serving connection.
     pub(crate) fn apply_plan(
         &mut self,
         document: &[u8],
         plan: &superschematic_migrate::Plan,
+        record: &Record,
         binaries: &Binaries,
     ) -> Result<(), Refusal> {
         match self {
             Conn::Sqlite(conn) => {
                 let _ = (document, binaries);
-                conn.apply_plan(plan)
+                conn.apply_plan(plan, record)
             }
             #[cfg(feature = "postgres")]
             Conn::Postgres(conn) => {
                 let _ = plan;
-                conn.apply_plan(document, binaries)
+                conn.apply_plan(document, &record.document()?, binaries)
             }
         }
     }
@@ -240,9 +248,18 @@ impl SqliteConn {
         &self.conn
     }
 
-    fn apply_plan(&mut self, plan: &superschematic_migrate::Plan) -> Result<(), Refusal> {
+    fn apply_plan(
+        &mut self,
+        plan: &superschematic_migrate::Plan,
+        record: &Record,
+    ) -> Result<(), Refusal> {
         let conn = Connection::open(&self.path).map_err(sqlite_failed)?;
-        let mut runner = superschematic_migrate::Runner::new(&conn).map_err(apply_refusal)?;
+        let mut runner = superschematic_migrate::Runner::new(&conn)
+            .map_err(apply_refusal)?
+            .finish(|conn| {
+                crate::store::write_sqlite_record(conn, record)
+                    .map_err(|refusal| refusal.message.into())
+            });
         runner
             .apply(plan, superschematic_migrate::Phase::All)
             .map_err(apply_refusal)?;
@@ -371,7 +388,6 @@ mod pg {
     use serde_json::{Map, Value};
     use superschematic_rules::{Code, Refusal};
 
-    use super::{apply_refusal, run_binary};
     use crate::db::Db;
     use crate::values::{internal, Dialect};
     use crate::Binaries;
@@ -402,6 +418,15 @@ mod pg {
                     Code::Busy,
                     format!("the runtime database is busy: {}", db.message()),
                 );
+            }
+            if code == "42501" {
+                return Refusal {
+                    class: super::PRIVILEGE_CLASS.to_owned(),
+                    ..internal(format!(
+                        "the database refused the server's role: {}",
+                        db.message()
+                    ))
+                };
             }
             return internal(format!("the database failed: {}", db.message()));
         }
@@ -460,25 +485,15 @@ mod pg {
             &mut self.client
         }
 
+        /// The Go runner beside the database, the record in a file it
+        /// writes in the transaction that finishes the plan.
         pub(crate) fn apply_plan(
             &mut self,
             document: &[u8],
+            record: &[u8],
             binaries: &Binaries,
         ) -> Result<(), Refusal> {
-            let (ok, stdout, stderr) = run_binary(
-                &binaries.migrate,
-                &["apply", "--plan", "-", "--database-url", &self.url],
-                document,
-            )?;
-            if ok {
-                return Ok(());
-            }
-            let said = if stderr.is_empty() {
-                String::from_utf8_lossy(&stdout).trim().to_owned()
-            } else {
-                stderr
-            };
-            Err(apply_refusal(said))
+            crate::runner::apply_postgres(&binaries.migrate, &self.url, document, record)
         }
     }
 
