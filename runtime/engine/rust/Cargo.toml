@@ -16,8 +16,9 @@ resolver = "2"
 # request handler over the development layout (rules-handler) and its store
 # over SQLite, a file or a database in memory (rules-dev); runtime mode is
 # the same handler over each type's own table, a publish a migration
-# (rules-runtime).
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+# (rules-runtime). The handler's WebAssembly binding (rules-handler-wasm)
+# is what @superschematic/rules-handler loads.
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-handler-wasm", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"

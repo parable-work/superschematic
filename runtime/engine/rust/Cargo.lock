@@ -2069,6 +2069,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-rules-handler-wasm"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+ "superschematic-rules-handler",
+]
+
+[[package]]
 name = "superschematic-rules-runtime"
 version = "0.0.0"
 dependencies = [
