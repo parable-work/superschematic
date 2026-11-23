@@ -391,13 +391,19 @@ test('declarations are the registered files, each field typed and the value fiel
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
   expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool']);
-  // Comments keeps its messages, edits and reactions in sub-tables of the
-  // row and each conversation's high-water marks in a table of the table as
-  // a whole; its writes are beside the row (D103's step 4), and its fields
-  // are computed at a read, so it owns no column.
+  // Comments keeps its messages, draft chunks, read markers, follows,
+  // deliveries, edits and reactions in sub-tables of the row and each
+  // conversation's high-water marks in a table of the table as a whole;
+  // its writes are beside the row (D103's step 4), and its fields are
+  // computed at a read, so it owns no column. It arms a composing message's
+  // idle deadline and declares the signals of D77's primitive 2.
   const comments = byName('Comments');
   expect(comments.tables?.map(t => `${t.name} by ${t.key}${t.scope === 'schema' ? ', shared' : ''}`)).toEqual([
     'messages by message',
+    'drafts by chunk',
+    'reads by subject',
+    'follows by follow',
+    'deliveries by delivery',
     'edits by edit',
     'reactions by reaction',
     'conversations by conversation, shared',
@@ -405,6 +411,12 @@ test('declarations are the registered files, each field typed and the value fiel
   expect(comments.fields?.filter(f => f.type !== undefined)).toEqual([]);
   expect(comments.operations?.filter(o => o.beside === true).map(o => o.name)).toContain('post');
   expect(comments.operations?.filter(o => o.beside === true && o.writes !== true)).toEqual([]);
+  expect(comments.armsDeadlines).toBe(true);
+  expect(comments.signals?.map(s => [s.name, s.access])).toEqual([
+    ['typing', 'read'],
+    ['viewing', 'read'],
+    ['draft', 'operation'],
+  ]);
   // Derived keeps each derived field's hashes, override and attempts in a
   // sub-table keyed by the field, computes fields and stale at a read, and
   // pulls and settles through operations of the table as a whole; and
