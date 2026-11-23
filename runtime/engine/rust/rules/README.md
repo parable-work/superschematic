@@ -23,7 +23,10 @@ StateRules, Approvals, Timers, Lease, Presence, Budget and Retries, then
 Seats, Reconcile, Schedules and Pool, which no engine implements (D104),
 the calendar Schedules reads its cron lines with, in a zone of the IANA
 database jiff bundles (`calendar`), and the contract Capacity, which
-Budget implements and Pool asks (`capacity`);
+Budget implements and Pool asks (`capacity`), then the later waves of
+D103's step 4, among them Stock, Holds, Calendar and Payments (D70), which
+meet through the contract Supply (`supply`): Stock and Calendar implement
+it, and Holds asks it and calls its operations on a supply's row;
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
@@ -857,9 +860,13 @@ For a `subRows` read it selects the use's sub-table rows of the row by the
 column that holds the row's key, the key's column and then the layout's
 fields, in key order (`COLLATE "C"` on Postgres), each converted as an
 owned column is. On a store whose locks are fenced (SQLite, D1) a
-`subRows` read made while the command holds a lock is refused as
-`internal` (`a read of sub-table rows under a lock has no check on SQLite
-or D1 yet (D103)`): the batch has no check of it yet.
+`subRows` read made while the command holds a lock is held to its row's
+version: a sub-table's rows change only with a write of their row, which
+moves the version, so the check of the row's own read under the lock
+holds them too (Stock's records and Calendar's bookings, D103's step 4).
+A run that read the sub-table under the lock and not its row is refused
+as `internal`, and so is one of a use whose behavior writes beside its
+rows (Comments'), which moves no version.
 
 For a `linked` read it selects the type's rows whose own column for `field`
 holds the key (bound as that column binds a value, a UUID hyphenated), the
@@ -1012,7 +1019,12 @@ Derived and Provenance (D73 on D103's step 4), the hand-written
 `core-derived-provenance` to 75 steps, 26 checks and 49 commands, in 7
 scenarios, each settle a command without a row that writes the rows it
 reaches through applyDerived, an update attributed to Derived
-(`Cx::update_attributed`). Every transcript's `behaviors` lists the
+(`Cx::update_attributed`); and, of the commerce wave (D70 on D103's step
+4), `core-holds` (the engine's `commerce-holds.json`) to 71 steps,
+`core-holds-timers` to 14, the hand-written `core-commerce` to 66,
+`core-calendar` to 47, `core-bookings` to 83, `core-refunds` to 52 and
+`core-payments` to 73, each take of a claim a call of its supply's
+operation on the supply's row under the supply row's lock. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

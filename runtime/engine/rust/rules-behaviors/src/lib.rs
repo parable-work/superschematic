@@ -80,6 +80,16 @@
 //! core attributes ([`superschematic_rules::Cx::update_attributed`]); and
 //! who set each own field last and through what, with a review a Workflow
 //! state may require.
+//! [`Stock`], [`Holds`], [`Calendar`] and [`Payments`], the last wave of
+//! step 4 (D70): units a supply counts and time it opens, which a claim
+//! holds, commits, releases and returns as its Workflow moves, and what a
+//! row owes and the payments and refunds that settle it. Stock and
+//! Calendar meet Holds through [`supply`], the second contract, the first
+//! an operation answers: Holds asks each supply `checkHold` through its
+//! answer hook and calls its `holdFor`, `commitFor`, `releaseFor` and
+//! `returnFor` on the supply's row, each write taking the supply row's
+//! lock ([`supply::lock_key`]). [`currency`] holds a config's ISO 4217
+//! code to the table superscalar's `Finance.Currency` keeps.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
