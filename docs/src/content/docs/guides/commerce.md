@@ -1,6 +1,6 @@
 ---
 title: Selling and booking with the engine
-description: Sell counted stock and book time on the engine with Stock, Calendar, Holds and Payments. The supply contract, totals and currency, payments through a provider adapter outside the engine (webhooks, a settle job, idempotency, no card data), refunds two staff sign off with Approvals, expiry with Timers, the MCP tools' policy for operations that move money, and what one namespace's writer allows.
+description: Sell counted stock and book time with Stock, Calendar, Holds and Payments, on the engine or on a table through the behaviors' core. The supply contract, totals and currency, payments through a provider adapter outside the engine (webhooks, a settle job, idempotency, no card data), refunds two staff sign off with Approvals, expiry with Timers, the MCP tools' policy for operations that move money, and what one namespace's writer allows.
 sidebar:
   order: 8.5
 ---
