@@ -121,6 +121,7 @@ pub mod lease;
 mod moves;
 pub mod numbering;
 mod paging;
+pub mod payments;
 mod periods;
 pub mod pool;
 pub mod presence;
@@ -155,6 +156,7 @@ pub use holds::{Holds, HoldsConfig};
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
 pub use numbering::{Numbering, NumberingConfig};
+pub use payments::{Payments, PaymentsConfig};
 pub use pool::{Pool, PoolConfig};
 pub use presence::{Presence, PresenceConfig};
 pub use provenance::{Provenance, ProvenanceConfig, ProvenanceReview};
@@ -187,7 +189,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 24] = [
+pub const NAMES: [&str; 25] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -212,6 +214,7 @@ pub const NAMES: [&str; 24] = [
     stock::NAME,
     holds::NAME,
     calendar::behavior::NAME,
+    payments::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -219,7 +222,7 @@ pub const NAMES: [&str; 24] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 24] = [
+pub const DECLARATIONS: [&str; 25] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -244,6 +247,7 @@ pub const DECLARATIONS: [&str; 24] = [
     stock::DECLARATION,
     holds::DECLARATION,
     calendar::behavior::DECLARATION,
+    payments::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -280,6 +284,7 @@ pub fn core() -> Core {
         .with(Stock)
         .with(Holds)
         .with(Calendar)
+        .with(Payments)
 }
 
 #[cfg(test)]

@@ -108,3 +108,29 @@ fn core_calendar_replays_every_step_on_the_reference_host() {
         report.details()
     );
 }
+
+/// The steps of `commerce-payments.json` the replayer maps and compares.
+const PAYMENTS_FLOOR: usize = 67;
+
+#[test]
+fn payments_scenarios_replay_on_the_core() {
+    replays("commerce-payments", PAYMENTS_FLOOR);
+}
+
+/// The steps of `commerce-payments-refunds.json` the replayer maps and
+/// compares.
+const PAYMENTS_REFUNDS_FLOOR: usize = 56;
+
+#[test]
+fn payments_refunds_scenarios_replay_on_the_core() {
+    replays("commerce-payments-refunds", PAYMENTS_REFUNDS_FLOOR);
+}
+
+/// The steps of `commerce-payments-holds.json` the replayer maps and
+/// compares.
+const PAYMENTS_HOLDS_FLOOR: usize = 76;
+
+#[test]
+fn payments_holds_scenarios_replay_on_the_core() {
+    replays("commerce-payments-holds", PAYMENTS_HOLDS_FLOOR);
+}

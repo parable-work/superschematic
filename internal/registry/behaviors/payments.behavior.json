@@ -113,24 +113,131 @@
   "fields": [
     {
       "name": "due",
-      "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then."
+      "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then.",
+      "type": "Generic.Int64"
     },
-    {"name": "authorized", "description": "What the provider has authorized and not voided or captured."},
-    {"name": "captured", "description": "What the provider has captured."},
-    {"name": "refunded", "description": "What the provider has refunded."},
-    {"name": "outstanding", "description": "due less captured, never below 0."},
+    {"name": "authorized", "description": "What the provider has authorized and not voided or captured.", "type": "Generic.Int64"},
+    {"name": "captured", "description": "What the provider has captured.", "type": "Generic.Int64"},
+    {"name": "refunded", "description": "What the provider has refunded.", "type": "Generic.Int64"},
+    {"name": "outstanding", "description": "due less captured, never below 0.", "type": "Generic.Int64"},
     {
       "name": "overpaid",
-      "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it."
+      "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it.",
+      "type": "Generic.Int64"
     },
-    {"name": "currency", "description": "The ISO 4217 code of every amount."},
+    {"name": "currency", "description": "The ISO 4217 code of every amount.", "type": "string"},
     {
       "name": "state",
-      "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid."
+      "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid.",
+      "type": "string"
     },
     {
       "name": "attempts",
       "description": "The last twenty attempts, newest first: { attempt, provider, providerRef?, amount, currency, status, authorized?, captured?, brand?, last4?, openedAt, updatedAt }."
+    }
+  ],
+  "tables": [
+    {
+      "name": "attempts",
+      "description": "On a table, each payment attempt the row opened, keyed by its id: its provider and the provider's reference, its amount, currency and what was due when it opened, its status, what is authorized and captured of it, a card's brand and last four digits, and when it opened and last moved.",
+      "key": "attempt",
+      "fields": [
+        {"name": "attempt", "description": "The attempt's id, pay_ and a key the command makes, which the adapter sends its provider as an idempotency key.", "type": "string"},
+        {"name": "seq", "description": "Its place among the row's attempts, from 1.", "type": "Generic.Int64"},
+        {"name": "idempotencyKey", "description": "The key openPayment opened it under.", "type": "string"},
+        {"name": "provider", "description": "The provider it is at.", "type": "string"},
+        {"name": "providerRef", "description": "The provider's reference, once the adapter reports it.", "type": "string"},
+        {"name": "amount", "description": "What it asks, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "Its ISO 4217 code.", "type": "string"},
+        {"name": "due", "description": "What was due when it opened.", "type": "Generic.Int64"},
+        {"name": "status", "description": "open, requiresAction, processing, authorized, captured, failed or cancelled.", "type": "string"},
+        {"name": "authorized", "description": "What the provider authorized of it.", "type": "Generic.Int64"},
+        {"name": "captured", "description": "What the provider captured of it.", "type": "Generic.Int64"},
+        {"name": "brand", "description": "A card's brand, for display.", "type": "string"},
+        {"name": "last4", "description": "A card's last four digits, for display.", "type": "string"},
+        {"name": "returnUrl", "description": "Where the provider sends the payer back.", "type": "string"},
+        {"name": "openedAt", "description": "When it opened, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "updatedAt", "description": "When it last moved, in epoch milliseconds.", "type": "Generic.Int64"}
+      ]
+    },
+    {
+      "name": "actions",
+      "description": "On a table, each thing the provider's adapter is to do for the row (create, capture, void, refund), keyed by its id, waiting until an event for it is recorded.",
+      "key": "action",
+      "fields": [
+        {"name": "action", "description": "The action's id, act_ and a key the command makes, which the adapter sends its provider as an idempotency key.", "type": "string"},
+        {"name": "seq", "description": "Its place among the row's actions, from 1.", "type": "Generic.Int64"},
+        {"name": "kind", "description": "create, capture, void or refund.", "type": "string"},
+        {"name": "attempt", "description": "The attempt it acts on.", "type": "string"},
+        {"name": "refund", "description": "For a refund, the refund.", "type": "string"},
+        {"name": "provider", "description": "The provider it is for.", "type": "string"},
+        {"name": "amount", "description": "What it moves, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "Its ISO 4217 code.", "type": "string"},
+        {"name": "at", "description": "When it was asked, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "doneAt", "description": "When an event for it was recorded; absent while it waits.", "type": "Generic.Int64"}
+      ]
+    },
+    {
+      "name": "refunds",
+      "description": "On a table, each refund asked of the row, keyed by its id: the attempt it draws on, its amount and reason, its status and what was refunded, and the refund row that asked it, if one did.",
+      "key": "refund",
+      "fields": [
+        {"name": "refund", "description": "The refund's id, rf_ and a key the command makes.", "type": "string"},
+        {"name": "seq", "description": "Its place among the row's refunds, from 1.", "type": "Generic.Int64"},
+        {"name": "idempotencyKey", "description": "The key it was asked under.", "type": "string"},
+        {"name": "attempt", "description": "The captured attempt it draws on.", "type": "string"},
+        {"name": "provider", "description": "That attempt's provider.", "type": "string"},
+        {"name": "amount", "description": "What it asks, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "Its ISO 4217 code.", "type": "string"},
+        {"name": "reason", "description": "Why it was asked.", "type": "string"},
+        {"name": "status", "description": "requested, sent, succeeded or failed.", "type": "string"},
+        {"name": "refunded", "description": "What the provider refunded.", "type": "Generic.Int64"},
+        {"name": "originSchema", "description": "The type of the refund row that asked it, through refundFor.", "type": "string"},
+        {"name": "originId", "description": "The key of the refund row that asked it.", "type": "string"},
+        {"name": "at", "description": "When it was asked, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "updatedAt", "description": "When it last moved, in epoch milliseconds.", "type": "Generic.Int64"}
+      ]
+    },
+    {
+      "name": "issues",
+      "description": "On a refund row (refundOf), each refund it asked of the row it refunds, keyed by the refund's id: its key, amount and currency, its status as the provider settled it, and the Workflow entry it was asked at.",
+      "key": "refund",
+      "fields": [
+        {"name": "refund", "description": "The refund's id, as the row it refunds recorded it.", "type": "string"},
+        {"name": "seq", "description": "Its place among the row's issues, from 1.", "type": "Generic.Int64"},
+        {"name": "ofSchema", "description": "The type of the row it refunds.", "type": "string"},
+        {"name": "ofId", "description": "The key of the row it refunds.", "type": "string"},
+        {"name": "idempotencyKey", "description": "The key it was asked under: the refund row's type and key and the issue's number.", "type": "string"},
+        {"name": "amount", "description": "What it asks, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "Its ISO 4217 code.", "type": "string"},
+        {"name": "status", "description": "requested, sent, succeeded or failed.", "type": "string"},
+        {"name": "refunded", "description": "What the provider refunded.", "type": "Generic.Int64"},
+        {"name": "enteredAt", "description": "The Workflow's enteredAt when it was asked, which tells a later entry of an issueOn state from this one.", "type": "Generic.Int64"},
+        {"name": "at", "description": "When it was asked, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "updatedAt", "description": "When it last moved, in epoch milliseconds.", "type": "Generic.Int64"}
+      ]
+    },
+    {
+      "name": "events",
+      "description": "On a table, every provider event recorded, kept for the table as a whole and keyed by its provider and event id, so an event applies once per table and provider: the row it was recorded on, its normalised fields alone, and whether it moved anything. A delete of the row leaves it, so a redelivery is still a repeat.",
+      "key": "event",
+      "scope": "schema",
+      "fields": [
+        {"name": "event", "description": "The provider and the event id, joined by /.", "type": "string"},
+        {"name": "provider", "description": "The provider.", "type": "string"},
+        {"name": "eventId", "description": "The provider's event id.", "type": "string"},
+        {"name": "rowKey", "description": "The key of the row it was recorded on.", "type": "string"},
+        {"name": "kind", "description": "What it reported.", "type": "string"},
+        {"name": "amount", "description": "Its amount, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "Its ISO 4217 code.", "type": "string"},
+        {"name": "at", "description": "When the provider says it happened, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "attempt", "description": "The attempt it reported on.", "type": "string"},
+        {"name": "providerRef", "description": "The provider's reference it named.", "type": "string"},
+        {"name": "refund", "description": "The refund it reported on.", "type": "string"},
+        {"name": "applied", "description": "Whether it moved anything.", "type": "boolean"},
+        {"name": "metadata", "description": "At most ten string pairs the adapter passed on.", "type": "Generic.JSON"},
+        {"name": "recordedAt", "description": "When it was recorded, in epoch milliseconds.", "type": "Generic.Int64"}
+      ]
     }
   ],
   "operations": [
