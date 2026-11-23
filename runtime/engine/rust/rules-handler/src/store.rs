@@ -17,13 +17,35 @@
 //! handler asks coarsely (every row of a type, every row of a sub-table)
 //! and answers the core's reads, a list's filters and a publish's checks
 //! from them itself, so a store learns no rule: development mode promises
-//! a table's answers and not a table's speed.
+//! a table's answers and not a table's speed. A store over each type's own
+//! table (runtime mode, D117) answers a list's page, a unique key's holders
+//! and the rows a delete reaches in queries of its own instead, when its
+//! handler reads by [`Reading::Queries`].
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use superschematic_rules::{Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange};
+
+use crate::filter::Sort;
+
+/// How a handler asks a store for what a list, a unique field and a
+/// relation's delete read (D117).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reading {
+    /// Every row of the type, which the handler filters, sorts, pages and
+    /// checks itself, so the store learns no rule: development mode.
+    #[default]
+    Rows,
+    /// The page a list answers, a unique key's holders and the rows a
+    /// delete reaches, each of which the store answers in a query of its
+    /// own ([`StoreRead::Page`], [`StoreRead::Holders`],
+    /// [`StoreRead::Reached`]): runtime mode, over each type's table, its
+    /// columns and its indexes. Each answer is the one the handler makes
+    /// from every row by [`Reading::Rows`].
+    Queries,
+}
 
 /// What the handler asks a store to read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -88,6 +110,44 @@ pub enum StoreRead {
         id: String,
         use_id: String,
         name: String,
+    },
+    /// One page of a list ([`StoreAnswer::Rows`]): at most `limit` of the
+    /// rows of a type a filter keeps, in a sort's order, after a cursor,
+    /// as [`crate::filter`] answers them over every row: a field with no
+    /// value last in either direction, the key breaking ties. Asked by
+    /// [`Reading::Queries`] alone.
+    Page {
+        #[serde(rename = "type")]
+        type_name: String,
+        #[serde(default)]
+        filter: Value,
+        #[serde(default)]
+        sort: Vec<Sort>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        limit: usize,
+    },
+    /// The rows of a type whose own fields hold every one of the values,
+    /// each compared as a unique index compares it: a unique key's
+    /// holders, at most two ([`StoreAnswer::Rows`]). Asked by
+    /// [`Reading::Queries`] alone.
+    Holders {
+        #[serde(rename = "type")]
+        type_name: String,
+        values: Map<String, Value>,
+    },
+    /// The rows of a referring type that a delete of a row of `target`
+    /// reaches through one relation, `member`: the ones whose member holds
+    /// the row's key, as the store's own delete of the row reaches them
+    /// through its foreign key, and none when that delete is a soft
+    /// delete, which fires no foreign key ([`StoreAnswer::Rows`]). Asked
+    /// by [`Reading::Queries`] alone.
+    Reached {
+        #[serde(rename = "type")]
+        type_name: String,
+        member: String,
+        target: String,
+        id: String,
     },
 }
 
@@ -455,4 +515,13 @@ pub trait Store {
     /// and a refusal, with none applied, when the unit cannot apply as it
     /// stands (a row of the id exists).
     fn apply(&mut self, unit: &Unit) -> Result<bool, Refusal>;
+}
+
+/// The refusal of a store that reads rows, development mode's, of a query
+/// read only a handler that reads by [`Reading::Queries`] asks.
+pub fn unqueried(read: &StoreRead) -> Refusal {
+    Refusal::internal(format!(
+        "this store answers every row of a type and no query of its own, and the handler asked {}: serve it with Reading::Rows",
+        serde_json::to_string(read).unwrap_or_default()
+    ))
 }

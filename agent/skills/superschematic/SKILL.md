@@ -281,7 +281,13 @@ path for when the store is unavailable.
   publish with a `destructive` or `data-dependent` hazard is refused with
   the hazard's id: allow a drop only when the data may go, and name a
   rename (`task.title=task.summary`) rather than allowing the drop it
-  reads as. Never allow a hazard the person did not agree to.
+  reads as. Never allow a hazard the person did not agree to. A list's
+  filters, sorts and pages, a unique field and a relation's delete are
+  queries of the type's table, and a table with `deletedAt` serves its
+  live rows alone. Where the runner is a job on another machine
+  (`JobRunner`, D46's migration job), the publish waits on the model the
+  database records, and the servers' roles keep D46's grants: they never
+  run DDL.
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`

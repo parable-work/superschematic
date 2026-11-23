@@ -574,6 +574,9 @@ impl Store for MemoryStore {
                         payload: payload.clone(),
                     }),
             ),
+            StoreRead::Page { .. } | StoreRead::Holders { .. } | StoreRead::Reached { .. } => {
+                return Err(crate::store::unqueried(read))
+            }
         })
     }
 

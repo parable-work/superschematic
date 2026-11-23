@@ -60,6 +60,48 @@ fn a_plan_is_answered_without_being_applied() {
     common::plan_without_applying(&opener(file("plan")), &binaries);
 }
 
+#[test]
+fn a_list_answers_in_sql_as_development_mode_does_from_every_row() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    common::parity::lists_answer_as_development_mode(&opener(file("parity")), &binaries);
+}
+
+/// A soft-deletable table serves its live rows alone, and its table keeps
+/// the deleted row, stamped, with its version moved on and its sub-table
+/// rows.
+#[test]
+fn a_soft_delete_stamps_the_row_and_serves_the_live_rows_alone() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let path = file("soft");
+    let (shelf, book) = common::parity::soft_deletes(&opener(path.clone()), &binaries);
+    let conn = Connection::open(&path).expect("the file");
+    let deleted_at: Option<String> = conn
+        .query_row(
+            "SELECT deleted_at FROM shelf WHERE id = ?1",
+            [uuid_text(&shelf)],
+            |row| row.get(0),
+        )
+        .expect("the shelf's row stays");
+    assert!(
+        deleted_at.as_deref().is_some_and(|at| at.ends_with('Z')),
+        "{deleted_at:?}"
+    );
+    let (book_deleted, status, version): (Option<String>, String, i64) = conn
+        .query_row(
+            "SELECT deleted_at, status, _version FROM book WHERE id = ?1",
+            [uuid_text(&book)],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("the book's row stays");
+    assert!(book_deleted.is_some());
+    assert_eq!(status, "out", "its behavior's columns stay");
+    assert_eq!(version, 3, "the create, the transition and the delete");
+}
+
 /// What a file holds of a schema, by table: each column's type,
 /// nullability, default and key, each index's columns and uniqueness, each
 /// foreign key, and each trigger, the runner's and runtime mode's own

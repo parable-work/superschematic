@@ -259,7 +259,9 @@ pub(crate) fn publish(
     let cascade = if start.is_empty() {
         crate::handler::Cascade::default()
     } else {
-        let Some(cascade) = Handler::cascade(&live, &start, &BTreeSet::new(), reads)? else {
+        // A publish is development mode's alone, whose store reads rows.
+        let rows = crate::store::Reading::Rows;
+        let Some(cascade) = Handler::cascade(&live, &start, &BTreeSet::new(), rows, reads)? else {
             return Ok(waiting(reads));
         };
         cascade

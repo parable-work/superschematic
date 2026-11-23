@@ -87,6 +87,17 @@ func runJobDatabase(ctx context.Context, j *migrate.Job, db *migrate.JobDatabase
 			return fmt.Errorf("%s is the plan of %s", planRef, plan.Service)
 		}
 	}
+	var record *migrate.Record
+	if db.Record != "" {
+		recordRef := relativeTo(ref, db.Record)
+		doc, err := o.read(ctx, recordRef)
+		if err != nil {
+			return err
+		}
+		if record, err = parseRecord(recordRef, doc, plan); err != nil {
+			return err
+		}
+	}
 	var driver migrate.Driver
 	var closeDriver func()
 	if dialer != nil {
@@ -102,20 +113,36 @@ func runJobDatabase(ctx context.Context, j *migrate.Job, db *migrate.JobDatabase
 		}
 	}
 	defer closeDriver()
+	granter, gives := driver.(migrate.Granter)
+	if db.Privileges != nil && !gives {
+		return fmt.Errorf("the %s driver gives no privileges; leave privileges out of the job", driver.Dialect())
+	}
 	if plan != nil {
 		if plan.Dialect != driver.Dialect() {
 			return fmt.Errorf("the plan is for %s and the database is %s", plan.Dialect, driver.Dialect())
 		}
-		if _, err := o.runner(driver).Apply(ctx, plan, j.Phase); err != nil {
+		runner := o.runner(driver)
+		if record != nil {
+			// The record, and the privileges on the plan's new tables, move
+			// with the model, so a server follows the publish only once it
+			// may read and write them.
+			runner.Finish = func(ctx context.Context, conn migrate.Conn) error {
+				if err := migrate.WriteRecord(ctx, conn, plan.Dialect, record); err != nil {
+					return err
+				}
+				if db.Privileges == nil {
+					return nil
+				}
+				_, err := granter.GrantReadWriteIn(ctx, conn, db.Privileges.ReadWrite, migrate.GrantExcept(db.Privileges))
+				return err
+			}
+		}
+		if _, err := runner.Apply(ctx, plan, j.Phase); err != nil {
 			return err
 		}
 	}
 	if db.Privileges == nil {
 		return nil
-	}
-	granter, ok := driver.(migrate.Granter)
-	if !ok {
-		return fmt.Errorf("the %s driver gives no privileges; leave privileges out of the job", driver.Dialect())
 	}
 	grants, err := granter.GrantReadWrite(ctx, db.Privileges.ReadWrite, migrate.GrantExcept(db.Privileges))
 	if err != nil {

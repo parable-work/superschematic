@@ -39,6 +39,15 @@ type Runner struct {
 	// error it returns stops the run as a failed step does. Tests use it
 	// to stop a run part-way.
 	AfterStep func(ctx context.Context, step *Step) error
+	// Finish, when set, runs in the transaction that finishes a plan,
+	// after the state records the plan's model as the applied one: what
+	// must change with the model or not at all, such as runtime mode's
+	// record of the layout its servers read and their privileges on the
+	// plan's new tables (D117, apply --record), so no server sees the
+	// model move without them. An error it returns rolls that transaction
+	// back, the plan's last transactional step with it, and fails the
+	// run; the next Apply of the plan resumes there.
+	Finish func(ctx context.Context, conn Conn) error
 }
 
 // Result is what one Apply did.
@@ -302,7 +311,15 @@ func (r *Runner) advance(ctx context.Context, conn Conn, plan *Plan, st state, f
 	switch {
 	case allDone:
 		result.Finished = true
-		return setModel(ctx, conn, plan.model)
+		if err := setModel(ctx, conn, plan.model); err != nil {
+			return err
+		}
+		if r.Finish != nil {
+			if err := r.Finish(ctx, conn); err != nil {
+				return fmt.Errorf("finish plan %s: %w", plan.Hash, err)
+			}
+		}
+		return nil
 	case expandDone && st.planPhase == "":
 		return setExpandDone(ctx, conn, plan)
 	}

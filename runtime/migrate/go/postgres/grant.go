@@ -84,8 +84,45 @@ ORDER BY 1`
 // schemas, and a schema the user may not give USAGE on, such as one only
 // PUBLIC may use.
 func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except migrate.Except) (*migrate.Grants, error) {
-	out := &migrate.Grants{}
+	var out *migrate.Grants
 	err := d.Transact(ctx, migrate.TxOptions{}, func(ctx context.Context, c migrate.Conn) error {
+		var err error
+		out, err = d.GrantReadWriteIn(ctx, c, roles, except)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// readers lists the roles other than the owners, PUBLIC and the
+// connection's user's own roles that hold a privilege on one of the tables
+// $1 names, and the tables that exist among them, qualified.
+const readers = `
+WITH RECURSIVE mine(oid) AS (
+  SELECT oid FROM pg_roles WHERE rolname = current_user
+  UNION
+  SELECT m.roleid FROM pg_auth_members m JOIN mine ON m.member = mine.oid
+)
+SELECT DISTINCT 'role', r.rolname
+FROM pg_class c
+CROSS JOIN LATERAL aclexplode(c.relacl) a
+JOIN pg_roles r ON r.oid = a.grantee
+WHERE c.oid IN (SELECT to_regclass(t) FROM unnest($1::text[]) AS t)
+  AND a.grantee <> c.relowner
+  AND a.grantee NOT IN (SELECT oid FROM mine)
+UNION
+SELECT 'table', quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.oid IN (SELECT to_regclass(t) FROM unnest($1::text[]) AS t)
+ORDER BY 1, 2`
+
+// GrantReadWriteIn is GrantReadWrite in the caller's transaction, with the
+// tables except.Read names given to the roles to read alone.
+func (d *Driver) GrantReadWriteIn(ctx context.Context, c migrate.Conn, roles []string, except migrate.Except) (*migrate.Grants, error) {
+	out := &migrate.Grants{}
+	err := func() error {
 		var tables, views, sequences, schemas []string
 		err := c.Query(ctx, grantable, []any{exceptArray(except.Tables), exceptArray(except.Schemas)}, func(scan func(dest ...any) error) error {
 			var schema, name, kind string
@@ -165,12 +202,57 @@ func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except migr
 		out.Objects = len(tables) + len(views) + len(sequences)
 		out.Schemas = len(schemas)
 		out.Revoked = others
-		return nil
-	})
+		return grantRead(ctx, c, roles, except.Read, out)
+	}()
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// grantRead gives each role SELECT alone on the tables of read that exist,
+// and takes every privilege on them back from any other role.
+func grantRead(ctx context.Context, c migrate.Conn, roles, read []string, out *migrate.Grants) error {
+	if len(read) == 0 {
+		return nil
+	}
+	var holders, tables []string
+	err := c.Query(ctx, readers, []any{read}, func(scan func(dest ...any) error) error {
+		var kind, name string
+		if err := scan(&kind, &name); err != nil {
+			return err
+		}
+		if kind == "table" {
+			tables = append(tables, name)
+		} else {
+			holders = append(holders, name)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("postgres: list the tables the roles read: %w", err)
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+	on := strings.Join(tables, ", ")
+	for _, role := range holders {
+		r := pgx.Identifier{role}.Sanitize()
+		if err := c.Exec(ctx, fmt.Sprintf("REVOKE ALL ON TABLE %s FROM %s", on, r)); err != nil {
+			return fmt.Errorf("postgres: revoke the reads of %s: %w", role, err)
+		}
+		if !slices.Contains(roles, role) && !slices.Contains(out.Revoked, role) {
+			out.Revoked = append(out.Revoked, role)
+		}
+	}
+	for _, role := range roles {
+		r := pgx.Identifier{role}.Sanitize()
+		if err := c.Exec(ctx, fmt.Sprintf("GRANT SELECT ON TABLE %s TO %s", on, r)); err != nil {
+			return fmt.Errorf("postgres: grant %s reads: %w", role, err)
+		}
+	}
+	out.Objects += len(tables)
+	return nil
 }
 
 // exceptArray is except as a Postgres text array argument.
