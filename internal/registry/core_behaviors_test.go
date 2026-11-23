@@ -1210,8 +1210,8 @@ func TestContractsAreTheCores(t *testing.T) {
 		}
 	}
 	slices.Sort(named)
-	if !slices.Equal(named, []string{"Budget:Capacity:implements", "Holds:Supply:asks", "Pool:Capacity:asks", "Stock:Supply:implements"}) {
-		t.Errorf("the core's declarations name the contracts %v, want Budget implementing Capacity and Pool asking it, and Stock implementing Supply and Holds asking it", named)
+	if !slices.Equal(named, []string{"Budget:Capacity:implements", "Calendar:Supply:implements", "Holds:Supply:asks", "Pool:Capacity:asks", "Stock:Supply:implements"}) {
+		t.Errorf("the core's declarations name the contracts %v, want Budget implementing Capacity and Pool asking it, and Stock and Calendar implementing Supply and Holds asking it", named)
 	}
 }
 

@@ -1,8 +1,9 @@
-// Type-level checks of Stock<T, C> and Holds<T, C> (D70, D103's step 4).
+// Type-level checks of Stock<T, C>, Holds<T, C> and Calendar<T, C> (D70,
+// D103's step 4).
 // Nothing imports this file: `bun run typecheck`, which `make ts` runs,
 // checks it, and fails on an expected error (@ts-expect-error) that no
 // longer errors.
-import type { HoldOn, Holds, HoldsOn, Stock, StockOn } from "./index";
+import type { Calendar, CalendarOn, HoldOn, Holds, HoldsOn, Stock, StockOn } from "./index";
 
 // The carriers impose no members: a table implements them with its own
 // fields alone, and their first type argument is the table itself. An
@@ -51,3 +52,27 @@ const unknownLink: HoldOn<Checkout> = { link: "gift", quantity: 1 };
 const askingNothing: HoldOn<Checkout> = { link: "wrap" };
 // @ts-expect-error holds names the holds
 const noHolds: HoldsOn<Checkout> = { takeOn: ["held"] };
+
+// A desk whose time Calendar opens, and a booking that holds a slot of it.
+export abstract class Desk
+  implements
+    Calendar<Desk, {
+      timeZone: "Europe/London";
+      hours: { mon: [["09:00", "17:30"]]; sat: [["10:00", "13:00"], ["14:00", "16:00"]] };
+      capacity: { field: "places" };
+      slotMs: 900000;
+      bufferMs: { after: 300000 };
+      permission: "desk.manage";
+    }>
+{
+  id: string;
+  places: number;
+}
+
+const opened: CalendarOn<Desk> = { timeZone: "America/New_York", hours: { sun: [] }, capacity: 2, leadMs: 3600000 };
+// @ts-expect-error a calendar names its time zone
+const noZone: CalendarOn<Desk> = { hours: { mon: [["09:00", "17:00"]] } };
+// @ts-expect-error a day is mon to sun
+const someday: CalendarOn<Desk> = { timeZone: "UTC", hours: { someday: [["09:00", "17:00"]] } };
+// @ts-expect-error capacity.field is the table's own
+const unknownCapacity: CalendarOn<Desk> = { timeZone: "UTC", hours: {}, capacity: { field: "seats" } };

@@ -1,0 +1,534 @@
+{
+  "types": {
+    "Booking": {
+      "type": "Booking",
+      "table": "booking",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "slotStart",
+          "column": "slot_start",
+          "type": "Temporal.DateTime",
+          "convert": "epochMillis"
+        },
+        {
+          "field": "slotEnd",
+          "column": "slot_end",
+          "type": "Temporal.DateTime",
+          "convert": "epochMillis"
+        },
+        {
+          "field": "deskId",
+          "column": "desk_id",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Holds",
+          "behavior": "Holds",
+          "member": "holds",
+          "fields": [
+            {
+              "name": "state",
+              "field": "holdsState",
+              "column": "holds_state",
+              "type": "string"
+            },
+            {
+              "name": "total",
+              "field": "holdsTotal",
+              "column": "holds_total",
+              "type": "Generic.JSON"
+            }
+          ],
+          "operations": [
+            {
+              "name": "retakeHolds",
+              "writes": true
+            },
+            {
+              "name": "listHolds",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "items",
+              "table": "booking_holds_items",
+              "row": "booking_id",
+              "key": {
+                "name": "key",
+                "field": "key",
+                "column": "key",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "supplySchema",
+                  "field": "supplySchema",
+                  "column": "supply_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "supplyId",
+                  "field": "supplyId",
+                  "column": "supply_id",
+                  "type": "string"
+                },
+                {
+                  "name": "quantity",
+                  "field": "quantity",
+                  "column": "quantity",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "unitPrice",
+                  "field": "unitPrice",
+                  "column": "unit_price",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "takenAt",
+                  "field": "takenAt",
+                  "column": "taken_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Booking",
+        "uses": [
+          {
+            "behavior": "Holds",
+            "config": {
+              "commitOn": [
+                "booked"
+              ],
+              "holds": {
+                "slot": {
+                  "interval": {
+                    "end": "slotEnd",
+                    "start": "slotStart"
+                  },
+                  "link": "desk"
+                }
+              },
+              "releaseOn": [
+                "expired",
+                "cancelled"
+              ],
+              "takeOn": [
+                "held"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "draft",
+              "states": [
+                "draft",
+                "held",
+                "booked",
+                "expired",
+                "cancelled"
+              ],
+              "transitions": [
+                {
+                  "from": "draft",
+                  "to": "held"
+                },
+                {
+                  "from": "held",
+                  "to": "booked"
+                },
+                {
+                  "from": "held",
+                  "to": "expired"
+                },
+                {
+                  "from": "held",
+                  "to": "cancelled"
+                },
+                {
+                  "from": "draft",
+                  "to": "cancelled"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "slotStart",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          },
+          {
+            "name": "slotEnd",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          },
+          {
+            "name": "deskId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "desk",
+              "type": "Desk"
+            }
+          }
+        ]
+      }
+    },
+    "Desk": {
+      "type": "Desk",
+      "table": "desk",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Calendar",
+          "behavior": "Calendar",
+          "member": "calendar",
+          "fields": [],
+          "operations": [
+            {
+              "name": "setOpeningHours",
+              "writes": true
+            },
+            {
+              "name": "addClosure",
+              "writes": true
+            },
+            {
+              "name": "removeClosure",
+              "writes": true
+            },
+            {
+              "name": "holdFor",
+              "writes": true
+            },
+            {
+              "name": "commitFor",
+              "writes": true
+            },
+            {
+              "name": "releaseFor",
+              "writes": true
+            },
+            {
+              "name": "checkHold",
+              "writes": false
+            },
+            {
+              "name": "listBookings",
+              "writes": false
+            },
+            {
+              "name": "findAvailability",
+              "writes": false,
+              "table": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "bookings",
+              "table": "desk_calendar_bookings",
+              "row": "desk_id",
+              "key": {
+                "name": "record",
+                "field": "record",
+                "column": "record",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "holderSchema",
+                  "field": "holderSchema",
+                  "column": "holder_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "holderId",
+                  "field": "holderId",
+                  "column": "holder_id",
+                  "type": "string"
+                },
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "unitPrice",
+                  "field": "unitPrice",
+                  "column": "unit_price",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "retired",
+                  "field": "retired",
+                  "column": "retired",
+                  "type": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "closures",
+              "table": "desk_calendar_closures",
+              "row": "desk_id",
+              "key": {
+                "name": "closure",
+                "field": "closure",
+                "column": "closure",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "by",
+                  "field": "by",
+                  "column": "by",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "settings",
+              "table": "desk_calendar_settings",
+              "row": "desk_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "value",
+                  "field": "value",
+                  "column": "value",
+                  "type": "Generic.JSON"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Desk",
+        "uses": [
+          {
+            "behavior": "Calendar",
+            "config": {
+              "capacity": 1,
+              "hours": {
+                "fri": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "mon": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "thu": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "tue": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "wed": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ]
+              },
+              "maxMs": 7200000,
+              "minMs": 900000,
+              "permission": "desk.manage",
+              "slotMs": 900000,
+              "timeZone": "Europe/London"
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  }
+}

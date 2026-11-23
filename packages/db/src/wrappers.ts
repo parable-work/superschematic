@@ -879,3 +879,51 @@ export interface HoldsOn<T> {
  * itself.
  */
 export type Holds<T, C extends HoldsOn<T>> = NonNullable<unknown>;
+
+/** A day's opening hours, each range `["HH:MM", "HH:MM"]` from 00:00 to 24:00, by day of the week. */
+export type CalendarDaysOn = Readonly<
+  Partial<Record<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun", readonly (readonly [string, string])[]>>
+>;
+
+/** Calendar's config on a table (D70, D103's step 4): weekly hours in an IANA time zone, how many holds may overlap, the grid and the length bounds of a hold, its buffers, the lead time and horizon, and the permission that sets a row's own hours and closures. */
+export interface CalendarOn<T> {
+  /** The IANA time zone the hours are in, read in the database the core bundles. */
+  readonly timeZone: string;
+  /** The weekly opening hours, by day. */
+  readonly hours: CalendarDaysOn;
+  /** How many holds may overlap at once, 1 to 10000, or the own integer field that holds it; 1 when absent. */
+  readonly capacity?: number | { readonly field: Extract<keyof T, string> };
+  /** The start grid, a whole number of slotMs after an opening time; any whole minute when absent. */
+  readonly slotMs?: number;
+  /** The shortest hold; slotMs, or a minute, when absent. */
+  readonly minMs?: number;
+  /** The longest hold, at most 31 days; a day when absent. */
+  readonly maxMs?: number;
+  /** The time kept free before and after each hold. */
+  readonly bufferMs?: { readonly before?: number; readonly after?: number };
+  /** How soon after now a hold may start; 0 when absent. */
+  readonly leadMs?: number;
+  /** How far ahead of now a hold may start; no limit when absent. */
+  readonly horizonMs?: number;
+  /** What setOpeningHours, addClosure and removeClosure need; nobody may call them when absent. */
+  readonly permission?: string;
+}
+
+/**
+ * Time a supply opens (D70, D103's step 4): `export abstract class Desk
+ * implements Calendar<Desk, { timeZone: "Europe/London"; hours: { mon:
+ * [["09:00", "17:30"]] }; slotMs: 900000; permission: "desk.manage" }>`.
+ * The type stays a table. Calendar keeps its record of each claim item
+ * that holds time of the row (desk_calendar_bookings), the row's closures
+ * (desk_calendar_closures) and its own hours, time zone and count of
+ * closures (desk_calendar_settings) in sub-tables; its fields timeZone,
+ * hours and closures are computed at a read. Its operations
+ * (calendar.setOpeningHours, addClosure, removeClosure, listBookings, and
+ * findAvailability on the table as a whole) set and read them, and it
+ * implements the contract Supply: Holds calls its holdFor, commitFor and
+ * releaseFor on the row, each holding the row's lock, and asks its
+ * checkHold, so a caller books time through a claim alone. Stock and
+ * Calendar conflict. Like Timers, it resolves to the empty object type;
+ * the first type argument is the table itself.
+ */
+export type Calendar<T, C extends CalendarOn<T>> = NonNullable<unknown>;
