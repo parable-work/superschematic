@@ -104,6 +104,71 @@
       "perReader": true
     }
   ],
+  "tables": [
+    {
+      "name": "messages",
+      "description": "On a table, one row per message of the row's conversation, keyed by its id: its thread and the message it quotes, its author, its state, its body, blocks and mentions, when it was posted and last edited, how many edits it has had, whether it is pinned, the clientId it was posted with, and for a top-level message who resolved its thread and when. A deleted message keeps its row; a purged one loses it. A delete of the row deletes them.",
+      "key": "message",
+      "fields": [
+        { "name": "message", "description": "The message's id on the row, from 1, in ten digits zero-padded so the key's order is theirs; never reused, a purged message's included.", "type": "string" },
+        { "name": "thread", "description": "For a reply, the id of its thread's top-level message; absent for a top-level message.", "type": "Generic.Int64" },
+        { "name": "quotes", "description": "The id of the message of the thread a reply quotes, when it quotes one.", "type": "Generic.Int64" },
+        { "name": "author", "description": "The subject of the caller who posted it.", "type": "string" },
+        { "name": "state", "description": "posted, or deleted once deleted.", "type": "string" },
+        { "name": "body", "description": "The text, Markdown; empty once deleted.", "type": "string" },
+        { "name": "blocks", "description": "The blocks as posted or last edited, in order.", "type": "Generic.JSON" },
+        { "name": "mentions", "description": "The subjects it mentions, as posted or last edited, in order.", "type": "Generic.JSON" },
+        { "name": "createdAt", "description": "When it was posted, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "postedAt", "description": "When it came to stand, in epoch milliseconds: its post's time.", "type": "Temporal.DateTime" },
+        { "name": "stand", "description": "Its place in the order the conversation's messages came to stand, from 1.", "type": "Generic.Int64" },
+        { "name": "editedAt", "description": "When it was last edited, in epoch milliseconds; absent before its first edit and once deleted.", "type": "Temporal.DateTime" },
+        { "name": "edits", "description": "How many edits it has had.", "type": "Generic.Int64" },
+        { "name": "pinned", "description": "Whether it is pinned.", "type": "boolean" },
+        { "name": "clientId", "description": "The caller's key for it, by which a retry of its post returns it.", "type": "string" },
+        { "name": "resolvedBy", "description": "For a top-level message whose thread is resolved, the subject who resolved it.", "type": "string" },
+        { "name": "resolvedAt", "description": "When its thread was resolved, in epoch milliseconds.", "type": "Temporal.DateTime" }
+      ]
+    },
+    {
+      "name": "edits",
+      "description": "On a table, one row per edit of a message, keyed by the message and the edit's number: what the message held before the edit, who made it and when. A delete or a purge of the message deletes them, and so does a delete of the row.",
+      "key": "edit",
+      "fields": [
+        { "name": "edit", "description": "The message's id and the edit's number on it, each in ten digits zero-padded, joined by a dot, so the key's order is theirs.", "type": "string" },
+        { "name": "message", "description": "The id of the message edited.", "type": "Generic.Int64" },
+        { "name": "number", "description": "The edit's number on the message, from 1.", "type": "Generic.Int64" },
+        { "name": "body", "description": "The body before the edit.", "type": "string" },
+        { "name": "blocks", "description": "The blocks before the edit.", "type": "Generic.JSON" },
+        { "name": "mentions", "description": "The mentions before the edit.", "type": "Generic.JSON" },
+        { "name": "by", "description": "The subject of the caller who made the edit.", "type": "string" },
+        { "name": "at", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" }
+      ]
+    },
+    {
+      "name": "reactions",
+      "description": "On a table, one row per reaction a subject holds on a message, keyed by its number on the row, which orders reactions: the message, the emoji, the subject and when. unreact deletes the caller's; a delete or a purge of the message deletes them, and so does a delete of the row.",
+      "key": "reaction",
+      "fields": [
+        { "name": "reaction", "description": "The reaction's number on the row, from 1, in ten digits zero-padded: the order reactions were given in, which listReactions pages by.", "type": "string" },
+        { "name": "message", "description": "The id of the message reacted to.", "type": "Generic.Int64" },
+        { "name": "emoji", "description": "The emoji: a name or the character itself.", "type": "string" },
+        { "name": "subject", "description": "The subject of the caller who reacted.", "type": "string" },
+        { "name": "at", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" }
+      ]
+    },
+    {
+      "name": "conversations",
+      "description": "On a table, one row per row that has had a message, kept for the table as a whole: the greatest message id, reaction number and stand the row's conversation has given. Every write of a conversation moves its row's version, which holds two writes of one conversation apart; a delete of the row leaves it, so a row re-created with the key numbers on from it and never reuses an id.",
+      "key": "conversation",
+      "scope": "schema",
+      "fields": [
+        { "name": "conversation", "description": "The key of the row whose conversation it is.", "type": "string" },
+        { "name": "lastMessage", "description": "The greatest message id the conversation has given.", "type": "Generic.Int64" },
+        { "name": "lastReaction", "description": "The greatest reaction number the conversation has given.", "type": "Generic.Int64" },
+        { "name": "lastStand", "description": "The greatest stand the conversation has given.", "type": "Generic.Int64" }
+      ]
+    }
+  ],
   "operations": [
     {
       "name": "post",

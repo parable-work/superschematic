@@ -509,7 +509,35 @@ impl<'r, C> Cx<'r, C> {
         };
         self.view
             .run
-            .update_own(self.view.frame, self.view.index, patch)
+            .update_own(self.view.frame, self.view.index, patch, &Map::new())
+    }
+
+    /// Writes the row's own fields as [`Cx::update`] does, saying where each
+    /// value came from (D73, the engine's `update_attributed`):
+    /// `attribution` is an object of entries by a field the patch names,
+    /// each `{ confidence? }`, a number from 0 to 1. The operation's
+    /// after-change hooks hear each field it changed with the writing
+    /// behavior's name and its entry ([`crate::Change::Operation`]'s
+    /// `attribution`), as they hear a plain update's with the name alone, so
+    /// Provenance records the confidence a model gave. An attribution of
+    /// another shape, or of a field the patch does not name, is a defect.
+    pub fn update_attributed(&self, patch: &Value, attribution: &Value) -> Hook<bool> {
+        self.off_table("update_attributed()")?;
+        self.writing("update_attributed()")?;
+        if !self.handler {
+            return Err(self.defect(
+                "update_attributed() is an operation's: an initializer, a deadline and an after-change hook write the use's own state alone",
+            ));
+        }
+        let Some(patch) = patch.as_object() else {
+            return Err(self.defect(
+                "update_attributed() takes a JSON merge patch of the row's own fields: a JSON object",
+            ));
+        };
+        let entries = attributed(patch, attribution).map_err(|reason| self.defect(reason))?;
+        self.view
+            .run
+            .update_own(self.view.frame, self.view.index, patch, &entries)
     }
 
     /// Holds a JSON merge patch of the row's own fields to an update's
@@ -883,6 +911,48 @@ impl<'r> ConfigCx<'r> {
     pub fn defect(&self, message: impl Into<String>) -> Stop {
         Refusal::defect(self.behavior, message).into()
     }
+}
+
+// attributed holds an update's attribution to its shape (D73): an object of
+// entries by a field the patch names, each with only a confidence from 0
+// to 1. It returns the entries, or why the attribution is a defect.
+fn attributed(
+    patch: &Map<String, Value>,
+    attribution: &Value,
+) -> Result<Map<String, Value>, String> {
+    let Some(entries) = attribution.as_object() else {
+        return Err(
+            "update_attributed()'s attribution is an object of entries by own field".to_owned(),
+        );
+    };
+    for (field, entry) in entries {
+        if !patch.contains_key(field) {
+            return Err(format!(
+                "update_attributed() attributes {field}, which its patch does not write"
+            ));
+        }
+        let Some(entry) = entry.as_object() else {
+            return Err(format!(
+                "update_attributed()'s attribution of {field} is an object of its confidence"
+            ));
+        };
+        for (member, value) in entry {
+            match member.as_str() {
+                "confidence" if value.as_f64().is_some_and(|c| (0.0..=1.0).contains(&c)) => {}
+                "confidence" => {
+                    return Err(format!(
+                        "update_attributed()'s confidence for {field} is a number from 0 to 1"
+                    ))
+                }
+                _ => {
+                    return Err(format!(
+                        "update_attributed()'s attribution of {field} has {member}; it takes confidence"
+                    ))
+                }
+            }
+        }
+    }
+    Ok(entries.clone())
 }
 
 // listed names declared names for a defect's message, `none` for none.

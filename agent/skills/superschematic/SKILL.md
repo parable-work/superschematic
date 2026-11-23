@@ -255,7 +255,27 @@ path for when the store is unavailable.
   may rename, retype, remove and tighten, and is refused with each stored
   row it no longer describes unless it says `discard`. It gives a table's
   answers (unique fields, relations, the ORMs' filters and sorts) but not
-  a table's speed, so it is not where an application's data goes.
+  a table's speed, so it is not where an application's data goes. Run it
+  as a server with `cargo run -p superschematic-rules-dev --features
+  server --bin superschematic-dev -- --db dev.db` in
+  `runtime/engine/rust`: the engine's paths under
+  `/namespaces/default`, an event stream at `/events` and MCP at `/mcp`,
+  whose tools include `define_schema` and `publish_schema`. A request's
+  caller is the `X-Superschematic-Subject` header, or `--as`, and
+  `--policy` takes the engine's access policy (`"permission"` or
+  `{"rules": [...]}`).
+- **Schemas that change while the app runs, rows that matter?** Runtime
+  mode (D117, the Rust crate `superschematic-rules-runtime`) serves the
+  same handler over each type's own table, the table a build writes, in a
+  SQLite file or a Postgres database. A publish takes the DB service's
+  schema documents whole (`format --to=json`) and is a migration: it runs
+  `superschematic migrate plan --request` from the model the database
+  recorded, and the runner applies the plan. Plan first
+  (`{"kind": "plan", "documents": [...]}`) and read each step's hazards. A
+  publish with a `destructive` or `data-dependent` hazard is refused with
+  the hazard's id: allow a drop only when the data may go, and name a
+  rename (`task.title=task.summary`) rather than allowing the drop it
+  reads as. Never allow a hazard the person did not agree to.
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`
@@ -759,6 +779,47 @@ Most are load errors; knowing them saves a build round-trip:
   holds it to the behaviors' rules alone. Revisions cannot be removed from
   a table with rows. For history alone on Postgres, `@versioned` is the
   lighter choice.
+- When a row needs a discussion (a ticket's, a change under review's, an
+  incident's), implement Comments on the table rather than a `HasMany` of
+  notes: `implements Comments<Ticket, { moderatePermission:
+  "tickets.moderate"; editWindowMs: 900000 }>` (D77, D103). It keeps the
+  messages, edits and reactions in sub-tables of the row, with threads one
+  level deep, quotes, mentions, ref, action and code blocks, pins and
+  resolved threads (`comments.post`, `edit`, `deleteMessage`, `purge`,
+  `react`, `pin`, `resolve`, `listMessages`, ...). Every write is beside the
+  row: it moves no version or ETag of the row and no other behavior's
+  guard is asked, so a Lease does not stop a reply; do not present a Lease
+  token to a post, which is refused. Pass `clientId` on a post a client
+  may retry. On a table, streamed replies (`begin`, `appendDraft`,
+  `finish`), read state (`markRead`, `follow`, `unread`), the inbox,
+  deliveries, search, attachments and `moveAnchor` are not there yet: the
+  build refuses their config members (`composeTimeoutMs`,
+  `deliverPermission`, `attachments`, ...) and leaves their operations out.
+  Comments cannot be removed from a table with rows.
+- When a model should fill fields of a row from its other fields (a
+  ticket's category, an article's summary), implement Derived on the
+  table rather than a worker that writes columns of its own: `implements
+  Derived<Ticket, { fields: { category: { from: ["subject", "body"];
+  instruction: "Classify the request."; model: "standard" } }; permission:
+  "tickets.derive" }>` (D73, D103). Type each derived field as the answer
+  you want, an enum for a pick: its JSON Schema is the output the model is
+  asked for, and a value it refuses counts an attempt. A deriver holding
+  the permission pulls with `derived.staleDerivations` and settles with
+  `derived.settleDerivations`, presenting each item's `sourceHash`; both
+  take no key. A caller's write of a derived field overrides it until
+  `derived.rederive`. Never derive from a `Secret<T>` field. A `@deriver`
+  runs over engine types alone so far: on a table, run the loop in a
+  worker of your own through the repository.
+- When each field must say who set it, or a model's answers must wait
+  for a person, implement Provenance beside it: `implements
+  Provenance<Ticket, { review: { sources: ["Derived"]; below: 0.8;
+  permission: "tickets.review" }; gates: { assigned: { reviewed:
+  ["category"] } } }>` (D73, D103). A write from a source below the
+  confidence is proposed until `provenance.accept` or `provenance.reject`;
+  `provenance_in_review` is a column to list the queue by; a gate holds
+  the Workflow's move into its state. For who wrote the row as a whole,
+  the audit fields (`createdBy`, `updatedBy`, D87) are enough. Neither
+  behavior can be removed from a table with rows.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

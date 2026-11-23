@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The documents of shop-db, a DB service in the data form, as format
@@ -316,6 +317,52 @@ func TestAnswerRefuses(t *testing.T) {
 		require.Error(t, err, tc.name)
 		assert.Contains(t, err.Error(), tc.want, tc.name)
 	}
+}
+
+// TestAnswerLayout: a request with layout gets, beside its plan, the layout
+// document a runtime handler serves the documents' tables through (D117):
+// every table, Order and Customer, each with its key and its own columns,
+// in canonical JSON; a request without it gets none.
+func TestAnswerLayout(t *testing.T) {
+	without, err := answer(t, request("null", orderDocument, customerDocument))
+	require.NoError(t, err)
+	assert.Nil(t, without.Layout)
+	line, err := without.JSON()
+	require.NoError(t, err)
+	assert.NotContains(t, string(line), `"layout"`)
+
+	body := strings.TrimSuffix(request("null", orderDocument, customerDocument), "}") + `, "layout": true}`
+	response, err := answer(t, body)
+	require.NoError(t, err)
+	canonical, err := ir.CanonicalJSON(response.Layout)
+	require.NoError(t, err)
+	assert.Equal(t, string(canonical), string(response.Layout), "the layout is its canonical JSON")
+	var layout struct {
+		Types map[string]struct {
+			Table string `json:"table"`
+			Key   struct {
+				Column string `json:"column"`
+				Type   string `json:"type"`
+			} `json:"key"`
+			Own []struct {
+				Field  string `json:"field"`
+				Column string `json:"column"`
+			} `json:"own"`
+			Uses []json.RawMessage `json:"uses"`
+		} `json:"types"`
+	}
+	require.NoError(t, json.Unmarshal(response.Layout, &layout))
+	require.Len(t, layout.Types, 2)
+	customer := layout.Types["Customer"]
+	assert.Equal(t, "customer", customer.Table)
+	assert.Equal(t, "id", customer.Key.Column)
+	assert.Equal(t, "string", customer.Key.Type)
+	require.Len(t, customer.Own, 1)
+	assert.Equal(t, "email", customer.Own[0].Column)
+	assert.Empty(t, customer.Uses)
+	line, err = response.JSON()
+	require.NoError(t, err)
+	assert.Contains(t, string(line), `"layout":{"types":`)
 }
 
 // TestResponseJSON: a response is one line of JSON, its plan's bytes as

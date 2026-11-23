@@ -1,0 +1,2374 @@
+{
+  "name": "fixture-derived-provenance-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-derived-provenance-db",
+      "types": [
+        "Article",
+        "Ticket"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-derived-provenance-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "ArticleDerivedApplyDerivedInput": {
+      "name": "ArticleDerivedApplyDerivedInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Article's derived applyDerived.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "ArticleDerivedApplyDerivedInputFields"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedApplyDerivedInputFields": {
+      "name": "ArticleDerivedApplyDerivedInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "summary",
+          "typeRef": {
+            "name": "ArticleDerivedApplyDerivedInputFieldsSummary"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedApplyDerivedInputFieldsSummary": {
+      "name": "ArticleDerivedApplyDerivedInputFieldsSummary",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "confidence",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "usage",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedApplyDerivedResult": {
+      "name": "ArticleDerivedApplyDerivedResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Article's derived applyDerived returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "settled",
+          "comment": "The fields written, in the order given.",
+          "typeRef": {
+            "name": "ArticleDerivedApplyDerivedResultSettled",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedFailedDerivationsInput": {
+      "name": "ArticleDerivedFailedDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Article's derived failedDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many, 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedFailedDerivationsResult": {
+      "name": "ArticleDerivedFailedDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Article's derived failedDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "ArticleDerivedFailedDerivationsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedFailedDerivationsResultItems": {
+      "name": "ArticleDerivedFailedDerivationsResultItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempts",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedRederiveInput": {
+      "name": "ArticleDerivedRederiveInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Article's derived rederive.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "ArticleDerivedRederiveInputFields",
+            "isArray": true
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedRederiveResult": {
+      "name": "ArticleDerivedRederiveResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Article's derived rederive returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "stale",
+          "comment": "The derived fields stale after it.",
+          "typeRef": {
+            "name": "ArticleDerivedRederiveResultStale",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsInput": {
+      "name": "ArticleDerivedSettleDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Article's derived settleDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "ArticleDerivedSettleDerivationsInputItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsInputItems": {
+      "name": "ArticleDerivedSettleDerivationsInputItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "confidence",
+          "comment": "How sure the model is, from 0 to 1.",
+          "typeRef": {
+            "name": "number"
+          },
+          "validateMin": 0,
+          "validateMax": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "comment": "Why no value came back.",
+          "typeRef": {
+            "name": "ArticleDerivedSettleDerivationsInputItemsFailure"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "usage",
+          "comment": "What the call cost, kept in the event's parameters for reports.",
+          "typeRef": {
+            "name": "ArticleDerivedSettleDerivationsInputItemsUsage"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "value",
+          "comment": "The value, which the derived field's type must accept.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsInputItemsFailure": {
+      "name": "ArticleDerivedSettleDerivationsInputItemsFailure",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "Why no value came back.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "class",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 64,
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 2000,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsInputItemsUsage": {
+      "name": "ArticleDerivedSettleDerivationsInputItemsUsage",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What the call cost, kept in the event's parameters for reports.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "costMicros",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "inputTokens",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "modelId",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 200,
+          "origin": "behavior"
+        },
+        {
+          "name": "outputTokens",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsResult": {
+      "name": "ArticleDerivedSettleDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Article's derived settleDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "failed",
+          "comment": "How many failures were counted.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "settled",
+          "comment": "How many values were written.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "skipped",
+          "typeRef": {
+            "name": "ArticleDerivedSettleDerivationsResultSkipped",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedSettleDerivationsResultSkipped": {
+      "name": "ArticleDerivedSettleDerivationsResultSkipped",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "behavior",
+          "comment": "For vetoed, the behavior that vetoed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "code",
+          "comment": "For vetoed, its veto code.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "issues",
+          "comment": "For invalid, what the type refuses.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "reason",
+          "comment": "not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedStaleDerivationsInput": {
+      "name": "ArticleDerivedStaleDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Article's derived staleDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "comment": "Only this derived field.",
+          "typeRef": {
+            "name": "ArticleDerivedStaleDerivationsInputField"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many, 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedStaleDerivationsResult": {
+      "name": "ArticleDerivedStaleDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Article's derived staleDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "ArticleDerivedStaleDerivationsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null on the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedStaleDerivationsResultItems": {
+      "name": "ArticleDerivedStaleDerivationsResultItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt this is, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "inputs",
+          "comment": "The inputs that hold a value, by field name.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "instruction",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "model",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "output",
+          "comment": "The derived field's JSON Schema: what the value must be.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "comment": "The hash of the inputs, instruction, model and output, which a settle presents.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedInput": {
+      "name": "TicketDerivedApplyDerivedInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's derived applyDerived.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "TicketDerivedApplyDerivedInputFields"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedInputFields": {
+      "name": "TicketDerivedApplyDerivedInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "category",
+          "typeRef": {
+            "name": "TicketDerivedApplyDerivedInputFieldsCategory"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "priority",
+          "typeRef": {
+            "name": "TicketDerivedApplyDerivedInputFieldsPriority"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedInputFieldsCategory": {
+      "name": "TicketDerivedApplyDerivedInputFieldsCategory",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "confidence",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "usage",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedInputFieldsPriority": {
+      "name": "TicketDerivedApplyDerivedInputFieldsPriority",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "confidence",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "usage",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedResult": {
+      "name": "TicketDerivedApplyDerivedResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's derived applyDerived returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "settled",
+          "comment": "The fields written, in the order given.",
+          "typeRef": {
+            "name": "TicketDerivedApplyDerivedResultSettled",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedFailedDerivationsInput": {
+      "name": "TicketDerivedFailedDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's derived failedDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many, 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedFailedDerivationsResult": {
+      "name": "TicketDerivedFailedDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's derived failedDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketDerivedFailedDerivationsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedFailedDerivationsResultItems": {
+      "name": "TicketDerivedFailedDerivationsResultItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempts",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedRederiveInput": {
+      "name": "TicketDerivedRederiveInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's derived rederive.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "TicketDerivedRederiveInputFields",
+            "isArray": true
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedRederiveResult": {
+      "name": "TicketDerivedRederiveResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's derived rederive returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "stale",
+          "comment": "The derived fields stale after it.",
+          "typeRef": {
+            "name": "TicketDerivedRederiveResultStale",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsInput": {
+      "name": "TicketDerivedSettleDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's derived settleDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketDerivedSettleDerivationsInputItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsInputItems": {
+      "name": "TicketDerivedSettleDerivationsInputItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "confidence",
+          "comment": "How sure the model is, from 0 to 1.",
+          "typeRef": {
+            "name": "number"
+          },
+          "validateMin": 0,
+          "validateMax": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "comment": "Why no value came back.",
+          "typeRef": {
+            "name": "TicketDerivedSettleDerivationsInputItemsFailure"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "usage",
+          "comment": "What the call cost, kept in the event's parameters for reports.",
+          "typeRef": {
+            "name": "TicketDerivedSettleDerivationsInputItemsUsage"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "value",
+          "comment": "The value, which the derived field's type must accept.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsInputItemsFailure": {
+      "name": "TicketDerivedSettleDerivationsInputItemsFailure",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "Why no value came back.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "class",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 64,
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 2000,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsInputItemsUsage": {
+      "name": "TicketDerivedSettleDerivationsInputItemsUsage",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What the call cost, kept in the event's parameters for reports.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "costMicros",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "inputTokens",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "modelId",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 200,
+          "origin": "behavior"
+        },
+        {
+          "name": "outputTokens",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsResult": {
+      "name": "TicketDerivedSettleDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's derived settleDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "failed",
+          "comment": "How many failures were counted.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "settled",
+          "comment": "How many values were written.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "skipped",
+          "typeRef": {
+            "name": "TicketDerivedSettleDerivationsResultSkipped",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedSettleDerivationsResultSkipped": {
+      "name": "TicketDerivedSettleDerivationsResultSkipped",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "behavior",
+          "comment": "For vetoed, the behavior that vetoed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "code",
+          "comment": "For vetoed, its veto code.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "issues",
+          "comment": "For invalid, what the type refuses.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "reason",
+          "comment": "not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedStaleDerivationsInput": {
+      "name": "TicketDerivedStaleDerivationsInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's derived staleDerivations.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "comment": "Only this derived field.",
+          "typeRef": {
+            "name": "TicketDerivedStaleDerivationsInputField"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many, 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedStaleDerivationsResult": {
+      "name": "TicketDerivedStaleDerivationsResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's derived staleDerivations returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketDerivedStaleDerivationsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null on the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedStaleDerivationsResultItems": {
+      "name": "TicketDerivedStaleDerivationsResultItems",
+      "owner": "fixture-derived-provenance-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt this is, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "field",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "inputs",
+          "comment": "The inputs that hold a value, by field name.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "instruction",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "model",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "output",
+          "comment": "The derived field's JSON Schema: what the value must be.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "sourceHash",
+          "comment": "The hash of the inputs, instruction, model and output, which a settle presents.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceAcceptInput": {
+      "name": "TicketProvenanceAcceptInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's provenance accept.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "TicketProvenanceAcceptInputFields",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceAcceptResult": {
+      "name": "TicketProvenanceAcceptResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's provenance accept returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "accepted",
+          "typeRef": {
+            "name": "TicketProvenanceAcceptResultAccepted",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "inReview",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceRejectInput": {
+      "name": "TicketProvenanceRejectInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's provenance reject.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "fields",
+          "typeRef": {
+            "name": "TicketProvenanceRejectInputFields",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "patch",
+          "comment": "Replacement values, by field of fields; a field it leaves out is cleared.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceRejectResult": {
+      "name": "TicketProvenanceRejectResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's provenance reject returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "inReview",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "rejected",
+          "typeRef": {
+            "name": "TicketProvenanceRejectResultRejected",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketStatusTransitionInput": {
+      "name": "TicketStatusTransitionInput",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "The parameters of Ticket's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketStatusTransitionResult": {
+      "name": "TicketStatusTransitionResult",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "What Ticket's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "ArticleDerivedApplyDerivedResultSettled": {
+      "name": "ArticleDerivedApplyDerivedResultSettled",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Summary",
+          "serializedAs": "summary"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedRederiveInputFields": {
+      "name": "ArticleDerivedRederiveInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Summary",
+          "serializedAs": "summary"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedRederiveResultStale": {
+      "name": "ArticleDerivedRederiveResultStale",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Summary",
+          "serializedAs": "summary"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ArticleDerivedStaleDerivationsInputField": {
+      "name": "ArticleDerivedStaleDerivationsInputField",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "Only this derived field.",
+      "values": [
+        {
+          "name": "Summary",
+          "serializedAs": "summary"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedApplyDerivedResultSettled": {
+      "name": "TicketDerivedApplyDerivedResultSettled",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedRederiveInputFields": {
+      "name": "TicketDerivedRederiveInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedRederiveResultStale": {
+      "name": "TicketDerivedRederiveResultStale",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketDerivedStaleDerivationsInputField": {
+      "name": "TicketDerivedStaleDerivationsInputField",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "Only this derived field.",
+      "values": [
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceAcceptInputFields": {
+      "name": "TicketProvenanceAcceptInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Body",
+          "serializedAs": "body"
+        },
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        },
+        {
+          "name": "Subject",
+          "serializedAs": "subject"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceAcceptResultAccepted": {
+      "name": "TicketProvenanceAcceptResultAccepted",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Body",
+          "serializedAs": "body"
+        },
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        },
+        {
+          "name": "Subject",
+          "serializedAs": "subject"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceRejectInputFields": {
+      "name": "TicketProvenanceRejectInputFields",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Body",
+          "serializedAs": "body"
+        },
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        },
+        {
+          "name": "Subject",
+          "serializedAs": "subject"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketProvenanceRejectResultRejected": {
+      "name": "TicketProvenanceRejectResultRejected",
+      "owner": "fixture-derived-provenance-api",
+      "values": [
+        {
+          "name": "Body",
+          "serializedAs": "body"
+        },
+        {
+          "name": "Category",
+          "serializedAs": "category"
+        },
+        {
+          "name": "Priority",
+          "serializedAs": "priority"
+        },
+        {
+          "name": "Subject",
+          "serializedAs": "subject"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketStatusState": {
+      "name": "TicketStatusState",
+      "owner": "fixture-derived-provenance-api",
+      "comment": "A state of Ticket's status Workflow.",
+      "values": [
+        {
+          "name": "New",
+          "serializedAs": "new"
+        },
+        {
+          "name": "Triage",
+          "serializedAs": "triage"
+        },
+        {
+          "name": "Assigned",
+          "serializedAs": "assigned"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TicketTriage",
+      "comment": "A ticket's triage for any signed-in caller (D73, D103's step 4): a\nderiver pulls the stale fields at ticket/derived/stale-derivations and\nsettles its answers at ticket/derived/settle-derivations, routes of the\ntable as a whole; applyDerived and rederive are routes of the row under\nderived, and a reviewer's accept and reject routes of the row under\nprovenance, beside the status Workflow's transition.",
+      "operations": [
+        {
+          "name": "derivedStaleDerivations",
+          "comment": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+          "docs": {
+            "title": "Ticket derived: stale derivations",
+            "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+            "capability": "ticket.derived.stale-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_derived_stale_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketDerivedStaleDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketDerivedStaleDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "staleDerivations",
+            "table": true,
+            "permissions": [
+              "tickets.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/derived/stale-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedSettleDerivations",
+          "comment": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+          "docs": {
+            "title": "Ticket derived: settle derivations",
+            "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+            "capability": "ticket.derived.settle-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_derived_settle_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketDerivedSettleDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketDerivedSettleDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "settleDerivations",
+            "writes": true,
+            "table": true,
+            "permissions": [
+              "tickets.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/derived/settle-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedFailedDerivations",
+          "comment": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+          "docs": {
+            "title": "Ticket derived: failed derivations",
+            "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+            "capability": "ticket.derived.failed-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_derived_failed_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketDerivedFailedDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketDerivedFailedDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "failedDerivations",
+            "table": true,
+            "permissions": [
+              "tickets.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/derived/failed-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedApplyDerived",
+          "comment": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+          "docs": {
+            "title": "Ticket derived: apply derived",
+            "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+            "capability": "ticket.derived.apply-derived",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_derived_apply_derived",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketDerivedApplyDerivedResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketDerivedApplyDerivedInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "applyDerived",
+            "writes": true,
+            "permissions": [
+              "tickets.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/derived/apply-derived",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedRederive",
+          "comment": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+          "docs": {
+            "title": "Ticket derived: rederive",
+            "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+            "capability": "ticket.derived.rederive",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_derived_rederive",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketDerivedRederiveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketDerivedRederiveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "rederive",
+            "writes": true,
+            "permissions": [
+              "tickets.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/derived/rederive",
+          "origin": "behavior"
+        },
+        {
+          "name": "provenanceAccept",
+          "comment": "Accepts proposed fields as they are, as the caller. Needs the review's permission.",
+          "docs": {
+            "title": "Ticket provenance: accept",
+            "description": "Accepts proposed fields as they are, as the caller. Needs the review's permission.",
+            "capability": "ticket.provenance.accept",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_provenance_accept",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketProvenanceAcceptResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketProvenanceAcceptInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Provenance",
+            "behavior": "Provenance",
+            "operation": "accept",
+            "writes": true,
+            "permissions": [
+              "tickets.review"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/provenance/accept",
+          "origin": "behavior"
+        },
+        {
+          "name": "provenanceReject",
+          "comment": "Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission.",
+          "docs": {
+            "title": "Ticket provenance: reject",
+            "description": "Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission.",
+            "capability": "ticket.provenance.reject",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_provenance_reject",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketProvenanceRejectResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketProvenanceRejectInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Provenance",
+            "behavior": "Provenance",
+            "operation": "reject",
+            "writes": true,
+            "permissions": [
+              "tickets.review"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/provenance/reject",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Ticket status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "ticket.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Ticket"
+      },
+      "auth": true
+    },
+    {
+      "name": "ArticleSummaries",
+      "comment": "An article's summary, Derived's routes alone.",
+      "operations": [
+        {
+          "name": "derivedStaleDerivations",
+          "comment": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+          "docs": {
+            "title": "Article derived: stale derivations",
+            "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+            "capability": "article.derived.stale-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "article_derived_stale_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ArticleDerivedStaleDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ArticleDerivedStaleDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Article",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "staleDerivations",
+            "table": true,
+            "permissions": [
+              "articles.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "article/derived/stale-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedSettleDerivations",
+          "comment": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+          "docs": {
+            "title": "Article derived: settle derivations",
+            "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+            "capability": "article.derived.settle-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "article_derived_settle_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ArticleDerivedSettleDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ArticleDerivedSettleDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Article",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "settleDerivations",
+            "writes": true,
+            "table": true,
+            "permissions": [
+              "articles.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "article/derived/settle-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedFailedDerivations",
+          "comment": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+          "docs": {
+            "title": "Article derived: failed derivations",
+            "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+            "capability": "article.derived.failed-derivations",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "article_derived_failed_derivations",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ArticleDerivedFailedDerivationsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ArticleDerivedFailedDerivationsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Article",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "failedDerivations",
+            "table": true,
+            "permissions": [
+              "articles.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "article/derived/failed-derivations",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedApplyDerived",
+          "comment": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+          "docs": {
+            "title": "Article derived: apply derived",
+            "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+            "capability": "article.derived.apply-derived",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "article_derived_apply_derived",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ArticleDerivedApplyDerivedResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Article row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ArticleDerivedApplyDerivedInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Article",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "applyDerived",
+            "writes": true,
+            "permissions": [
+              "articles.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "article/{id}/derived/apply-derived",
+          "origin": "behavior"
+        },
+        {
+          "name": "derivedRederive",
+          "comment": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+          "docs": {
+            "title": "Article derived: rederive",
+            "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+            "capability": "article.derived.rederive",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "article_derived_rederive",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ArticleDerivedRederiveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Article row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ArticleDerivedRederiveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-derived-provenance-db",
+            "type": "Article",
+            "key": "id",
+            "use": "Derived",
+            "behavior": "Derived",
+            "operation": "rederive",
+            "writes": true,
+            "permissions": [
+              "articles.derive"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "article/{id}/derived/rederive",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Article"
+      },
+      "auth": true
+    }
+  ]
+}

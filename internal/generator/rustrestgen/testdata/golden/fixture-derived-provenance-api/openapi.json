@@ -1,0 +1,2990 @@
+{
+  "components": {
+    "schemas": {
+      "ArticleDerivedApplyDerivedInput": {
+        "description": "The parameters of Article's derived applyDerived.",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ArticleDerivedApplyDerivedInputFields"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedApplyDerivedInputFields": {
+        "properties": {
+          "summary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArticleDerivedApplyDerivedInputFieldsSummary"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ArticleDerivedApplyDerivedInputFieldsSummary": {
+        "properties": {
+          "confidence": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "sourceHash": {
+            "type": "string"
+          },
+          "usage": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "value": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "sourceHash",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedApplyDerivedResult": {
+        "description": "What Article's derived applyDerived returns.",
+        "properties": {
+          "settled": {
+            "description": "The fields written, in the order given.",
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedApplyDerivedResultSettled"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedApplyDerivedResultSettled": {
+        "enum": [
+          "summary"
+        ],
+        "type": "string"
+      },
+      "ArticleDerivedFailedDerivationsInput": {
+        "description": "The parameters of Article's derived failedDerivations.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ArticleDerivedFailedDerivationsResult": {
+        "description": "What Article's derived failedDerivations returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedFailedDerivationsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedFailedDerivationsResultItems": {
+        "properties": {
+          "attempts": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "failure": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempts",
+          "field",
+          "id"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedRederiveInput": {
+        "description": "The parameters of Article's derived rederive.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedRederiveInputFields"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ArticleDerivedRederiveInputFields": {
+        "enum": [
+          "summary"
+        ],
+        "type": "string"
+      },
+      "ArticleDerivedRederiveResult": {
+        "description": "What Article's derived rederive returns.",
+        "properties": {
+          "stale": {
+            "description": "The derived fields stale after it.",
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedRederiveResultStale"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "stale"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedRederiveResultStale": {
+        "enum": [
+          "summary"
+        ],
+        "type": "string"
+      },
+      "ArticleDerivedSettleDerivationsInput": {
+        "description": "The parameters of Article's derived settleDerivations.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsInputItems"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedSettleDerivationsInputItems": {
+        "properties": {
+          "confidence": {
+            "description": "How sure the model is, from 0 to 1.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "failure": {
+            "description": "Why no value came back.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsInputItemsFailure"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "field": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceHash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "usage": {
+            "description": "What the call cost, kept in the event's parameters for reports.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsInputItemsUsage"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "value": {
+            "description": "The value, which the derived field's type must accept.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "field",
+          "id",
+          "sourceHash"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedSettleDerivationsInputItemsFailure": {
+        "description": "Why no value came back.",
+        "properties": {
+          "class": {
+            "maxLength": 64,
+            "nullable": true,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedSettleDerivationsInputItemsUsage": {
+        "description": "What the call cost, kept in the event's parameters for reports.",
+        "properties": {
+          "costMicros": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "inputTokens": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "modelId": {
+            "maxLength": 200,
+            "nullable": true,
+            "type": "string"
+          },
+          "outputTokens": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ArticleDerivedSettleDerivationsResult": {
+        "description": "What Article's derived settleDerivations returns.",
+        "properties": {
+          "failed": {
+            "description": "How many failures were counted.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "settled": {
+            "description": "How many values were written.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsResultSkipped"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "failed",
+          "settled",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedSettleDerivationsResultSkipped": {
+        "properties": {
+          "behavior": {
+            "description": "For vetoed, the behavior that vetoed.",
+            "nullable": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "For vetoed, its veto code.",
+            "nullable": true,
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issues": {
+            "description": "For invalid, what the type refuses.",
+            "items": {
+              "description": "Any valid JSON value: object, array, primitive, or null"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "description": "not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedStaleDerivationsInput": {
+        "description": "The parameters of Article's derived staleDerivations.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "field": {
+            "description": "Only this derived field.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArticleDerivedStaleDerivationsInputField"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ArticleDerivedStaleDerivationsInputField": {
+        "description": "Only this derived field.",
+        "enum": [
+          "summary"
+        ],
+        "type": "string"
+      },
+      "ArticleDerivedStaleDerivationsResult": {
+        "description": "What Article's derived staleDerivations returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArticleDerivedStaleDerivationsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null on the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ArticleDerivedStaleDerivationsResultItems": {
+        "properties": {
+          "attempt": {
+            "description": "Which attempt this is, from 1.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "description": "The inputs that hold a value, by field name."
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output": {
+            "description": "The derived field's JSON Schema: what the value must be."
+          },
+          "sourceHash": {
+            "description": "The hash of the inputs, instruction, model and output, which a settle presents.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt",
+          "field",
+          "id",
+          "inputs",
+          "instruction",
+          "model",
+          "output",
+          "sourceHash"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedInput": {
+        "description": "The parameters of Ticket's derived applyDerived.",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/TicketDerivedApplyDerivedInputFields"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedInputFields": {
+        "properties": {
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketDerivedApplyDerivedInputFieldsCategory"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "priority": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketDerivedApplyDerivedInputFieldsPriority"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedInputFieldsCategory": {
+        "properties": {
+          "confidence": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "sourceHash": {
+            "type": "string"
+          },
+          "usage": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "value": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "sourceHash",
+          "value"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedInputFieldsPriority": {
+        "properties": {
+          "confidence": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "sourceHash": {
+            "type": "string"
+          },
+          "usage": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "value": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "sourceHash",
+          "value"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedResult": {
+        "description": "What Ticket's derived applyDerived returns.",
+        "properties": {
+          "settled": {
+            "description": "The fields written, in the order given.",
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedApplyDerivedResultSettled"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedApplyDerivedResultSettled": {
+        "enum": [
+          "category",
+          "priority"
+        ],
+        "type": "string"
+      },
+      "TicketDerivedFailedDerivationsInput": {
+        "description": "The parameters of Ticket's derived failedDerivations.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TicketDerivedFailedDerivationsResult": {
+        "description": "What Ticket's derived failedDerivations returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedFailedDerivationsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedFailedDerivationsResultItems": {
+        "properties": {
+          "attempts": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "failure": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempts",
+          "field",
+          "id"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedRederiveInput": {
+        "description": "The parameters of Ticket's derived rederive.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedRederiveInputFields"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "TicketDerivedRederiveInputFields": {
+        "enum": [
+          "category",
+          "priority"
+        ],
+        "type": "string"
+      },
+      "TicketDerivedRederiveResult": {
+        "description": "What Ticket's derived rederive returns.",
+        "properties": {
+          "stale": {
+            "description": "The derived fields stale after it.",
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedRederiveResultStale"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "stale"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedRederiveResultStale": {
+        "enum": [
+          "category",
+          "priority"
+        ],
+        "type": "string"
+      },
+      "TicketDerivedSettleDerivationsInput": {
+        "description": "The parameters of Ticket's derived settleDerivations.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedSettleDerivationsInputItems"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedSettleDerivationsInputItems": {
+        "properties": {
+          "confidence": {
+            "description": "How sure the model is, from 0 to 1.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "failure": {
+            "description": "Why no value came back.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketDerivedSettleDerivationsInputItemsFailure"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "field": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceHash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "usage": {
+            "description": "What the call cost, kept in the event's parameters for reports.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketDerivedSettleDerivationsInputItemsUsage"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "value": {
+            "description": "The value, which the derived field's type must accept.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "field",
+          "id",
+          "sourceHash"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedSettleDerivationsInputItemsFailure": {
+        "description": "Why no value came back.",
+        "properties": {
+          "class": {
+            "maxLength": 64,
+            "nullable": true,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedSettleDerivationsInputItemsUsage": {
+        "description": "What the call cost, kept in the event's parameters for reports.",
+        "properties": {
+          "costMicros": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "inputTokens": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "modelId": {
+            "maxLength": 200,
+            "nullable": true,
+            "type": "string"
+          },
+          "outputTokens": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TicketDerivedSettleDerivationsResult": {
+        "description": "What Ticket's derived settleDerivations returns.",
+        "properties": {
+          "failed": {
+            "description": "How many failures were counted.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "settled": {
+            "description": "How many values were written.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedSettleDerivationsResultSkipped"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "failed",
+          "settled",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedSettleDerivationsResultSkipped": {
+        "properties": {
+          "behavior": {
+            "description": "For vetoed, the behavior that vetoed.",
+            "nullable": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "For vetoed, its veto code.",
+            "nullable": true,
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issues": {
+            "description": "For invalid, what the type refuses.",
+            "items": {
+              "description": "Any valid JSON value: object, array, primitive, or null"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "description": "not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedStaleDerivationsInput": {
+        "description": "The parameters of Ticket's derived staleDerivations.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "field": {
+            "description": "Only this derived field.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketDerivedStaleDerivationsInputField"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TicketDerivedStaleDerivationsInputField": {
+        "description": "Only this derived field.",
+        "enum": [
+          "category",
+          "priority"
+        ],
+        "type": "string"
+      },
+      "TicketDerivedStaleDerivationsResult": {
+        "description": "What Ticket's derived staleDerivations returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TicketDerivedStaleDerivationsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null on the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TicketDerivedStaleDerivationsResultItems": {
+        "properties": {
+          "attempt": {
+            "description": "Which attempt this is, from 1.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "description": "The inputs that hold a value, by field name."
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output": {
+            "description": "The derived field's JSON Schema: what the value must be."
+          },
+          "sourceHash": {
+            "description": "The hash of the inputs, instruction, model and output, which a settle presents.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt",
+          "field",
+          "id",
+          "inputs",
+          "instruction",
+          "model",
+          "output",
+          "sourceHash"
+        ],
+        "type": "object"
+      },
+      "TicketProvenanceAcceptInput": {
+        "description": "The parameters of Ticket's provenance accept.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/TicketProvenanceAcceptInputFields"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "TicketProvenanceAcceptInputFields": {
+        "enum": [
+          "body",
+          "category",
+          "priority",
+          "subject"
+        ],
+        "type": "string"
+      },
+      "TicketProvenanceAcceptResult": {
+        "description": "What Ticket's provenance accept returns.",
+        "properties": {
+          "accepted": {
+            "items": {
+              "$ref": "#/components/schemas/TicketProvenanceAcceptResultAccepted"
+            },
+            "type": "array"
+          },
+          "inReview": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted",
+          "inReview"
+        ],
+        "type": "object"
+      },
+      "TicketProvenanceAcceptResultAccepted": {
+        "enum": [
+          "body",
+          "category",
+          "priority",
+          "subject"
+        ],
+        "type": "string"
+      },
+      "TicketProvenanceRejectInput": {
+        "description": "The parameters of Ticket's provenance reject.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/TicketProvenanceRejectInputFields"
+            },
+            "type": "array"
+          },
+          "patch": {
+            "description": "Replacement values, by field of fields; a field it leaves out is cleared.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "TicketProvenanceRejectInputFields": {
+        "enum": [
+          "body",
+          "category",
+          "priority",
+          "subject"
+        ],
+        "type": "string"
+      },
+      "TicketProvenanceRejectResult": {
+        "description": "What Ticket's provenance reject returns.",
+        "properties": {
+          "inReview": {
+            "type": "boolean"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/components/schemas/TicketProvenanceRejectResultRejected"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "inReview",
+          "rejected"
+        ],
+        "type": "object"
+      },
+      "TicketProvenanceRejectResultRejected": {
+        "enum": [
+          "body",
+          "category",
+          "priority",
+          "subject"
+        ],
+        "type": "string"
+      },
+      "TicketStatusState": {
+        "description": "A state of Ticket's status Workflow.",
+        "enum": [
+          "new",
+          "triage",
+          "assigned"
+        ],
+        "type": "string"
+      },
+      "TicketStatusTransitionInput": {
+        "description": "The parameters of Ticket's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TicketStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/TicketStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "TicketStatusTransitionResult": {
+        "description": "What Ticket's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/TicketStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/TicketStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-derived-provenance-api schema",
+    "title": "Fixture-Derived-Provenance-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/article/derived/failed-derivations": {
+      "post": {
+        "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+        "operationId": "ArticleSummariesDerivedFailedDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleDerivedFailedDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ArticleDerivedFailedDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Article derived: failed derivations",
+        "tags": [
+          "article-summaries"
+        ],
+        "x-superschematic-docs": {
+          "capability": "article.derived.failed-derivations",
+          "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Article derived: failed derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/article/derived/settle-derivations": {
+      "post": {
+        "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+        "operationId": "ArticleSummariesDerivedSettleDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ArticleDerivedSettleDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Article derived: settle derivations",
+        "tags": [
+          "article-summaries"
+        ],
+        "x-superschematic-docs": {
+          "capability": "article.derived.settle-derivations",
+          "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Article derived: settle derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/article/derived/stale-derivations": {
+      "post": {
+        "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+        "operationId": "ArticleSummariesDerivedStaleDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleDerivedStaleDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ArticleDerivedStaleDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Article derived: stale derivations",
+        "tags": [
+          "article-summaries"
+        ],
+        "x-superschematic-docs": {
+          "capability": "article.derived.stale-derivations",
+          "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Article derived: stale derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/article/{id}/derived/apply-derived": {
+      "post": {
+        "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+        "operationId": "ArticleSummariesDerivedApplyDerivedHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleDerivedApplyDerivedInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ArticleDerivedApplyDerivedResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Article derived: apply derived",
+        "tags": [
+          "article-summaries"
+        ],
+        "x-superschematic-docs": {
+          "capability": "article.derived.apply-derived",
+          "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Article derived: apply derived",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/article/{id}/derived/rederive": {
+      "post": {
+        "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+        "operationId": "ArticleSummariesDerivedRederiveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleDerivedRederiveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ArticleDerivedRederiveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Article derived: rederive",
+        "tags": [
+          "article-summaries"
+        ],
+        "x-superschematic-docs": {
+          "capability": "article.derived.rederive",
+          "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Article derived: rederive",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/derived/failed-derivations": {
+      "post": {
+        "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+        "operationId": "TicketTriageDerivedFailedDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDerivedFailedDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketDerivedFailedDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket derived: failed derivations",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.derived.failed-derivations",
+          "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket derived: failed derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/derived/settle-derivations": {
+      "post": {
+        "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+        "operationId": "TicketTriageDerivedSettleDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDerivedSettleDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketDerivedSettleDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket derived: settle derivations",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.derived.settle-derivations",
+          "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket derived: settle derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/derived/stale-derivations": {
+      "post": {
+        "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+        "operationId": "TicketTriageDerivedStaleDerivationsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDerivedStaleDerivationsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketDerivedStaleDerivationsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket derived: stale derivations",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.derived.stale-derivations",
+          "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket derived: stale derivations",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/derived/apply-derived": {
+      "post": {
+        "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+        "operationId": "TicketTriageDerivedApplyDerivedHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDerivedApplyDerivedInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketDerivedApplyDerivedResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket derived: apply derived",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.derived.apply-derived",
+          "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket derived: apply derived",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/derived/rederive": {
+      "post": {
+        "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+        "operationId": "TicketTriageDerivedRederiveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDerivedRederiveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketDerivedRederiveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket derived: rederive",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.derived.rederive",
+          "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket derived: rederive",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/provenance/accept": {
+      "post": {
+        "description": "Accepts proposed fields as they are, as the caller. Needs the review's permission.",
+        "operationId": "TicketTriageProvenanceAcceptHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketProvenanceAcceptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketProvenanceAcceptResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket provenance: accept",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.provenance.accept",
+          "description": "Accepts proposed fields as they are, as the caller. Needs the review's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket provenance: accept",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/provenance/reject": {
+      "post": {
+        "description": "Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission.",
+        "operationId": "TicketTriageProvenanceRejectHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketProvenanceRejectInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketProvenanceRejectResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket provenance: reject",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.provenance.reject",
+          "description": "Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket provenance: reject",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "TicketTriageStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket status: transition",
+        "tags": [
+          "ticket-triage"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket status: transition",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

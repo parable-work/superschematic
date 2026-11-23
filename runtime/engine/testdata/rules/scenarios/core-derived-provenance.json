@@ -1,0 +1,4709 @@
+{
+  "name": "core-derived-provenance",
+  "description": "Derived and Provenance on a table, D73 on the core (D103's step 4): a deriver's pull of a table's stale derived fields, an operation of the table as a whole that reads its rows a page at a time, by row and by field, and its settle by hash, each row's values written through applyDerived as an update attributed to Derived; what a settle skips; a caller's override until rederive and a moved input; a refused value, another use's veto and a failure counting attempts into failedDerivations; a field's states; Provenance's records of a caller's write and Derived's with its confidence, review below the threshold, inReview as a column a list filters on, an edit over a proposal, a write acting for a subject (D77), the gate on the Workflow, accept and reject, and Derived's override by reject's write; with each one's define refusals. Cases written by hand in the recorded format, in the core's words, where a table's answers part from the engine's: the cursor, the attempt entry, the forbidden message without a namespace. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, a refusal whole; what only the engine's store answers is left out.",
+  "source": "written by hand (D103): runtime/engine/testdata/rules/scenarios/core-derived-provenance.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Derived > a deriver pulls the stale fields of a table's rows a page at a time, by row and by field, and settles values by hash that land as own fields; a settle skips a moved hash, a row that is not there and a field the config does not derive",
+      "behaviors": [
+        "Derived"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "category": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Classify the request.",
+                            "model": "standard"
+                          },
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          }
+                        },
+                        "permission": "tickets.derive",
+                        "maxAttempts": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Login",
+              "body": "Locked out."
+            },
+            {
+              "id": "t2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t2",
+            "data": {
+              "subject": "Login",
+              "body": "Locked out."
+            },
+            "behaviors": {
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {
+              "limit": 3
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "category",
+                "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                "attempt": 1,
+                "instruction": "Classify the request.",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Card declined",
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A Category value",
+                  "enum": [
+                    "billing",
+                    "bug",
+                    "other",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t2",
+                "field": "category",
+                "sourceHash": "e85aa3eb7f6c696bd07a1145a1922f9098b5123db895e40e63547f16d39da796",
+                "attempt": 1,
+                "instruction": "Classify the request.",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Login",
+                  "body": "Locked out."
+                },
+                "output": {
+                  "description": "A Category value",
+                  "enum": [
+                    "billing",
+                    "bug",
+                    "other",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": "YWZ0ZXI6WyJ0MiIsImNhdGVnb3J5Il0"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {
+              "limit": 3,
+              "cursor": "YWZ0ZXI6WyJ0MiIsImNhdGVnb3J5Il0"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t2",
+                "field": "summary",
+                "sourceHash": "435224334e2f9188818118b6eb9debeed36a540e72fef4f15f781ea465219d1d",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Locked out."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {
+              "field": "summary"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t2",
+                "field": "summary",
+                "sourceHash": "435224334e2f9188818118b6eb9debeed36a540e72fef4f15f781ea465219d1d",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Locked out."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "category",
+                  "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                  "value": "billing",
+                  "confidence": 0.9
+                },
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                  "value": "A card is refused."
+                },
+                {
+                  "id": "t2",
+                  "field": "summary",
+                  "sourceHash": "stale",
+                  "value": "x"
+                },
+                {
+                  "id": "t3",
+                  "field": "summary",
+                  "sourceHash": "h",
+                  "value": "x"
+                },
+                {
+                  "id": "t2",
+                  "field": "priority",
+                  "sourceHash": "h",
+                  "value": "x"
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 2,
+            "failed": 0,
+            "skipped": [
+              {
+                "id": "t2",
+                "field": "summary",
+                "reason": "moved"
+              },
+              {
+                "id": "t3",
+                "field": "summary",
+                "reason": "not_found"
+              },
+              {
+                "id": "t2",
+                "field": "priority",
+                "reason": "not_derived"
+              }
+            ]
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout.",
+              "category": "billing",
+              "summary": "A card is refused."
+            },
+            "behaviors": {
+              "Derived": {
+                "fields": {
+                  "category": {
+                    "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                    "model": "standard",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.9
+                  },
+                  "summary": {
+                    "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                    "model": "simple",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver"
+                  }
+                },
+                "stale": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t2",
+                "field": "category",
+                "sourceHash": "e85aa3eb7f6c696bd07a1145a1922f9098b5123db895e40e63547f16d39da796",
+                "attempt": 1,
+                "instruction": "Classify the request.",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Login",
+                  "body": "Locked out."
+                },
+                "output": {
+                  "description": "A Category value",
+                  "enum": [
+                    "billing",
+                    "bug",
+                    "other",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t2",
+                "field": "summary",
+                "sourceHash": "435224334e2f9188818118b6eb9debeed36a540e72fef4f15f781ea465219d1d",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Locked out."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Derived > a caller's write overrides a field until rederive, and a moved input moves the other's hash",
+      "behaviors": [
+        "Derived"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "category": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Classify the request.",
+                            "model": "standard"
+                          },
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          }
+                        },
+                        "permission": "tickets.derive",
+                        "maxAttempts": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            {
+              "category": "other",
+              "body": "Refused twice."
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused twice.",
+              "category": "other"
+            },
+            "behaviors": {
+              "Derived": {
+                "fields": {
+                  "category": {
+                    "overridden": {
+                      "by": "alice",
+                      "at": 1772323260000
+                    }
+                  }
+                },
+                "stale": [
+                  "summary"
+                ]
+              }
+            }
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "category",
+                  "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                  "value": "bug"
+                },
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                  "value": "x"
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 0,
+            "failed": 0,
+            "skipped": [
+              {
+                "id": "t1",
+                "field": "category",
+                "reason": "overridden"
+              },
+              {
+                "id": "t1",
+                "field": "summary",
+                "reason": "moved"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "t1",
+            "applyDerived",
+            {
+              "fields": {
+                "category": {
+                  "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                  "value": "bug"
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Derived vetoes applyDerived of Ticket t1: category of Ticket t1 was written by alice; rederive lets Derived write it again",
+            "details": {
+              "behavior": "Derived",
+              "action": "applyDerived",
+              "reason": "category of Ticket t1 was written by alice; rederive lets Derived write it again",
+              "vetoCode": "overridden"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "rederive",
+            {
+              "fields": [
+                "category"
+              ]
+            }
+          ],
+          "expect": {
+            "stale": [
+              "category",
+              "summary"
+            ]
+          },
+          "now": 1772323320000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "rederive",
+            {
+              "fields": [
+                "priority"
+              ]
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Derived vetoes rederive of Ticket t1: Ticket derives no field priority",
+            "details": {
+              "behavior": "Derived",
+              "action": "rederive",
+              "reason": "Ticket derives no field priority",
+              "vetoCode": "not_derived"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "category",
+                "sourceHash": "5a7cbc41f8256a48d2cd8ae7763b17d86c7ccf13cc68b0394c02e1eaa08cc066",
+                "attempt": 1,
+                "instruction": "Classify the request.",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Card declined",
+                  "body": "Refused twice."
+                },
+                "output": {
+                  "description": "A Category value",
+                  "enum": [
+                    "billing",
+                    "bug",
+                    "other",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "280ed3d81032990afe475633aea1018fcd0492fc2db8a6b898292e77c8e2bebf",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Refused twice."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Derived > a refused value, another use's veto and a failure count attempts and write no own field, and run out into failedDerivations until an input moves; a caller's attempt entry is refused; each operation of the table needs the permission",
+      "behaviors": [
+        "Derived",
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "new": {
+                            "frozen": [
+                              "summary"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "category": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Classify the request.",
+                            "model": "standard"
+                          },
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          }
+                        },
+                        "permission": "tickets.derive",
+                        "maxAttempts": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "category",
+                  "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                  "value": "payments"
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 0,
+            "failed": 0,
+            "skipped": [
+              {
+                "id": "t1",
+                "field": "category",
+                "reason": "invalid",
+                "issues": [
+                  {
+                    "path": "category",
+                    "rule": "enum",
+                    "message": "Category must be one of the allowed values."
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                  "value": "A card is refused."
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 0,
+            "failed": 0,
+            "skipped": [
+              {
+                "id": "t1",
+                "field": "summary",
+                "reason": "vetoed",
+                "behavior": "StateRules",
+                "code": "frozen_fields"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "category",
+                  "sourceHash": "72c4932fe182030ceb732c6ca4718bfaa443317c233d1d4a01602f949a066861",
+                  "failure": {
+                    "class": "timeout",
+                    "message": "too slow"
+                  }
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 0,
+            "failed": 1,
+            "skipped": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                "attempt": 2,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "failedDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "category",
+                "attempts": 2,
+                "failure": {
+                  "class": "timeout",
+                  "message": "too slow"
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "t1",
+            "applyDerived",
+            {
+              "fields": {
+                "summary": {
+                  "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                  "attempt": {}
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation applyDerived of behavior Derived: /fields/summary: must NOT have additional properties: attempt",
+            "details": {
+              "issues": [
+                {
+                  "path": "/fields/summary",
+                  "message": "must NOT have additional properties: attempt"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not pull the derived fields of Ticket in namespace default: it needs tickets.derive"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "failedDerivations",
+            {}
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not list the derived fields of Ticket in namespace default: it needs tickets.derive"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": []
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not settle the derived fields of Ticket in namespace default: it needs tickets.derive"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            {
+              "subject": "Card refused"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card refused",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "category",
+                  "summary"
+                ]
+              }
+            }
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {
+              "field": "category"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "category",
+                "sourceHash": "c2fea876bb3208455eaa9016079f8d3fda27f3f921b6a0cbc9471a4b71253e1d",
+                "attempt": 1,
+                "instruction": "Classify the request.",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Card refused",
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A Category value",
+                  "enum": [
+                    "billing",
+                    "bug",
+                    "other",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Derived > a field with states is pulled and applied only while the status is one of them; with each define refusal",
+      "behaviors": [
+        "Derived",
+        "Workflow",
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "title": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Derived config: fields: Ticket has no field title",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Derived config: fields: Ticket has no field title"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "summary"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Derived config: fields: summary is derived from itself",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Derived config: fields: summary is derived from itself"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "notes"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Derived config: fields: summary is derived from notes, which Ticket does not have",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Derived config: fields: summary is derived from notes, which Ticket does not have"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          },
+                          "category": {
+                            "from": [
+                              "summary"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Derived config: fields: category is derived from summary, which is derived too",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Derived config: fields: category is derived from summary, which is derived too"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "summary"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "i",
+                            "model": "m"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/1/config: type Ticket: behavior Derived config: fields: summary is a field Constants keeps, which no model may write after the create",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/1/config",
+                  "message": "type Ticket: behavior Derived config: fields: summary is a field Constants keeps, which no model may write after the create"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "i",
+                            "model": "m",
+                            "states": [
+                              "new"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Derived config: fields: summary names states, and the type has no Workflow",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Derived config: fields: summary names states, and the type has no Workflow"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "i",
+                            "model": "m",
+                            "states": [
+                              "done"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/1/config: type Ticket: behavior Derived config: fields: summary: state \"done\" is not a state of the type's Workflow (new, closed)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/1/config",
+                  "message": "type Ticket: behavior Derived config: fields: summary: state \"done\" is not a state of the type's Workflow (new, closed)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "permission": "tickets.derive",
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple",
+                            "states": [
+                              "closed"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "summary"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "t1",
+            "applyDerived",
+            {
+              "fields": {
+                "summary": {
+                  "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                  "value": "x"
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Derived vetoes applyDerived of Ticket t1: Ticket t1 is new, and summary is derived only in closed",
+            "details": {
+              "behavior": "Derived",
+              "action": "applyDerived",
+              "reason": "Ticket t1 is new, and summary is derived only in closed",
+              "vetoCode": "out_of_state"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "transition",
+            {
+              "to": "closed"
+            }
+          ],
+          "expect": {
+            "from": "new",
+            "to": "closed"
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "665ead3d12a41a48205537b35e0681088e50f2200dc9ea6c0e4b34990822d1af",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provenance > records a caller's write and Derived's with the confidence it attributed, proposes a write below the threshold, lists it by inReview, and a caller's write over a proposal edits it; a write acting for a subject (D77) records for",
+      "behaviors": [
+        "Provenance",
+        "Derived",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "triage",
+                          "assigned"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "triage"
+                          },
+                          {
+                            "from": "new",
+                            "to": "assigned"
+                          },
+                          {
+                            "from": "triage",
+                            "to": "assigned"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          },
+                          "priority": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "How urgent is this?",
+                            "model": "standard"
+                          }
+                        },
+                        "permission": "tickets.derive"
+                      }
+                    },
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "fields": [
+                          "subject",
+                          "body",
+                          "summary",
+                          "priority"
+                        ],
+                        "review": {
+                          "sources": [
+                            "Derived"
+                          ],
+                          "below": 0.8,
+                          "permission": "tickets.review"
+                        },
+                        "gates": {
+                          "assigned": {
+                            "reviewed": [
+                              "summary",
+                              "priority"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "summary",
+                  "priority"
+                ]
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  }
+                },
+                "inReview": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "staleDerivations",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "id": "t1",
+                "field": "summary",
+                "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                "attempt": 1,
+                "instruction": "Summarize it in one sentence.",
+                "model": "simple",
+                "inputs": {
+                  "subject": "Card declined",
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              {
+                "id": "t1",
+                "field": "priority",
+                "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                "attempt": 1,
+                "instruction": "How urgent is this?",
+                "model": "standard",
+                "inputs": {
+                  "subject": "Card declined",
+                  "body": "Refused at checkout."
+                },
+                "output": {
+                  "description": "A string value",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                  "value": "A card is refused.",
+                  "confidence": 0.95
+                },
+                {
+                  "id": "t1",
+                  "field": "priority",
+                  "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                  "value": "high",
+                  "confidence": 0.6
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 2,
+            "failed": 0,
+            "skipped": []
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout.",
+              "summary": "A card is refused.",
+              "priority": "high"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {
+                  "summary": {
+                    "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                    "model": "simple",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.95
+                  },
+                  "priority": {
+                    "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                    "model": "standard",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.6
+                  }
+                },
+                "stale": []
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "summary": {
+                    "source": "Derived",
+                    "by": "deriver",
+                    "at": 1772323260000,
+                    "confidence": 0.95,
+                    "review": {
+                      "state": "accepted",
+                      "at": 1772323260000
+                    }
+                  },
+                  "priority": {
+                    "source": "Derived",
+                    "by": "deriver",
+                    "at": 1772323260000,
+                    "confidence": 0.6,
+                    "review": {
+                      "state": "proposed"
+                    }
+                  }
+                },
+                "inReview": true
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.list",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "where": {
+                "Provenance.inReview": true
+              }
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "namespace": "default",
+                "schema": "Ticket",
+                "id": "t1",
+                "data": {
+                  "subject": "Card declined",
+                  "body": "Refused at checkout.",
+                  "summary": "A card is refused.",
+                  "priority": "high"
+                },
+                "behaviors": {
+                  "Workflow": {
+                    "status": "new",
+                    "enteredAt": 1772323200000
+                  },
+                  "Derived": {
+                    "fields": {
+                      "summary": {
+                        "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                        "model": "simple",
+                        "settledAt": 1772323260000,
+                        "settledBy": "deriver",
+                        "confidence": 0.95
+                      },
+                      "priority": {
+                        "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                        "model": "standard",
+                        "settledAt": 1772323260000,
+                        "settledBy": "deriver",
+                        "confidence": 0.6
+                      }
+                    },
+                    "stale": []
+                  },
+                  "Provenance": {
+                    "fields": {
+                      "subject": {
+                        "source": "caller",
+                        "by": "alice",
+                        "at": 1772323200000
+                      },
+                      "body": {
+                        "source": "caller",
+                        "by": "alice",
+                        "at": 1772323200000
+                      },
+                      "summary": {
+                        "source": "Derived",
+                        "by": "deriver",
+                        "at": 1772323260000,
+                        "confidence": 0.95,
+                        "review": {
+                          "state": "accepted",
+                          "at": 1772323260000
+                        }
+                      },
+                      "priority": {
+                        "source": "Derived",
+                        "by": "deriver",
+                        "at": 1772323260000,
+                        "confidence": 0.6,
+                        "review": {
+                          "state": "proposed"
+                        }
+                      }
+                    },
+                    "inReview": true
+                  }
+                }
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            {
+              "priority": "low"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout.",
+              "summary": "A card is refused.",
+              "priority": "low"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {
+                  "summary": {
+                    "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                    "model": "simple",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.95
+                  },
+                  "priority": {
+                    "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                    "model": "standard",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.6,
+                    "overridden": {
+                      "by": "alice",
+                      "at": 1772323320000
+                    }
+                  }
+                },
+                "stale": []
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "summary": {
+                    "source": "Derived",
+                    "by": "deriver",
+                    "at": 1772323260000,
+                    "confidence": 0.95,
+                    "review": {
+                      "state": "accepted",
+                      "at": 1772323260000
+                    }
+                  },
+                  "priority": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323320000,
+                    "review": {
+                      "state": "edited",
+                      "by": "alice",
+                      "at": 1772323320000
+                    }
+                  }
+                },
+                "inReview": false
+              }
+            }
+          },
+          "now": 1772323320000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.list",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "where": {
+                "Provenance.inReview": true
+              }
+            }
+          ],
+          "expect": {
+            "items": [],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "agent:triage",
+          "args": [
+            "Ticket",
+            "t1",
+            {
+              "body": "Refused twice."
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused twice.",
+              "summary": "A card is refused.",
+              "priority": "low"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {
+                  "summary": {
+                    "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                    "model": "simple",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.95
+                  },
+                  "priority": {
+                    "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                    "model": "standard",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.6,
+                    "overridden": {
+                      "by": "alice",
+                      "at": 1772323320000
+                    }
+                  }
+                },
+                "stale": [
+                  "summary"
+                ]
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "agent:triage",
+                    "for": "bob",
+                    "at": 1772323380000
+                  },
+                  "summary": {
+                    "source": "Derived",
+                    "by": "deriver",
+                    "at": 1772323260000,
+                    "confidence": 0.95,
+                    "review": {
+                      "state": "accepted",
+                      "at": 1772323260000
+                    }
+                  },
+                  "priority": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323320000,
+                    "review": {
+                      "state": "edited",
+                      "by": "alice",
+                      "at": 1772323320000
+                    }
+                  }
+                },
+                "inReview": false
+              }
+            }
+          },
+          "now": 1772323380000
+        }
+      ]
+    },
+    {
+      "name": "Provenance > a gate holds a move while a field it lists is proposed; accept and reject need the review's permission and a proposed field; reject writes the field as the reviewer, which Derived records as an override",
+      "behaviors": [
+        "Provenance",
+        "Derived",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "triage",
+                          "assigned"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "triage"
+                          },
+                          {
+                            "from": "new",
+                            "to": "assigned"
+                          },
+                          {
+                            "from": "triage",
+                            "to": "assigned"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          },
+                          "priority": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "How urgent is this?",
+                            "model": "standard"
+                          }
+                        },
+                        "permission": "tickets.derive"
+                      }
+                    },
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "fields": [
+                          "subject",
+                          "body",
+                          "summary",
+                          "priority"
+                        ],
+                        "review": {
+                          "sources": [
+                            "Derived"
+                          ],
+                          "below": 0.8,
+                          "permission": "tickets.review"
+                        },
+                        "gates": {
+                          "assigned": {
+                            "reviewed": [
+                              "summary",
+                              "priority"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "summary",
+                  "priority"
+                ]
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  }
+                },
+                "inReview": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                  "value": "A card is refused.",
+                  "confidence": 0.95
+                },
+                {
+                  "id": "t1",
+                  "field": "priority",
+                  "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                  "value": "high",
+                  "confidence": 0.6
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 2,
+            "failed": 0,
+            "skipped": []
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "transition",
+            {
+              "to": "assigned"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Provenance vetoes transition of Ticket t1: Ticket t1 cannot move to assigned while priority is in review",
+            "details": {
+              "behavior": "Provenance",
+              "action": "transition",
+              "reason": "Ticket t1 cannot move to assigned while priority is in review",
+              "vetoCode": "unreviewed_fields",
+              "vetoDetails": {
+                "state": "assigned",
+                "fields": [
+                  "priority"
+                ]
+              }
+            }
+          },
+          "now": 1772323320000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "accept",
+            {
+              "fields": [
+                "priority"
+              ]
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not review Ticket t1: it needs permission tickets.review"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "rae",
+          "args": [
+            "Ticket",
+            "t1",
+            "accept",
+            {
+              "fields": [
+                "summary"
+              ]
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Provenance vetoes accept of Ticket t1: summary of Ticket t1 is not proposed",
+            "details": {
+              "behavior": "Provenance",
+              "action": "accept",
+              "reason": "summary of Ticket t1 is not proposed",
+              "vetoCode": "not_in_review"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "rae",
+          "args": [
+            "Ticket",
+            "t1",
+            "accept",
+            {
+              "fields": [
+                "category"
+              ]
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Provenance vetoes accept of Ticket t1: Provenance does not record category of Ticket",
+            "details": {
+              "behavior": "Provenance",
+              "action": "accept",
+              "reason": "Provenance does not record category of Ticket",
+              "vetoCode": "not_recorded"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "rae",
+          "args": [
+            "Ticket",
+            "t1",
+            "reject",
+            {
+              "fields": [
+                "priority"
+              ],
+              "patch": {
+                "summary": "x"
+              }
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Provenance vetoes reject of Ticket t1: reject's patch sets summary, which its fields do not name",
+            "details": {
+              "behavior": "Provenance",
+              "action": "reject",
+              "reason": "reject's patch sets summary, which its fields do not name",
+              "vetoCode": "not_recorded"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "rae",
+          "args": [
+            "Ticket",
+            "t1",
+            "reject",
+            {
+              "fields": [
+                "priority"
+              ],
+              "patch": {
+                "priority": "low"
+              }
+            }
+          ],
+          "expect": {
+            "rejected": [
+              "priority"
+            ],
+            "inReview": false
+          },
+          "now": 1772323380000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout.",
+              "summary": "A card is refused.",
+              "priority": "low"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {
+                  "summary": {
+                    "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                    "model": "simple",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.95
+                  },
+                  "priority": {
+                    "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                    "model": "standard",
+                    "settledAt": 1772323260000,
+                    "settledBy": "deriver",
+                    "confidence": 0.6,
+                    "overridden": {
+                      "by": "Provenance",
+                      "at": 1772323380000
+                    }
+                  }
+                },
+                "stale": []
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "summary": {
+                    "source": "Derived",
+                    "by": "deriver",
+                    "at": 1772323260000,
+                    "confidence": 0.95,
+                    "review": {
+                      "state": "accepted",
+                      "at": 1772323260000
+                    }
+                  },
+                  "priority": {
+                    "source": "Provenance",
+                    "by": "rae",
+                    "at": 1772323380000,
+                    "review": {
+                      "state": "rejected",
+                      "by": "rae",
+                      "at": 1772323380000
+                    }
+                  }
+                },
+                "inReview": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "transition",
+            {
+              "to": "assigned"
+            }
+          ],
+          "expect": {
+            "from": "new",
+            "to": "assigned"
+          },
+          "now": 1772323440000
+        }
+      ]
+    },
+    {
+      "name": "Provenance > accept lets a gated move through; with each define refusal",
+      "behaviors": [
+        "Provenance",
+        "Derived",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "deriver": {
+          "subject": "deriver",
+          "permissions": [
+            "tickets.derive"
+          ]
+        },
+        "rae": {
+          "subject": "rae",
+          "permissions": [
+            "tickets.review"
+          ]
+        },
+        "agent:triage": {
+          "subject": "agent:triage",
+          "permissions": [],
+          "actingFor": {
+            "subject": "bob"
+          }
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "tickets.derive"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "fields": [
+                          "title"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Provenance config: fields: Ticket has no field title",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Provenance config: fields: Ticket has no field title"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "review": {
+                          "sources": [
+                            "Derived"
+                          ],
+                          "permission": "p"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Provenance config: review: source Derived is not another behavior Ticket composes",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Provenance config: review: source Derived is not another behavior Ticket composes"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "gates": {
+                          "assigned": {
+                            "reviewed": "all"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/0/config: type Ticket: behavior Provenance config: gates: the type has no Workflow whose moves they gate",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/0/config",
+                  "message": "type Ticket: behavior Provenance config: gates: the type has no Workflow whose moves they gate"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "triage",
+                          "assigned"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "triage"
+                          },
+                          {
+                            "from": "new",
+                            "to": "assigned"
+                          },
+                          {
+                            "from": "triage",
+                            "to": "assigned"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "gates": {
+                          "done": {
+                            "reviewed": "all"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/1/config: type Ticket: behavior Provenance config: gate \"done\" is not a state of the type's Workflow (new, triage, assigned)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/1/config",
+                  "message": "type Ticket: behavior Provenance config: gate \"done\" is not a state of the type's Workflow (new, triage, assigned)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "triage",
+                          "assigned"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "triage"
+                          },
+                          {
+                            "from": "new",
+                            "to": "assigned"
+                          },
+                          {
+                            "from": "triage",
+                            "to": "assigned"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "fields": [
+                          "subject"
+                        ],
+                        "gates": {
+                          "assigned": {
+                            "reviewed": [
+                              "body"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Ticket/behaviors/1/config: type Ticket: behavior Provenance config: gate \"assigned\": body is not a field Provenance records",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Ticket/behaviors/1/config",
+                  "message": "type Ticket: behavior Provenance config: gate \"assigned\": body is not a field Provenance records"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ticket",
+              "enums": {
+                "Category": {
+                  "name": "Category",
+                  "values": [
+                    {
+                      "name": "billing"
+                    },
+                    {
+                      "name": "bug"
+                    },
+                    {
+                      "name": "other"
+                    }
+                  ]
+                }
+              },
+              "types": {
+                "Ticket": {
+                  "name": "Ticket",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "subject",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "category",
+                      "typeRef": {
+                        "name": "Category"
+                      }
+                    },
+                    {
+                      "name": "summary",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "priority",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "new",
+                          "triage",
+                          "assigned"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "new",
+                            "to": "triage"
+                          },
+                          {
+                            "from": "new",
+                            "to": "assigned"
+                          },
+                          {
+                            "from": "triage",
+                            "to": "assigned"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Derived",
+                      "config": {
+                        "fields": {
+                          "summary": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "Summarize it in one sentence.",
+                            "model": "simple"
+                          },
+                          "priority": {
+                            "from": [
+                              "subject",
+                              "body"
+                            ],
+                            "instruction": "How urgent is this?",
+                            "model": "standard"
+                          }
+                        },
+                        "permission": "tickets.derive"
+                      }
+                    },
+                    {
+                      "name": "Provenance",
+                      "config": {
+                        "fields": [
+                          "subject",
+                          "body",
+                          "summary",
+                          "priority"
+                        ],
+                        "review": {
+                          "sources": [
+                            "Derived"
+                          ],
+                          "below": 0.8,
+                          "permission": "tickets.review"
+                        },
+                        "gates": {
+                          "assigned": {
+                            "reviewed": [
+                              "summary",
+                              "priority"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": null,
+            "instanceType": "Ticket"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ticket"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ticket",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ticket",
+            "id": "t1",
+            "data": {
+              "subject": "Card declined",
+              "body": "Refused at checkout."
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "new",
+                "enteredAt": 1772323200000
+              },
+              "Derived": {
+                "fields": {},
+                "stale": [
+                  "summary",
+                  "priority"
+                ]
+              },
+              "Provenance": {
+                "fields": {
+                  "subject": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  },
+                  "body": {
+                    "source": "caller",
+                    "by": "alice",
+                    "at": 1772323200000
+                  }
+                },
+                "inReview": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "deriver",
+          "args": [
+            "Ticket",
+            "settleDerivations",
+            {
+              "items": [
+                {
+                  "id": "t1",
+                  "field": "summary",
+                  "sourceHash": "ed04e2a35adf06e5cff0e92164aa07c539d15820d6d1ba8fee7d6a5676a0f84e",
+                  "value": "A card is refused.",
+                  "confidence": 0.95
+                },
+                {
+                  "id": "t1",
+                  "field": "priority",
+                  "sourceHash": "3252103a21344a0c8dde0a359b58068afd8e8234e5d2d94c05b3f1c2042ccb91",
+                  "value": "high",
+                  "confidence": 0.6
+                }
+              ]
+            }
+          ],
+          "expect": {
+            "settled": 2,
+            "failed": 0,
+            "skipped": []
+          },
+          "now": 1772323260000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "rae",
+          "args": [
+            "Ticket",
+            "t1",
+            "accept",
+            {
+              "fields": [
+                "priority"
+              ]
+            }
+          ],
+          "expect": {
+            "accepted": [
+              "priority"
+            ],
+            "inReview": false
+          },
+          "now": 1772323320000
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ticket",
+            "t1",
+            "transition",
+            {
+              "to": "assigned"
+            }
+          ],
+          "expect": {
+            "from": "new",
+            "to": "assigned"
+          },
+          "now": 1772323380000
+        }
+      ]
+    }
+  ]
+}

@@ -94,7 +94,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	}
 	// The core registers its behaviors in one order (D104), the four only
 	// it implements after the engine's, then those D103's step 4 ports
-	// (Rollups, Dependencies, Numbering, Revisions); Reconcile's value field is optional, its column
+	// (Rollups, Dependencies, Numbering, Revisions, Comments); Reconcile's value field is optional, its column
 	// NULL before the behavior sets it, Schedules and Pool each declare the
 	// one event they emit, run and recheck, whose payload's schema the
 	// declaration holds, Pool's pick and Lease's expireHolder run on the
@@ -106,8 +106,14 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		names = append(names, declaration.Name)
 		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
+	}
+	// Comments' writes are beside the row (D103's step 4).
+	for _, operation := range byName["Comments"].Operations {
+		if operation.Name == "post" && (!operation.Beside || !operation.Writes) {
+			t.Fatalf("Comments' post = %+v, want a write beside the row", operation)
+		}
 	}
 	reconcile := byName["Reconcile"]
 	if reconcile.Value != "observed" || len(reconcile.Fields) == 0 || reconcile.Fields[0].Name != "observed" || !reconcile.Fields[0].Optional {
@@ -132,7 +138,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 			}
 		}
 	}
-	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema"}; !maps.Equal(scopes, want) {
+	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema", "Derived.staleDerivations": "schema", "Derived.settleDerivations": "schema", "Derived.failedDerivations": "schema"}; !maps.Equal(scopes, want) {
 		t.Fatalf("the operations of a table as a whole = %v, want %v", scopes, want)
 	}
 	if got := byName["Budget"].Contracts; len(got) != 1 || got[0].Name != "Capacity" || got[0].Role != "implements" {

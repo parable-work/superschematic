@@ -1,0 +1,1906 @@
+{
+  "name": "fixture-comments-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-comments-db",
+      "types": [
+        "Ticket"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-comments-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "TicketCommentsCommentMessage": {
+      "name": "TicketCommentsCommentMessage",
+      "owner": "fixture-comments-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "author",
+          "comment": "The subject of the caller who posted or began it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "blocks",
+          "comment": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "body",
+          "comment": "The text, Markdown: the draft so far while composing; empty once deleted.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "createdAt",
+          "comment": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "editedAt",
+          "comment": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "edits",
+          "comment": "How many times it was edited; listEdits reads the text before each. 0 once deleted.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "for",
+          "comment": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "The message's number on the instance: 1, 2, 3, ...; never reused.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastReplyAt",
+          "comment": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "mentions",
+          "comment": "The subjects the message names for someone to hear of it; none once deleted.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "participants",
+          "comment": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "pinned",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "postedAt",
+          "comment": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "quotes",
+          "comment": "The id of the message of the thread the reply quotes.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "reactions",
+          "comment": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessageReactions",
+            "isMap": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "replies",
+          "comment": "On a top-level message: how many posted or interrupted replies its thread has.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "resolved",
+          "comment": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessageResolved"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "stand",
+          "comment": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessageState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "thread",
+          "comment": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "via",
+          "comment": "The deployable of the service whose call posted or began it (D37).",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsCommentMessageReactions": {
+      "name": "TicketCommentsCommentMessageReactions",
+      "owner": "fixture-comments-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "count",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "mine",
+          "comment": "Whether the caller reacted with the emoji.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsCommentMessageResolved": {
+      "name": "TicketCommentsCommentMessageResolved",
+      "owner": "fixture-comments-api",
+      "comment": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "In epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "by",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "for",
+          "comment": "The subject the caller who resolved it acted for, when it acted for someone.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsDeleteMessageInput": {
+      "name": "TicketCommentsDeleteMessageInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments deleteMessage.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsEditInput": {
+      "name": "TicketCommentsEditInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments edit.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "blocks",
+          "comment": "The blocks, in place of the message's; it keeps them when absent.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "body",
+          "comment": "The text, Markdown, at most the config's maxBodyLength code points.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 40000,
+          "validatePattern": "\\S",
+          "origin": "behavior"
+        },
+        {
+          "name": "mentions",
+          "comment": "The mentions, in place of the message's; it keeps them when absent.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsGetMessageInput": {
+      "name": "TicketCommentsGetMessageInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments getMessage.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListEditsInput": {
+      "name": "TicketCommentsListEditsInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments listEdits.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many edits; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 500,
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListEditsResult": {
+      "name": "TicketCommentsListEditsResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments listEdits returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketCommentsListEditsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null after the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListEditsResultItems": {
+      "name": "TicketCommentsListEditsResultItems",
+      "owner": "fixture-comments-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "blocks",
+          "comment": "The blocks before the edit.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "body",
+          "comment": "The body before the edit.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "by",
+          "comment": "The subject of the caller who made the edit.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "edit",
+          "comment": "The edit's number on the message: 1, 2, 3, ...",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "for",
+          "comment": "The subject the caller who made the edit acted for, when it acted for someone.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "mentions",
+          "comment": "The mentions before the edit.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListMessagesInput": {
+      "name": "TicketCommentsListMessagesInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments listMessages.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "after",
+          "comment": "The page is the earliest messages with a higher id.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "around",
+          "comment": "A message of the listing: the page holds it and the messages either side of it. At most one of around, before and after.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "before",
+          "comment": "The page is the latest messages with a lower id.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many messages; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        },
+        {
+          "name": "thread",
+          "comment": "The id of a top-level message: the page is its thread's replies, and the result carries the message as root.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListMessagesResult": {
+      "name": "TicketCommentsListMessagesResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments listMessages returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "after",
+          "comment": "The id to pass as after for the page of newer messages: the last item's, when the listing has a newer message; null when it has none or the page is empty.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "before",
+          "comment": "The id to pass as before for the page of older messages: the first item's, when the listing has an older message; null when it has none or the page is empty.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "readUpTo",
+          "comment": "The caller's read marker on the listing, the conversation's or with thread the thread's: a message of another whose stand is above it is unread. Absent while the caller has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "root",
+          "comment": "With thread, the thread's top-level message.",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListPinnedInput": {
+      "name": "TicketCommentsListPinnedInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments listPinned.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many messages; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 100,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListPinnedResult": {
+      "name": "TicketCommentsListPinnedResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments listPinned returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null after the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListReactionsInput": {
+      "name": "TicketCommentsListReactionsInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments listReactions.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "emoji",
+          "comment": "The reaction: an emoji's name or the character itself, at most 32 code points.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 32,
+          "validatePattern": "^\\S+$",
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many reactions; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 500,
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListReactionsResult": {
+      "name": "TicketCommentsListReactionsResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments listReactions returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TicketCommentsListReactionsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null after the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsListReactionsResultItems": {
+      "name": "TicketCommentsListReactionsResultItems",
+      "owner": "fixture-comments-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "for",
+          "comment": "The subject the caller who reacted acted for, when it acted for someone.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject of the caller who reacted.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsPinInput": {
+      "name": "TicketCommentsPinInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments pin.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsPostInput": {
+      "name": "TicketCommentsPostInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments post.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "blocks",
+          "comment": "Structured parts beside the body, each of a kind the config allows.",
+          "typeRef": {
+            "name": "Generic.JSON",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "body",
+          "comment": "The text, Markdown, at most the config's maxBodyLength code points.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 40000,
+          "validatePattern": "\\S",
+          "origin": "behavior"
+        },
+        {
+          "name": "clientId",
+          "comment": "The caller's key for the message, so a retry returns the message it posted.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 128,
+          "origin": "behavior"
+        },
+        {
+          "name": "mentions",
+          "comment": "The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:\u003cname\u003e), as the client resolved them from what was typed.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "quotes",
+          "comment": "The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "thread",
+          "comment": "The id of the top-level message to reply in; a top-level message when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsPurgeInput": {
+      "name": "TicketCommentsPurgeInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments purge.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsPurgeResult": {
+      "name": "TicketCommentsPurgeResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments purge returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message purged.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "purged",
+          "comment": "The ids of every message removed: the message, and for a top-level one its replies, in ascending order.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsReactInput": {
+      "name": "TicketCommentsReactInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments react.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "emoji",
+          "comment": "The reaction: an emoji's name or the character itself, at most 32 code points.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 32,
+          "validatePattern": "^\\S+$",
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsReopenInput": {
+      "name": "TicketCommentsReopenInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments reopen.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "thread",
+          "comment": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsResolveInput": {
+      "name": "TicketCommentsResolveInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments resolve.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "thread",
+          "comment": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsUnpinInput": {
+      "name": "TicketCommentsUnpinInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments unpin.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsUnreactInput": {
+      "name": "TicketCommentsUnreactInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments unreact.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "emoji",
+          "comment": "The reaction: an emoji's name or the character itself, at most 32 code points.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 32,
+          "validatePattern": "^\\S+$",
+          "origin": "behavior"
+        },
+        {
+          "name": "message",
+          "comment": "The id of the message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "TicketCommentsCommentMessageState": {
+      "name": "TicketCommentsCommentMessageState",
+      "owner": "fixture-comments-api",
+      "comment": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.",
+      "values": [
+        {
+          "name": "Composing",
+          "serializedAs": "composing"
+        },
+        {
+          "name": "Posted",
+          "serializedAs": "posted"
+        },
+        {
+          "name": "Interrupted",
+          "serializedAs": "interrupted"
+        },
+        {
+          "name": "Deleted",
+          "serializedAs": "deleted"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TicketComments",
+      "comment": "A ticket's conversation for any signed-in caller (D103's step 4): each\nof Comments' operations a table runs is a route of its own\n(ticket/{id}/comments/post, ticket/{id}/comments/list-messages, ...);\nthe ones it leaves out, and those of the namespace, are left out with a\nwarning each.",
+      "operations": [
+        {
+          "name": "commentsPost",
+          "comment": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.",
+          "docs": {
+            "title": "Ticket comments: post",
+            "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.",
+            "capability": "ticket.comments.post",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_post",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsPostInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "post",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/post",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsEdit",
+          "comment": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit.",
+          "docs": {
+            "title": "Ticket comments: edit",
+            "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit.",
+            "capability": "ticket.comments.edit",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_edit",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsEditInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "edit",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/edit",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsDeleteMessage",
+          "comment": "Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.",
+          "docs": {
+            "title": "Ticket comments: delete message",
+            "description": "Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.",
+            "capability": "ticket.comments.delete-message",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_delete_message",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsDeleteMessageInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "deleteMessage",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/delete-message",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsPurge",
+          "comment": "Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them.",
+          "docs": {
+            "title": "Ticket comments: purge",
+            "description": "Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them.",
+            "capability": "ticket.comments.purge",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_purge",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsPurgeResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsPurgeInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "purge",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/purge",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsReact",
+          "comment": "Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji.",
+          "docs": {
+            "title": "Ticket comments: react",
+            "description": "Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji.",
+            "capability": "ticket.comments.react",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_react",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsReactInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "react",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/react",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsUnreact",
+          "comment": "Removes the caller's reaction from a posted or interrupted message.",
+          "docs": {
+            "title": "Ticket comments: unreact",
+            "description": "Removes the caller's reaction from a posted or interrupted message.",
+            "capability": "ticket.comments.unreact",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_unreact",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsUnreactInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "unreact",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/unreact",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsPin",
+          "comment": "Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.",
+          "docs": {
+            "title": "Ticket comments: pin",
+            "description": "Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.",
+            "capability": "ticket.comments.pin",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_pin",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsPinInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "pin",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/pin",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsUnpin",
+          "comment": "Unpins a pinned message. Needs pinPermission when the config names one.",
+          "docs": {
+            "title": "Ticket comments: unpin",
+            "description": "Unpins a pinned message. Needs pinPermission when the config names one.",
+            "capability": "ticket.comments.unpin",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_unpin",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsUnpinInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "unpin",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/unpin",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsResolve",
+          "comment": "Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.",
+          "docs": {
+            "title": "Ticket comments: resolve",
+            "description": "Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.",
+            "capability": "ticket.comments.resolve",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_resolve",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsResolveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "resolve",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/resolve",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsReopen",
+          "comment": "Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission.",
+          "docs": {
+            "title": "Ticket comments: reopen",
+            "description": "Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission.",
+            "capability": "ticket.comments.reopen",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_reopen",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsReopenInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "reopen",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/reopen",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsListMessages",
+          "comment": "Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.",
+          "docs": {
+            "title": "Ticket comments: list messages",
+            "description": "Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.",
+            "capability": "ticket.comments.list-messages",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_comments_list_messages",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsListMessagesResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsListMessagesInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "listMessages",
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/list-messages",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsGetMessage",
+          "comment": "Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.",
+          "docs": {
+            "title": "Ticket comments: get message",
+            "description": "Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.",
+            "capability": "ticket.comments.get-message",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_comments_get_message",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsCommentMessage"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsGetMessageInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "getMessage",
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/get-message",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsListEdits",
+          "comment": "Lists what a message held before each of its edits, oldest first, one page at a time.",
+          "docs": {
+            "title": "Ticket comments: list edits",
+            "description": "Lists what a message held before each of its edits, oldest first, one page at a time.",
+            "capability": "ticket.comments.list-edits",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_comments_list_edits",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsListEditsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsListEditsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "listEdits",
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/list-edits",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsListReactions",
+          "comment": "Lists who reacted to a message with an emoji, in the order they reacted, one page at a time.",
+          "docs": {
+            "title": "Ticket comments: list reactions",
+            "description": "Lists who reacted to a message with an emoji, in the order they reacted, one page at a time.",
+            "capability": "ticket.comments.list-reactions",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_comments_list_reactions",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsListReactionsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsListReactionsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "listReactions",
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/list-reactions",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsListPinned",
+          "comment": "Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one.",
+          "docs": {
+            "title": "Ticket comments: list pinned",
+            "description": "Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one.",
+            "capability": "ticket.comments.list-pinned",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "ticket_comments_list_pinned",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsListPinnedResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsListPinnedInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "listPinned",
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/list-pinned",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Ticket"
+      },
+      "auth": true
+    }
+  ]
+}

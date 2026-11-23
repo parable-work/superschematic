@@ -12,6 +12,15 @@ publish.workspace = true
 default = []
 # PgStore: the development layout in a schema of a Postgres database.
 postgres = ["dep:postgres"]
+# The routes over HTTP as an axum router (rules_dev::server), with the
+# event stream and the MCP endpoint, and the superschematic-dev binary that
+# serves them. The handler's router is transport-free; this is its binding.
+server = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:bytes", "dep:http", "dep:async-trait", "dep:superschematic-http-runtime"]
+
+[[bin]]
+name = "superschematic-dev"
+path = "src/bin/superschematic-dev.rs"
+required-features = ["server"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
@@ -27,10 +36,28 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 postgres = { version = "0.19.14", optional = true }
 # A request's id and a create's key when it names none.
 uuid = { version = "1.28.0", features = ["v4"] }
+# The server feature's router and listener, at the versions the engine's
+# axum feature and the generated Rust servers pin.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "original-uri"], optional = true }
+tokio = { version = "1.52.2", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"], optional = true }
+# The event stream's body, an unfold over the queue's reads. Already in
+# axum's tree, as are bytes and http.
+futures-util = { version = "0.3.34", default-features = false, optional = true }
+bytes = { version = "1.12.1", optional = true }
+http = { version = "1", optional = true }
+async-trait = { version = "0.1.89", optional = true }
+# The MCP endpoint's transport (D81, D116): the stateless streamable HTTP
+# transport over a tool set, which the generated Rust servers serve with.
+superschematic-http-runtime = { path = "../../../http/rust", optional = true }
 
 [dev-dependencies]
 # The transcripts the replay reads.
 superschematic-rules-testkit = { path = "../rules-testkit" }
+# The server feature's tests: requests through the router in process
+# (tower's oneshot), an event stream's body read a frame at a time.
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time"] }
+futures-util = { version = "0.3.34", default-features = false }
 
 [lints]
 workspace = true

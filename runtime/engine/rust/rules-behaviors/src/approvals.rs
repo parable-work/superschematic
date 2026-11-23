@@ -493,15 +493,24 @@ impl Behavior for Approvals {
                 // A gate a later build removed.
                 None => true,
                 Some(gate) => {
-                    let reset = match change {
-                        Change::Update { before, .. } => match &gate.reset_on {
-                            Some(fields) => fields
-                                .iter()
-                                .any(|field| !equal(before.get(field), now.get(field))),
-                            None => config.reset_on_change,
-                        },
-                        _ => false,
+                    // A change of the own fields, an update's or an
+                    // operation's update() (Revisions' approve) alike; one
+                    // that leaves them as they were changes nothing, as the
+                    // engine answered it with no write.
+                    let before = match change {
+                        Change::Update { before, .. } => Some(*before),
+                        Change::Operation {
+                            before: Some(before),
+                            ..
+                        } => Some(*before),
+                        _ => None,
                     };
+                    let reset = before.is_some_and(|before| match &gate.reset_on {
+                        Some(fields) => fields
+                            .iter()
+                            .any(|field| !equal(before.get(field), now.get(field))),
+                        None => config.reset_on_change && *before != now,
+                    });
                     // Entering the gate's state used its sign-offs.
                     reset || status.as_deref() == Some(state)
                 }

@@ -19,7 +19,10 @@
     "Rollups",
     "Dependencies",
     "Numbering",
-    "Revisions"
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance"
   ],
   "scenarios": [
     {
@@ -4441,184 +4444,2542 @@
     },
     {
       "name": "Approvals (node) > a change of the own fields consumes every gate's sign-offs, an update's and an approval's update() alike; nothing else does, nor anything with resetOnChange false",
-      "clock": "wall",
-      "types": [],
-      "steps": [],
+      "clock": {
+        "fixed": 10
+      },
+      "types": [
+        {
+          "name": "Doc",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Doc",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "review",
+                      "approved",
+                      "published"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "review"
+                      },
+                      {
+                        "from": "review",
+                        "to": "draft"
+                      },
+                      {
+                        "from": "review",
+                        "to": "approved"
+                      },
+                      {
+                        "from": "review",
+                        "to": "published"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "review"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "published"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Approvals",
+                  "config": {
+                    "gates": {
+                      "approved": {
+                        "count": 2,
+                        "permission": "docs.approve"
+                      },
+                      "published": {
+                        "count": 1,
+                        "permission": "docs.publish",
+                        "from": [
+                          "approved"
+                        ]
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Revisions",
+                  "config": {
+                    "review": {
+                      "permission": "docs.review"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "name": "Doc",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "review",
+                      "approved",
+                      "published"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "review"
+                      },
+                      {
+                        "from": "review",
+                        "to": "draft"
+                      },
+                      {
+                        "from": "review",
+                        "to": "approved"
+                      },
+                      {
+                        "from": "review",
+                        "to": "published"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "review"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "published"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Approvals",
+                  "config": {
+                    "gates": {
+                      "approved": {
+                        "count": 2,
+                        "permission": "docs.approve"
+                      },
+                      "published": {
+                        "count": 1,
+                        "permission": "docs.publish",
+                        "from": [
+                          "approved"
+                        ]
+                      }
+                    },
+                    "resetOnChange": false
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "review",
+                    "approved",
+                    "published"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "review",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "review",
+                      "to": "published"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "review"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "published"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "docs.approve"
+                    },
+                    "published": {
+                      "count": 1,
+                      "permission": "docs.publish",
+                      "from": [
+                        "approved"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "docs.review"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "review",
+                    "approved",
+                    "published"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "review",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "review",
+                      "to": "published"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "review"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "published"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "docs.approve"
+                    },
+                    "published": {
+                      "count": 1,
+                      "permission": "docs.publish",
+                      "from": [
+                        "approved"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "docs.review"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "create",
+              "id": "d1",
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "d1",
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "review"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "review"
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ann",
+              "permissions": [
+                "docs.approve"
+              ]
+            },
+            "now": 10,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "ann",
+              "at": 10,
+              "signedBy": [
+                "ann"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "pat",
+              "permissions": [
+                "docs.publish"
+              ]
+            },
+            "now": 10,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "published"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "state": "published",
+              "subject": "pat",
+              "at": 10,
+              "signedBy": [
+                "pat"
+              ],
+              "count": 1
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wes",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Looks close."
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "wes",
+              "state": "posted",
+              "body": "Looks close.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 10,
+              "postedAt": 10,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "wes"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 10,
+            "action": {
+              "kind": "update",
+              "key": "d1",
+              "patch": {
+                "title": "Plan"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 20,
+            "action": {
+              "kind": "update",
+              "key": "d1",
+              "patch": {
+                "body": "The plan, in full."
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "The plan, in full."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 20,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "listSignOffs",
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "state": "approved",
+                  "subject": "ann",
+                  "at": 10,
+                  "consumedAt": 20
+                },
+                {
+                  "state": "published",
+                  "subject": "pat",
+                  "at": 10,
+                  "consumedAt": 20
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "The plan, in full."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ann",
+              "permissions": [
+                "docs.approve"
+              ]
+            },
+            "now": 20,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "ann",
+              "at": 20,
+              "signedBy": [
+                "ann"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "The plan, in full."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 20
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wes",
+              "permissions": []
+            },
+            "now": 20,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "propose",
+              "params": {
+                "patch": {
+                  "body": "Shorter."
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "body": "Shorter."
+              },
+              "base": 2,
+              "state": "pending",
+              "createdBy": "wes",
+              "createdAt": 20
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "The plan, in full."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 20
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Shorter."
+                      },
+                      "base": 2,
+                      "state": "pending",
+                      "createdBy": "wes",
+                      "createdAt": 20
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rae",
+              "permissions": [
+                "docs.review"
+              ]
+            },
+            "now": 30,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "approve",
+              "params": {
+                "proposal": 1
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "body": "Shorter."
+              },
+              "base": 2,
+              "state": "approved",
+              "createdBy": "wes",
+              "createdAt": 20,
+              "reviewedBy": "rae",
+              "reviewedAt": 30,
+              "revision": 3
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "Shorter."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 3
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 20,
+                      "consumedAt": 30
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Shorter."
+                      },
+                      "base": 2,
+                      "state": "approved",
+                      "createdBy": "wes",
+                      "createdAt": 20,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 30,
+                      "revision": 3
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "Shorter."
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 30,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 30,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "listSignOffs",
+              "params": {}
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "state": "approved",
+                  "subject": "ann",
+                  "at": 10,
+                  "consumedAt": 20
+                },
+                {
+                  "state": "published",
+                  "subject": "pat",
+                  "at": 10,
+                  "consumedAt": 20
+                },
+                {
+                  "state": "approved",
+                  "subject": "ann",
+                  "at": 20,
+                  "consumedAt": 30
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "Shorter."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 3
+                },
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 10
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 10,
+                      "consumedAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 20,
+                      "consumedAt": 30
+                    }
+                  }
+                ]
+              },
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "wes",
+                      "state": "posted",
+                      "body": "Looks close.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 10,
+                      "postedAt": 10,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Shorter."
+                      },
+                      "base": 2,
+                      "state": "approved",
+                      "createdBy": "wes",
+                      "createdAt": 20,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 30,
+                      "revision": 3
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 10
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "The plan, in full."
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 20
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "createdBy": "alice",
+                        "body": "Shorter."
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 30,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 23,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "review",
+                    "approved",
+                    "published"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "review",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "review",
+                      "to": "published"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "review"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "published"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "docs.approve"
+                    },
+                    "published": {
+                      "count": 1,
+                      "permission": "docs.publish",
+                      "from": [
+                        "approved"
+                      ]
+                    }
+                  },
+                  "resetOnChange": false
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 24,
+          "call": "schemas.publish",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "review",
+                    "approved",
+                    "published"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "review",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "review",
+                      "to": "published"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "review"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "published"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "docs.approve"
+                    },
+                    "published": {
+                      "count": 1,
+                      "permission": "docs.publish",
+                      "from": [
+                        "approved"
+                      ]
+                    }
+                  },
+                  "resetOnChange": false
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 25,
+          "call": "instances.create",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "d1",
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "d1",
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "review"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "review"
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 27,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "ann",
+              "permissions": [
+                "docs.approve"
+              ]
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "ann",
+              "at": 1767225600005,
+              "signedBy": [
+                "ann"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 28,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "docs.approve"
+              ]
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "bob",
+              "at": 1767225600006,
+              "signedBy": [
+                "ann",
+                "bob"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1767225600006
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 29,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "pat",
+              "permissions": [
+                "docs.publish"
+              ]
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "published"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "state": "published",
+              "subject": "pat",
+              "at": 1767225600007,
+              "signedBy": [
+                "pat"
+              ],
+              "count": 1
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1767225600006
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 1767225600007
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 30,
+          "call": "instances.update",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "update",
+              "key": "d1",
+              "patch": {
+                "body": "Changed after."
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "Changed after."
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1767225600006
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 1767225600007
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 32,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "approved"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "from": "review",
+              "to": "approved"
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "Changed after."
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1767225600010
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005,
+                      "consumedAt": 1767225600010
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1767225600006,
+                      "consumedAt": 1767225600010
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 1767225600007
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 34,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Doc",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "published"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "from": "approved",
+              "to": "published"
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "createdBy": "alice",
+                "body": "Changed after."
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "published",
+                  "enteredAt": 1767225600012
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "ann",
+                      "at": 1767225600005,
+                      "consumedAt": 1767225600010
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1767225600006,
+                      "consumedAt": 1767225600010
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "published",
+                      "subject": "pat",
+                      "at": 1767225600007,
+                      "consumedAt": 1767225600012
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 5,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 7,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 8,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 9,
-          "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 10,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 11,
-          "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 12,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 13,
           "call": "events.read",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 14,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 15,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 16,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of the engine's event log that holds an operation beside an instance (D77's primitive 1), which the engine logged with no sequence: a table's write beside its row writes its use's tables alone, which no change queue hears and no log of the row's writes holds (D103's step 4), and a table's events reach the app through its event queue (D104)"
         },
         {
           "step": 17,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 18,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 19,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 20,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 21,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 22,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 23,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 24,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 25,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 26,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 27,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 28,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 29,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 30,
-          "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 31,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 32,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 33,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 34,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 35,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     },

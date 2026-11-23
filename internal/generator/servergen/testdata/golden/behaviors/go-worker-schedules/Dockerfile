@@ -45,6 +45,8 @@ COPY runtime/schema/rust-ir runtime/schema/rust-ir
 COPY runtime/schema/rust runtime/schema/rust
 COPY runtime/versiongraph/rust-engine runtime/versiongraph/rust-engine
 COPY runtime/versiongraph/rust runtime/versiongraph/rust
+COPY runtime/http/rust runtime/http/rust
+COPY runtime/migrate/rust runtime/migrate/rust
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.toml
 COPY third_party/superscalar/crates third_party/superscalar/crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

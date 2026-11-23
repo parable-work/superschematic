@@ -872,7 +872,7 @@ fn a_define_is_held_to_the_cores_check_of_its_configs() {
     });
     assert_eq!(refused.code, Code::InvalidSchema);
     let unknown = host.refused(&Request::Define {
-        document: ticket(json!([{"name": "Comments"}])),
+        document: ticket(json!([{"name": "Branches"}])),
     });
     assert_eq!(unknown.code, Code::InvalidSchema, "{}", unknown.message);
     let none = host.refused(&Request::Publish {

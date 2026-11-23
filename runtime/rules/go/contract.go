@@ -86,6 +86,10 @@ type FieldSpec struct {
 	// (projectId, the relation project to Project); nil for any other
 	// field (D103).
 	Relation *RelationSpec `json:"relation,omitempty"`
+	// Schema is the field's JSON Schema, which a host gives for a field a
+	// behavior hands a model: the output a deriver asks for a field Derived
+	// derives (D73); nil for none.
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 // RelationSpec is a to-one relation an own field holds the key of, as the
@@ -96,11 +100,13 @@ type RelationSpec struct {
 }
 
 // Caller is who makes a call: a subject and the permissions it holds;
-// StandsIn for a service standing in for an end user, which holds none.
+// StandsIn for a service standing in for an end user, which holds none;
+// ActingFor the subject it acts for (D77), which Provenance records (D73).
 type Caller struct {
 	Subject     string   `json:"subject"`
 	Permissions []string `json:"permissions,omitempty"`
 	StandsIn    bool     `json:"standsIn,omitempty"`
+	ActingFor   string   `json:"actingFor,omitempty"`
 }
 
 // ActionKind is what an Action does.

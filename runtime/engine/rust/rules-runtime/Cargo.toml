@@ -1,0 +1,42 @@
+[package]
+name = "superschematic-rules-runtime"
+description = "Runtime mode (D117): the request handler of superschematic-rules-handler over each type's own table, as a build writes it, in a SQLite file or a Postgres database, and a publish that is a migration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# The runtime store in a Postgres database, whose publish runs the Go runner,
+# superschematic-migrate, beside it.
+postgres = ["dep:postgres", "dep:bytes"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order, as the core reads and writes them.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+superschematic-rules-handler = { path = "../rules-handler" }
+# The layout document's types alone, as the compiled adapter reads it; no
+# store feature, so no client of its own.
+superschematic-rules-adapter = { path = "../rules-adapter" }
+# The runner that applies a SQLite plan in the process that serves the file
+# (D116), the one a deploy of an embedded environment uses.
+superschematic-migrate = { path = "../../../migrate/rust" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The store in a Postgres database, through the synchronous client the
+# development store uses; off by default.
+postgres = { version = "0.19.14", optional = true }
+# The buffer a parameter sent as text writes into, already in the client's
+# tree.
+bytes = { version = "1.11", optional = true }
+# A request's id and a create's key when it names none.
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[lints]
+workspace = true

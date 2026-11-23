@@ -1,0 +1,2019 @@
+{
+  "file": "core-comments-beside",
+  "source": "runtime/engine/testdata/rules/scenarios/core-comments-beside.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance"
+  ],
+  "scenarios": [
+    {
+      "name": "Comments > a write beside the row moves no version of it and asks no other guard: another principal posts while the lease is held, its holder posts with no token, and a post takes no precondition",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Job",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Lease",
+                  "config": {
+                    "requireToken": true
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "config": {
+                    "moderatePermission": "jobs.moderate"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "requireToken": true
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "config": {
+                  "moderatePermission": "jobs.moderate"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "requireToken": true
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "config": {
+                  "moderatePermission": "jobs.moderate"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "j1",
+              "own": {
+                "title": "Build"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "j1",
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1060000,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "update",
+              "key": "j1",
+              "patch": {
+                "title": "Mine"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Lease vetoes update of Job j1: another principal holds its lease, until 1970-01-01T00:17:40.000Z",
+              "details": {
+                "behavior": "Lease",
+                "action": "update",
+                "reason": "another principal holds its lease, until 1970-01-01T00:17:40.000Z",
+                "vetoCode": "held_by_another",
+                "vetoDetails": {
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Taking over?"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "otto",
+              "state": "posted",
+              "body": "Taking over?",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "otto"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Started.",
+                "thread": 1,
+                "quotes": 1
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "thread": 1,
+              "quotes": 1,
+              "author": "wren",
+              "state": "posted",
+              "body": "Started.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 2,
+              "edits": 0,
+              "pinned": false
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Done."
+              }
+            },
+            "request": "request-6",
+            "preconditions": {
+              "Lease": {
+                "token": 1
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "PreconditionsError",
+              "message": "preconditions of Job: /Lease: operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/Lease",
+                    "message": "operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "react",
+              "params": {
+                "message": 2,
+                "emoji": "eyes"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "thread": 1,
+              "quotes": 1,
+              "author": "wren",
+              "state": "posted",
+              "body": "Started.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {
+                "eyes": {
+                  "count": 1,
+                  "mine": true
+                }
+              },
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 2,
+              "edits": 0,
+              "pinned": false
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reactions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "message": 2,
+                      "emoji": "eyes",
+                      "subject": "otto",
+                      "at": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "edit",
+              "params": {
+                "message": 1,
+                "body": "Not yours."
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Comments vetoes edit of Job j1: wren is not the author of message 1 of Job j1; otto is",
+              "details": {
+                "behavior": "Comments",
+                "action": "edit",
+                "reason": "wren is not the author of message 1 of Job j1; otto is",
+                "vetoCode": "not_author",
+                "vetoDetails": {
+                  "message": 1,
+                  "author": "otto"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reactions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "message": 2,
+                      "emoji": "eyes",
+                      "subject": "otto",
+                      "at": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": [
+                "jobs.moderate"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "edit",
+              "params": {
+                "message": 1,
+                "body": "Who takes it over?",
+                "mentions": [
+                  "wren"
+                ]
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "otto",
+              "state": "posted",
+              "body": "Who takes it over?",
+              "blocks": [],
+              "mentions": [
+                "wren"
+              ],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 1,
+              "editedAt": 1001000,
+              "edits": 1,
+              "pinned": false,
+              "replies": 1,
+              "lastReplyAt": 1000000,
+              "participants": [
+                "wren",
+                "otto"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "edits": [
+                  {
+                    "key": "0000000001.0000000001",
+                    "values": {
+                      "message": 1,
+                      "number": 1,
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "by": "carol",
+                      "at": 1001000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Who takes it over?",
+                      "blocks": [],
+                      "mentions": [
+                        "wren"
+                      ],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 1,
+                      "pinned": false,
+                      "editedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reactions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "message": 2,
+                      "emoji": "eyes",
+                      "subject": "otto",
+                      "at": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Comments",
+              "operation": "listEdits",
+              "params": {
+                "message": 1
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "edit": 1,
+                  "body": "Taking over?",
+                  "blocks": [],
+                  "mentions": [],
+                  "by": "carol",
+                  "at": 1001000
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "edits": [
+                  {
+                    "key": "0000000001.0000000001",
+                    "values": {
+                      "message": 1,
+                      "number": 1,
+                      "body": "Taking over?",
+                      "blocks": [],
+                      "mentions": [],
+                      "by": "carol",
+                      "at": 1001000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "otto",
+                      "state": "posted",
+                      "body": "Who takes it over?",
+                      "blocks": [],
+                      "mentions": [
+                        "wren"
+                      ],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 1,
+                      "pinned": false,
+                      "editedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "quotes": 1,
+                      "author": "wren",
+                      "state": "posted",
+                      "body": "Started.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reactions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "message": 2,
+                      "emoji": "eyes",
+                      "subject": "otto",
+                      "at": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 14,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Comments > a code block is held to its lines and its path, the config's kinds and its longest body, and a table's Comments refuses the members it waits for",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Doc",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Doc",
+              "uses": [
+                {
+                  "behavior": "Comments",
+                  "config": {
+                    "blocks": [
+                      "code",
+                      "ref"
+                    ],
+                    "maxBodyLength": 20,
+                    "editWindowMs": 60000
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "composeTimeoutMs": 60000
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Comments",
+                    "index": 0,
+                    "behavior": "Comments",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "blocks": [
+                    "code",
+                    "attachment"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Comments",
+                    "index": 0,
+                    "behavior": "Comments",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "blocks": [
+                    "code",
+                    "ref"
+                  ],
+                  "maxBodyLength": 20,
+                  "editWindowMs": 60000
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Doc",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "blocks": [
+                    "code",
+                    "ref"
+                  ],
+                  "maxBodyLength": 20,
+                  "editWindowMs": 60000
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "d1",
+              "own": {
+                "title": "Orders"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "d1",
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Off by one.",
+                "blocks": [
+                  {
+                    "kind": "code",
+                    "repo": "github.com/acme/shop",
+                    "path": "src/orders.rs",
+                    "revision": "9c1f2e7",
+                    "lines": [
+                      48,
+                      40
+                    ],
+                    "snippet": "fn place() {"
+                  }
+                ]
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation post of behavior Comments: /blocks/0/lines: must have its first line at most its last",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/blocks/0/lines",
+                    "message": "must have its first line at most its last"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Off by one.",
+                "blocks": [
+                  {
+                    "kind": "code",
+                    "repo": "github.com/acme/shop",
+                    "path": "src/../orders.rs",
+                    "revision": "9c1f2e7",
+                    "lines": [
+                      40,
+                      48
+                    ],
+                    "snippet": "fn place() {"
+                  }
+                ]
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation post of behavior Comments: /blocks/0/path: must be a relative path: no leading or trailing /, no \\, and no empty, . or .. part",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/blocks/0/path",
+                    "message": "must be a relative path: no leading or trailing /, no \\, and no empty, . or .. part"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Shot.",
+                "blocks": [
+                  {
+                    "kind": "attachment",
+                    "uri": "https://files.example/a.png",
+                    "name": "a.png",
+                    "mediaType": "image/png",
+                    "bytes": 10,
+                    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+                  }
+                ]
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation post of behavior Comments: /blocks/0: is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/blocks/0",
+                    "message": "is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Ran it.",
+                "blocks": [
+                  {
+                    "kind": "action",
+                    "title": "ran the tests",
+                    "status": "succeeded"
+                  }
+                ]
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Comments vetoes post of Doc d1: block 0 is a action block, which Comments on Doc does not allow (it allows code, ref)",
+              "details": {
+                "behavior": "Comments",
+                "action": "post",
+                "reason": "block 0 is a action block, which Comments on Doc does not allow (it allows code, ref)",
+                "vetoCode": "block_not_allowed",
+                "vetoDetails": {
+                  "block": 0,
+                  "kind": "action",
+                  "allowed": [
+                    "code",
+                    "ref"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "This body is longer than twenty."
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation post of behavior Comments: /body: must NOT have more than 20 characters",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/body",
+                    "message": "must NOT have more than 20 characters"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Off by one.",
+                "blocks": [
+                  {
+                    "kind": "code",
+                    "repo": "github.com/acme/shop",
+                    "path": "src/orders.rs",
+                    "revision": "9c1f2e7",
+                    "lines": [
+                      40,
+                      48
+                    ],
+                    "snippet": "fn place() {"
+                  }
+                ],
+                "clientId": "c1"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "alice",
+              "state": "posted",
+              "body": "Off by one.",
+              "blocks": [
+                {
+                  "kind": "code",
+                  "repo": "github.com/acme/shop",
+                  "path": "src/orders.rs",
+                  "revision": "9c1f2e7",
+                  "lines": [
+                    40,
+                    48
+                  ],
+                  "snippet": "fn place() {"
+                }
+              ],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "alice"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Off by one.",
+                      "blocks": [
+                        {
+                          "kind": "code",
+                          "repo": "github.com/acme/shop",
+                          "path": "src/orders.rs",
+                          "revision": "9c1f2e7",
+                          "lines": [
+                            40,
+                            48
+                          ],
+                          "snippet": "fn place() {"
+                        }
+                      ],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false,
+                      "clientId": "c1"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Again.",
+                "clientId": "c1"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "alice",
+              "state": "posted",
+              "body": "Off by one.",
+              "blocks": [
+                {
+                  "kind": "code",
+                  "repo": "github.com/acme/shop",
+                  "path": "src/orders.rs",
+                  "revision": "9c1f2e7",
+                  "lines": [
+                    40,
+                    48
+                  ],
+                  "snippet": "fn place() {"
+                }
+              ],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000000,
+              "postedAt": 1000000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "alice"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Off by one.",
+                      "blocks": [
+                        {
+                          "kind": "code",
+                          "repo": "github.com/acme/shop",
+                          "path": "src/orders.rs",
+                          "revision": "9c1f2e7",
+                          "lines": [
+                            40,
+                            48
+                          ],
+                          "snippet": "fn place() {"
+                        }
+                      ],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false,
+                      "clientId": "c1"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Doc",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1060001,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "edit",
+              "params": {
+                "message": 1,
+                "body": "Off by two."
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Comments vetoes edit of Doc d1: message 1 was posted at 1000000, more than editWindowMs (60000) ago",
+              "details": {
+                "behavior": "Comments",
+                "action": "edit",
+                "reason": "message 1 was posted at 1000000, more than editWindowMs (60000) ago",
+                "vetoCode": "edit_window_passed",
+                "vetoDetails": {
+                  "message": 1,
+                  "postedAt": 1000000,
+                  "editWindowMs": 60000
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Orders"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Off by one.",
+                      "blocks": [
+                        {
+                          "kind": "code",
+                          "repo": "github.com/acme/shop",
+                          "path": "src/orders.rs",
+                          "revision": "9c1f2e7",
+                          "lines": [
+                            40,
+                            48
+                          ],
+                          "snippet": "fn place() {"
+                        }
+                      ],
+                      "mentions": [],
+                      "createdAt": 1000000,
+                      "postedAt": 1000000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false,
+                      "clientId": "c1"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 1
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    }
+  ]
+}
