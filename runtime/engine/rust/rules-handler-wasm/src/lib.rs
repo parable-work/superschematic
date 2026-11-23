@@ -21,7 +21,10 @@
 //!   Policy}` to one step: `{"read": [StoreRead]}`, the reads to answer
 //!   before the request runs again with them, or `{"done": {"response",
 //!   "unit"}}` or `{"done": {"refused", "unit"}}`, the request's answer and
-//!   the [`Unit`] to apply. A refusal is an answer, not an error. `now` is
+//!   the [`Unit`] to apply. With `"respond": {"answer", "requestId"}`, the
+//!   answer a `route` gave, a done step carries the HTTP response it is
+//!   written as too (`"http"`), so the response's body is the handler's own
+//!   JSON. A refusal is an answer, not an error. `now` is
 //!   epoch milliseconds, `request` the host's id for the request (kept for
 //!   every run of it), and `id` a version 4 UUID the host drew, hyphenated.
 //!   The request, the reads, the answers and the unit are the handler's
@@ -199,6 +202,19 @@ struct RunInput {
     answers: StoreAnswers,
     #[serde(default)]
     policy: Policy,
+    /// How a routed request's answer is written, when the host wants its
+    /// HTTP response with the answer.
+    #[serde(default)]
+    respond: Option<RespondWith>,
+}
+
+/// A routed request's answer and the host's id for it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RespondWith {
+    answer: Value,
+    #[serde(default)]
+    request_id: String,
 }
 
 fn run(op: Op, input: RunInput) -> Result<Value, Failure> {
@@ -224,20 +240,22 @@ fn run(op: Op, input: RunInput) -> Result<Value, Failure> {
         id,
     };
     let handler = Handler::new(&CORE, &DECLARATIONS).with_policy(&input.policy);
-    Ok(
-        match handler.run(&input.request, &context, &input.answers) {
-            HandlerStep::Read(reads) => json!({ "read": to_json(&reads)? }),
-            HandlerStep::Done(Done { response, unit }) => {
-                let unit = to_json(&unit)?;
-                match response {
-                    Ok(response) => json!({ "done": { "response": response, "unit": unit } }),
-                    Err(refusal) => {
-                        json!({ "done": { "refused": to_json(&refusal)?, "unit": unit } })
-                    }
-                }
-            }
-        },
-    )
+    let (response, unit) = match handler.run(&input.request, &context, &input.answers) {
+        HandlerStep::Read(reads) => return Ok(json!({ "read": to_json(&reads)? })),
+        HandlerStep::Done(Done { response, unit }) => (response, unit),
+    };
+    let mut done = Map::new();
+    if let Some(respond) = &input.respond {
+        let answer = answer_of(op, &respond.answer)?;
+        let written = http::respond(&answer, response.clone(), &respond.request_id);
+        done.insert("http".into(), response_json(&written));
+    }
+    match response {
+        Ok(response) => done.insert("response".into(), response),
+        Err(refusal) => done.insert("refused".into(), to_json(&refusal)?),
+    };
+    done.insert("unit".into(), to_json(&unit)?);
+    Ok(json!({ "done": done }))
 }
 
 /// An HTTP request as a host sends it, its body as text.
@@ -617,6 +635,16 @@ mod tests {
         );
         assert_eq!(step["done"]["refused"]["code"], "not_found");
         assert_eq!(step["done"]["unit"], json!({"writes": []}));
+        // With the answer a route gave, the step carries its HTTP response.
+        let step = call(
+            Op::Run,
+            json!({"request": request, "context": context(), "answers": {"reads": answered},
+                "respond": {"answer": {"kind": "row"}, "requestId": "q9"}}),
+        );
+        assert_eq!(step["done"]["http"]["status"], 404);
+        assert!(step["done"]["http"]["body"]
+            .as_str()
+            .is_some_and(|body| body.contains(r#""requestId":"q9""#)));
     }
 
     #[test]
