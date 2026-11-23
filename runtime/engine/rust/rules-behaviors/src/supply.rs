@@ -110,9 +110,14 @@ pub const MAX_ALSO: usize = 100;
 
 /// The lock a rule over a supply's row takes before the reads it decides
 /// on (D103): one per row, whichever behavior supplies it, so Holds takes
-/// it without knowing which.
+/// it without knowing which. A UUID key names its row in its base62 wire
+/// form whichever form a claim wrote it in, so two claims of one supply
+/// take one lock.
 pub fn lock_key(type_name: &str, key: &str) -> String {
-    format!("{NAME}/{type_name}/{key}")
+    format!(
+        "{NAME}/{type_name}/{}",
+        crate::subjects::canonical_subject(key)
+    )
 }
 
 /// What a supply holds: units it counts, or time it opens.

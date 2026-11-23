@@ -1,0 +1,39 @@
+{
+  "name": "fixture-commerce-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-commerce-db",
+      "types": [
+        "Checkout",
+        "Inventory"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-commerce-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "InventoryStock",
+      "comment": "An inventory's stock for any signed-in caller (D70, D103's step 4):\nreceiveStock, adjustStock and countStock under stock, which need\nstock.adjust, listStockMovements, and the contract Supply's operations,\nwhich a caller's direct call is not_requested of unless it changes\nnothing: a claim takes units through its Holds alone.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Inventory"
+      },
+      "auth": true
+    },
+    {
+      "name": "CheckoutHolds",
+      "comment": "A checkout's holds: retakeHolds and listHolds under holds, beside the\nstatus Workflow's transition, whose moves take, commit, release and\nreturn what it holds.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Checkout"
+      },
+      "auth": true
+    }
+  ]
+}

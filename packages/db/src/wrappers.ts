@@ -796,3 +796,86 @@ export interface ProvenanceOn<T> {
  * the table itself.
  */
 export type Provenance<T, C extends ProvenanceOn<T>> = NonNullable<unknown>;
+
+/** A count Stock reads, or the own field of the table that holds one. */
+export type StockAmountOn<T> = number | { readonly field: Extract<keyof T, string> };
+
+/** Stock's config on a table (D70, D103's step 4): the permission receiving, adjusting and counting need, the unit price a hold returns, when a row reads low, the most one item holds, and whether a hold may take more than is available. */
+export interface StockOn<T> {
+  /** What receiveStock, adjustStock and countStock need; a count below what claims hold needs its .override. */
+  readonly permission: string;
+  /** The own integer field that holds the unit price, in its currency's minor units, and the currency: an ISO 4217 code or the own field that holds one. */
+  readonly price?: { readonly field: Extract<keyof T, string>; readonly currency: string | { readonly field: Extract<keyof T, string> } };
+  /** Stock.low is true while available is at or below this count or the own field's. */
+  readonly lowAt?: StockAmountOn<T>;
+  /** The most units one claim item holds, at least 1. */
+  readonly maxPerHold?: number;
+  /** Whether a hold may take more than is available; false when absent. */
+  readonly backorder?: boolean;
+}
+
+/**
+ * Units a supply counts (D70, D103's step 4): `export abstract class
+ * Inventory implements Stock<Inventory, { permission: "stock.adjust";
+ * price: { field: "priceCents"; currency: "GBP" } }>`. The type stays a
+ * table. Stock keeps onHand and held as owned columns (stock_on_hand,
+ * stock_held), each change of what is on hand a row of its ledger
+ * (inventory_stock_movements) and its record of each claim item it holds
+ * in another (inventory_stock_holds); available and low are computed at a
+ * read. Its operations (stock.receiveStock, adjustStock, countStock and
+ * listStockMovements) change and read them, and it implements the contract
+ * Supply: Holds calls its holdFor, commitFor, releaseFor and returnFor on
+ * the row, each holding the row's lock, and asks its checkHold, so a caller
+ * takes units through a claim alone. Like Timers, it resolves to the empty
+ * object type; the first type argument is the table itself.
+ */
+export type Stock<T, C extends StockOn<T>> = NonNullable<unknown>;
+
+/** What each item of a hold asks: a quantity of units, a count or an own field (an each hold's element's field), or an interval of time from a date-time field, ending at another or after durationMs. */
+export type HoldAskOn =
+  | { readonly quantity: number | { readonly field: string } }
+  | { readonly interval: { readonly start: string; readonly end: string } | { readonly start: string; readonly durationMs: number } };
+
+/** One hold of HoldsOn<T> (D70): a to-one relation of the table (one item), or an own list field each of whose elements names a key of the supply table schema; the supply implements Supply (Stock or Calendar). */
+export type HoldOn<T> = HoldAskOn &
+  (
+    | { readonly link: Extract<keyof T, string> }
+    | { readonly each: { readonly field: Extract<keyof T, string>; readonly target: string }; readonly schema: string }
+  );
+
+/** Holds' config on a table (D70, D103's step 4): the holds by name, the states of the table's Workflow that take, commit, release and return them, and the most items a claim holds. */
+export interface HoldsOn<T> {
+  /** The holds, by name: camelCase, at most 16. */
+  readonly holds: Readonly<Record<string, HoldOn<T>>>;
+  /** The states whose entry takes the holds; the create alone when absent. */
+  readonly takeOn?: readonly string[];
+  /** The states whose entry commits what is held. */
+  readonly commitOn?: readonly string[];
+  /** The states whose entry lets go of what is held. */
+  readonly releaseOn?: readonly string[];
+  /** The states whose entry puts committed units back. */
+  readonly returnOn?: readonly string[];
+  /** The most items the holds ask together, 1 to 1000; 100 when absent. */
+  readonly maxItems?: number;
+  /** The Workflow whose status moves the holds: its field, when the table has several. */
+  readonly status?: string;
+}
+
+/**
+ * One claim's holds on any supply, tied to its Workflow (D70, D103's step
+ * 4): `export abstract class Checkout implements Holds<Checkout, { holds: {
+ * lines: { each: { field: "lines"; target: "inventoryId" }; schema:
+ * "Inventory"; quantity: { field: "quantity" } } }; takeOn: ["held"];
+ * commitOn: ["placed"]; releaseOn: ["cancelled"] }>`. The type stays a
+ * table, beside its status Workflow. Holds keeps state and total as owned
+ * columns (holds_state, holds_total), which a Reactions rule hears, and
+ * each item it has taken in a sub-table (checkout_holds_items); items is
+ * computed at a read, the items not taken yet pending. Entering a takeOn
+ * state takes every item or none through each supply's Supply, under each
+ * supply's lock; commitOn, releaseOn and returnOn move them on; an update
+ * of a field a hold reads while it holds is refused. Its operations
+ * (holds.retakeHolds, listHolds) take again and read. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Holds<T, C extends HoldsOn<T>> = NonNullable<unknown>;

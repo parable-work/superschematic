@@ -750,6 +750,34 @@ fn key_text(value: Option<&Value>) -> Option<String> {
     }
 }
 
+// listed reads an `each` hold's list: a JSON array, or the JSON text of one,
+// as a SQLite column holds a list of a struct its layout gives no
+// conversion (D103's step 4).
+fn listed(value: Option<&Value>) -> Option<Vec<Value>> {
+    match value? {
+        Value::Array(items) => Some(items.clone()),
+        Value::String(text) => match serde_json::from_str(text) {
+            Ok(Value::Array(items)) => Some(items),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// same_field says whether a field a hold reads holds one value before and
+// after a write, a list compared as its elements whether it came as JSON or
+// as its text.
+fn same_field(before: Option<&Value>, after: Option<&Value>) -> bool {
+    let normal = |value: Option<&Value>| match value {
+        Some(Value::String(text)) => match serde_json::from_str::<Value>(text) {
+            Ok(parsed @ Value::Array(_)) => Some(parsed),
+            _ => value.cloned(),
+        },
+        other => other.cloned(),
+    };
+    crate::values::equal(normal(before).as_ref(), normal(after).as_ref())
+}
+
 // ask_of is what an item asks, read from `source` (an element, or the
 // type's own fields); `None` when it asks nothing.
 fn ask_of(spec: &HoldSpec, source: &Map<String, Value>) -> Option<Ask> {
@@ -794,7 +822,7 @@ pub fn plan(config: &HoldsConfig, own: &Map<String, Value>) -> Vec<HolderItem> {
                 target,
                 schema,
             } => {
-                let Some(elements) = own.get(field).and_then(Value::as_array) else {
+                let Some(elements) = listed(own.get(field)) else {
                     continue;
                 };
                 for (index, element) in elements.iter().enumerate() {
@@ -1503,7 +1531,7 @@ impl Behavior for Holds {
                     .into_iter()
                     .filter(|field| {
                         patch.contains_key(field)
-                            && !crate::values::equal(before.get(field), after.get(field))
+                            && !same_field(before.get(field), after.get(field))
                     })
                     .collect();
                 if changed.is_empty() {
@@ -1622,8 +1650,7 @@ impl Behavior for Holds {
                 config.takes_in(status.as_deref())
                     && !holding(&items)
                     && config.reads().iter().any(|field| {
-                        patch.contains_key(field)
-                            && !crate::values::equal(before.get(field), own.get(field))
+                        patch.contains_key(field) && !same_field(before.get(field), own.get(field))
                     })
             }
             _ => false,

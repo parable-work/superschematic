@@ -468,9 +468,9 @@ func TestRegisterBehaviorEvents(t *testing.T) {
 // (Contracts, D104); a name it does not define is refused, naming the ones
 // it does.
 func TestRegisterBehaviorRefusesAContractItDoesNotKnow(t *testing.T) {
-	decl := declaration("Meter", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "implements"}}})
+	decl := declaration("Meter", map[string]any{"contracts": []any{map[string]any{"name": "Shelf", "role": "implements"}}})
 	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: RulesPackage, Declaration: decl})
-	if want := `registry: behavior Meter names contract "Supply", which is not one the behaviors' core defines (Capacity)`; err == nil || err.Error() != want {
+	if want := `registry: behavior Meter names contract "Shelf", which is not one the behaviors' core defines (Capacity, Supply)`; err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
@@ -531,6 +531,36 @@ func TestRegisterBehaviorContracts(t *testing.T) {
 		if _, ok := meter.Contract("Supply"); ok {
 			t.Errorf("Meter.Contract(Supply) found a contract")
 		}
+	}
+}
+
+// Supply is a contract an engine's behaviors meet by operation names (the
+// engine's Holds invokes holdFor and the rest by name, D70), so a behavior
+// of a package an engine runs may ask it, as the commerce package's Holds
+// does (contractsEnginesMeet, D103's step 4); Capacity stays asked by the
+// core's package alone, and an extension's behavior names neither.
+func TestRegisterBehaviorAsksSupplyFromAnEnginesPackage(t *testing.T) {
+	for _, pkg := range []string{CommercePackage, WorkQueuePackage, EnginePackage, RulesPackage} {
+		reg := New(naming.Default())
+		decl := declaration("Claim", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "asks", "description": "Holds what a supply gives."}}})
+		if err := reg.RegisterBehavior(BehaviorSpec{Package: pkg, Declaration: decl}); err != nil {
+			t.Errorf("Supply asked by a behavior of %s: %v", pkg, err)
+			continue
+		}
+		claim, _ := reg.Behavior("Claim")
+		if got, ok := claim.Contract("Supply"); !ok || got.Role != ContractRoleAsks {
+			t.Errorf("Claim.Contract(Supply) = %+v, %v", got, ok)
+		}
+	}
+	decl := declaration("Claim", map[string]any{"contracts": []any{map[string]any{"name": "Capacity", "role": "asks"}}})
+	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: CommercePackage, Declaration: decl})
+	if want := `registry: behavior Claim asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`; err == nil || err.Error() != want {
+		t.Fatalf("Capacity asked from the commerce package: err = %v, want %q", err, want)
+	}
+	extension := declaration("acme.Claim", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "asks"}}})
+	err = New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: extension})
+	if want := `registry: behavior acme.Claim of extension acme names contract Supply, which the behaviors' core asks and answers: an extension's behavior runs in its engine (D58)`; err == nil || err.Error() != want {
+		t.Fatalf("Supply asked by an extension's behavior: err = %v, want %q", err, want)
 	}
 }
 

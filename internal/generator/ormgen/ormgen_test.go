@@ -101,6 +101,13 @@ const commentsFixture = "fixture-comments-db"
 // whole, each derivation and record a sub-table row with no repository.
 const derivedProvenanceFixture = "fixture-derived-provenance-db"
 
+// commerceFixture is the DB fixture whose Inventory implements Stock and
+// whose Checkout implements Holds beside its status Workflow (D70 on
+// D103's step 4): their operations under Stock() and Holds(), the
+// contract Supply's among Stock's, each record, movement and item a
+// sub-table row with no repository.
+const commerceFixture = "fixture-commerce-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -119,7 +126,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -258,6 +265,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// table as a whole taking no key, no repository of a sub-table, no
 		// upserts, and no queue.
 		{derivedProvenanceFixture, []string{"repository_article.go", "repository_ticket.go", "rules.go"}},
+		// Tables of Stock and Holds (D70 on D103's step 4): their
+		// operations under Stock() and Holds(), no repository of a
+		// sub-table, no upserts, and no queue.
+		{commerceFixture, []string{"repository_checkout.go", "repository_inventory.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

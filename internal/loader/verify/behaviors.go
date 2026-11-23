@@ -111,6 +111,11 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			// reads and moves the Workflow it names; the engine's Reactions
 			// reads its one Workflow and would ignore it (D103).
 			r.errorf(td.Owner, "type %s: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<%s, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out", td.Name, td.Name)
+		} else if ref.Name == holdsBehavior && !ref.FieldAnchored() && !ref.Implements && configNames(ref.Config, "status") {
+			// Holds' declaration takes status for a table, whose core
+			// reads the Workflow it names; the engine's Holds reads its one
+			// Workflow and would ignore it (D103's step 4).
+			r.errorf(td.Owner, "type %s: @behavior Holds names status, the Workflow field a table's Holds reads (implements Holds<%s, C>, D103); an engine type's Holds reads its one Workflow, so leave status out", td.Name, td.Name)
 		} else if ref.Name == workflowBehavior && !ref.FieldAnchored() && !ref.Implements {
 			// Workflow's declaration takes by, overridePermission and
 			// repeat for a table, whose core runs them; the engine's
@@ -149,6 +154,14 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 	}
 	if len(uses) > 0 {
 		checkTableUses(schema, td, bases, uses, r)
+		// A table's Holds is held to the tables its holds name, whose
+		// behaviors' declarations say which implements Supply (D103's
+		// step 4), so it reads the registry.
+		for _, ref := range td.ImplementsBehaviors() {
+			if behavior, ok := uses[ref.UseID()]; ok && ref.Name == holdsBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkHoldsConfig(schema, td, ref, reg, r)
+			}
+		}
 	}
 
 	opOwner := map[string]string{}
