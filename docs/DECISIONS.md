@@ -1248,8 +1248,17 @@ that lists the rows a version fails and discards them when told to
 transcript replays over the layout, and the recorded access steps through
 its policy. Left:
 
-- The library in TypeScript, Go and Python over the handler (WebAssembly
-  with a JSON ABI, or the C ABI), and the prebuilt image (D103's step 6).
+- Built since: the handler on wasm32 with a JSON ABI that imports nothing
+  (`rules-handler-wasm`), and the TypeScript library over it,
+  `@superschematic/rules-handler` (`runtime/rules-handler/typescript`), a
+  development store over `bun:sqlite` or `node:sqlite` whose files the
+  Rust hosts read and write, with the routes, the event stream and the
+  tools; every transcript replays through it. Left of the libraries: an
+  asynchronous store loop (D1, Postgres from TypeScript), a store in memory
+  for a browser, runtime mode in TypeScript (its table store, the record
+  and a publish through the planner and a runner), the library on Workers
+  and in a browser, run, and the Go and Python libraries over the C ABI;
+  and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
   engine-notes waits for Comments' streamed replies and read state, and
   engine-jobs for the choice on Blueprint (D103's status).
