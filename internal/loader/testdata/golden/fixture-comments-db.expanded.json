@@ -423,6 +423,13 @@
           }
         },
         {
+          "name": "forSubject",
+          "description": "The subject the editor acted for, when the caller acted for someone (D77).",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "at",
           "description": "When, in epoch milliseconds.",
           "typeRef": {
@@ -671,6 +678,13 @@
           }
         },
         {
+          "name": "resolvedFor",
+          "description": "The subject its resolver acted for, when the caller acted for someone (D77).",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
           "typeRef": {
@@ -755,6 +769,13 @@
         {
           "name": "subject",
           "description": "The subject of the caller who reacted.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject the caller acted for, when it acted for someone (D77).",
           "typeRef": {
             "name": "string"
           }
@@ -1199,6 +1220,13 @@
           }
         },
         {
+          "name": "forSubject",
+          "description": "The subject the editor acted for, when the caller acted for someone (D77).",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "at",
           "description": "When, in epoch milliseconds.",
           "typeRef": {
@@ -1447,6 +1475,13 @@
           }
         },
         {
+          "name": "resolvedFor",
+          "description": "The subject its resolver acted for, when the caller acted for someone (D77).",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
           "typeRef": {
@@ -1531,6 +1566,13 @@
         {
           "name": "subject",
           "description": "The subject of the caller who reacted.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject the caller acted for, when it acted for someone (D77).",
           "typeRef": {
             "name": "string"
           }

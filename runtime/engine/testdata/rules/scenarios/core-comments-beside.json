@@ -500,7 +500,7 @@
                     {
                       "name": "Comments",
                       "config": {
-                        "maxAttempts": 3
+                        "anchorPermission": "docs.anchor"
                       }
                     }
                   ]
@@ -511,12 +511,12 @@
           "error": {
             "class": "SchemaDocumentError",
             "code": "invalid_schema",
-            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)",
+            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: anchorPermission: moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)",
             "details": {
               "issues": [
                 {
                   "path": "/types/Doc/behaviors/0/config",
-                  "message": "type Doc: behavior Comments config: maxAttempts: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+                  "message": "type Doc: behavior Comments config: anchorPermission: moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
                 }
               ]
             }

@@ -128,6 +128,7 @@
         { "name": "pinned", "description": "Whether it is pinned.", "type": "boolean" },
         { "name": "clientId", "description": "The caller's key for it, by which a retry of its post returns it.", "type": "string" },
         { "name": "resolvedBy", "description": "For a top-level message whose thread is resolved, the subject who resolved it.", "type": "string" },
+        { "name": "resolvedFor", "description": "The subject its resolver acted for, when the caller acted for someone (D77).", "type": "string" },
         { "name": "resolvedAt", "description": "When its thread was resolved, in epoch milliseconds.", "type": "Temporal.DateTime" },
         { "name": "draftLength", "description": "While composing, the draft's length in code points; absent otherwise.", "type": "Generic.Int64" },
         { "name": "lastAppendAt", "description": "While composing, when its begin or its latest appendDraft ran, in epoch milliseconds; absent otherwise. composeTimeoutMs after it the message is idle, and its deadline interrupts it.", "type": "Temporal.DateTime" }
@@ -199,6 +200,7 @@
         { "name": "blocks", "description": "The blocks before the edit.", "type": "Generic.JSON" },
         { "name": "mentions", "description": "The mentions before the edit.", "type": "Generic.JSON" },
         { "name": "by", "description": "The subject of the caller who made the edit.", "type": "string" },
+        { "name": "forSubject", "description": "The subject the editor acted for, when the caller acted for someone (D77).", "type": "string" },
         { "name": "at", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" }
       ]
     },
@@ -211,6 +213,7 @@
         { "name": "message", "description": "The id of the message reacted to.", "type": "Generic.Int64" },
         { "name": "emoji", "description": "The emoji: a name or the character itself.", "type": "string" },
         { "name": "subject", "description": "The subject of the caller who reacted.", "type": "string" },
+        { "name": "forSubject", "description": "The subject the caller acted for, when it acted for someone (D77).", "type": "string" },
         { "name": "at", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" }
       ]
     },

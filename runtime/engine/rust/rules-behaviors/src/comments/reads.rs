@@ -147,17 +147,18 @@ pub(super) fn list_edits(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
             let number = edit.value("number").and_then(whole)?;
             (number > request.after).then(|| {
                 let text = |name: &str| edit.value(name).cloned().unwrap_or(Value::Null);
-                (
-                    number,
-                    object(vec![
-                        ("edit", Value::from(number)),
-                        ("body", text("body")),
-                        ("blocks", text("blocks")),
-                        ("mentions", text("mentions")),
-                        ("by", text("by")),
-                        ("at", text("at")),
-                    ]),
-                )
+                let mut members = vec![
+                    ("edit", Value::from(number)),
+                    ("body", text("body")),
+                    ("blocks", text("blocks")),
+                    ("mentions", text("mentions")),
+                    ("by", text("by")),
+                ];
+                if let Some(acted_for) = edit.value("forSubject") {
+                    members.push(("for", acted_for.clone()));
+                }
+                members.push(("at", text("at")));
+                (number, object(members))
             })
         })
         .collect();
@@ -180,13 +181,12 @@ pub(super) fn list_reactions(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
             reaction.message == id && reaction.emoji == emoji && reaction.number > request.after
         })
         .map(|reaction| {
-            (
-                reaction.number,
-                object(vec![
-                    ("subject", Value::from(reaction.subject)),
-                    ("at", Value::from(reaction.at)),
-                ]),
-            )
+            let mut members = vec![("subject", Value::from(reaction.subject))];
+            if let Some(acted_for) = reaction.for_subject {
+                members.push(("for", Value::from(acted_for)));
+            }
+            members.push(("at", Value::from(reaction.at)));
+            (reaction.number, object(members))
         })
         .collect();
     Ok(paged(items, request.limit))

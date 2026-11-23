@@ -224,6 +224,12 @@ const rulesLayoutJSON = `{
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
@@ -482,6 +488,12 @@ const rulesLayoutJSON = `{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -517,6 +529,12 @@ const rulesLayoutJSON = `{
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {
@@ -785,6 +803,12 @@ const rulesLayoutJSON = `{
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
@@ -1043,6 +1067,12 @@ const rulesLayoutJSON = `{
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -1078,6 +1108,12 @@ const rulesLayoutJSON = `{
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {

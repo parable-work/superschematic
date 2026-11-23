@@ -163,11 +163,7 @@ pub const NAMESPACE_WIDE: &str = "the inbox, claiming and settling deliveries (c
 pub const ANCHORS: &str = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)";
 
 /// The config members a table's Comments refuses, each with why it waits.
-const WAITING_MEMBERS: [(&str, &str); 7] = [
-    ("deliverPermission", NAMESPACE_WIDE),
-    ("maxAttempts", NAMESPACE_WIDE),
-    ("retryBackoffMs", NAMESPACE_WIDE),
-    ("deliveryRetentionMs", NAMESPACE_WIDE),
+const WAITING_MEMBERS: [(&str, &str); 3] = [
     ("anchorPermission", ANCHORS),
     ("attachments", ATTACHMENTS),
     ("blocks", ATTACHMENTS),

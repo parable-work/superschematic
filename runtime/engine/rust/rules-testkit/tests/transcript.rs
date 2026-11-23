@@ -345,20 +345,21 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 const REVISIONS_FLOOR: usize = 112;
 
 /// The steps `core-comments.transcript.json` holds, of
-/// `core-comments.json`'s 502 (D103's step 4): 35 define and publish checks
-/// and 203 creates, deletes and invokes, in its 24 scenarios: each
-/// message, edit and reaction a row of a sub-table of the use, each
+/// `core-comments.json`'s 502 (D103's step 4): 45 define and publish checks
+/// and 316 creates, deletes, invokes and deadlines, in its 24 scenarios:
+/// each message, edit and reaction a row of a sub-table of the use, each
 /// conversation's high-water marks a row of its shared table, and each
 /// write beside the row, so the row's version stays; streamed replies, each
 /// composing message's draft a sub-table of chunks and its idle time a
 /// deadline whose fire is beside the row too (D77's primitive 2, 2 deadline
-/// commands); and read state, each reader's marker, follow and delivery a
-/// row of a sub-table. 306 commands and 41 checks. The 155 left out are what
-/// the replay skips (the inbox and deliveries claimed and settled, search,
-/// anchors and attachments, the scenarios with an access policy, the reads
-/// of the event log that hold a write beside the row), opens and reads. An
-/// adapter's replay holds its own count to this one.
-const COMMENTS_FLOOR: usize = 347;
+/// commands); read state, each reader's marker, follow and delivery a row
+/// of a sub-table; and each message, edit, reaction and resolve recording
+/// the subject its caller acted for. The 141 left out are what the replay
+/// skips (from the first claim of deliveries or read of the inbox on,
+/// search, anchors and attachments, the scenarios with an access policy,
+/// the reads of the event log that hold a write beside the row), opens and
+/// reads. An adapter's replay holds its own count to this one.
+const COMMENTS_FLOOR: usize = 361;
 
 /// The steps `core-comments-beside.transcript.json` holds, of the
 /// hand-written `core-comments-beside.json`'s 29 (D103's step 4): 6 define

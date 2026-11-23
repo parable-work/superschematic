@@ -250,6 +250,11 @@
           "type": "string"
         },
         {
+          "name": "resolvedFor",
+          "description": "The subject its resolver acted for, when the caller acted for someone (D77).",
+          "type": "string"
+        },
+        {
           "name": "resolvedAt",
           "description": "When its thread was resolved, in epoch milliseconds.",
           "type": "Temporal.DateTime"
@@ -465,6 +470,11 @@
           "type": "string"
         },
         {
+          "name": "forSubject",
+          "description": "The subject the editor acted for, when the caller acted for someone (D77).",
+          "type": "string"
+        },
+        {
           "name": "at",
           "description": "When, in epoch milliseconds.",
           "type": "Temporal.DateTime"
@@ -494,6 +504,11 @@
         {
           "name": "subject",
           "description": "The subject of the caller who reacted.",
+          "type": "string"
+        },
+        {
+          "name": "forSubject",
+          "description": "The subject the caller acted for, when it acted for someone (D77).",
           "type": "string"
         },
         {

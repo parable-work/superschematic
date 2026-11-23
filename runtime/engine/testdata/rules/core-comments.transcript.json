@@ -51441,8 +51441,350 @@
       "clock": {
         "fixed": 1000
       },
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "Review",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Review",
+              "uses": [
+                {
+                  "behavior": "Comments",
+                  "config": {
+                    "deliverPermission": "comments.notify",
+                    "retryBackoffMs": 1000
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Review",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "deliverPermission": "comments.notify",
+                  "retryBackoffMs": 1000
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Review",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "deliverPermission": "comments.notify",
+                  "retryBackoffMs": 1000
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "title": "Q3 plan"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "create",
+              "id": "r2",
+              "own": {
+                "title": "Q4 plan"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "r2",
+            "row": {
+              "own": {
+                "title": "Q4 plan"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Look,   carol\nand agent:ada.",
+                "mentions": [
+                  "carol",
+                  "agent:ada",
+                  "role:leads",
+                  "alice"
+                ]
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "alice",
+              "state": "posted",
+              "body": "Look,   carol\nand agent:ada.",
+              "blocks": [],
+              "mentions": [
+                "carol",
+                "agent:ada",
+                "role:leads",
+                "alice"
+              ],
+              "reactions": {},
+              "createdAt": 1000,
+              "postedAt": 1000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "alice"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000001.agent:ada",
+                    "values": {
+                      "message": 1,
+                      "subject": "agent:ada",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.carol",
+                    "values": {
+                      "message": 1,
+                      "subject": "carol",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.role:leads",
+                    "values": {
+                      "message": 1,
+                      "subject": "role:leads",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.agent:ada",
+                    "values": {
+                      "thread": 1,
+                      "subject": "agent:ada",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.carol",
+                    "values": {
+                      "thread": 1,
+                      "subject": "carol",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Look,   carol\nand agent:ada.",
+                      "blocks": [],
+                      "mentions": [
+                        "carol",
+                        "agent:ada",
+                        "role:leads",
+                        "alice"
+                      ],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
@@ -51450,94 +51792,69 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 5,
-          "call": "instances.create",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
           "step": 7,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 8,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 9,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 10,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 11,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 12,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 13,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 14,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 15,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 16,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 17,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 18,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 19,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 7: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         }
       ]
     },
@@ -51546,8 +51863,861 @@
       "clock": {
         "fixed": 1000
       },
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "Review",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Review",
+              "uses": [
+                {
+                  "behavior": "Comments",
+                  "config": {
+                    "deliverPermission": "comments.notify"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Review",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "deliverPermission": "comments.notify"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Review",
+            "uses": [
+              {
+                "behavior": "Comments",
+                "config": {
+                  "deliverPermission": "comments.notify"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "title": "Q3 plan"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "create",
+              "id": "r2",
+              "own": {
+                "title": "Q4 plan"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "r2",
+            "row": {
+              "own": {
+                "title": "Q4 plan"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Thread."
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "bob",
+              "state": "posted",
+              "body": "Thread.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000,
+              "postedAt": 1000,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "bob"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.bob",
+                    "values": {
+                      "thread": 1,
+                      "subject": "bob",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "bob",
+                      "state": "posted",
+                      "body": "Thread.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "markRead",
+              "params": {
+                "upTo": 1
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "readUpTo": 1,
+              "unread": 0
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.bob",
+                    "values": {
+                      "thread": 1,
+                      "subject": "bob",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "bob",
+                      "state": "posted",
+                      "body": "Thread.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "follow",
+              "params": {
+                "thread": 1,
+                "on": true
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "thread": 1,
+              "following": true
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.bob",
+                    "values": {
+                      "thread": 1,
+                      "subject": "bob",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "bob",
+                      "state": "posted",
+                      "body": "Thread.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "agent:reviewer",
+              "permissions": [],
+              "actingFor": "alice"
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Found two issues.",
+                "thread": 1,
+                "mentions": [
+                  "alice",
+                  "carol"
+                ]
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "thread": 1,
+              "author": "agent:reviewer",
+              "for": "alice",
+              "state": "posted",
+              "body": "Found two issues.",
+              "blocks": [],
+              "mentions": [
+                "alice",
+                "carol"
+              ],
+              "reactions": {},
+              "createdAt": 1000,
+              "postedAt": 1000,
+              "stand": 2,
+              "edits": 0,
+              "pinned": false
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.bob",
+                    "values": {
+                      "message": 2,
+                      "subject": "bob",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000002.carol",
+                    "values": {
+                      "message": 2,
+                      "subject": "carol",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.agent:reviewer",
+                    "values": {
+                      "thread": 1,
+                      "subject": "agent:reviewer",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.bob",
+                    "values": {
+                      "thread": 1,
+                      "subject": "bob",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.carol",
+                    "values": {
+                      "thread": 1,
+                      "subject": "carol",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "bob",
+                      "state": "posted",
+                      "body": "Thread.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "author": "agent:reviewer",
+                      "forSubject": "alice",
+                      "state": "posted",
+                      "body": "Found two issues.",
+                      "blocks": [],
+                      "mentions": [
+                        "alice",
+                        "carol"
+                      ],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Review",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "agent:reviewer",
+              "permissions": [],
+              "actingFor": "alice"
+            },
+            "now": 1000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Summary for Alice."
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "id": 3,
+              "author": "agent:reviewer",
+              "for": "alice",
+              "state": "posted",
+              "body": "Summary for Alice.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1000,
+              "postedAt": 1000,
+              "stand": 3,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "agent:reviewer"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Q3 plan"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Comments": {
+                "deliveries": [
+                  {
+                    "key": "0000000002.bob",
+                    "values": {
+                      "message": 2,
+                      "subject": "bob",
+                      "mention": false,
+                      "reply": true,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000002.carol",
+                    "values": {
+                      "message": 2,
+                      "subject": "carol",
+                      "mention": true,
+                      "reply": false,
+                      "state": "pending",
+                      "dueAt": 1000,
+                      "attempts": 0,
+                      "createdAt": 1000
+                    }
+                  }
+                ],
+                "follows": [
+                  {
+                    "key": "0000000001.agent:reviewer",
+                    "values": {
+                      "thread": 1,
+                      "subject": "agent:reviewer",
+                      "followed": true,
+                      "readUpTo": 2,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.alice",
+                    "values": {
+                      "thread": 1,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.bob",
+                    "values": {
+                      "thread": 1,
+                      "subject": "bob",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000001.carol",
+                    "values": {
+                      "thread": 1,
+                      "subject": "carol",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000003.agent:reviewer",
+                    "values": {
+                      "thread": 3,
+                      "subject": "agent:reviewer",
+                      "followed": true,
+                      "readUpTo": 3,
+                      "updatedAt": 1000
+                    }
+                  },
+                  {
+                    "key": "0000000003.alice",
+                    "values": {
+                      "thread": 3,
+                      "subject": "alice",
+                      "followed": true,
+                      "readUpTo": 3,
+                      "updatedAt": 1000
+                    }
+                  }
+                ],
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "bob",
+                      "state": "posted",
+                      "body": "Thread.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "thread": 1,
+                      "author": "agent:reviewer",
+                      "forSubject": "alice",
+                      "state": "posted",
+                      "body": "Found two issues.",
+                      "blocks": [],
+                      "mentions": [
+                        "alice",
+                        "carol"
+                      ],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 2,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "author": "agent:reviewer",
+                      "forSubject": "alice",
+                      "state": "posted",
+                      "body": "Summary for Alice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1000,
+                      "postedAt": 1000,
+                      "stand": 3,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "agent:reviewer",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 3
+                    }
+                  },
+                  {
+                    "key": "alice",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "readAt": 1000,
+                      "upTo": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
@@ -51555,119 +52725,74 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 5,
-          "call": "instances.create",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 7,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 8,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
-          "step": 10,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-        },
-        {
           "step": 11,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 12,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 13,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 14,
           "call": "behaviors.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 15,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 16,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 17,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 18,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 19,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 20,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 21,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 22,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 23,
           "call": "instances.invoke",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         },
         {
           "step": 24,
           "call": "events.read",
-          "reason": "the scenario stopped at step 2: the core refuses what the engine took: type Review: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+          "reason": "the scenario stopped at step 11: behaviors.invoke is outside the reference host's surface, and the steps after it may read what it changed"
         }
       ]
     },

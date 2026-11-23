@@ -61,7 +61,7 @@ const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-numbering", 104),
     ("core-lease-numbering", 14),
     ("core-revisions", 112),
-    ("core-comments", 347),
+    ("core-comments", 361),
     ("core-comments-beside", 25),
     ("core-derived-provenance", 75),
 ];

@@ -51,6 +51,7 @@ pub(super) struct Message {
     pub pinned: bool,
     pub client_id: Option<String>,
     pub resolved_by: Option<String>,
+    pub resolved_for: Option<String>,
     pub resolved_at: Option<i64>,
     pub draft_length: Option<i64>,
     pub last_append_at: Option<i64>,
@@ -80,6 +81,7 @@ impl Message {
             pinned: row.value("pinned").and_then(Value::as_bool) == Some(true),
             client_id: text("clientId"),
             resolved_by: text("resolvedBy"),
+            resolved_for: text("resolvedFor"),
             resolved_at: int("resolvedAt"),
             draft_length: int("draftLength"),
             last_append_at: int("lastAppendAt"),
@@ -133,6 +135,7 @@ pub(super) struct Reaction {
     pub message: i64,
     pub emoji: String,
     pub subject: String,
+    pub for_subject: Option<String>,
     pub at: i64,
 }
 
@@ -153,6 +156,10 @@ impl Reaction {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            for_subject: row
+                .value("forSubject")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             at: row.value("at").and_then(whole).unwrap_or_default(),
         })
     }
@@ -434,6 +441,9 @@ pub(super) fn record(
         if let (Some(by), Some(at)) = (&message.resolved_by, message.resolved_at) {
             let mut resolved = Map::new();
             resolved.insert("by".into(), Value::from(by.as_str()));
+            if let Some(acted_for) = &message.resolved_for {
+                resolved.insert("for".into(), Value::from(acted_for.as_str()));
+            }
             resolved.insert("at".into(), Value::from(at));
             out.insert("resolved".into(), Value::Object(resolved));
         }

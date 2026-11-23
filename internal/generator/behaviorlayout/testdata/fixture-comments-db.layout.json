@@ -196,6 +196,12 @@
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
@@ -454,6 +460,12 @@
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -489,6 +501,12 @@
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {
@@ -757,6 +775,12 @@
                   "type": "string"
                 },
                 {
+                  "name": "resolvedFor",
+                  "field": "resolvedFor",
+                  "column": "resolved_for",
+                  "type": "string"
+                },
+                {
                   "name": "resolvedAt",
                   "field": "resolvedAt",
                   "column": "resolved_at",
@@ -1015,6 +1039,12 @@
                   "type": "string"
                 },
                 {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
                   "name": "at",
                   "field": "at",
                   "column": "at",
@@ -1050,6 +1080,12 @@
                   "name": "subject",
                   "field": "subject",
                   "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
                   "type": "string"
                 },
                 {

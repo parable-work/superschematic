@@ -190,15 +190,14 @@ fn the_config_is_the_declaration_files_schema_and_a_member_that_waits_is_refused
             "/config/pinPermission: must NOT have fewer than 1 characters",
         ]
     );
-    // Streamed replies' members are a table's now.
+    // Streamed replies' and deliveries' members are a table's now; the
+    // deliveries a message makes are recorded, and their claims wait.
     assert!(define(
         &core(),
-        &review(json!({"composeTimeoutMs": 5000, "maxDrafts": 2}))
+        &review(json!({"composeTimeoutMs": 5000, "maxDrafts": 2, "deliverPermission": "notify", "maxAttempts": 3}))
     )
     .is_ok());
     for (config, member) in [
-        (json!({"maxAttempts": 3}), "maxAttempts"),
-        (json!({"deliverPermission": "notify"}), "deliverPermission"),
         (json!({"anchorPermission": "anchor"}), "anchorPermission"),
         (json!({"attachments": {"maxBytes": 10}}), "attachments"),
     ] {

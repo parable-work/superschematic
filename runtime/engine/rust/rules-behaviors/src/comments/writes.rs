@@ -242,6 +242,9 @@ pub(super) fn edit(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     kept.insert("blocks".into(), message.blocks.clone());
     kept.insert("mentions".into(), message.mentions.clone());
     kept.insert("by".into(), Value::from(subject.as_str()));
+    if let Some(acted_for) = for_of(cx) {
+        kept.insert("forSubject".into(), Value::from(acted_for));
+    }
     kept.insert("at".into(), Value::from(now));
     cx.insert_row(EDITS, &edit_key(id, number), kept)?;
     let mut values = Map::new();
@@ -422,6 +425,9 @@ pub(super) fn react(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     values.insert("message".into(), Value::from(id));
     values.insert("emoji".into(), Value::from(emoji.as_str()));
     values.insert("subject".into(), Value::from(subject.as_str()));
+    if let Some(acted_for) = for_of(cx) {
+        values.insert("forSubject".into(), Value::from(acted_for));
+    }
     values.insert("at".into(), Value::from(cx.now()));
     cx.insert_row(REACTIONS, &reaction_key(conversation.last_reaction), values)?;
     conversation.save(cx)?;
@@ -534,9 +540,14 @@ pub(super) fn resolve(cx: C<'_, '_>, params: &Value, resolved: bool) -> Hook<Val
             "resolvedBy".into(),
             Value::from(cx.caller().subject.as_str()),
         );
+        values.insert(
+            "resolvedFor".into(),
+            for_of(cx).map_or(Value::Null, Value::from),
+        );
         values.insert("resolvedAt".into(), Value::from(cx.now()));
     } else {
         values.insert("resolvedBy".into(), Value::Null);
+        values.insert("resolvedFor".into(), Value::Null);
         values.insert("resolvedAt".into(), Value::Null);
     }
     cx.update_row(MESSAGES, &message_key(id), values)?;
