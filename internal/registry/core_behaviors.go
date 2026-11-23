@@ -123,14 +123,14 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3,
 // and number: Numbering<C> since D103's step 4, which ports the engine's
 // remaining behaviors in waves after them, and implements Rollups,
-// Dependencies, Revisions, Comments, Derived, Provenance, Stock, Holds and
-// Calendar<T, C> since that step too). A test holds the
+// Dependencies, Revisions, Comments, Derived, Provenance, Stock, Holds,
+// Calendar and Payments<T, C> since that step too). A test holds the
 // list to the behaviors each transcript of runtime/engine/testdata/rules
 // records.
 var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool",
 	// D103's step 4, its later waves, in the order they were ported.
 	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
-	"Stock", "Holds", "Calendar",
+	"Stock", "Holds", "Calendar", "Payments",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a

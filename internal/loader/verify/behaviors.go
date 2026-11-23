@@ -161,6 +161,10 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			if behavior, ok := uses[ref.UseID()]; ok && ref.Name == holdsBehavior && behavior.ValidateConfig(ref.Config) == nil {
 				checkHoldsConfig(schema, td, ref, reg, r)
 			}
+			// A refund's Payments is held to the table it refunds (D70).
+			if behavior, ok := uses[ref.UseID()]; ok && ref.Name == paymentsBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkPaymentsConfig(schema, td, ref, r)
+			}
 		}
 	}
 
