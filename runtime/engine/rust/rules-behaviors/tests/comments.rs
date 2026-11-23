@@ -31,7 +31,7 @@ fn post(host: &mut Host, subject: &str, params: Value) -> Value {
 }
 
 #[test]
-fn the_declaration_keeps_three_sub_tables_and_a_shared_one_and_leaves_out_what_waits() {
+fn the_declaration_keeps_its_sub_tables_and_a_shared_one_and_leaves_out_what_waits() {
     let registered = core();
     let declaration = registered.declaration(comments::NAME).expect("registered");
     let tables: Vec<(&str, Option<&str>, bool)> = declaration
@@ -43,14 +43,44 @@ fn the_declaration_keeps_three_sub_tables_and_a_shared_one_and_leaves_out_what_w
         tables,
         [
             ("messages", Some("message"), false),
+            ("drafts", Some("chunk"), false),
+            ("reads", Some("subject"), false),
+            ("follows", Some("follow"), false),
+            ("deliveries", Some("delivery"), false),
             ("edits", Some("edit"), false),
             ("reactions", Some("reaction"), false),
             ("conversations", Some("conversation"), true),
         ]
     );
-    // Its fields are computed at a read; composing and unread wait.
-    assert_eq!(declaration.fields, ["messages", "lastMessageAt", "threads"]);
+    // Its fields are computed at a read, the reader's unread among them.
+    assert_eq!(
+        declaration.fields,
+        [
+            "messages",
+            "lastMessageAt",
+            "threads",
+            "composing",
+            "unread"
+        ]
+    );
     assert_eq!(declaration.computed, declaration.fields);
+    // It arms a composing message's idle deadline, and writes beside its
+    // row alone, so the deadline fires beside it too; it declares the
+    // signals D77 gives it.
+    assert!(declaration.arms_deadlines && declaration.writes_beside_only());
+    let signals: Vec<(&str, &str)> = declaration
+        .signals
+        .iter()
+        .map(|signal| (signal.name.as_str(), signal.access.as_str()))
+        .collect();
+    assert_eq!(
+        signals,
+        [
+            ("typing", "read"),
+            ("viewing", "read"),
+            ("draft", "operation")
+        ]
+    );
     // Every writing operation is beside the row; the left-out ones and the
     // namespace's are none of its.
     let mut beside: Vec<&str> = declaration
@@ -63,8 +93,14 @@ fn the_declaration_keeps_three_sub_tables_and_a_shared_one_and_leaves_out_what_w
     assert_eq!(
         beside,
         [
+            "appendDraft",
+            "begin",
             "deleteMessage",
             "edit",
+            "finish",
+            "follow",
+            "interrupt",
+            "markRead",
             "pin",
             "post",
             "purge",
@@ -75,7 +111,7 @@ fn the_declaration_keeps_three_sub_tables_and_a_shared_one_and_leaves_out_what_w
             "unreact"
         ]
     );
-    assert_eq!(beside.len(), 10);
+    assert_eq!(beside.len(), 16);
     assert!(declaration
         .operations
         .iter()
@@ -91,7 +127,7 @@ fn the_declaration_keeps_three_sub_tables_and_a_shared_one_and_leaves_out_what_w
     ] {
         assert!(declaration.find_operation(name).is_none(), "{name}");
     }
-    assert_eq!(declaration.operation_names(false).len(), 15);
+    assert_eq!(declaration.operation_names(false).len(), 21);
 }
 
 #[test]
@@ -154,9 +190,14 @@ fn the_config_is_the_declaration_files_schema_and_a_member_that_waits_is_refused
             "/config/pinPermission: must NOT have fewer than 1 characters",
         ]
     );
+    // Streamed replies' and deliveries' members are a table's now; the
+    // deliveries a message makes are recorded, and their claims wait.
+    assert!(define(
+        &core(),
+        &review(json!({"composeTimeoutMs": 5000, "maxDrafts": 2, "deliverPermission": "notify", "maxAttempts": 3}))
+    )
+    .is_ok());
     for (config, member) in [
-        (json!({"composeTimeoutMs": 60000}), "composeTimeoutMs"),
-        (json!({"deliverPermission": "notify"}), "deliverPermission"),
         (json!({"anchorPermission": "anchor"}), "anchorPermission"),
         (json!({"attachments": {"maxBytes": 10}}), "attachments"),
     ] {
@@ -351,7 +392,8 @@ fn every_write_is_beside_the_row_and_its_conversations_row_holds_two_apart() {
     assert_eq!(
         host.read_fields("r1", USE, comments::MESSAGES),
         serde_json::from_value::<serde_json::Map<String, Value>>(json!({
-            "messages": 1, "lastMessageAt": support::START, "threads": {"open": 1, "resolved": 0}
+            "messages": 1, "lastMessageAt": support::START, "threads": {"open": 1, "resolved": 0},
+            "composing": []
         }))
         .unwrap()
     );

@@ -1,0 +1,2964 @@
+{
+  "components": {
+    "schemas": {
+      "BookingHoldsHoldName": {
+        "description": "A hold of Booking's Holds, by name.",
+        "enum": [
+          "slot"
+        ],
+        "type": "string"
+      },
+      "BookingHoldsListHoldsResult": {
+        "description": "What Booking's holds listHolds returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BookingHoldsListHoldsResultItems"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BookingHoldsListHoldsResultState"
+          },
+          "total": {
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
+      "BookingHoldsListHoldsResultItems": {
+        "properties": {
+          "check": {
+            "description": "For a pending item: the supply's checkHold answer now.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BookingHoldsListHoldsResultItemsCheck"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "currency": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "hold": {
+            "$ref": "#/components/schemas/BookingHoldsHoldName",
+            "description": "The hold's name in the config."
+          },
+          "id": {
+            "description": "The supply's id.",
+            "type": "string"
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "The units it asks, of counted supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The supply's schema.",
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When the time it asks starts, of timed supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BookingHoldsListHoldsResultItemsState"
+          },
+          "unitPrice": {
+            "description": "The unit price the supply held it at, in the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "id",
+          "item",
+          "schema",
+          "state"
+        ],
+        "type": "object"
+      },
+      "BookingHoldsListHoldsResultItemsCheck": {
+        "description": "For a pending item: the supply's checkHold answer now.",
+        "properties": {
+          "code": {
+            "description": "When it would not: the code holdFor would veto with.",
+            "nullable": true,
+            "type": "string"
+          },
+          "details": {
+            "description": "When it would not: the veto's details.",
+            "nullable": true
+          },
+          "fits": {
+            "description": "Whether holdFor would hold the item now.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "When it would not: why.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fits"
+        ],
+        "type": "object"
+      },
+      "BookingHoldsListHoldsResultItemsState": {
+        "enum": [
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "BookingHoldsListHoldsResultState": {
+        "enum": [
+          "none",
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "BookingHoldsRetakeHoldsResult": {
+        "description": "What Booking's holds retakeHolds returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BookingHoldsRetakeHoldsResultItems"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BookingHoldsRetakeHoldsResultState"
+          },
+          "total": {
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
+      "BookingHoldsRetakeHoldsResultItems": {
+        "properties": {
+          "currency": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "hold": {
+            "$ref": "#/components/schemas/BookingHoldsHoldName",
+            "description": "The hold's name in the config."
+          },
+          "id": {
+            "description": "The supply's id.",
+            "type": "string"
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "The units it asks, of counted supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The supply's schema.",
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When the time it asks starts, of timed supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BookingHoldsRetakeHoldsResultItemsState"
+          },
+          "unitPrice": {
+            "description": "The unit price the supply held it at, in the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "id",
+          "item",
+          "schema",
+          "state"
+        ],
+        "type": "object"
+      },
+      "BookingHoldsRetakeHoldsResultItemsState": {
+        "enum": [
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "BookingHoldsRetakeHoldsResultState": {
+        "enum": [
+          "none",
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "BookingStatusState": {
+        "description": "A state of Booking's status Workflow.",
+        "enum": [
+          "draft",
+          "held",
+          "booked",
+          "expired",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "BookingStatusTransitionInput": {
+        "description": "The parameters of Booking's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BookingStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/BookingStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "BookingStatusTransitionResult": {
+        "description": "What Booking's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/BookingStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/BookingStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarAddClosureInput": {
+        "description": "The parameters of Desk's calendar addClosure.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "force": {
+            "description": "Close over held time.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When it starts, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "reason",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarAddClosureResult": {
+        "description": "What Desk's calendar addClosure returns.",
+        "properties": {
+          "closure": {
+            "description": "The closure's id.",
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When it starts, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "closure",
+          "endMs",
+          "reason",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldInput": {
+        "description": "The parameters of Desk's calendar checkHold.",
+        "properties": {
+          "also": {
+            "description": "What the claim's other items still to hold ask of this instance, which the answer counts as taken.",
+            "items": {
+              "$ref": "#/components/schemas/DeskCalendarCheckHoldInputAlso"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/DeskCalendarCheckHoldInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/DeskCalendarCheckHoldInputInterval",
+            "description": "The time the item asks, from startMs to endMs, in epoch milliseconds."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "interval",
+          "item"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldInputAlso": {
+        "properties": {
+          "interval": {
+            "$ref": "#/components/schemas/DeskCalendarCheckHoldInputAlsoInterval",
+            "description": "The time the item asks, from startMs to endMs, in epoch milliseconds."
+          }
+        },
+        "required": [
+          "interval"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldInputAlsoInterval": {
+        "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "When it starts, no earlier than 1900-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldInputInterval": {
+        "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "When it starts, no earlier than 1900-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCheckHoldResult": {
+        "description": "What Desk's calendar checkHold returns.",
+        "properties": {
+          "code": {
+            "description": "When it would not: the code holdFor would veto with.",
+            "nullable": true,
+            "type": "string"
+          },
+          "details": {
+            "description": "When it would not: the veto's details.",
+            "nullable": true
+          },
+          "fits": {
+            "description": "Whether holdFor would hold the item now.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "When it would not: why.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fits"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCommitForInput": {
+        "description": "The parameters of Desk's calendar commitFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/DeskCalendarCommitForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/DeskCalendarCommitForInputInterval",
+            "description": "The time the item asks, from startMs to endMs, in epoch milliseconds."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "interval",
+          "item"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCommitForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCommitForInputInterval": {
+        "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "When it starts, no earlier than 1900-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCommitForResult": {
+        "description": "What Desk's calendar commitFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeskCalendarCommitForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarCommitForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "DeskCalendarFindAvailabilityInput": {
+        "description": "The parameters of Desk's calendar findAvailability.",
+        "properties": {
+          "durationMs": {
+            "description": "How long each slot is, in milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 60000,
+            "type": "integer"
+          },
+          "endMs": {
+            "description": "The window's end, after startMs and at most 31 days after it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "ids": {
+            "description": "Only these instances.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "limit": {
+            "description": "At most this many slots; 100 when absent.",
+            "format": "int64",
+            "maximum": 500,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "The window's start, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "where": {
+            "description": "Only the instances a list with this filter returns.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "durationMs",
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarFindAvailabilityResult": {
+        "description": "What Desk's calendar findAvailability returns.",
+        "properties": {
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/DeskCalendarFindAvailabilityResultSlots"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "Whether more slots fit than limit returned, more instances matched than were read, or the search stopped at its bound of work.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slots",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarFindAvailabilityResultSlots": {
+        "properties": {
+          "endMs": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "id": {
+            "description": "The instance.",
+            "type": "string"
+          },
+          "remaining": {
+            "description": "How many more holds the instance can take over the slot.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "id",
+          "remaining",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarHoldForInput": {
+        "description": "The parameters of Desk's calendar holdFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/DeskCalendarHoldForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/DeskCalendarHoldForInputInterval",
+            "description": "The time the item asks, from startMs to endMs, in epoch milliseconds."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "interval",
+          "item"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarHoldForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarHoldForInputInterval": {
+        "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "When it starts, no earlier than 1900-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarHoldForResult": {
+        "description": "What Desk's calendar holdFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeskCalendarHoldForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarHoldForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "DeskCalendarListBookingsInput": {
+        "description": "The parameters of Desk's calendar listBookings.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "endMs": {
+            "description": "The window's end, after startMs and at most 31 days after it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "At most this many; 50 when absent.",
+            "format": "int64",
+            "maximum": 500,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "The window's start, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarListBookingsResult": {
+        "description": "What Desk's calendar listBookings returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeskCalendarListBookingsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarListBookingsResultItems": {
+        "properties": {
+          "endMs": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "hold": {
+            "description": "The claim's hold.",
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/DeskCalendarListBookingsResultItemsHolder",
+            "description": "The claim."
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "retired": {
+            "description": "True for a deleted claim's committed time, which stays booked; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "startMs": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeskCalendarListBookingsResultItemsState"
+          }
+        },
+        "required": [
+          "endMs",
+          "hold",
+          "holder",
+          "item",
+          "startMs",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarListBookingsResultItemsHolder": {
+        "description": "The claim.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarListBookingsResultItemsState": {
+        "enum": [
+          "held",
+          "committed"
+        ],
+        "type": "string"
+      },
+      "DeskCalendarReleaseForInput": {
+        "description": "The parameters of Desk's calendar releaseFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/DeskCalendarReleaseForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/DeskCalendarReleaseForInputInterval",
+            "description": "The time the item asks, from startMs to endMs, in epoch milliseconds."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "interval",
+          "item"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarReleaseForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarReleaseForInputInterval": {
+        "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+        "properties": {
+          "endMs": {
+            "description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          },
+          "startMs": {
+            "description": "When it starts, no earlier than 1900-01-01T00:00Z.",
+            "format": "int64",
+            "maximum": 221845392000000,
+            "minimum": -2208988800000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarReleaseForResult": {
+        "description": "What Desk's calendar releaseFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeskCalendarReleaseForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarReleaseForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "DeskCalendarRemoveClosureInput": {
+        "description": "The parameters of Desk's calendar removeClosure.",
+        "properties": {
+          "closure": {
+            "description": "The closure's id.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "closure"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarRemoveClosureResult": {
+        "description": "What Desk's calendar removeClosure returns.",
+        "properties": {
+          "closure": {
+            "description": "The closure's id.",
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When it starts, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "closure",
+          "endMs",
+          "reason",
+          "startMs"
+        ],
+        "type": "object"
+      },
+      "DeskCalendarSetOpeningHoursInput": {
+        "description": "The parameters of Desk's calendar setOpeningHours.",
+        "properties": {
+          "hours": {
+            "description": "The instance's hours, or null for the config's.",
+            "nullable": true
+          },
+          "timeZone": {
+            "description": "The instance's time zone, or null for the config's.",
+            "nullable": true
+          }
+        },
+        "type": "object"
+      },
+      "DeskCalendarSetOpeningHoursResult": {
+        "description": "What Desk's calendar setOpeningHours returns.",
+        "properties": {
+          "hours": {
+            "description": "The instance's hours after the call."
+          },
+          "timeZone": {
+            "description": "The instance's time zone after the call.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hours",
+          "timeZone"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "description": "An error response in the Problem Details format (RFC 9457).",
+        "properties": {
+          "code": {
+            "description": "The stable error code, when the problem has one.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What went wrong with this request.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Structured facts about the refusal, such as the entity or the path it concerns. Only some refusals have it."
+          },
+          "errors": {
+            "description": "The fields or filters that failed validation. Only a validation or filter error has it."
+          },
+          "requestId": {
+            "description": "The ID of the request, when the problem has one.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "example": 400,
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short summary, usually the text of the HTTP status.",
+            "example": "Bad Request",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem type. It is `about:blank`: the status and `code` identify the problem.",
+            "example": "about:blank",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-calendar-api schema",
+    "title": "Fixture-Calendar-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/booking/{id}/holds/list-holds": {
+      "post": {
+        "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.",
+        "operationId": "BookingHoldsHoldsListHoldsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BookingHoldsListHoldsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Booking holds: list holds",
+        "tags": [
+          "booking-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "booking.holds.list-holds",
+          "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Booking holds: list holds",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/booking/{id}/holds/retake-holds": {
+      "post": {
+        "description": "Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.",
+        "operationId": "BookingHoldsHoldsRetakeHoldsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BookingHoldsRetakeHoldsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Booking holds: retake holds",
+        "tags": [
+          "booking-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "booking.holds.retake-holds",
+          "description": "Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Booking holds: retake holds",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/booking/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "BookingHoldsStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BookingStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Booking status: transition",
+        "tags": [
+          "booking-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "booking.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Booking status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/calendar/find-availability": {
+      "post": {
+        "description": "Finds free slots of a duration across the schema's instances over a window of at most 31 days, by holdFor's rules at the engine's clock: at most limit slots, soonest first, each with the instance and how many more holds it can take then. ids or where narrow the instances, as a list does.",
+        "operationId": "DeskCalendarCalendarFindAvailabilityHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarFindAvailabilityInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarFindAvailabilityResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: find availability",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.find-availability",
+          "description": "Finds free slots of a duration across the schema's instances over a window of at most 31 days, by holdFor's rules at the engine's clock: at most limit slots, soonest first, each with the instance and how many more holds it can take then. ids or where narrow the instances, as a list does.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Desk calendar: find availability",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/add-closure": {
+      "post": {
+        "description": "Closes the instance from startMs to endMs, with a reason. Needs the config's permission; refused over time a claim holds unless force is set, which needs the permission's .override. Forcing keeps the holds: the claims are moved by their own Workflow, by a rule or by hand.",
+        "operationId": "DeskCalendarCalendarAddClosureHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarAddClosureInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarAddClosureResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: add closure",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.add-closure",
+          "description": "Closes the instance from startMs to endMs, with a reason. Needs the config's permission; refused over time a claim holds unless force is set, which needs the permission's .override. Forcing keeps the holds: the claims are moved by their own Workflow, by a rule or by hand.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: add closure",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/check-hold": {
+      "post": {
+        "description": "Answers whether holdFor would hold what an item asks now, and when not, why.",
+        "operationId": "DeskCalendarCalendarCheckHoldHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarCheckHoldInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarCheckHoldResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: check hold",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.check-hold",
+          "description": "Answers whether holdFor would hold what an item asks now, and when not, why.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Desk calendar: check hold",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/commit-for": {
+      "post": {
+        "description": "Makes what an item of a claim holds the claim's for good, once the claim's item is committed.",
+        "operationId": "DeskCalendarCalendarCommitForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarCommitForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarCommitForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: commit for",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.commit-for",
+          "description": "Makes what an item of a claim holds the claim's for good, once the claim's item is committed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: commit for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/hold-for": {
+      "post": {
+        "description": "Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.",
+        "operationId": "DeskCalendarCalendarHoldForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarHoldForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarHoldForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: hold for",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.hold-for",
+          "description": "Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: hold for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/list-bookings": {
+      "post": {
+        "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time.",
+        "operationId": "DeskCalendarCalendarListBookingsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarListBookingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarListBookingsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: list bookings",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.list-bookings",
+          "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Desk calendar: list bookings",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/release-for": {
+      "post": {
+        "description": "Frees what an item of a claim holds, once the claim's item is released.",
+        "operationId": "DeskCalendarCalendarReleaseForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarReleaseForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarReleaseForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: release for",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.release-for",
+          "description": "Frees what an item of a claim holds, once the claim's item is released.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: release for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/remove-closure": {
+      "post": {
+        "description": "Removes a closure. Needs the config's permission.",
+        "operationId": "DeskCalendarCalendarRemoveClosureHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarRemoveClosureInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarRemoveClosureResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: remove closure",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.remove-closure",
+          "description": "Removes a closure. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: remove closure",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/desk/{id}/calendar/set-opening-hours": {
+      "post": {
+        "description": "Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission.",
+        "operationId": "DeskCalendarCalendarSetOpeningHoursHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskCalendarSetOpeningHoursInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DeskCalendarSetOpeningHoursResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Desk calendar: set opening hours",
+        "tags": [
+          "desk-calendar"
+        ],
+        "x-superschematic-docs": {
+          "capability": "desk.calendar.set-opening-hours",
+          "description": "Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Desk calendar: set opening hours",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

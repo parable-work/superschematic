@@ -23,7 +23,10 @@ StateRules, Approvals, Timers, Lease, Presence, Budget and Retries, then
 Seats, Reconcile, Schedules and Pool, which no engine implements (D104),
 the calendar Schedules reads its cron lines with, in a zone of the IANA
 database jiff bundles (`calendar`), and the contract Capacity, which
-Budget implements and Pool asks (`capacity`);
+Budget implements and Pool asks (`capacity`), then the later waves of
+D103's step 4, among them Stock, Holds, Calendar and Payments (D70), which
+meet through the contract Supply (`supply`): Stock and Calendar implement
+it, and Holds asks it and calls its operations on a supply's row;
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
@@ -179,8 +182,14 @@ with a fallback arm.
   Comments' writes) asks its own use's guard alone, writes no row and runs
   no `after_change`: its change set holds its use's sub-table rows and
   shared-table rows and no `rows` entry, so the row's version stays, and a
-  write of an own or owned field, another row, an event or a deadline is a
-  defect. It takes no precondition but its own use's: another use's entry
+  write of an own or owned field, another row, an event, or a deadline of
+  another use or another row is a defect: its own use's deadlines on its
+  row are its own state, which it arms and clears (a composing message's
+  idle time). A behavior that writes beside its row alone
+  (`Declaration::writes_beside_only`: every field it declares computed,
+  and every writing operation of a row beside it) has its deadlines fire
+  beside the row too: no version moves and no `after_change` runs. It
+  takes no precondition but its own use's: another use's entry
   is refused (`operation post of behavior Comments is beside the instance
   (D77) and asks only its own behavior's guard, so it takes no
   precondition for behavior Lease`). A host applies such a change set as
@@ -223,6 +232,40 @@ with a fallback arm.
     "write": "update", "at": 1001000,
     "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
     "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}
+  ```
+- `Signal { key, use_id, name, data }` (D77's primitive 2): a caller's
+  signal about a row, a message the host delivers to the event streams open
+  on it once the command commits and keeps nowhere (Comments' `typing`).
+  The core holds it to the use's declaration (`Declaration::signals`, each
+  `SignalDecl { name, access }`, access `read`, `write` or `operation`):
+  one it does not declare is `not_found`, one only its operations send
+  (`operation`, Comments' `draft`) is `forbidden`, data past
+  `MAX_SIGNAL_DATA_BYTES` (4096 of compact JSON) or that the behavior's
+  `check_signal` refuses is `invalid_argument`, and a row the host lacks is
+  `not_found`. It writes nothing; its change set's `signals` hold the one
+  sent. The access policy is the host's: `read` or `write` as the access
+  says, with the operation `signal:<name>`.
+
+  ```json
+  {"kind": "signal", "key": "n1", "useId": "Comments", "name": "typing", "data": {"thread": 1}}
+  ```
+- `NamespaceOperation { behavior, operation, params }` (D77's primitive 3):
+  an operation of the namespace as a whole, a declaration's `"scope":
+  "namespace"` (Comments' `inbox`), a command on no type: the spec the host
+  runs it on is not read (`TypeSpec::new("")`). It runs the behavior's
+  `check_namespace_params`, then its `namespace` hook with a `NamespaceCx`,
+  which has no config of its own: it reads the types that compose the
+  behavior and that the caller may read (`composing()`, the read
+  `Composing { behavior }`, answered `Answer::Specs`, which the host holds
+  to its access policy), each use's config as its type holds it, and their
+  rows through the read across a table. One that writes writes its
+  behavior's sub-table rows and shared rows of those types' rows alone; a
+  write of a type it does not compose, or through another behavior's use,
+  is a defect. A veto names the namespace (`behavior Comments vetoes
+  settleDeliveries of namespace default: ...`).
+
+  ```json
+  {"kind": "namespaceOperation", "behavior": "Comments", "operation": "inbox", "params": {"limit": 10}}
   ```
 - `Read { key }` (D104's step 4): a read of a row, which runs each use's
   `read_view` on the row as the host has it, in list order, through the
@@ -331,7 +374,7 @@ columns is the one rule a host learns of it, and the core applies every
 other (a behavior's predicate, its order, the contracts it asks) to the
 rows it is answered. A field that is no own column of the type, or a
 sub-table the layout does not give its use, is refused as `internal`, and
-so is the read under a lock on SQLite or D1. The enum is open: sub-table rows by a condition and counts
+so is the read under a lock on SQLite or D1. `Composing { behavior }` (`Answer::Specs(Vec<TypeSpec>)`, D77's primitive 3) is the live versions of the types that compose a behavior and that the command's caller may read, in name order: what an operation of the namespace runs over. A host asks its access policy whether the caller may read each type and leaves out one it may not; an adapter of one database, whose API authorizes, answers every type of its layout that composes it. The enum is open: sub-table rows by a condition and counts
 join it as behaviors need them, so a host matches it with a fallback arm,
 which refuses the command as `internal`. An answer of
 another kind than its request asks for is refused as `invalid_argument`.
@@ -415,6 +458,14 @@ host keys and gives to every entry that names it so):
 - `deadlines`: `DeadlineChange::Arm { row, use_id, name, at, payload }` or
   `Clear { row, use_id, name }`, in order; a later entry for the same row,
   use and name replaces an earlier one.
+- `signals` (D77's primitive 2, absent in JSON for none): `Signal { row,
+  use_id, name, data }`, what the command sends: a caller's `Signal`, or
+  an operation's `Cx::signal(name, data)` (a name its declaration lists,
+  data at most 4096 bytes, else a defect; a read-only operation sends
+  none). They are ephemeral: the host stores none, publishes each to the
+  streams open on its row after the commit, stamped with the caller's
+  subject and the command's time, and drops them with a rollback or a
+  refused call. An `unchanged()` is no refusal of one.
 - `result`: an operation's result; null for the rest.
 
 `RowWrite`, `SubRowChange` and `DeadlineChange` are open, so a host matches
@@ -857,9 +908,14 @@ For a `subRows` read it selects the use's sub-table rows of the row by the
 column that holds the row's key, the key's column and then the layout's
 fields, in key order (`COLLATE "C"` on Postgres), each converted as an
 owned column is. On a store whose locks are fenced (SQLite, D1) a
-`subRows` read made while the command holds a lock is refused as
-`internal` (`a read of sub-table rows under a lock has no check on SQLite
-or D1 yet (D103)`): the batch has no check of it yet.
+`subRows` read made while the command holds a lock is held to its row's
+version: a sub-table's rows change only with a write of their row, which
+moves the version, so the check of the row's own read under the lock
+holds them too (Stock's records and Calendar's bookings, D103's step 4).
+A run that read the sub-table under the lock and not its row is refused
+as `internal`, and so is one of a use whose behavior writes beside its
+rows (Comments'), or writes through an operation of the namespace, which
+moves no version.
 
 For a `linked` read it selects the type's rows whose own column for `field`
 holds the key (bound as that column binds a value, a UUID hyphenated), the
@@ -1012,7 +1068,12 @@ Derived and Provenance (D73 on D103's step 4), the hand-written
 `core-derived-provenance` to 75 steps, 26 checks and 49 commands, in 7
 scenarios, each settle a command without a row that writes the rows it
 reaches through applyDerived, an update attributed to Derived
-(`Cx::update_attributed`). Every transcript's `behaviors` lists the
+(`Cx::update_attributed`); and, of the commerce wave (D70 on D103's step
+4), `core-holds` (the engine's `commerce-holds.json`) to 71 steps,
+`core-holds-timers` to 14, the hand-written `core-commerce` to 66,
+`core-calendar` to 47, `core-bookings` to 83, `core-refunds` to 52 and
+`core-payments` to 73, each take of a claim a call of its supply's
+operation on the supply's row under the supply row's lock. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

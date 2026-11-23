@@ -15,7 +15,10 @@
 //! holds after the cursor, the `ready` event once it has caught up, then a
 //! read each [`Options::poll`] and a heartbeat comment each
 //! [`Options::heartbeat`] while nothing comes. A refusal of a read (the
-//! policy changed) ends it.
+//! policy changed) ends it. A stream opened with `signals=1` subscribes to
+//! the host's signals as it opens, before its first read, and once it has
+//! caught up sends what it holds of them at each pull, each `event: signal`
+//! with no `id:` (D77's primitive 2).
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -242,6 +245,9 @@ struct Pull {
     ready: bool,
     beat: Instant,
     done: bool,
+    /// The stream's signals, when it was opened with them; closed when the
+    /// stream goes.
+    signals: Option<crate::hub::Subscription>,
 }
 
 async fn stream<S: Store + Send + 'static>(
@@ -249,6 +255,22 @@ async fn stream<S: Store + Send + 'static>(
     query: EventsQuery,
     caller: Caller,
 ) -> Response {
+    // A stream with signals subscribes before its first read, so a reader
+    // that opens it and then reads misses no signal sent between.
+    let signals = if query.signals {
+        let hub = {
+            let dev = Arc::clone(&routes.dev);
+            tokio::task::spawn_blocking(move || {
+                let guard = dev.lock().unwrap_or_else(PoisonError::into_inner);
+                Arc::clone(guard.hub())
+            })
+            .await
+            .ok()
+        };
+        hub.map(|hub| crate::hub::Subscription::open(&hub, &caller, &query))
+    } else {
+        None
+    };
     let start = {
         let query = query.clone();
         blocking(&routes.dev, move |dev| {
@@ -265,6 +287,7 @@ async fn stream<S: Store + Send + 'static>(
         ready: false,
         beat: Instant::now(),
         done: false,
+        signals,
     };
     let frames = futures_util::stream::unfold(state, move |mut state| {
         let routes = routes.clone();
@@ -295,6 +318,20 @@ async fn stream<S: Store + Send + 'static>(
                     state.beat = Instant::now();
                     let frame = events::ready_frame(state.cursor);
                     return Some((Ok(Bytes::from(frame)), state));
+                }
+                // Caught up: the signals sent since the last pull.
+                let held = state
+                    .signals
+                    .as_ref()
+                    .map(crate::hub::Subscription::drain)
+                    .unwrap_or_default();
+                if !held.is_empty() {
+                    let text: String = held
+                        .iter()
+                        .map(superschematic_rules_handler::signals::frame)
+                        .collect();
+                    state.beat = Instant::now();
+                    return Some((Ok(Bytes::from(text)), state));
                 }
                 if state.beat.elapsed() >= routes.options.heartbeat {
                     state.beat = Instant::now();

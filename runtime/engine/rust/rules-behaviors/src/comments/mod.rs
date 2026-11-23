@@ -29,28 +29,34 @@
 //! row re-created with the key numbers its messages on from it and never
 //! reuses an id, as the engine's high-water marks did.
 //!
-//! The three fields, `messages`, `lastMessageAt` and `threads`, are
-//! computed at a read from the `messages` sub-table, as the engine's
-//! volatile fields were from its counts, so no write carries their moves.
+//! The four fields, `messages`, `lastMessageAt`, `threads` and
+//! `composing`, are computed at a read from the `messages` sub-table, as
+//! the engine's volatile fields were from its counts, so no write carries
+//! their moves; the fifth, `unread`, is the reader's, computed through the
+//! read the core runs as the caller (`read_view`).
+//!
+//! A message may be streamed as it is written, on the core's signals (D77's
+//! primitive 2, [`drafts`]): `begin`, `appendDraft`, which sends the
+//! `draft` signal the host delivers after the commit, `finish` and
+//! `interrupt`; a composing message's idle time is a deadline of its own,
+//! which fires beside the row. A caller sends `typing` and `viewing`, which
+//! the core holds to their data. Each caller has read markers and follows
+//! (`markRead`, `follow`, [`follows`]), and a message that comes to stand
+//! records a delivery for each subject that should hear of it.
 //!
 //! What the engine's Comments has that a table's leaves out, each a part
-//! the core cannot run yet or a later step's: streamed replies (`begin`,
-//! `appendDraft`, `finish`, `interrupt`, the `composing` field and the
-//! config's `composeTimeoutMs` and `maxDrafts`), which the engine built on
-//! signals (D77's primitive 2); read state and follows (`markRead`,
-//! `follow`, the `unread` field), the inbox and deliveries (the config's
-//! `deliverPermission`, `maxAttempts`, `retryBackoffMs` and
-//! `deliveryRetentionMs`), which it built on namespace operations (D77's
-//! primitive 3); `searchMessages`, a full-text search across a namespace;
-//! attachment blocks and the config's `attachments`; `moveAnchor` and
-//! `anchorPermission`; a message's `via` and `for`, which the core's
-//! caller does not carry; and the operation events the engine logged, a
-//! table's events reaching the app through its event queue (D104). The
-//! core declares none of those operations and fields, and refuses a config
-//! that sets one of those members, so a table's use waits for them in so
-//! many words. A ref block names a row of a table the database's layout
-//! holds, which the core reads; whether the caller may read it is the
-//! route's, as a table's access policy is (D103).
+//! the core cannot run yet or a later step's: the inbox, claiming and
+//! settling deliveries (the config's `deliverPermission`, `maxAttempts`,
+//! `retryBackoffMs` and `deliveryRetentionMs`) and `searchMessages`, which
+//! run across a namespace; attachment blocks and the config's
+//! `attachments`; `moveAnchor` and `anchorPermission`; a message's `via`,
+//! the calling service, which the core's caller does not carry; and the
+//! operation events the engine logged, a table's events reaching the app
+//! through its event queue (D104). The core declares none of those
+//! operations, and refuses a config that sets one of those members, so a
+//! table's use waits for them in so many words. A ref block names a row of
+//! a table the database's layout holds, which the core reads; whether the
+//! caller may read it is the route's, as a table's access policy is (D103).
 //!
 //! Comments is held to D103's test of a behavior and passes it: a
 //! conversation is state of its own (messages, their edits and reactions,
@@ -70,6 +76,9 @@
 //! the messages as they are.
 
 mod checks;
+pub mod drafts;
+pub mod follows;
+mod inbox;
 mod messages;
 mod params;
 mod reads;
@@ -80,6 +89,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     Behavior, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, Hook, Row, SchemaIssue, SubRow,
+    View,
 };
 
 use crate::declared;
@@ -102,6 +112,14 @@ pub const EDITS: &str = "edits";
 pub const REACTIONS: &str = "reactions";
 /// The shared table of each row's conversation's high-water marks.
 pub const CONVERSATIONS: &str = "conversations";
+/// The sub-table of the composing messages' draft chunks.
+pub const DRAFTS: &str = "drafts";
+/// The sub-table of each subject's conversation marker.
+pub const READS: &str = "reads";
+/// The sub-table of each subject's state on each thread.
+pub const FOLLOWS: &str = "follows";
+/// The sub-table of the deliveries.
+pub const DELIVERIES: &str = "deliveries";
 
 /// The computed field that counts the standing messages.
 pub const MESSAGES_FIELD: &str = "messages";
@@ -109,43 +127,43 @@ pub const MESSAGES_FIELD: &str = "messages";
 pub const LAST_MESSAGE_AT: &str = "lastMessageAt";
 /// The computed field of the threads, open and resolved.
 pub const THREADS: &str = "threads";
+/// The computed field of the subjects composing now.
+pub const COMPOSING_FIELD: &str = "composing";
+/// The reader's computed field: how many of others' top-level messages
+/// stand above its marker.
+pub const UNREAD_FIELD: &str = "unread";
 
 /// The longest body when the config gives no `maxBodyLength`.
 pub const DEFAULT_MAX_BODY_LENGTH: i64 = 40_000;
+/// How long a composing message's author may append nothing before it is
+/// interrupted, when the config gives no `composeTimeoutMs`.
+pub const DEFAULT_COMPOSE_TIMEOUT_MS: i64 = 60_000;
+/// The most composing messages a subject has at once on a row, when the
+/// config gives no `maxDrafts`.
+pub const DEFAULT_MAX_DRAFTS: i64 = 5;
 
 /// The operations a table's Comments leaves out of its declaration, each
 /// with why: the engine's alone until the core runs what they need. The
 /// build leaves them out of a table's operations too
 /// (`registry.TableLeavesOut`).
-pub const LEFT_OUT_OPERATIONS: [(&str, &str); 7] = [
-    ("begin", STREAMED),
-    ("appendDraft", STREAMED),
-    ("finish", STREAMED),
-    ("interrupt", STREAMED),
-    ("markRead", READ_STATE),
-    ("follow", READ_STATE),
+pub const LEFT_OUT_OPERATIONS: [(&str, &str); 4] = [
     ("moveAnchor", ANCHORS),
+    ("searchMessages", NAMESPACE_WIDE),
+    ("claimDeliveries", NAMESPACE_WIDE),
+    ("settleDeliveries", NAMESPACE_WIDE),
 ];
 
 /// The fields a table's Comments leaves out of its declaration, each with
-/// why.
-pub const LEFT_OUT_FIELDS: [(&str, &str); 2] = [("composing", STREAMED), ("unread", READ_STATE)];
+/// why: none since streamed replies and read state.
+pub const LEFT_OUT_FIELDS: [(&str, &str); 0] = [];
 
-/// Why a streamed reply waits.
-pub const STREAMED: &str = "a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)";
-/// Why read state waits.
-pub const READ_STATE: &str = "read state (markRead, follow, the unread field and a listing's readUpTo), the inbox and deliveries each waits for namespace operations on the core, which the engine read them across a namespace by (D77's primitive 3)";
+/// Why the claims of deliveries and the search wait.
+pub const NAMESPACE_WIDE: &str = "claiming and settling deliveries (claimDeliveries and settleDeliveries) and searchMessages run across a namespace, as the inbox does, and each waits for its port onto the core's operations of the namespace (D77's primitive 3)";
 /// Why moving a code block's anchor waits.
 pub const ANCHORS: &str = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)";
 
 /// The config members a table's Comments refuses, each with why it waits.
-const WAITING_MEMBERS: [(&str, &str); 9] = [
-    ("composeTimeoutMs", STREAMED),
-    ("maxDrafts", STREAMED),
-    ("deliverPermission", READ_STATE),
-    ("maxAttempts", READ_STATE),
-    ("retryBackoffMs", READ_STATE),
-    ("deliveryRetentionMs", READ_STATE),
+const WAITING_MEMBERS: [(&str, &str); 3] = [
     ("anchorPermission", ANCHORS),
     ("attachments", ATTACHMENTS),
     ("blocks", ATTACHMENTS),
@@ -173,6 +191,11 @@ pub struct CommentsConfig {
     pub pin_permission: Option<String>,
     /// Resolve and reopen another's thread; only its author when `None`.
     pub resolve_permission: Option<String>,
+    /// How long a composing message's author may append nothing before its
+    /// idle deadline interrupts it.
+    pub compose_timeout_ms: i64,
+    /// The most composing messages a subject has at once on a row.
+    pub max_drafts: i64,
 }
 
 impl Default for CommentsConfig {
@@ -184,6 +207,8 @@ impl Default for CommentsConfig {
             moderate_permission: None,
             pin_permission: None,
             resolve_permission: None,
+            compose_timeout_ms: DEFAULT_COMPOSE_TIMEOUT_MS,
+            max_drafts: DEFAULT_MAX_DRAFTS,
         }
     }
 }
@@ -231,6 +256,14 @@ impl CommentsConfig {
             moderate_permission: text("moderatePermission"),
             pin_permission: text("pinPermission"),
             resolve_permission: text("resolvePermission"),
+            compose_timeout_ms: raw
+                .get("composeTimeoutMs")
+                .and_then(checks::whole)
+                .unwrap_or(DEFAULT_COMPOSE_TIMEOUT_MS),
+            max_drafts: raw
+                .get("maxDrafts")
+                .and_then(checks::whole)
+                .unwrap_or(DEFAULT_MAX_DRAFTS),
         })
     }
 }
@@ -242,10 +275,9 @@ pub struct Comments;
 impl Behavior for Comments {
     type Config = CommentsConfig;
 
-    // The declaration file names the three fields, the sub-tables and the
-    // shared table; the operations and fields a table's Comments leaves
-    // out are left out of it, and so are the namespace's operations, which
-    // the core runs no command for.
+    // The declaration file names the five fields, the sub-tables, the
+    // shared table, the signals and the deadlines it arms; the operations
+    // and fields a table's Comments leaves out are left out of it.
     fn declaration(&self) -> Declaration {
         let mut declared = declared::declaration(DECLARATION);
         let operations: Vec<&str> = LEFT_OUT_OPERATIONS.iter().map(|(name, _)| *name).collect();
@@ -296,9 +328,21 @@ impl Behavior for Comments {
         params::params_issues(operation, params).into_issues()
     }
 
+    // typing and viewing, which a caller sends, held to their
+    // paramsSchemas.
+    fn check_signal(&self, _config: &CommentsConfig, name: &str, data: &Value) -> Vec<SchemaIssue> {
+        params::signal_issues(name, data).into_issues()
+    }
+
     fn operation(&self, cx: &Cx<'_, CommentsConfig>, name: &str, params: &Value) -> Hook<Value> {
         match name {
             writes::POST => writes::post(cx, params),
+            drafts::BEGIN => drafts::begin(cx, params),
+            drafts::APPEND_DRAFT => drafts::append_draft(cx, params),
+            drafts::FINISH => drafts::finish(cx, params),
+            drafts::INTERRUPT => drafts::interrupt(cx, params),
+            follows::MARK_READ => follows::mark_read(cx, params),
+            follows::FOLLOW => follows::follow(cx, params),
             writes::EDIT => writes::edit(cx, params),
             writes::DELETE_MESSAGE => writes::delete_message(cx, params),
             writes::PURGE => writes::purge(cx, params),
@@ -317,9 +361,54 @@ impl Behavior for Comments {
         }
     }
 
-    // The three fields, from the messages: how many stand, the latest
-    // standing one's postedAt, and the standing top-level messages, open
-    // and resolved.
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        match operation {
+            inbox::INBOX => inbox::params_issues(params),
+            _ => Vec::new(),
+        }
+    }
+
+    // The inbox, across every type that composes Comments and the caller
+    // may read (D77's primitive 3).
+    fn namespace(
+        &self,
+        cx: &superschematic_rules::NamespaceCx<'_>,
+        name: &str,
+        params: &Value,
+    ) -> Hook<Value> {
+        match name {
+            inbox::INBOX => inbox::inbox(cx, params),
+            _ => Err(cx.defect(format!(
+                "{name} is not an operation of Comments' namespace it runs"
+            ))),
+        }
+    }
+
+    // A composing message's idle deadline, the one kind Comments arms.
+    fn deadline(&self, cx: &Cx<'_, CommentsConfig>, name: &str, payload: &Value) -> Hook<()> {
+        if name.starts_with(drafts::IDLE) {
+            return drafts::idle(cx, name, payload);
+        }
+        Err(cx.defect(format!("deadline {name} is not one Comments arms")))
+    }
+
+    // The reader's unread: others' standing top-level messages above its
+    // conversation marker, 0 while it has none.
+    fn read_view(&self, view: &View<'_, CommentsConfig>) -> Hook<Map<String, Value>> {
+        let messages = messages::messages_of(view)?;
+        let subject = view.caller().subject.clone();
+        let marker = follows::conversation_marker(view, &subject)?;
+        let mut fields = Map::new();
+        fields.insert(
+            UNREAD_FIELD.into(),
+            Value::from(follows::unread_of(&messages, marker, &subject)),
+        );
+        Ok(fields)
+    }
+
+    // The four fields, from the messages: how many stand, the latest
+    // standing one's postedAt, the standing top-level messages, open and
+    // resolved, and the subjects composing.
     fn read_fields(
         &self,
         _config: &CommentsConfig,

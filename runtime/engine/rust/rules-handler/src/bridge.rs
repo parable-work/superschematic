@@ -74,7 +74,15 @@ pub struct Bridge<'a> {
     pub specs: &'a BTreeMap<String, TypeSpec>,
     pub hearing: &'a BTreeSet<String>,
     pub own: Option<&'a OwnFields<'a>>,
+    /// Whether the command's caller may read a type, which the types an
+    /// operation of the namespace runs over are held to (D77's primitive 3,
+    /// [`superschematic_rules::ReadRequest::Composing`]); every type when
+    /// `None`.
+    pub readable: Option<&'a Readable<'a>>,
 }
+
+/// Whether the command's caller may read a type, by its name.
+pub type Readable<'a> = dyn Fn(&str) -> bool + 'a;
 
 /// A stored row as the core reads it.
 pub fn core_row(row: &StoredRow) -> Row {
@@ -407,6 +415,17 @@ impl Bridge<'_> {
                     }
                 }
             }
+            // The live types that compose the behavior and that the caller
+            // may read, in name order (D77's primitive 3): the policy is
+            // asked of each, as the engine's readable() is.
+            ReadRequest::Composing { behavior } => Some(Answer::Specs(
+                self.specs
+                    .values()
+                    .filter(|spec| spec.uses.iter().any(|entry| entry.behavior == *behavior))
+                    .filter(|spec| self.readable.is_none_or(|readable| readable(&spec.name)))
+                    .cloned()
+                    .collect(),
+            )),
             other => {
                 return Err(Refusal::internal(format!(
                     "the development store answers no read of this kind: {}",

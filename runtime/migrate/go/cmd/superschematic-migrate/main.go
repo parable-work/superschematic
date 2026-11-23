@@ -2,7 +2,7 @@
 // `superschematic migrate plan` wrote, and reads and records the state of a
 // database's schema. runtime/migrate/README.md describes its commands.
 //
-//	superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
+//	superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--record record.json] [--database-url URL]
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
@@ -47,7 +47,8 @@ const (
 )
 
 const usage = `usage:
-  superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
+  superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--record record.json]
+      [--database-url URL]
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--diff] [--database-url URL]
   superschematic-migrate job --job job.json|gs://bucket/job.json
@@ -62,7 +63,9 @@ URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite;
 a d1://<account id>/<database id> URL selects a Cloudflare D1 database,
 reached with the API token in $CLOUDFLARE_API_TOKEN. SQLite and D1 run
 sqlite plans. apply --plan - reads the plan from stdin, as a runtime
-environment's publish hands it over.
+environment's publish hands it over. apply --record writes runtime mode's
+record of the publish (D117) in the transaction that finishes the plan, so
+a server never reads the plan's model before the layout it serves.
 
 adopt records a model as a database's state, which the database must
 already hold. With --diff it records nothing: it prints each way the
@@ -70,7 +73,9 @@ database differs from the model, one line each, and fails when there is
 one.
 
 job runs a job document: one phase of the plans it names, each on its
-database, then the read and write privileges of the roles it lists. Its
+database, then the read and write privileges of the roles it lists. A
+database with a runtime record writes it, and gives the roles their
+privileges, in the transaction that finishes its plan. Its
 databases are on one Cloud SQL instance, reached through the Cloud SQL Go
 connector with IAM database authentication, or each at its URL. A gs://
 document is read with application default credentials, or from
@@ -273,11 +278,15 @@ func apply(ctx context.Context, args []string, o options) error {
 	fs, urlFlag := flags("apply", o)
 	planPath := fs.String("plan", "", "the plan `file` superschematic migrate plan wrote, or - for stdin")
 	phase := fs.String("phase", "all", "the steps to run: expand, contract or all")
+	recordPath := fs.String("record", "", "runtime mode's record `file` (D117), written in the transaction that finishes the plan")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if *planPath == "" {
 		return usageErrorf("apply needs --plan")
+	}
+	if *recordPath == "-" {
+		return usageErrorf("--record takes a file; stdin is the plan's")
 	}
 	switch migrate.Phase(*phase) {
 	case migrate.Expand, migrate.Contract, migrate.All:
@@ -299,13 +308,46 @@ func apply(ctx context.Context, args []string, o options) error {
 	if dialect := migrate.URLDialect(url); dialect != plan.Dialect {
 		return fmt.Errorf("%s: the plan is for %s and the database URL selects %s", *planPath, plan.Dialect, dialect)
 	}
+	var record *migrate.Record
+	if *recordPath != "" {
+		if record, err = readRecord(*recordPath, plan); err != nil {
+			return err
+		}
+	}
 	driver, closeDriver, err := openDriver(ctx, url, o)
 	if err != nil {
 		return err
 	}
 	defer closeDriver()
-	_, err = o.runner(driver).Apply(ctx, plan, migrate.Phase(*phase))
+	runner := o.runner(driver)
+	if record != nil {
+		runner.Finish = func(ctx context.Context, conn migrate.Conn) error {
+			return migrate.WriteRecord(ctx, conn, plan.Dialect, record)
+		}
+	}
+	_, err = runner.Apply(ctx, plan, migrate.Phase(*phase))
 	return err
+}
+
+// readRecord reads runtime mode's record document at path and checks it
+// against the plan whose finish writes it.
+func readRecord(path string, plan *migrate.Plan) (*migrate.Record, error) {
+	doc, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseRecord(path, doc, plan)
+}
+
+func parseRecord(ref string, doc []byte, plan *migrate.Plan) (*migrate.Record, error) {
+	record, err := migrate.ReadRecord(doc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", ref, err)
+	}
+	if err := migrate.CheckRecord(plan, record); err != nil {
+		return nil, fmt.Errorf("%s: %w", ref, err)
+	}
+	return record, nil
 }
 
 func status(ctx context.Context, args []string, o options) error {

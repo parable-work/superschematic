@@ -224,6 +224,7 @@ impl Handler<'_> {
                 action,
                 schema,
                 operation,
+                behavior: None,
             },
             self.core().matcher(),
         )
@@ -372,7 +373,8 @@ impl Handler<'_> {
                 }
             }
             for (use_id, behavior, operation) in &declared_ops {
-                let action = if operation.writes {
+                // One that writes the caller's own state alone asks read (D77).
+                let action = if operation.writes && !operation.asks_read {
                     Action::Write
                 } else {
                     Action::Read

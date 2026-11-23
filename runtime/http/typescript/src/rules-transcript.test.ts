@@ -140,9 +140,22 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-numbering', floor: 104 },
   { file: 'core-lease-numbering', floor: 14 },
   { file: 'core-revisions', floor: 112 },
-  { file: 'core-comments', floor: 238 },
+  { file: 'core-comments', floor: 361 },
   { file: 'core-comments-beside', floor: 25 },
   { file: 'core-derived-provenance', floor: 75 },
+  // D70 on the core (D103's step 4): Stock and Holds through Supply, each
+  // take a supply's lock.
+  { file: 'core-holds', floor: 71 },
+  { file: 'core-holds-timers', floor: 14 },
+  { file: 'core-commerce', floor: 66 },
+  // Calendar's time held through a booking's Holds, under the desk's lock,
+  // and findAvailability over the desks.
+  { file: 'core-bookings', floor: 83 },
+  { file: 'core-calendar', floor: 47 },
+  // Payments (D70 on the core): the refund pair, each a call on the other
+  // row, and the hand-written cases.
+  { file: 'core-refunds', floor: 52 },
+  { file: 'core-payments', floor: 73 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

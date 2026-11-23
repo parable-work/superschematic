@@ -345,16 +345,21 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 const REVISIONS_FLOOR: usize = 112;
 
 /// The steps `core-comments.transcript.json` holds, of
-/// `core-comments.json`'s 502 (D103's step 4): 35 define and publish checks
-/// and 203 creates, deletes and invokes, in its 24 scenarios: each
-/// message, edit and reaction a row of a sub-table of the use, each
+/// `core-comments.json`'s 502 (D103's step 4): 45 define and publish checks
+/// and 316 creates, deletes, invokes and deadlines, in its 24 scenarios:
+/// each message, edit and reaction a row of a sub-table of the use, each
 /// conversation's high-water marks a row of its shared table, and each
-/// write beside the row, so the row's version stays. The 264 left out are
-/// what the replay skips (streamed replies, read state, deliveries, search,
-/// anchors and attachments, the scenarios with an access policy, the reads
-/// of the event log that hold a write beside the row), opens and reads. An
-/// adapter's replay holds its own count to this one.
-const COMMENTS_FLOOR: usize = 238;
+/// write beside the row, so the row's version stays; streamed replies, each
+/// composing message's draft a sub-table of chunks and its idle time a
+/// deadline whose fire is beside the row too (D77's primitive 2, 2 deadline
+/// commands); read state, each reader's marker, follow and delivery a row
+/// of a sub-table; and each message, edit, reaction and resolve recording
+/// the subject its caller acted for. The 141 left out are what the replay
+/// skips (from the first claim of deliveries or read of the inbox on,
+/// search, anchors and attachments, the scenarios with an access policy,
+/// the reads of the event log that hold a write beside the row), opens and
+/// reads. An adapter's replay holds its own count to this one.
+const COMMENTS_FLOOR: usize = 361;
 
 /// The steps `core-comments-beside.transcript.json` holds, of the
 /// hand-written `core-comments-beside.json`'s 29 (D103's step 4): 6 define
@@ -376,6 +381,37 @@ const COMMENTS_BESIDE_FLOOR: usize = 25;
 /// scenarios; none is a repeat. The 13 left out are the opens and the
 /// reads of rows. An adapter's replay holds its own count to this one.
 const DERIVED_PROVENANCE_FLOOR: usize = 75;
+
+/// The steps `core-holds.transcript.json` holds, of the engine's
+/// `commerce-holds.json` (D70 on the core, D103's step 4).
+const HOLDS_FLOOR: usize = 71;
+
+/// The steps `core-holds-timers.transcript.json` holds, of the engine's
+/// `commerce-holds-timers.json` (D70 on the core, D103's step 4).
+const HOLDS_TIMERS_FLOOR: usize = 14;
+
+/// The steps `core-commerce.transcript.json` holds, of the hand-written
+/// `core-commerce.json` (D70 on the core, D103's step 4).
+const COMMERCE_FLOOR: usize = 66;
+
+/// The steps `core-bookings.transcript.json` holds, of the engine's
+/// `commerce-calendar.json` (D70 on the core, D103's step 4): Calendar's
+/// time held through a booking's Holds.
+const BOOKINGS_FLOOR: usize = 83;
+
+/// The steps `core-calendar.transcript.json` holds, of the hand-written
+/// `core-calendar.json` (D70 on the core, D103's step 4).
+const CALENDAR_FLOOR: usize = 47;
+
+/// The steps `core-refunds.transcript.json` holds, of the engine's
+/// `commerce-payments-refunds.json` (D70 on the core, D103's step 4): a
+/// refund row's refundFor and settleRefundFor, each a call on the other
+/// row, beside Approvals and Reactions.
+const REFUNDS_FLOOR: usize = 52;
+
+/// The steps `core-payments.transcript.json` holds, of the hand-written
+/// `core-payments.json` (D70 on the core, D103's step 4).
+const PAYMENTS_FLOOR: usize = 73;
 
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
@@ -406,6 +442,14 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ),
         ("core-revisions", "core-revisions", REVISIONS_FLOOR),
         ("core-comments", "core-comments", COMMENTS_FLOOR),
+        ("core-holds", "commerce-holds", HOLDS_FLOOR),
+        (
+            "core-holds-timers",
+            "commerce-holds-timers",
+            HOLDS_TIMERS_FLOOR,
+        ),
+        ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
+        ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -459,6 +503,9 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-pool", POOL_FLOOR, true),
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
+        ("core-commerce", COMMERCE_FLOOR, false),
+        ("core-calendar", CALENDAR_FLOOR, false),
+        ("core-payments", PAYMENTS_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

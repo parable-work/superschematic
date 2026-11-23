@@ -1,6 +1,6 @@
 ---
 title: Selling and booking with the engine
-description: Sell counted stock and book time on the engine with Stock, Calendar, Holds and Payments. The supply contract, totals and currency, payments through a provider adapter outside the engine (webhooks, a settle job, idempotency, no card data), refunds two staff sign off with Approvals, expiry with Timers, the MCP tools' policy for operations that move money, and what one namespace's writer allows.
+description: Sell counted stock and book time with Stock, Calendar, Holds and Payments, on the engine or on a table through the behaviors' core. The supply contract, totals and currency, payments through a provider adapter outside the engine (webhooks, a settle job, idempotency, no card data), refunds two staff sign off with Approvals, expiry with Timers, the MCP tools' policy for operations that move money, and what one namespace's writer allows.
 sidebar:
   order: 8.5
 ---
@@ -23,9 +23,11 @@ They build on [the core's behaviors](/superschematic/guides/engine-behaviors/):
 numbers orders and refunds, `StateRules` freezes a placed order, and a
 `Reactions` rule places a checkout once it is paid. The acme shop sells
 and books through these behaviors ([acme-shop](#the-acme-shop)). The
-four commerce behaviors compose on engine types. A table numbers its rows
-with a `Numbering` field instead, `number: Numbering<{ format:
-"ORD-{yyyy}-{seq:5}"; reset: "yearly" }>`, counted in a table of its own
+four commerce behaviors compose on engine types and, through the
+behaviors' core, on tables that stay tables ([On a table](#on-a-table)).
+A table numbers its rows with a `Numbering` field instead, `number:
+Numbering<{ format: "ORD-{yyyy}-{seq:5}"; reset: "yearly" }>`, counted in
+a table of its own
 ([A row's number and its history](/superschematic/guides/database-tables/#a-rows-number-and-its-history)).
 
 This page assumes you know [the engine](/superschematic/guides/engine/)
@@ -71,6 +73,48 @@ holds `payments.record`. A rules policy names that service, the staff
 roles, and the runner, `<db>-engine-runner`, which moves claims for
 `Timers` and `Reactions`: the first rule that matches decides, so the
 runner's rule comes before the staff rules.
+
+## On a table
+
+A DB table implements the four behaviors with `implements`, as it does
+any behavior of the core (D103): `implements Stock<Inventory, { ... }>`,
+`implements Holds<Checkout, { ... }>` beside a `status: Workflow<{ ...
+}>` field, `implements Calendar<Desk, { ... }>` and `implements
+Payments<Order, { ... }>`. The configs are the ones this page describes.
+The rows stay the table's: each behavior's state is columns of the
+table and sub-tables beside it, and its operations are the API's routes,
+SDK methods and MCP tools
+([Units and time a claim holds, and what it owes](/superschematic/guides/database-tables/#units-and-time-a-claim-holds-and-what-it-owes)).
+
+On a table the supply contract is the core's contract `Supply`. `Stock`
+and `Calendar` implement it, and a behavior of your own may: its
+declaration lists `{ "name": "Supply", "role": "implements" }` among its
+contracts, it serves `holdFor`, `commitFor` and `releaseFor` (and
+`returnFor` for counted supply) as operations of its rows, and it
+answers the query `checkHold` from its row and sub-tables. `Holds` asks
+it, finding the supply's use by its declaration, and calls the
+operations on the supply's row. A `link` hold reads a to-one relation of
+the claim's table, `wrap: Nullable<Relation<Inventory>>`, in place of a
+Links link.
+
+What differs from an engine type:
+
+- A take locks each supply row it reads, not the namespace. Two claims
+  of different supplies take no lock in common.
+- `Holds` reads the status of the table's one Workflow, or of the one
+  its config's `status` names.
+- A Payments event applies once per table and provider, not once per
+  namespace.
+- `Stock.low` is computed at a read, so a list of a table does not
+  filter on it yet.
+- A refund's `refundFor` and the refunded row's `settleRefundFor` are
+  calls between the two rows, through the core, in one transaction.
+
+The build checks what a type's own check cannot see: a hold names a
+table of the database that implements `Supply` and asks it what it
+holds, an amount from `Holds` lists `Holds` before `Payments`, and a
+refund's `refundOf` is a required to-one relation to a table that
+implements `Payments` with the same `record.permission`.
 
 ## A shop's types
 
@@ -504,6 +548,18 @@ database closer to the servers is faster. A
 move that waits in the queue past a server's 30-second engine route
 timeout answers 504 `gateway_timeout`, which a client asks again. Give
 each shop a namespace of its own.
+
+On a table, a take locks the supply rows it reads instead, in key
+order: a transaction's advisory lock on Postgres, and on SQLite and D1 a
+check in the unit that writes that each row read under the lock is
+still at its version. Each write of a supply's row is held to its
+version too, so a claim that lost the race runs again over the winner's
+hold and is `unavailable`. Writes of other supplies do not wait.
+`TestCommerceTablesEndToEnd` and `TestCalendarTablesEndToEnd` move two
+claims for the last unit, and two bookings of one slot, at once through
+the generated repository on Postgres: one holds. Postgres has no
+exclusion constraint for `Calendar`: one would hold a capacity of 1
+alone, with no buffers.
 
 ## Personal data
 

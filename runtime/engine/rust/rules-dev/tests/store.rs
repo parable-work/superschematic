@@ -415,6 +415,7 @@ fn a_unit_whose_fence_does_not_hold_applies_nothing() {
     let mut store = SqliteStore::memory(&declarations).expect("SQLite opens");
     store.begin().expect("begun");
     let insert = Unit {
+        signals: Vec::new(),
         writes: vec![StoreWrite::Insert {
             type_name: "Note".into(),
             id: "n1".into(),
@@ -426,6 +427,7 @@ fn a_unit_whose_fence_does_not_hold_applies_nothing() {
     let again = store.apply(&insert).expect_err("a second insert of the id");
     assert_eq!(again.code, Code::Conflict);
     let stale = Unit {
+        signals: Vec::new(),
         writes: vec![
             StoreWrite::Arm {
                 type_name: "Note".into(),
@@ -486,6 +488,7 @@ fn shared_rows_are_held_to_their_version<S: Store>(store: &mut S) {
     store.begin().expect("begun");
     assert_eq!(held(store), Value::Null);
     let insert = Unit {
+        signals: Vec::new(),
         writes: vec![write(
             json!({"kind": "insert", "values": {"last": 1, "counting": null}}),
         )],
@@ -497,6 +500,7 @@ fn shared_rows_are_held_to_their_version<S: Store>(store: &mut S) {
     );
     assert!(!store.apply(&insert).expect("a racing first insert moves"));
     let update = |expected: i64, last: i64| Unit {
+        signals: Vec::new(),
         writes: vec![write(
             json!({"kind": "update", "expectedVersion": expected, "values": {"last": last}}),
         )],
@@ -504,6 +508,7 @@ fn shared_rows_are_held_to_their_version<S: Store>(store: &mut S) {
     assert!(store.apply(&update(1, 2)).expect("applied"));
     // A unit whose shared row moved applies none of its writes.
     let stale = Unit {
+        signals: Vec::new(),
         writes: [
             update(1, 9).writes,
             vec![StoreWrite::Insert {
@@ -531,6 +536,7 @@ fn shared_rows_are_held_to_their_version<S: Store>(store: &mut S) {
         Value::Null
     );
     let dropped = Unit {
+        signals: Vec::new(),
         writes: vec![StoreWrite::DropUse {
             type_name: "Invoice".into(),
             behavior: "Numbering".into(),

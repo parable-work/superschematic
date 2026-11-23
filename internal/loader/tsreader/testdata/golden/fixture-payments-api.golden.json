@@ -1,0 +1,39 @@
+{
+  "name": "fixture-payments-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-payments-db",
+      "types": [
+        "Order",
+        "Refund"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-payments-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "OrderPayments",
+      "comment": "An order's payments for any signed-in caller (D70, D103's step 4):\nopenPayment, capturePayment, voidPayment and refundPayment under\npayments, the adapter's recordPaymentEvent and listPaymentActions, the\nsecond on the table as a whole, which need payments.record, and\nrefundFor, which takes a call only from a refund row whose relation\npoints at the order.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Order"
+      },
+      "auth": true
+    },
+    {
+      "name": "RefundPayments",
+      "comment": "A refund's settleRefundFor, which the adapter's event on the order it\nrefunds calls, beside the status Workflow's transition, whose move into\napproved asks for the refund.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Refund"
+      },
+      "auth": true
+    }
+  ]
+}

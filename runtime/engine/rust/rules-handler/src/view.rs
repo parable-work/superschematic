@@ -78,6 +78,7 @@ impl Handler<'_> {
             specs: &live.specs,
             hearing: &live.hearing,
             own: None,
+            readable: None,
         };
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {

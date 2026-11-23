@@ -1,8 +1,10 @@
 //! The axum binding (the `server` feature, D117): the routes in process
 //! through the router, a caller from development's headers or none (401),
 //! the event stream's frames from a cursor, its `ready` event and its
-//! heartbeat, and the MCP endpoint's `initialize`, `tools/list` and
-//! `tools/call` through the HTTP runtime's transport.
+//! heartbeat, the signals a stream opened with them sends beside the events
+//! (D77's primitive 2: a streamed reply's draft and a caller's typing), and
+//! the MCP endpoint's `initialize`, `tools/list` and `tools/call` through
+//! the HTTP runtime's transport.
 
 #![cfg(feature = "server")]
 
@@ -138,6 +140,7 @@ fn event(dev: &Arc<Mutex<Dev>>, id: &str) {
     store.begin().expect("begun");
     store
         .apply(&Unit {
+            signals: Vec::new(),
             writes: vec![StoreWrite::Event {
                 type_name: "Task".into(),
                 id: id.into(),
@@ -194,6 +197,162 @@ async fn the_event_stream_sends_from_its_cursor_then_ready_then_what_comes() {
     let third = next(&mut frames).await;
     assert!(third.starts_with("id: 3\n"), "{third}");
     assert_eq!(next(&mut frames).await, ": heartbeat\n\n");
+}
+
+// note is a type whose rows hold a conversation (Comments, D77).
+fn note() -> Value {
+    json!({"name": "Note",
+        "fields": [{"name": "title", "typeRef": {"name": "string"}, "required": true}],
+        "behaviors": [{"name": "Comments", "config": {"composeTimeoutMs": 5000}}]})
+}
+
+// frame_data is a frame's event name and its data as JSON.
+fn frame_data(frame: &str) -> (Option<&str>, Value) {
+    let event = frame.lines().find_map(|line| line.strip_prefix("event: "));
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .map(|text| serde_json::from_str(text).expect("JSON"))
+        .unwrap_or(Value::Null);
+    (event, data)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stream_opened_with_signals_sends_a_drafts_chunks_and_a_callers_typing() {
+    let (app, _) = app();
+    for (path, body) in [
+        ("/namespaces/default/schemas", Some(note())),
+        ("/namespaces/default/schemas/Note/publish", None),
+        (
+            "/namespaces/default/schemas/Note/instances",
+            Some(json!({"id": "n1", "data": {"title": "Plan"}})),
+        ),
+    ] {
+        let (status, answer, _) = send(&app, "POST", path, &[], body).await;
+        assert!(status < 300, "{path}: {answer}");
+    }
+    // A reader opens the stream with signals before it reads.
+    let request = http::Request::builder()
+        .uri("/namespaces/default/events?after=head&signals=1&schema=Note")
+        .header("accept", "text/event-stream")
+        .header(SUBJECT_HEADER, "carol")
+        .body(Body::empty())
+        .expect("a request");
+    let response = app.clone().oneshot(request).await.expect("an answer");
+    assert_eq!(response.status(), 200);
+    let mut frames = response.into_body().into_data_stream();
+    assert!(next(&mut frames).await.contains("event: ready"));
+
+    let bob = [(SUBJECT_HEADER, "bob")];
+    let operation =
+        |name: &str| format!("/namespaces/default/schemas/Note/instances/n1/operations/{name}");
+    let (status, begun, _) = send(&app, "POST", &operation("begin"), &bob, Some(json!({}))).await;
+    assert_eq!(status, 200, "{begun}");
+    assert_eq!(begun["data"]["state"], "composing");
+    let (status, appended, _) = send(
+        &app,
+        "POST",
+        &operation("appendDraft"),
+        &bob,
+        Some(json!({"message": 1, "text": "Half a th"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{appended}");
+    assert_eq!(
+        appended["data"],
+        json!({"message": 1, "offset": 0, "length": 9})
+    );
+    let chunk = next(&mut frames).await;
+    let (event, data) = frame_data(&chunk);
+    assert_eq!(event, Some("signal"), "{chunk}");
+    assert!(!chunk.contains("id: "), "a signal has no id: {chunk}");
+    assert_eq!(
+        data,
+        json!({"namespace": "default", "schema": "Note", "instanceId": "n1", "behavior": "Comments",
+            "name": "draft", "data": {"message": 1, "offset": 0, "text": "Half a th"},
+            "from": "bob", "at": 1_767_225_600_000_i64})
+    );
+
+    // A caller's typing reaches the stream; a draft is no caller's to send,
+    // and data its schema refuses is refused.
+    let signal = |name: &str| {
+        format!("/namespaces/default/schemas/Note/instances/n1/signals/Comments/{name}")
+    };
+    let (status, _, _) = send(
+        &app,
+        "POST",
+        &signal("typing"),
+        &bob,
+        Some(json!({"thread": 1})),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let typed = next(&mut frames).await;
+    let (event, data) = frame_data(&typed);
+    assert_eq!(event, Some("signal"));
+    assert_eq!(
+        (
+            data["name"].as_str(),
+            data["data"].clone(),
+            data["from"].as_str()
+        ),
+        (Some("typing"), json!({"thread": 1}), Some("bob"))
+    );
+    let (status, refused, _) = send(&app, "POST", &signal("draft"), &bob, Some(json!({}))).await;
+    assert_eq!(
+        (status, refused["code"].as_str()),
+        (403, Some("forbidden")),
+        "{refused}"
+    );
+    let (status, refused, _) = send(
+        &app,
+        "POST",
+        &signal("viewing"),
+        &bob,
+        Some(json!({"x": 1})),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["code"].as_str()),
+        (400, Some("invalid_argument")),
+        "{refused}"
+    );
+    let (status, missing, _) = send(
+        &app,
+        "POST",
+        "/namespaces/default/schemas/Note/instances/n9/signals/Comments/typing",
+        &bob,
+        None,
+    )
+    .await;
+    assert_eq!(status, 404, "{missing}");
+
+    // The draft finishes into a posted message, whose body the draft is.
+    let (status, finished, _) = send(
+        &app,
+        "POST",
+        &operation("finish"),
+        &bob,
+        Some(json!({"message": 1})),
+    )
+    .await;
+    assert_eq!(status, 200, "{finished}");
+    assert_eq!(
+        (
+            finished["data"]["state"].as_str(),
+            finished["data"]["body"].as_str()
+        ),
+        (Some("posted"), Some("Half a th"))
+    );
+    let (_, read, _) = send(
+        &app,
+        "GET",
+        "/namespaces/default/schemas/Note/instances/n1",
+        &[(SUBJECT_HEADER, "carol")],
+        None,
+    )
+    .await;
+    assert_eq!(read["data"]["commentsMessages"], 1, "{read}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

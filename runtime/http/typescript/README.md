@@ -201,7 +201,9 @@ Its entry points:
   NULL` for a null, a UUID field's value that is no UUID matching none, a
   page at a time in key order, each row with its rows of the sub-tables
   `tables` names, read by one query per sub-table per page), refused under
-  a lock on SQLite and D1 as the linked read is; `runTableOperation` runs
+  a lock on SQLite and D1 as the linked read is; its `composing` read (D77's
+  primitive 3) from the layout, the types that compose a behavior in name
+  order, none left out since a table's API authorizes; `runTableOperation` runs
   an operation of a table as a whole (D104), a command without a row,
   through the same host loop, each row its calls write held to its
   version, and one that writes no row applying nothing; and it passes a command's

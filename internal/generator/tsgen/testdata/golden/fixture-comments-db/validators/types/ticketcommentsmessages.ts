@@ -80,6 +80,8 @@ export function validateTicketCommentsMessages(value: TicketCommentsMessages | n
 
   expectString(errors, "author", value.author);
 
+  expectString(errors, "forSubject", value.forSubject);
+
   expectString(errors, "state", value.state);
 
   expectString(errors, "body", value.body);
@@ -139,10 +141,26 @@ export function validateTicketCommentsMessages(value: TicketCommentsMessages | n
 
   expectString(errors, "resolvedBy", value.resolvedBy);
 
+  expectString(errors, "resolvedFor", value.resolvedFor);
+
   if (value.resolvedAt !== null && value.resolvedAt !== undefined) {
     const [valid, fieldErrors] = validateTemporalDateTime(value.resolvedAt);
     if (!valid && fieldErrors) {
       setFieldErrors(errors, "resolvedAt", fieldErrors);
+    }
+  }
+
+  if (value.draftLength !== null && value.draftLength !== undefined) {
+    const [valid, fieldErrors] = validateGenericInt64(value.draftLength);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "draftLength", fieldErrors);
+    }
+  }
+
+  if (value.lastAppendAt !== null && value.lastAppendAt !== undefined) {
+    const [valid, fieldErrors] = validateTemporalDateTime(value.lastAppendAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "lastAppendAt", fieldErrors);
     }
   }
 
@@ -168,6 +186,7 @@ const TicketCommentsMessagesKnownFields = new Set<string>([
   'thread',
   'quotes',
   'author',
+  'forSubject',
   'state',
   'body',
   'blocks',
@@ -180,7 +199,10 @@ const TicketCommentsMessagesKnownFields = new Set<string>([
   'pinned',
   'clientId',
   'resolvedBy',
+  'resolvedFor',
   'resolvedAt',
+  'draftLength',
+  'lastAppendAt',
 ]);
 
 type TicketCommentsMessagesTextParser = (value: string) => unknown;
@@ -290,6 +312,10 @@ export function parseTicketCommentsMessagesFromJSON(input: unknown): TicketComme
     resolvedAt: obj.resolvedAt != null
       ? (parseTemporalDateTimeFromLib(obj.resolvedAt as string) as JSDate)
       : (obj.resolvedAt as unknown as JSDate | null),
+
+    lastAppendAt: obj.lastAppendAt != null
+      ? (parseTemporalDateTimeFromLib(obj.lastAppendAt as string) as JSDate)
+      : (obj.lastAppendAt as unknown as JSDate | null),
 
   };
 }

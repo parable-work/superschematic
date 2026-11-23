@@ -30,7 +30,10 @@
 //! its target's delete cascades, sets null or is restricted as the foreign
 //! key sqlgen writes, and a list's filter, sort and page answer as the
 //! ORMs' do ([`filter`]); every one is answered from every row of the type
-//! the store reads, which nothing tunes for volume.
+//! the store reads, which nothing tunes for volume. A store over each
+//! type's own table (runtime mode) answers them in queries of its own
+//! instead, when the handler reads by [`Reading::Queries`]
+//! ([`Handler::with_reading`]), with the same answers.
 //!
 //! ```
 //! use serde_json::json;
@@ -66,6 +69,7 @@ pub mod http;
 mod memory;
 mod publish;
 mod serve;
+pub mod signals;
 pub mod store;
 pub mod tools;
 mod validate;
@@ -80,9 +84,13 @@ pub use handler::{
     Context, Done, Handler, HandlerStep, Request, DEFAULT_LIMIT, MAX_LIMIT, VETOED_RETRY_MS,
 };
 pub use memory::MemoryStore;
-pub use serve::{run_due, serve, Ran as RanDue, MAX_ATTEMPTS, MAX_READ_ROUNDS, MAX_RUNS};
+pub use serve::{
+    run_due, serve, serve_publishing, Published, Ran as RanDue, MAX_ATTEMPTS, MAX_READ_ROUNDS,
+    MAX_RUNS,
+};
+pub use signals::HostSignal;
 pub use store::{
-    Armed, Draft, DueDeadline, HeldSubRow, QueuedChange, QueuedEvent, Store, StoreAnswer,
+    Armed, Draft, DueDeadline, HeldSubRow, QueuedChange, QueuedEvent, Reading, Store, StoreAnswer,
     StoreAnswers, StoreRead, StoreWrite, StoredRow, Unit, Version,
 };
 pub use validate::{own_fields, stored_fields, Mode};

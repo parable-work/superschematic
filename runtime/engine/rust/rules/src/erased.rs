@@ -13,6 +13,7 @@ use crate::behavior::{
     Hook, Listen, ValidationRequest,
 };
 use crate::context::{ConfigCx, Cx, View};
+use crate::namespace::NamespaceCx;
 use crate::reads::{Row, SubRow};
 use crate::refusal::{SchemaIssue, ValidationIssue, Veto};
 use crate::run::{Frame, Run};
@@ -80,6 +81,14 @@ pub(crate) trait Erased: Send + Sync {
     fn listens(&self, config: &(dyn Any + Send + Sync)) -> Option<Vec<Listen>>;
     fn heard(&self, scope: Scope<'_>, heard: &Heard<'_>) -> Hook<()>;
     fn read_view(&self, scope: Scope<'_>) -> Hook<Map<String, Value>>;
+    fn check_signal(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        name: &str,
+        data: &Value,
+    ) -> Option<Vec<SchemaIssue>>;
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue>;
+    fn namespace(&self, cx: &NamespaceCx<'_>, name: &str, params: &Value) -> Hook<Value>;
     fn read_fields(
         &self,
         config: &(dyn Any + Send + Sync),
@@ -252,6 +261,24 @@ impl<B: Behavior> Erased for Typed<B> {
 
     fn read_view(&self, scope: Scope<'_>) -> Hook<Map<String, Value>> {
         self.0.read_view(&self.view(scope)?)
+    }
+
+    fn check_signal(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        name: &str,
+        data: &Value,
+    ) -> Option<Vec<SchemaIssue>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.check_signal(config, name, data))
+    }
+
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        self.0.check_namespace_params(operation, params)
+    }
+
+    fn namespace(&self, cx: &NamespaceCx<'_>, name: &str, params: &Value) -> Hook<Value> {
+        self.0.namespace(cx, name, params)
     }
 
     fn read_fields(

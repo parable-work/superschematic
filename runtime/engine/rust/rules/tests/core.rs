@@ -27,11 +27,11 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, Code, Command, ConfigCx, ConfigError,
     ConfigIssueKind, ConfigTarget, ContractQuery, Cx, DeadlineChange, Declaration, FieldSpec,
-    GuardRequest, Heard, Hook, KeyedRow, LinkedRows, Listen, LockKey, OutboxEvent, Outcome,
-    PermissionMatcher, ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite,
-    SchemaIssue, SharedRow, SharedRowChange, Source, Step, Stop, SubRow, SubRowChange, TableDecl,
-    TableRef, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto, View, WriteKind,
-    LINKED_PAGE,
+    GuardRequest, Heard, Hook, KeyedRow, LinkedRows, Listen, LockKey, NamespaceCx, OutboxEvent,
+    Outcome, PermissionMatcher, ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite,
+    SchemaIssue, SharedRow, SharedRowChange, SignalAccess, Source, Step, Stop, SubRow,
+    SubRowChange, TableDecl, TableRef, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto,
+    View, WriteKind, LINKED_PAGE,
 };
 
 const NOW: i64 = 1_000_000;
@@ -1525,6 +1525,140 @@ impl Behavior for Thread {
     }
 }
 
+// Chat: lines kept beside the row, and signals (D77's primitives 1 to 3).
+// Its one field is computed, and its every writing operation of a row is
+// beside it, so it writes beside its row alone: `say` adds a line, sends the
+// `chunk` signal and arms the deadline `quiet`, whose fire clears the
+// line's draft mark beside the row too; `peek` reads and may send nothing.
+// A caller sends `typing`, whose data names at most a line, and not
+// `chunk`, which `say` alone sends. Its operations of the namespace: `mine`
+// lists the caller's lines across every type that composes Chat and that
+// the caller may read, and `wipe` deletes them, refused with `nothing` when
+// there are none.
+struct Chat;
+
+impl Behavior for Chat {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Chat")
+            .computed("lines")
+            .sub_table(TableDecl::new("lines", "line", ["by", "text", "draft"]))
+            .beside_operation("say")
+            .beside_operation("shout")
+            .operation("peek", false)
+            .namespace_operation("mine", false)
+            .namespace_operation("wipe", true)
+            .namespace_operation("stray", true)
+            .signal("typing", SignalAccess::Read)
+            .signal("chunk", SignalAccess::Operation)
+            .arms_deadlines()
+            .veto("nothing")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn check_signal(&self, _config: &(), name: &str, data: &Value) -> Vec<SchemaIssue> {
+        match data.as_object() {
+            Some(members) if name == "typing" => members
+                .keys()
+                .filter(|member| member.as_str() != "line")
+                .map(|member| {
+                    SchemaIssue::new("", format!("must NOT have additional property {member}"))
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        if operation == "mine" && params.get("limit").is_some_and(|limit| !limit.is_u64()) {
+            return vec![SchemaIssue::new("/limit", "must be integer")];
+        }
+        Vec::new()
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        match name {
+            "say" | "shout" => {
+                let line = format!("{:03}", cx.sub_rows("lines")?.len() + 1);
+                let text = params.get("text").cloned().unwrap_or(Value::Null);
+                cx.insert_row(
+                    "lines",
+                    &line,
+                    object(json!({"by": cx.caller().subject, "text": text, "draft": true})),
+                )?;
+                cx.signal("chunk", json!({"line": line, "text": text}))?;
+                if name == "shout" {
+                    // Its data is past the most a signal holds.
+                    cx.signal("chunk", json!({"text": "x".repeat(5000)}))?;
+                }
+                cx.arm("quiet", cx.now() + 60_000, json!({"line": line}))?;
+                Ok(json!({"line": line}))
+            }
+            _ => {
+                if params.get("signal") == Some(&json!(true)) {
+                    cx.signal("chunk", json!({}))?;
+                }
+                Ok(json!(cx.sub_rows("lines")?.len()))
+            }
+        }
+    }
+
+    fn deadline(&self, cx: &Cx<'_, ()>, _name: &str, payload: &Value) -> Hook<()> {
+        let line = payload
+            .get("line")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        cx.update_row("lines", line, object(json!({"draft": false})))
+    }
+
+    fn namespace(&self, cx: &NamespaceCx<'_>, name: &str, _params: &Value) -> Hook<Value> {
+        let subject = cx.caller().subject.clone();
+        let mut mine = Vec::new();
+        for (spec, entry) in cx.uses()? {
+            let tables = [TableRef::new(entry.id(), "lines")];
+            let page = cx.read_rows(&spec.name, &Map::new(), &tables, None)?;
+            for row in &page.rows {
+                for line in row.table(entry.id(), "lines") {
+                    if line.value("by") == Some(&json!(subject)) {
+                        mine.push((
+                            spec.name.clone(),
+                            row.key.clone(),
+                            entry.id().to_owned(),
+                            line.key.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+        match name {
+            "mine" => Ok(json!(mine
+                .iter()
+                .map(|(type_name, key, _, line)| format!("{type_name}/{key}/{line}"))
+                .collect::<Vec<_>>())),
+            "stray" => {
+                // A row of a type that composes no Chat.
+                cx.delete_row(("Ticket", "t1"), "Chat", "lines", "001")?;
+                Ok(Value::Null)
+            }
+            _ => {
+                if mine.is_empty() {
+                    return Err(cx.veto(
+                        Veto::new(format!("{subject} has said nothing")).with_code("nothing"),
+                    ));
+                }
+                for (type_name, key, use_id, line) in &mine {
+                    cx.delete_row((type_name, key), use_id, "lines", line)?;
+                }
+                Ok(json!(mine.len()))
+            }
+        }
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -1551,6 +1685,7 @@ fn core() -> superschematic_rules::Core {
         .with(Count)
         .with(Editor)
         .with(Thread)
+        .with(Chat)
 }
 
 fn alice() -> Caller {
@@ -1781,6 +1916,18 @@ impl Source for Memory {
                     key.clone(),
                 );
                 Ok(Answer::SharedRow(self.shared.get(&at).cloned()))
+            }
+            ReadRequest::Composing { behavior } => {
+                self.log.push(format!("composing {behavior}"));
+                // Every type the memory holds that composes it, in name
+                // order: this caller may read them all.
+                Ok(Answer::Specs(
+                    self.specs
+                        .values()
+                        .filter(|spec| spec.uses.iter().any(|entry| entry.behavior == *behavior))
+                        .cloned()
+                        .collect(),
+                ))
             }
             other => Err(Refusal::internal(format!("an unexpected read: {other:?}"))),
         }
@@ -2848,13 +2995,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread, Chat)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor, Thread, Chat); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -5288,4 +5435,225 @@ fn an_operation_beside_its_row_writes_its_own_tables_alone() {
         refusal.message,
         "behavior Freeze vetoes peek of Order o1: it is frozen"
     );
+}
+
+// ---- signals ----
+
+/// A signal an operation sends (D77's primitive 2) joins the change set,
+/// which stores nothing of it: a write beside the row sends one and arms its
+/// own use's deadline on its row, whose fire is beside the row too, since
+/// the behavior writes beside its row alone. A signal past the size a
+/// signal holds is a defect, and a read-only operation sends none.
+#[test]
+fn an_operation_sends_a_signal_and_a_beside_deadline_moves_no_version() {
+    let core = core();
+    let spec = TypeSpec::new("Order")
+        .with(UseSpec::on_type("Freeze", json!({})))
+        .with(UseSpec::on_type("Chat", json!({})));
+    let frozen = row(json!({"title": "Desk", "frozen": true}), json!({}), 7);
+    let mut memory = Memory::default().with("Order", "o1", frozen);
+    let say = command(alice(), invoke("o1", "Chat", "say", json!({"text": "hi"})));
+    let changes = changed(core.drive(&spec, &say, &mut memory));
+    assert!(changes.rows.is_empty(), "no row write: {:?}", changes.rows);
+    assert_eq!(
+        serde_json::to_value(&changes.signals).unwrap(),
+        json!([{"row": {"type": "Order", "key": "o1"}, "useId": "Chat", "name": "chunk", "data": {"line": "001", "text": "hi"}}])
+    );
+    assert_eq!(
+        serde_json::to_value(&changes.deadlines).unwrap(),
+        json!([{"kind": "arm", "row": {"type": "Order", "key": "o1"}, "useId": "Chat", "name": "quiet", "at": NOW + 60_000, "payload": {"line": "001"}}])
+    );
+    // A change set with no signal writes none.
+    let plain = serde_json::to_value(superschematic_rules::ChangeSet::default()).unwrap();
+    assert!(plain.get("signals").is_none());
+
+    // The deadline fires beside the row: no version moves, and no other
+    // use's after-change hook hears it.
+    let quiet = command(
+        alice(),
+        Action::Deadline {
+            key: "o1".into(),
+            use_id: "Chat".into(),
+            name: "quiet".into(),
+            at: NOW + 60_000,
+            payload: json!({"line": "001"}),
+        },
+    );
+    let fired = changed(core.drive(&spec, &quiet, &mut memory));
+    assert!(fired.rows.is_empty(), "no row write: {:?}", fired.rows);
+    assert_eq!(
+        serde_json::to_value(&fired.sub_rows).unwrap(),
+        json!([{"row": {"type": "Order", "key": "o1"}, "useId": "Chat", "table": "lines", "key": "001", "change": {"kind": "update", "values": {"draft": false}}}])
+    );
+
+    // Past the size, or from a read-only operation: a defect.
+    let shout = command(
+        alice(),
+        invoke("o1", "Chat", "shout", json!({"text": "hi"})),
+    );
+    let refusal = refused(core.drive(&spec, &shout, &mut memory));
+    assert_eq!(refusal.code, Code::BehaviorError);
+    assert_eq!(
+        refusal.message,
+        "behavior Chat: signal(chunk): its data is 5011 bytes of JSON, more than 4096"
+    );
+    let peek = command(
+        alice(),
+        invoke("o1", "Chat", "peek", json!({"signal": true})),
+    );
+    let open = TypeSpec::new("Order").with(UseSpec::on_type("Chat", json!({})));
+    let refusal = refused(core.drive(&open, &peek, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Chat: signal(chunk): a read-only operation sends nothing"
+    );
+}
+
+/// A caller's signal (D77's primitive 2) is held to its declaration, to the
+/// size a signal holds and to the behavior's check of its data, on a row
+/// the host has; it writes nothing, and its change set holds the one sent.
+#[test]
+fn a_callers_signal_is_held_to_its_declaration_and_writes_nothing() {
+    let core = core();
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Chat", json!({})));
+    let mut memory = Memory::default().with("Order", "o1", row(json!({}), json!({}), 2));
+    let send = |key: &str, name: &str, data: Value| {
+        command(
+            alice(),
+            Action::Signal {
+                key: key.into(),
+                use_id: "Chat".into(),
+                name: name.into(),
+                data,
+            },
+        )
+    };
+    let action = serde_json::to_value(&send("o1", "typing", json!({})).action).unwrap();
+    assert_eq!(
+        action,
+        json!({"kind": "signal", "key": "o1", "useId": "Chat", "name": "typing", "data": {}})
+    );
+    let typing = send("o1", "typing", json!({"line": "001"}));
+    let changes = changed(core.drive(&spec, &typing, &mut memory));
+    assert!(changes.rows.is_empty() && changes.sub_rows.is_empty());
+    assert_eq!(
+        serde_json::to_value(&changes.signals).unwrap(),
+        json!([{"row": {"type": "Order", "key": "o1"}, "useId": "Chat", "name": "typing", "data": {"line": "001"}}])
+    );
+    let cases = [
+        (
+            send("o1", "chunk", json!({})),
+            Code::Forbidden,
+            "signal chunk of Chat is sent by Chat's operations alone".to_owned(),
+        ),
+        (
+            send("o1", "waving", json!({})),
+            Code::NotFound,
+            "behavior Chat declares no signal waving".to_owned(),
+        ),
+        (
+            send("o1", "typing", json!({"mood": 1})),
+            Code::InvalidArgument,
+            "signal typing of Chat: its data does not match its paramsSchema: must NOT have additional property mood".to_owned(),
+        ),
+        (
+            send("o1", "typing", json!({"line": "x".repeat(4100)})),
+            Code::InvalidArgument,
+            "signal typing of Chat: its data is 4111 bytes of JSON, more than 4096".to_owned(),
+        ),
+    ];
+    for (call, code, message) in cases {
+        let refusal = refused(core.drive(&spec, &call, &mut memory));
+        assert_eq!((refusal.code, refusal.message), (code, message));
+    }
+    let missing = refused(core.drive(&spec, &send("o2", "typing", json!({})), &mut memory));
+    assert_eq!(missing.code, Code::NotFound);
+}
+
+// ---- an operation of the namespace ----
+
+/// An operation of the namespace as a whole (D77's primitive 3) runs on no
+/// type: it reads the types that compose its behavior and that the caller
+/// may read, which the host answers, and their rows across each table, and
+/// writes its behavior's sub-table rows of them alone. Its veto names the
+/// namespace; a write of a type that composes none of it is a defect.
+#[test]
+fn an_operation_of_the_namespace_reads_and_writes_across_the_types_that_compose_it() {
+    let core = core();
+    let order = TypeSpec::new("Order").with(UseSpec::on_type("Chat", json!({})));
+    let memo = TypeSpec::new("Memo").with(UseSpec::on_field("talk", "Chat", json!({})));
+    let ticket = TypeSpec::new("Ticket").with(UseSpec::on_type("Counter", json!({})));
+    let mut memory = Memory::default()
+        .with_spec(order.clone())
+        .with_spec(memo)
+        .with_spec(ticket)
+        .with("Order", "o1", row(json!({}), json!({}), 1))
+        .with("Memo", "m1", row(json!({}), json!({}), 4))
+        .with_sub_rows(
+            ["Order", "o1", "Chat", "lines"],
+            json!([
+                {"key": "001", "values": {"by": "alice", "text": "hi"}},
+                {"key": "002", "values": {"by": "bob", "text": "yo"}}
+            ]),
+        )
+        .with_sub_rows(
+            ["Memo", "m1", "talk", "lines"],
+            json!([{"key": "001", "values": {"by": "alice", "text": "memo"}}]),
+        );
+    let call = |caller: Caller, operation: &str, params: Value| {
+        command(
+            caller,
+            Action::NamespaceOperation {
+                behavior: "Chat".into(),
+                operation: operation.into(),
+                params,
+            },
+        )
+        .with_request("r1")
+    };
+    let placeholder = TypeSpec::new("");
+    let listed = changed(core.drive(&placeholder, &call(alice(), "mine", json!({})), &mut memory));
+    assert_eq!(listed.result, json!(["Memo/m1/001", "Order/o1/001"]));
+    assert!(memory.log.contains(&"composing Chat".to_owned()));
+
+    let wiped = changed(core.drive(&placeholder, &call(alice(), "wipe", json!({})), &mut memory));
+    assert_eq!(wiped.result, json!(2));
+    assert!(wiped.rows.is_empty());
+    assert_eq!(
+        serde_json::to_value(&wiped.sub_rows).unwrap(),
+        json!([
+            {"row": {"type": "Memo", "key": "m1"}, "useId": "talk", "table": "lines", "key": "001", "change": {"kind": "delete"}},
+            {"row": {"type": "Order", "key": "o1"}, "useId": "Chat", "table": "lines", "key": "001", "change": {"kind": "delete"}}
+        ])
+    );
+
+    let carol = Caller::new("carol", Vec::<String>::new());
+    let refusal = refused(core.drive(&placeholder, &call(carol, "wipe", json!({})), &mut memory));
+    assert_eq!(
+        refusal.error_json(),
+        json!({"class": "BehaviorVetoError", "code": "vetoed", "message": "behavior Chat vetoes wipe of namespace default: carol has said nothing",
+            "details": {"behavior": "Chat", "action": "wipe", "reason": "carol has said nothing", "vetoCode": "nothing"}})
+    );
+    let stray = call(alice(), "stray", json!({}));
+    let refusal = refused(core.drive(&placeholder, &stray, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Chat: a sub-row write: Ticket is no type that composes Chat and the caller may read"
+    );
+    let bad = call(alice(), "mine", json!({"limit": "x"}));
+    let refusal = refused(core.drive(&placeholder, &bad, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "operation mine of behavior Chat: /limit: must be integer"
+    );
+    let gone = call(alice(), "gone", json!({}));
+    let refusal = refused(core.drive(&placeholder, &gone, &mut memory));
+    assert_eq!(
+        refusal.message,
+        "behavior Chat has no operation gone of the namespace (its operations of the namespace: mine, wipe, stray)"
+    );
+    // An operation of the namespace is no operation of a row.
+    let on_row = command(alice(), invoke("o1", "Chat", "mine", json!({})));
+    let refusal = refused(core.drive(&order, &on_row, &mut memory));
+    assert_eq!(refusal.code, Code::NotFound);
 }

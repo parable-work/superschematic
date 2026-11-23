@@ -49,6 +49,7 @@ use superschematic_rules_handler::{
 };
 
 mod http;
+pub mod hub;
 #[cfg(feature = "postgres")]
 mod pg;
 #[cfg(feature = "server")]
@@ -902,6 +903,9 @@ impl Store for SqliteStore {
                         .transpose()?,
                 )
             }
+            StoreRead::Page { .. } | StoreRead::Holders { .. } | StoreRead::Reached { .. } => {
+                return Err(superschematic_rules_handler::store::unqueried(read))
+            }
         })
     }
 
@@ -951,6 +955,9 @@ pub struct Dev<S = SqliteStore> {
     runner: Caller,
     drain: Drain,
     policy: Policy,
+    /// The streams open with signals (D77's primitive 2), which each
+    /// request's committed signals reach.
+    hub: hub::SharedHub,
 }
 
 /// The system's time in epoch milliseconds.
@@ -1013,7 +1020,30 @@ impl<S: Store> Dev<S> {
             runner: Caller::new("development-runner", Vec::<String>::new()),
             drain: Drain::default(),
             policy: Policy::default(),
+            hub: hub::SharedHub::default(),
         }
+    }
+
+    /// The streams open with signals, which a transport subscribes to
+    /// ([`hub::Subscription`]).
+    pub fn hub(&self) -> &hub::SharedHub {
+        &self.hub
+    }
+
+    /// Hands signals a committed request sent to the streams open with
+    /// signals that deliver them: whose filters keep them and whose caller
+    /// may read their type.
+    pub fn publish(&self, signals: &[superschematic_rules_handler::HostSignal]) {
+        if signals.is_empty() {
+            return;
+        }
+        let handler = Handler::new(&self.core, &self.declarations).with_policy(&self.policy);
+        self.hub
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .publish(signals, |caller, query, signal| {
+                handler.delivers(caller, query, signal)
+            });
     }
 
     /// The host with a clock of its own, in epoch milliseconds.
@@ -1075,12 +1105,16 @@ impl<S: Store> Dev<S> {
                 uuid::Uuid::new_v4().as_u128(),
             )
         };
-        run_due(
+        let ran = run_due(
             &handler,
             &mut self.store,
             (self.clock)(),
             &self.runner,
             &mut fresh,
-        )
+        )?;
+        for one in &ran {
+            self.publish(&one.signals);
+        }
+        Ok(ran)
     }
 }

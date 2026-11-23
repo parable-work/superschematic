@@ -30,7 +30,9 @@ Runtime mode is the Rust crate `superschematic-rules-runtime` in the
 engine's Cargo workspace, `runtime/engine/rust`. It serves the same
 request handler as development mode, `superschematic-rules-handler`, over
 a SQLite file or, with its `postgres` feature, a Postgres database. A
-platform whose migration runner is a job, such as gcp's, is a later step.
+publish's plan runs in process by default, or in a job on another
+machine, as gcp's migration job runs a deploy's (see
+[A runner that is a job](#a-runner-that-is-a-job)).
 
 The environment carries two binaries and nothing else of the toolchain:
 
@@ -95,10 +97,12 @@ A publish does five things:
    hazard's id.
 4. The environment's runner applies the plan, expand and contract back to
    back, never over a serving connection: the Rust runner on a connection
-   of its own to a SQLite file, and `superschematic-migrate apply --plan -`
-   beside a Postgres database.
-5. It records the documents and the layout next to the model, in
-   `superschematic_runtime`, one row per database.
+   of its own to a SQLite file, `superschematic-migrate apply --plan -`
+   beside a Postgres database, or a job.
+5. The runner records the documents and the layout next to the model, in
+   `superschematic_runtime`, one row per database, in the transaction
+   that finishes the plan (`apply --record`). No server reads the plan's
+   model before the layout it serves the new tables through.
 
 A rename reads as a drop and an add until the publish says otherwise.
 Name the renames you mean, as `--rename` takes them, and the plan renames
@@ -133,8 +137,10 @@ server made it, with no restart.
 
 - A request holds the database's one writer from its start: `BEGIN
   IMMEDIATE` on SQLite, and on Postgres an advisory lock that a publish
-  holds too. On Postgres a request waits while a publish runs, then reads
-  the new layout.
+  in process holds too. On Postgres a request waits while such a publish
+  runs, then reads the new layout. A publish whose runner is a job holds
+  no lock: the plan in progress, which the runner records before its
+  first step, keeps the requests off.
 - A plan in progress serves no request. A request that meets one, as a
   server in another process can between the runner's steps on SQLite, is
   refused as `busy`.
@@ -142,6 +148,99 @@ server made it, with no restart.
   that violate it, stops the publish. The plan stays in progress, and the
   database serves no request until a publish of the same documents
   resumes it, once the rows are fixed.
+
+## Lists, unique fields and relations in SQL
+
+Development mode answers a list, a unique field and a relation from every
+row of the type. Runtime mode asks the type's table in a query of its own
+for each, with the same answers:
+
+- A list's filter is the ORMs' grammar: an operation per field (`eq`,
+  `ne`, `in`, `notIn`, `ilike`, `gt`, `gte`, `lt`, `lte`, `between`,
+  `isNull`), a member named for a to-one relation holding the target's
+  filter, `allOf`, `anyOf` and the query string's `$query`. It becomes the
+  query's condition, a relation's as an `EXISTS` over the target's table.
+- A sort orders by its fields, a field with no value last in either
+  direction, then by the key in the first field's direction. A page is the
+  rows after the cursor's sort values and key, and one row past it says
+  whether more follow.
+- A unique field's check reads the rows that hold its values, and a
+  delete reads the rows each relation into the type reaches.
+
+A value compares as its column does in either database: an instant by its
+time, a UUID by its value, a number by its value, and text by code point,
+under the `C` collation on Postgres. A value that is not of the field's
+kind matches nothing, and `ne` and `notIn` keep a row whose field holds no
+value. `ilike` is the handler's own on SQLite, a function the connection
+registers. A cursor whose values are not of their fields' kinds is
+refused, in either mode.
+
+## Soft deletes
+
+A table with a `deletedAt` field is soft-deletable, as a build's is. It
+serves its live rows alone: a get, a list, a filter through a relation, a
+unique field's check and an update find no row whose `deletedAt` holds a
+time. A delete stamps `deletedAt` with the database's clock and moves the
+row's version on, and keeps its sub-table rows, as the compiled adapter
+does. It reaches no row that points at it, since a foreign key fires on a
+delete and not on an update. A create of a deleted row's key is a
+`conflict`, and a relation to it is refused as a row that does not exist.
+
+## A runner that is a job
+
+On a platform whose migration runner is a job, such as gcp's migration
+job (D46), a publish gives its plan to a `JobRunner` in place of applying
+it in process:
+
+```rust
+use std::time::Duration;
+use superschematic_rules_runtime::{Directory, JobDatabase, JobRunner, ProcessLaunch, Runtime};
+
+let jobs = JobRunner::new(
+    Directory("/var/lib/runtime/bucket".into()),          // where the job reads its documents
+    ProcessLaunch { migrate: "superschematic-migrate".into() },
+    JobDatabase::Url("postgres://migrator@db/tasks".into()), // how the job reaches the database
+)
+.with_servers(["tasks-api"])                               // the servers' database roles
+.with_wait(Duration::from_secs(600), Duration::from_secs(2));
+let mut runtime = Runtime::postgres("postgres://tasks-api@db/tasks")?.with_plan_runner(jobs);
+```
+
+1. The publish checks its plan as it does in process, then writes three
+   documents into the job's store, under
+   `superschematic/migrations/runtime/<service>/<plan hash>/`: the plan,
+   its record, and a job document that names both beside it, the
+   database, and the servers' roles. The plan never goes on stdin.
+2. It starts an execution of the job (`Launch`), which runs
+   `superschematic-migrate job --job <reference>`.
+3. It polls the model the database records until it is the plan's `to`,
+   with no plan in progress and the publish's record, or until the
+   execution reports a failure, which the publish returns with the
+   runner's own error line, or until the wait's timeout, which it returns
+   as `busy` (`PlanTimeoutError`). It holds no lock while it waits.
+
+The job writes the record, and gives each server role its privileges on
+the plan's new tables, in the transaction that finishes the plan. A
+server that follows the publish may already read and write them.
+
+`JobStore`, `Launch` and `Execution` are the platform's half. `Directory`
+and `ProcessLaunch` keep the documents in a directory and run the job as a
+process of the same machine. On gcp, `extensions/gcp`'s `RunRuntimeJob`
+uploads such a directory to the state bucket and runs an execution of the
+stack's migration job with it, reporting the runner's error from Cloud
+Logging when it fails.
+
+## Server roles
+
+A server never runs DDL. On Postgres the job connects as the migrator,
+which owns the tables, and gives each server role D46's grants: USAGE on
+the schema, SELECT, INSERT, UPDATE and DELETE on the tables, and USAGE and
+SELECT on the sequences. With them it gives SELECT alone on the runner's
+state table and on `superschematic_runtime`, which a server reads to
+follow a publish (`readState` in the job document). A role the job no
+longer lists loses them. A server whose role may not create tables opens
+a database no publish has reached yet, and reads its record once the
+first job writes it.
 
 ## The plan as a route and a tool
 
@@ -170,7 +269,7 @@ state tables beside them. Runtime mode adds one table of its own:
 |-------|---------------|
 | `superschematic_schema_state` | the runner's: the model the database is at, and the plan in progress |
 | `superschematic_migrations` | the runner's: the log of each plan's steps |
-| `superschematic_runtime` | the documents of the last publish, the layout document the planner wrote for them, each type's version and the model they belong to |
+| `superschematic_runtime` | the documents of the last publish, the layout document the planner wrote for them, each type's version and the model they belong to, which the runner writes with the plan's last step |
 
 A behavior's queues are the build's too. A table whose writes its
 behaviors hear has a change trigger, which writes each write to its
@@ -179,12 +278,12 @@ each request, or when you call `run_due` with `Drain::WhenAsked`.
 
 ## What is left
 
-- A platform whose runner is a job (gcp's migration job, D46), and a
-  publish's wait for it.
-- The handler still answers a list's filters and sorts, a unique field and
-  a relation from every row of the type it reads, as development mode
-  does. Pushing them into SQL is later.
-- A soft-deletable table's live rows, the `createdBy` stamp, the access
-  policy as data, the event stream and MCP, as in development mode.
+- A runtime environment on gcp: its server process, the job's documents
+  written to the state bucket from it and the job's execution started
+  from it, and a run against Google Cloud.
+- The behaviors' own reads of other rows (Dependencies' blockers, a
+  relation's linked rows, Pool's rows) still read every row of a type.
+- The `createdBy` and `deletedBy` stamps, the access policy as data, the
+  event stream and MCP, as in development mode.
 - Moving between modes: development to runtime with rows, and runtime to
   compiled by the recorded model.

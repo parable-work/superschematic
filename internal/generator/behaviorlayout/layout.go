@@ -758,7 +758,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			}
 			use.Tables = append(use.Tables, sub)
 		}
-		armsDeadlines = armsDeadlines || behavior.ArmsDeadlines
+		armsDeadlines = armsDeadlines || registry.TableArmsDeadlines(ref.Name, behavior.ArmsDeadlines)
 		t.Uses = append(t.Uses, use)
 		spec := UseSpec{Behavior: ref.Name, Anchor: Anchor{Field: ref.Field}}
 		if len(ref.Config) > 0 {

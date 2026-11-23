@@ -388,7 +388,7 @@ func behaviorWorkerOf(schema *ir.Schema, typeName string) bool {
 func armingBehaviors(td *ir.TypeDef, reg *registry.Registry) []string {
 	var out []string
 	for _, ref := range td.TableBehaviors() {
-		if b, ok := reg.Behavior(ref.Name); ok && b.ArmsDeadlines && !slices.Contains(out, ref.Name) {
+		if b, ok := reg.Behavior(ref.Name); ok && registry.TableArmsDeadlines(ref.Name, b.ArmsDeadlines) && !slices.Contains(out, ref.Name) {
 			out = append(out, ref.Name)
 		}
 	}

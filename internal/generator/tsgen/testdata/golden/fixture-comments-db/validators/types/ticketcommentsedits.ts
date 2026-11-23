@@ -96,6 +96,8 @@ export function validateTicketCommentsEdits(value: TicketCommentsEdits | null | 
 
   expectString(errors, "by", value.by);
 
+  expectString(errors, "forSubject", value.forSubject);
+
   if (value.at !== null && value.at !== undefined) {
     const [valid, fieldErrors] = validateTemporalDateTime(value.at);
     if (!valid && fieldErrors) {
@@ -128,6 +130,7 @@ const TicketCommentsEditsKnownFields = new Set<string>([
   'blocks',
   'mentions',
   'by',
+  'forSubject',
   'at',
 ]);
 

@@ -42,6 +42,10 @@ pub struct DeclaredOperation {
     pub writes: bool,
     /// An operation of the table as a whole (`"scope": "schema"`, D104).
     pub table: bool,
+    /// A writing operation that writes only the caller's own state and is
+    /// asked of the policy as a read (`"asks": "read"`, D77: Comments'
+    /// markRead and follow).
+    pub asks_read: bool,
     pub description: String,
     /// Its parameters' JSON Schema, as the file gives it.
     pub params: Value,
@@ -172,6 +176,7 @@ fn read(file: &Value) -> Result<Declared, String> {
                 name: text(operation.get("name")),
                 writes: operation.get("writes") == Some(&Value::Bool(true)),
                 table: scope == Some("schema"),
+                asks_read: operation.get("asks").and_then(Value::as_str) == Some("read"),
                 description: text(operation.get("description")),
                 params: operation
                     .get("paramsSchema")

@@ -101,6 +101,28 @@ const commentsFixture = "fixture-comments-db"
 // whole, each derivation and record a sub-table row with no repository.
 const derivedProvenanceFixture = "fixture-derived-provenance-db"
 
+// commerceFixture is the DB fixture whose Inventory implements Stock and
+// whose Checkout implements Holds beside its status Workflow (D70 on
+// D103's step 4): their operations under Stock() and Holds(), the
+// contract Supply's among Stock's, each record, movement and item a
+// sub-table row with no repository.
+const commerceFixture = "fixture-commerce-db"
+
+// calendarFixture is the DB fixture whose Desk implements Calendar and
+// whose Booking implements Holds beside its status Workflow (D70 on
+// D103's step 4): their operations under Calendar() and Holds(), the
+// contract Supply's and findAvailability among Calendar's, each booking,
+// closure and setting a sub-table row with no repository.
+const calendarFixture = "fixture-calendar-db"
+
+// paymentsFixture is the DB fixture whose Order takes payments over its
+// own total and whose Refund refunds one, each implementing Payments
+// beside its status Workflow (D70 on D103's step 4): their operations under
+// Payments(), listPaymentActions among them, each attempt, action, refund,
+// issue and provider event a sub-table or shared table row with no
+// repository.
+const paymentsFixture = "fixture-payments-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -119,7 +141,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -258,6 +280,18 @@ func TestWriteORMGolden(t *testing.T) {
 		// table as a whole taking no key, no repository of a sub-table, no
 		// upserts, and no queue.
 		{derivedProvenanceFixture, []string{"repository_article.go", "repository_ticket.go", "rules.go"}},
+		// Tables of Stock and Holds (D70 on D103's step 4): their
+		// operations under Stock() and Holds(), no repository of a
+		// sub-table, no upserts, and no queue.
+		{commerceFixture, []string{"repository_checkout.go", "repository_inventory.go", "rules.go"}},
+		// Tables of Calendar (D70 on D103's step 4): its operations under
+		// Calendar(), findAvailability taking no key, no repository of a
+		// sub-table, no upserts, and no queue.
+		{calendarFixture, []string{"repository_booking.go", "repository_desk.go", "rules.go"}},
+		// Tables of Payments (D70 on D103's step 4): its operations under
+		// Payments(), listPaymentActions taking no key, no repository of a
+		// sub-table or the shared table, no upserts, and no queue.
+		{paymentsFixture, []string{"repository_order.go", "repository_refund.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

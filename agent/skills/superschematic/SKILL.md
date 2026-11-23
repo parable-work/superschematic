@@ -263,7 +263,13 @@ path for when the store is unavailable.
   whose tools include `define_schema` and `publish_schema`. A request's
   caller is the `X-Superschematic-Subject` header, or `--as`, and
   `--policy` takes the engine's access policy (`"permission"` or
-  `{"rules": [...]}`).
+  `{"rules": [...]}`). In a TypeScript server written by hand, mount it
+  with `@superschematic/rules-handler` (`runtime/rules-handler/typescript`,
+  the handler built for WebAssembly): `openDev('dev.db')` from its
+  `./sqlite` entry over the same tables on bun:sqlite, then
+  `dev.request(caller, {kind: 'create', type, data})` or
+  `Bun.serve({fetch: request => dev.http(request)})`, and call
+  `dev.runDue()` on a timer so deadlines fall due.
 - **Schemas that change while the app runs, rows that matter?** Runtime
   mode (D117, the Rust crate `superschematic-rules-runtime`) serves the
   same handler over each type's own table, the table a build writes, in a
@@ -275,7 +281,13 @@ path for when the store is unavailable.
   publish with a `destructive` or `data-dependent` hazard is refused with
   the hazard's id: allow a drop only when the data may go, and name a
   rename (`task.title=task.summary`) rather than allowing the drop it
-  reads as. Never allow a hazard the person did not agree to.
+  reads as. Never allow a hazard the person did not agree to. A list's
+  filters, sorts and pages, a unique field and a relation's delete are
+  queries of the type's table, and a table with `deletedAt` serves its
+  live rows alone. Where the runner is a job on another machine
+  (`JobRunner`, D46's migration job), the publish waits on the model the
+  database records, and the servers' roles keep D46's grants: they never
+  run DDL.
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`
@@ -790,12 +802,15 @@ Most are load errors; knowing them saves a build round-trip:
   row: it moves no version or ETag of the row and no other behavior's
   guard is asked, so a Lease does not stop a reply; do not present a Lease
   token to a post, which is refused. Pass `clientId` on a post a client
-  may retry. On a table, streamed replies (`begin`, `appendDraft`,
-  `finish`), read state (`markRead`, `follow`, `unread`), the inbox,
-  deliveries, search, attachments and `moveAnchor` are not there yet: the
-  build refuses their config members (`composeTimeoutMs`,
-  `deliverPermission`, `attachments`, ...) and leaves their operations out.
-  Comments cannot be removed from a table with rows.
+  may retry. Development mode (`superschematic-dev`) also runs streamed
+  replies (`begin`, `appendDraft`, `finish`, `interrupt`, the `draft`
+  signal on its event stream with `signals=1`), read state (`markRead`,
+  `follow`, `unread`, `readUpTo`) and the `inbox`. In a build, a table's
+  generated API serves none of those yet, nor the deliveries' claims,
+  search, attachments or `moveAnchor`: the build refuses their config
+  members (`composeTimeoutMs`, `deliverPermission`, `attachments`, ...) and
+  leaves their operations out. Comments cannot be removed from a table with
+  rows.
 - When a model should fill fields of a row from its other fields (a
   ticket's category, an article's summary), implement Derived on the
   table rather than a worker that writes columns of its own: `implements
@@ -820,6 +835,29 @@ Most are load errors; knowing them saves a build round-trip:
   the Workflow's move into its state. For who wrote the row as a whole,
   the audit fields (`createdBy`, `updatedBy`, D87) are enough. Neither
   behavior can be removed from a table with rows.
+- When a table sells units or books time, implement the commerce
+  behaviors on it rather than counters and overlap checks of your own
+  (D70, D103): `implements Stock<Inventory, { permission: "stock.adjust";
+  price: { field: "priceCents"; currency: "GBP" } }>` on what is counted,
+  `implements Calendar<Desk, { timeZone: "Europe/London"; hours: { mon:
+  [["09:00", "17:30"]] }; capacity: 1; permission: "desk.manage" }>` on
+  what is booked, `implements Holds<Checkout, { holds: { lines: { each: {
+  field: "lines"; target: "inventoryId" }; schema: "Inventory"; quantity:
+  { field: "quantity" } } }; takeOn: ["held"]; commitOn: ["placed"];
+  releaseOn: ["expired", "cancelled"] }>` beside a `status: Workflow<{ ...
+  }>` on the claim, and `implements Payments<Order, { amount: { field:
+  "totalCents" }; currency: "GBP"; require: { placed: "paid" }; record: {
+  permission: "payments.record" } }>` on what is paid. A hold names a
+  table that implements `Supply` (Stock, Calendar, or a behavior of your
+  own), through an `each` list or a to-one relation (`link`). Move the
+  claim's status to take, commit and release; never call a supply's
+  `holdFor` or `releaseFor` yourself, which is `not_requested`. Let a
+  Timers deadline expire a hold. A take locks the supply rows it reads,
+  so two claims for the last unit never both hold it. Never write
+  `stock_on_hand`, `stock_held` or a behavior's sub-tables by hand: the
+  ledger stops agreeing. Give no card fields to a schema; a card goes to
+  the provider's hosted fields, and an adapter of your own records the
+  provider's events with `payments.recordPaymentEvent`.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

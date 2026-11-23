@@ -1,0 +1,1675 @@
+{
+  "about": "rules-dev's store session (rules-dev/tests/store.rs), each request with its context and its answer over memory; written by UPDATE_SESSION=1 cargo test -p superschematic-rules-handler-wasm --test session",
+  "caller": {
+    "subject": "alice",
+    "permissions": [
+      "orders"
+    ]
+  },
+  "now": 1000000,
+  "steps": [
+    {
+      "request": {
+        "kind": "define",
+        "document": {
+          "name": "Project",
+          "fields": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "key": true
+            },
+            {
+              "name": "name",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "unique": true
+            }
+          ]
+        }
+      },
+      "context": {
+        "request": "r0",
+        "id": "00000000-0000-0001-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Project",
+          "defined": true
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Project",
+        "discard": false
+      },
+      "context": {
+        "request": "r1",
+        "id": "00000000-0000-0002-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Project",
+          "version": 1,
+          "rewritten": 0,
+          "discarded": []
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "define",
+        "document": {
+          "name": "Task",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "field": "status",
+              "config": {
+                "states": [
+                  "todo",
+                  "doing",
+                  "done"
+                ],
+                "transitions": [
+                  {
+                    "from": "todo",
+                    "to": "doing"
+                  },
+                  {
+                    "from": "doing",
+                    "to": "done",
+                    "permission": "projects.finish"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Timers",
+              "config": {
+                "deadlines": {
+                  "nudge": {
+                    "start": {
+                      "create": true
+                    },
+                    "afterMs": 3600000,
+                    "then": {
+                      "transition": "doing"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "key": true
+            },
+            {
+              "name": "title",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "points",
+              "typeRef": {
+                "name": "Generic.Int64"
+              }
+            },
+            {
+              "name": "due",
+              "typeRef": {
+                "name": "Temporal.DateTime"
+              }
+            },
+            {
+              "name": "project",
+              "typeRef": {
+                "name": "Project"
+              },
+              "relation": {
+                "type": "Project"
+              }
+            }
+          ]
+        }
+      },
+      "context": {
+        "request": "r2",
+        "id": "00000000-0000-0003-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Task",
+          "defined": true
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Task",
+        "discard": false
+      },
+      "context": {
+        "request": "r3",
+        "id": "00000000-0000-0004-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Task",
+          "version": 1,
+          "rewritten": 0,
+          "discarded": []
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Project",
+        "data": {
+          "id": "p1",
+          "name": "Launch"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r4",
+        "id": "00000000-0000-0005-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "p1",
+          "name": "Launch",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Project",
+        "data": {
+          "id": "p2",
+          "name": "Launch"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r5",
+        "id": "00000000-0000-0006-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "conflict",
+          "status": 409,
+          "class": "EngineError",
+          "message": "Project p1 holds name \"Launch\", which is unique",
+          "details": {
+            "fields": [
+              "name"
+            ],
+            "holder": "p1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Project",
+        "data": {
+          "id": "p2",
+          "name": "Ship"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r6",
+        "id": "00000000-0000-0007-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "p2",
+          "name": "Ship",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Task",
+        "data": {
+          "id": "t1",
+          "title": "Write the notes",
+          "points": 3,
+          "projectId": "p1",
+          "due": "2026-03-01T09:00:00+01:00"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r7",
+        "id": "00000000-0000-0008-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "t1",
+          "title": "Write the notes",
+          "points": 3,
+          "due": "2026-03-01T08:00:00.000Z",
+          "projectId": "p1",
+          "status": "todo",
+          "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Task",
+        "data": {
+          "id": "t2",
+          "title": "Review",
+          "points": 5,
+          "projectId": "p2"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r8",
+        "id": "00000000-0000-0009-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "t2",
+          "title": "Review",
+          "points": 5,
+          "projectId": "p2",
+          "status": "todo",
+          "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Task",
+        "data": {
+          "id": "t3",
+          "title": "Ship",
+          "projectId": "p9"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r9",
+        "id": "00000000-0000-000a-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "invalid_instance",
+          "status": 422,
+          "class": "InstanceValidationError",
+          "message": "Task: /projectId: project points at Project p9, which does not exist",
+          "details": {
+            "issues": [
+              {
+                "path": "/projectId",
+                "rule": "relation",
+                "message": "project points at Project p9, which does not exist"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Task",
+        "data": {
+          "id": "t3",
+          "title": "Ship",
+          "projectId": "p1"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r10",
+        "id": "00000000-0000-000b-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "t3",
+          "title": "Ship",
+          "projectId": "p1",
+          "status": "todo",
+          "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "update",
+        "type": "Task",
+        "id": "t3",
+        "patch": {
+          "points": 8
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r11",
+        "id": "00000000-0000-000c-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "t3",
+          "title": "Ship",
+          "points": 8,
+          "projectId": "p1",
+          "status": "todo",
+          "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+          "_version": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Task",
+        "id": "t1",
+        "use": "status",
+        "operation": "transition",
+        "params": {
+          "to": "doing"
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r12",
+        "id": "00000000-0000-000d-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "from": "todo",
+          "to": "doing"
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Task",
+        "id": "t1",
+        "use": "status",
+        "operation": "transition",
+        "params": {
+          "to": "done"
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r13",
+        "id": "00000000-0000-000e-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "forbidden",
+          "status": 403,
+          "class": "EngineError",
+          "message": "alice may not move Task t1's status from doing to done: the transition needs permission projects.finish"
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "list",
+        "type": "Task",
+        "filter": {
+          "project": {
+            "name": {
+              "eq": "Launch"
+            }
+          }
+        },
+        "sort": [
+          {
+            "field": "points",
+            "desc": true
+          }
+        ],
+        "limit": 2,
+        "cursor": null
+      },
+      "context": {
+        "request": "r14",
+        "id": "00000000-0000-000f-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "items": [
+            {
+              "id": "t3",
+              "title": "Ship",
+              "points": 8,
+              "projectId": "p1",
+              "status": "todo",
+              "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+              "timersDeadlines": {
+                "nudge": {
+                  "dueAt": 4600000,
+                  "fired": false
+                }
+              },
+              "_version": 2
+            },
+            {
+              "id": "t1",
+              "title": "Write the notes",
+              "points": 3,
+              "due": "2026-03-01T08:00:00.000Z",
+              "projectId": "p1",
+              "status": "doing",
+              "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+              "timersDeadlines": {
+                "nudge": {
+                  "dueAt": 4600000,
+                  "fired": false
+                }
+              },
+              "_version": 2
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "list",
+        "type": "Task",
+        "filter": {
+          "status": {
+            "in": [
+              "doing",
+              "done"
+            ]
+          }
+        },
+        "sort": [],
+        "limit": 2,
+        "cursor": null
+      },
+      "context": {
+        "request": "r15",
+        "id": "00000000-0000-0010-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "items": [
+            {
+              "id": "t1",
+              "title": "Write the notes",
+              "points": 3,
+              "due": "2026-03-01T08:00:00.000Z",
+              "projectId": "p1",
+              "status": "doing",
+              "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+              "timersDeadlines": {
+                "nudge": {
+                  "dueAt": 4600000,
+                  "fired": false
+                }
+              },
+              "_version": 2
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "list",
+        "type": "Task",
+        "filter": {
+          "due": {
+            "gte": "2026-03-01T08:00:00Z"
+          }
+        },
+        "sort": [],
+        "limit": 2,
+        "cursor": null
+      },
+      "context": {
+        "request": "r16",
+        "id": "00000000-0000-0011-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "items": [
+            {
+              "id": "t1",
+              "title": "Write the notes",
+              "points": 3,
+              "due": "2026-03-01T08:00:00.000Z",
+              "projectId": "p1",
+              "status": "doing",
+              "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+              "timersDeadlines": {
+                "nudge": {
+                  "dueAt": 4600000,
+                  "fired": false
+                }
+              },
+              "_version": 2
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "get",
+        "type": "Task",
+        "id": "t1"
+      },
+      "context": {
+        "request": "r17",
+        "id": "00000000-0000-0012-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "t1",
+          "title": "Write the notes",
+          "points": 3,
+          "due": "2026-03-01T08:00:00.000Z",
+          "projectId": "p1",
+          "status": "doing",
+          "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+          "timersDeadlines": {
+            "nudge": {
+              "dueAt": 4600000,
+              "fired": false
+            }
+          },
+          "_version": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "describe",
+        "type": "Task"
+      },
+      "context": {
+        "request": "r18",
+        "id": "00000000-0000-0013-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Task",
+          "version": 1,
+          "mode": "development",
+          "key": {
+            "name": "id",
+            "type": "string",
+            "auto": false
+          },
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "list": false,
+              "required": true,
+              "unique": false,
+              "filter": [
+                "eq",
+                "ne",
+                "in",
+                "notIn",
+                "ilike",
+                "isNull"
+              ],
+              "sorts": true
+            },
+            {
+              "name": "points",
+              "type": "Generic.Int64",
+              "list": false,
+              "required": false,
+              "unique": false,
+              "filter": [
+                "eq",
+                "ne",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "between",
+                "in",
+                "notIn",
+                "isNull"
+              ],
+              "sorts": true
+            },
+            {
+              "name": "due",
+              "type": "Temporal.DateTime",
+              "list": false,
+              "required": false,
+              "unique": false,
+              "filter": [
+                "eq",
+                "ne",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "between",
+                "in",
+                "notIn",
+                "isNull"
+              ],
+              "sorts": true
+            },
+            {
+              "name": "projectId",
+              "type": "string",
+              "list": false,
+              "required": false,
+              "unique": false,
+              "filter": [
+                "eq",
+                "ne",
+                "in",
+                "notIn",
+                "ilike",
+                "isNull"
+              ],
+              "sorts": true,
+              "relation": {
+                "name": "project",
+                "type": "Project",
+                "onDelete": "CASCADE"
+              }
+            }
+          ],
+          "owned": [
+            {
+              "name": "status",
+              "use": "status",
+              "field": "status",
+              "type": "string",
+              "value": true,
+              "optional": false,
+              "filter": [
+                "eq",
+                "ne",
+                "in",
+                "notIn",
+                "ilike",
+                "isNull"
+              ],
+              "sorts": true
+            },
+            {
+              "name": "statusEnteredAt",
+              "use": "status",
+              "field": "enteredAt",
+              "type": "Temporal.DateTime",
+              "value": false,
+              "optional": true,
+              "filter": [
+                "eq",
+                "ne",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "between",
+                "in",
+                "notIn",
+                "isNull"
+              ],
+              "sorts": true
+            }
+          ],
+          "computed": [
+            {
+              "name": "timersDeadlines",
+              "use": "Timers",
+              "field": "deadlines"
+            }
+          ],
+          "uses": [
+            {
+              "id": "status",
+              "behavior": "Workflow",
+              "anchor": {
+                "field": "status"
+              },
+              "config": {
+                "states": [
+                  "todo",
+                  "doing",
+                  "done"
+                ],
+                "transitions": [
+                  {
+                    "from": "todo",
+                    "to": "doing"
+                  },
+                  {
+                    "from": "doing",
+                    "to": "done",
+                    "permission": "projects.finish"
+                  }
+                ]
+              },
+              "operations": [
+                {
+                  "name": "transition",
+                  "writes": true,
+                  "table": false,
+                  "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+                  "params": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "from": {
+                        "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "to": {
+                        "description": "The state to move to.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "to"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ],
+              "tables": [],
+              "events": [],
+              "armsDeadlines": false,
+              "hearsChanges": false
+            },
+            {
+              "id": "Timers",
+              "behavior": "Timers",
+              "anchor": "type",
+              "config": {
+                "deadlines": {
+                  "nudge": {
+                    "start": {
+                      "create": true
+                    },
+                    "afterMs": 3600000,
+                    "then": {
+                      "transition": "doing"
+                    }
+                  }
+                }
+              },
+              "operations": [
+                {
+                  "name": "fireTimer",
+                  "writes": true,
+                  "table": false,
+                  "description": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
+                  "params": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "deadline": {
+                        "description": "The deadline's name.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "deadline"
+                    ],
+                    "type": "object"
+                  }
+                },
+                {
+                  "name": "resetTimer",
+                  "writes": true,
+                  "table": false,
+                  "description": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
+                  "params": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "deadline": {
+                        "description": "The deadline's name.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "deadline"
+                    ],
+                    "type": "object"
+                  }
+                },
+                {
+                  "name": "snoozeTimer",
+                  "writes": true,
+                  "table": false,
+                  "description": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
+                  "params": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "deadline": {
+                        "description": "The deadline's name.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "dueAt": {
+                        "description": "When it is due, in epoch milliseconds.",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "deadline",
+                      "dueAt"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ],
+              "tables": [
+                {
+                  "name": "deadlines",
+                  "key": "name",
+                  "fields": [
+                    {
+                      "name": "baseAt",
+                      "type": "Temporal.DateTime"
+                    },
+                    {
+                      "name": "armedFrom",
+                      "type": "string"
+                    },
+                    {
+                      "name": "dueAt",
+                      "type": "Temporal.DateTime"
+                    },
+                    {
+                      "name": "fired",
+                      "type": "boolean"
+                    },
+                    {
+                      "name": "firedAt",
+                      "type": "Temporal.DateTime"
+                    },
+                    {
+                      "name": "outcome",
+                      "type": "string"
+                    }
+                  ]
+                }
+              ],
+              "events": [],
+              "armsDeadlines": true,
+              "hearsChanges": true
+            }
+          ],
+          "uniques": [],
+          "document": {
+            "name": "Task",
+            "behaviors": [
+              {
+                "name": "Workflow",
+                "field": "status",
+                "config": {
+                  "states": [
+                    "todo",
+                    "doing",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "doing"
+                    },
+                    {
+                      "from": "doing",
+                      "to": "done",
+                      "permission": "projects.finish"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "Timers",
+                "config": {
+                  "deadlines": {
+                    "nudge": {
+                      "start": {
+                        "create": true
+                      },
+                      "afterMs": 3600000,
+                      "then": {
+                        "transition": "doing"
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "id",
+                "typeRef": {
+                  "name": "string"
+                },
+                "key": true
+              },
+              {
+                "name": "title",
+                "typeRef": {
+                  "name": "string"
+                },
+                "required": true
+              },
+              {
+                "name": "points",
+                "typeRef": {
+                  "name": "Generic.Int64"
+                }
+              },
+              {
+                "name": "due",
+                "typeRef": {
+                  "name": "Temporal.DateTime"
+                }
+              },
+              {
+                "name": "project",
+                "typeRef": {
+                  "name": "Project"
+                },
+                "relation": {
+                  "type": "Project"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "delete",
+        "type": "Project",
+        "id": "p2",
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r19",
+        "id": "00000000-0000-0014-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "deleted": [
+            {
+              "type": "Project",
+              "id": "p2"
+            },
+            {
+              "type": "Task",
+              "id": "t2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "get",
+        "type": "Task",
+        "id": "t2"
+      },
+      "context": {
+        "request": "r20",
+        "id": "00000000-0000-0015-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "not_found",
+          "status": 404,
+          "class": "EngineError",
+          "message": "Task t2 does not exist"
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "define",
+        "document": {
+          "name": "Task",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "field": "status",
+              "config": {
+                "states": [
+                  "todo",
+                  "doing",
+                  "done"
+                ],
+                "transitions": [
+                  {
+                    "from": "todo",
+                    "to": "doing"
+                  },
+                  {
+                    "from": "doing",
+                    "to": "done",
+                    "permission": "projects.finish"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Timers",
+              "config": {
+                "deadlines": {
+                  "nudge": {
+                    "start": {
+                      "create": true
+                    },
+                    "afterMs": 3600000,
+                    "then": {
+                      "transition": "doing"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "key": true
+            },
+            {
+              "name": "title",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMaxLength": 5
+            },
+            {
+              "name": "points",
+              "typeRef": {
+                "name": "Generic.Int64"
+              }
+            },
+            {
+              "name": "due",
+              "typeRef": {
+                "name": "Temporal.DateTime"
+              }
+            },
+            {
+              "name": "project",
+              "typeRef": {
+                "name": "Project"
+              },
+              "relation": {
+                "type": "Project"
+              }
+            }
+          ]
+        }
+      },
+      "context": {
+        "request": "r21",
+        "id": "00000000-0000-0016-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Task",
+          "defined": true
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Task",
+        "discard": false
+      },
+      "context": {
+        "request": "r22",
+        "id": "00000000-0000-0017-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "conflict",
+          "status": 409,
+          "class": "StoredRowsError",
+          "message": "type Task: version 2 does not describe 1 stored row: t1 (/title: title must be at most 5 characters long); publish it with discard to delete them",
+          "details": {
+            "version": 2,
+            "rows": [
+              {
+                "type": "Task",
+                "id": "t1",
+                "issues": [
+                  {
+                    "path": "/title",
+                    "rule": "maxLength",
+                    "message": "title must be at most 5 characters long"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Task",
+        "discard": true
+      },
+      "context": {
+        "request": "r23",
+        "id": "00000000-0000-0018-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Task",
+          "version": 2,
+          "rewritten": 0,
+          "discarded": [
+            {
+              "type": "Task",
+              "id": "t1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "list",
+        "type": "Task",
+        "filter": null,
+        "sort": [],
+        "limit": 2,
+        "cursor": null
+      },
+      "context": {
+        "request": "r24",
+        "id": "00000000-0000-0019-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "items": [
+            {
+              "id": "t3",
+              "title": "Ship",
+              "points": 8,
+              "projectId": "p1",
+              "status": "todo",
+              "statusEnteredAt": "1970-01-01T00:16:40.000Z",
+              "timersDeadlines": {
+                "nudge": {
+                  "dueAt": 4600000,
+                  "fired": false
+                }
+              },
+              "_version": 2
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "tableOperation",
+        "type": "Task",
+        "use": "Timers",
+        "operation": "nothing",
+        "params": null
+      },
+      "context": {
+        "request": "r25",
+        "id": "00000000-0000-001a-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "not_found",
+          "status": 404,
+          "class": "EngineError",
+          "message": "Task has no operation nothing of Timers on the table as a whole (its operations on the table: none)"
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "define",
+        "document": {
+          "name": "Invoice",
+          "behaviors": [
+            {
+              "name": "Numbering",
+              "field": "number",
+              "config": {
+                "format": "INV-{seq:2}"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "key": true
+            },
+            {
+              "name": "title",
+              "typeRef": {
+                "name": "string"
+              }
+            }
+          ]
+        }
+      },
+      "context": {
+        "request": "r26",
+        "id": "00000000-0000-001b-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Invoice",
+          "defined": true
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Invoice",
+        "discard": false
+      },
+      "context": {
+        "request": "r27",
+        "id": "00000000-0000-001c-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Invoice",
+          "version": 1,
+          "rewritten": 0,
+          "discarded": []
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Invoice",
+        "data": {
+          "id": "i1",
+          "title": "a"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r28",
+        "id": "00000000-0000-001d-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "i1",
+          "title": "a",
+          "numberSeq": 1,
+          "number": "INV-01",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Invoice",
+        "data": {
+          "id": "i2",
+          "title": "b"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r29",
+        "id": "00000000-0000-001e-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "i2",
+          "title": "b",
+          "numberSeq": 2,
+          "number": "INV-02",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "delete",
+        "type": "Invoice",
+        "id": "i2",
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r30",
+        "id": "00000000-0000-001f-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "deleted": [
+            {
+              "type": "Invoice",
+              "id": "i2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Invoice",
+        "data": {
+          "id": "i3",
+          "title": "c"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r31",
+        "id": "00000000-0000-0020-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "i3",
+          "title": "c",
+          "numberSeq": 3,
+          "number": "INV-03",
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "define",
+        "document": {
+          "name": "Policy",
+          "behaviors": [
+            {
+              "name": "Revisions",
+              "config": {
+                "review": {
+                  "permission": "orders.review"
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "string"
+              },
+              "key": true
+            },
+            {
+              "name": "title",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            }
+          ]
+        }
+      },
+      "context": {
+        "request": "r32",
+        "id": "00000000-0000-0021-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Policy",
+          "defined": true
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "publish",
+        "type": "Policy",
+        "discard": false
+      },
+      "context": {
+        "request": "r33",
+        "id": "00000000-0000-0022-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "type": "Policy",
+          "version": 1,
+          "rewritten": 0,
+          "discarded": []
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "create",
+        "type": "Policy",
+        "data": {
+          "id": "y1",
+          "title": "Travel"
+        },
+        "params": {}
+      },
+      "context": {
+        "request": "r34",
+        "id": "00000000-0000-0023-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "y1",
+          "title": "Travel",
+          "revisionsRevision": 1,
+          "_version": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Policy",
+        "id": "y1",
+        "use": "Revisions",
+        "operation": "propose",
+        "params": {
+          "patch": {
+            "title": "Trips"
+          }
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r35",
+        "id": "00000000-0000-0024-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": 1,
+          "patch": {
+            "title": "Trips"
+          },
+          "base": 1,
+          "state": "pending",
+          "createdBy": "alice",
+          "createdAt": 1000000
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Policy",
+        "id": "y1",
+        "use": "Revisions",
+        "operation": "approve",
+        "params": {
+          "proposal": 1
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r36",
+        "id": "00000000-0000-0025-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": 1,
+          "patch": {
+            "title": "Trips"
+          },
+          "base": 1,
+          "state": "approved",
+          "createdBy": "alice",
+          "createdAt": 1000000,
+          "reviewedBy": "alice",
+          "reviewedAt": 1000000,
+          "revision": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Policy",
+        "id": "y1",
+        "use": "Revisions",
+        "operation": "propose",
+        "params": {
+          "patch": {
+            "title": null
+          }
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r37",
+        "id": "00000000-0000-0026-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": 2,
+          "patch": {
+            "title": null
+          },
+          "base": 2,
+          "state": "pending",
+          "createdBy": "alice",
+          "createdAt": 1000000
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "operation",
+        "type": "Policy",
+        "id": "y1",
+        "use": "Revisions",
+        "operation": "approve",
+        "params": {
+          "proposal": 2
+        },
+        "preconditions": {}
+      },
+      "context": {
+        "request": "r38",
+        "id": "00000000-0000-0027-0000-000000000000"
+      },
+      "answer": {
+        "refused": {
+          "code": "invalid_instance",
+          "status": 422,
+          "class": "InstanceValidationError",
+          "message": "Policy: /title: title is required, so a patch cannot clear it",
+          "details": {
+            "issues": [
+              {
+                "path": "/title",
+                "rule": "required",
+                "message": "title is required, so a patch cannot clear it"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "kind": "get",
+        "type": "Policy",
+        "id": "y1"
+      },
+      "context": {
+        "request": "r39",
+        "id": "00000000-0000-0028-0000-000000000000"
+      },
+      "answer": {
+        "ok": {
+          "id": "y1",
+          "title": "Trips",
+          "revisionsRevision": 2,
+          "revisionsPendingProposals": 1,
+          "_version": 4
+        }
+      }
+    }
+  ]
+}

@@ -22,7 +22,11 @@
     "Revisions",
     "Comments",
     "Derived",
-    "Provenance"
+    "Provenance",
+    "Stock",
+    "Holds",
+    "Calendar",
+    "Payments"
   ],
   "scenarios": [
     {
@@ -5224,6 +5228,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5238,6 +5254,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5320,6 +5345,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5334,6 +5371,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5419,6 +5465,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5433,6 +5491,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5547,6 +5614,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5561,6 +5640,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5679,6 +5767,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5693,6 +5793,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5812,6 +5921,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5826,6 +5947,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -5963,6 +6093,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -5977,6 +6119,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]
@@ -6136,6 +6287,18 @@
                 ]
               },
               "Comments": {
+                "follows": [
+                  {
+                    "key": "0000000001.wes",
+                    "values": {
+                      "thread": 1,
+                      "subject": "wes",
+                      "followed": true,
+                      "readUpTo": 1,
+                      "updatedAt": 10
+                    }
+                  }
+                ],
                 "messages": [
                   {
                     "key": "0000000001",
@@ -6150,6 +6313,15 @@
                       "stand": 1,
                       "edits": 0,
                       "pinned": false
+                    }
+                  }
+                ],
+                "reads": [
+                  {
+                    "key": "wes",
+                    "values": {
+                      "readAt": 10,
+                      "upTo": 1
                     }
                   }
                 ]

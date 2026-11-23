@@ -1,0 +1,6341 @@
+{
+  "file": "core-commerce",
+  "source": "runtime/engine/testdata/rules/scenarios/core-commerce.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance",
+    "Stock",
+    "Holds",
+    "Calendar",
+    "Payments"
+  ],
+  "scenarios": [
+    {
+      "name": "Stock and Holds > a cart takes its lines and its wrap as it enters held, commits them as it is placed and returns them as it is returned; a direct call of the contract is not_requested unless it changes nothing",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Inventory",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "priceCents",
+              "type": "object"
+            },
+            {
+              "name": "reorderAt",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Inventory",
+              "uses": [
+                {
+                  "behavior": "Stock",
+                  "config": {
+                    "permission": "stock.adjust",
+                    "price": {
+                      "field": "priceCents",
+                      "currency": "GBP"
+                    },
+                    "lowAt": {
+                      "field": "reorderAt"
+                    },
+                    "maxPerHold": 5
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priceCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reorderAt",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Checkout",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "lines",
+              "type": "array"
+            },
+            {
+              "name": "wrapCount",
+              "type": "object"
+            },
+            {
+              "name": "wrapId",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Checkout",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "cart",
+                      "held",
+                      "placed",
+                      "expired",
+                      "cancelled",
+                      "returned"
+                    ],
+                    "initial": "cart",
+                    "transitions": [
+                      {
+                        "from": "cart",
+                        "to": "held"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "expired"
+                      },
+                      {
+                        "from": "held",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "placed",
+                        "to": "returned"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Holds",
+                  "config": {
+                    "holds": {
+                      "lines": {
+                        "each": {
+                          "field": "lines",
+                          "target": "inventoryId"
+                        },
+                        "schema": "Inventory",
+                        "quantity": {
+                          "field": "quantity"
+                        }
+                      },
+                      "wrap": {
+                        "link": "wrap",
+                        "quantity": {
+                          "field": "wrapCount"
+                        }
+                      }
+                    },
+                    "takeOn": [
+                      "held"
+                    ],
+                    "commitOn": [
+                      "placed"
+                    ],
+                    "releaseOn": [
+                      "expired",
+                      "cancelled"
+                    ],
+                    "returnOn": [
+                      "returned"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "lines",
+                  "type": "Line"
+                },
+                {
+                  "name": "wrapCount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "wrapId",
+                  "type": "string",
+                  "relation": {
+                    "name": "wrap",
+                    "type": "Inventory"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    },
+                    "wrap": {
+                      "link": "wrap",
+                      "quantity": {
+                        "field": "wrapCount"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "wrapId",
+                "type": "string",
+                "relation": {
+                  "name": "wrap",
+                  "type": "Inventory"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    },
+                    "wrap": {
+                      "link": "wrap",
+                      "quantity": {
+                        "field": "wrapCount"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "wrapId",
+                "type": "string",
+                "relation": {
+                  "name": "wrap",
+                  "type": "Inventory"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "anvil",
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "anvil",
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "rope",
+              "own": {
+                "title": "rope",
+                "priceCents": 300
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "rope",
+            "row": {
+              "own": {
+                "title": "rope",
+                "priceCents": 300
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "wrap",
+              "own": {
+                "title": "wrap",
+                "priceCents": 150
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "wrap",
+            "row": {
+              "own": {
+                "title": "wrap",
+                "priceCents": 150
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 3,
+                "reason": "delivery"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "onHand": 3,
+              "held": 0,
+              "available": 3,
+              "movement": 1
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rope",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 5,
+                "reason": "delivery"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "onHand": 5,
+              "held": 0,
+              "available": 5,
+              "movement": 1
+            },
+            "row": {
+              "own": {
+                "title": "rope",
+                "priceCents": 300
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 5,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 5,
+                      "onHand": 5,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "wrap",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 2,
+                "reason": "delivery"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "onHand": 2,
+              "held": 0,
+              "available": 2,
+              "movement": 1
+            },
+            "row": {
+              "own": {
+                "title": "wrap",
+                "priceCents": 150
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 2,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 2,
+                      "onHand": 2,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "pending",
+                  "total": {
+                    "amount": 0,
+                    "currency": null
+                  }
+                },
+                "Workflow": {
+                  "status": "cart",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "held"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "from": "cart",
+              "to": "held"
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 2950,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "anvil",
+                      "quantity": 2,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 1250,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "lines/1",
+                    "values": {
+                      "hold": "lines",
+                      "item": 1,
+                      "supplySchema": "Inventory",
+                      "supplyId": "rope",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 300,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "wrap/0",
+                    "values": {
+                      "hold": "wrap",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "wrap",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 150,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "anvil",
+                "row": {
+                  "own": {
+                    "title": "anvil",
+                    "priceCents": 1250,
+                    "reorderAt": 1
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 3,
+                      "held": 2
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "rope",
+                "row": {
+                  "own": {
+                    "title": "rope",
+                    "priceCents": 300
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 5,
+                      "held": 1
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "wrap",
+                "row": {
+                  "own": {
+                    "title": "wrap",
+                    "priceCents": 150
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 2,
+                      "held": 1
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "holdFor",
+              "params": {
+                "holder": {
+                  "schema": "Checkout",
+                  "id": "c1"
+                },
+                "hold": "lines",
+                "item": 0,
+                "quantity": 2
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "state": "held",
+              "changed": false,
+              "unitPrice": 1250,
+              "currency": "GBP"
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 2
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "held",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "releaseFor",
+              "params": {
+                "holder": {
+                  "schema": "Checkout",
+                  "id": "c1"
+                },
+                "hold": "lines",
+                "item": 0,
+                "quantity": 2
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Stock vetoes releaseFor of Inventory anvil: item 0 of hold lines of Checkout c1 is held, and releaseFor needs it released",
+              "details": {
+                "behavior": "Stock",
+                "action": "releaseFor",
+                "reason": "item 0 of hold lines of Checkout c1 is held, and releaseFor needs it released",
+                "vetoCode": "not_requested",
+                "vetoDetails": {
+                  "holder": {
+                    "schema": "Checkout",
+                    "id": "c1"
+                  },
+                  "hold": "lines",
+                  "item": 0,
+                  "needs": "released",
+                  "holderState": "held"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 2
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "held",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "commitFor",
+              "params": {
+                "holder": {
+                  "schema": "Checkout",
+                  "id": "c1"
+                },
+                "hold": "lines",
+                "item": 0,
+                "quantity": 1
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Stock vetoes commitFor of Inventory anvil: item 0 of hold lines of Checkout c1 asks {\"quantity\":2}, not {\"quantity\":1}",
+              "details": {
+                "behavior": "Stock",
+                "action": "commitFor",
+                "reason": "item 0 of hold lines of Checkout c1 asks {\"quantity\":2}, not {\"quantity\":1}",
+                "vetoCode": "not_requested",
+                "vetoDetails": {
+                  "holder": {
+                    "schema": "Checkout",
+                    "id": "c1"
+                  },
+                  "hold": "lines",
+                  "item": 0,
+                  "needs": "committed",
+                  "holderState": "held"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 2
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "held",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "checkHold",
+              "params": {
+                "holder": {
+                  "schema": "Checkout",
+                  "id": "c9"
+                },
+                "hold": "lines",
+                "item": 0,
+                "quantity": 2
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "fits": false,
+              "code": "unavailable",
+              "reason": "2 asked of Inventory anvil, which has 1 available",
+              "details": {
+                "supply": {
+                  "schema": "Inventory",
+                  "id": "anvil"
+                },
+                "hold": "lines",
+                "item": 0,
+                "asked": {
+                  "quantity": 2
+                },
+                "available": 1
+              }
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 2
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "held",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "update",
+              "key": "c1",
+              "patch": {
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 1
+                  }
+                ]
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Holds vetoes update of Checkout c1: lines reads what the claim holds; it does not change while it holds",
+              "details": {
+                "behavior": "Holds",
+                "action": "update",
+                "reason": "lines reads what the claim holds; it does not change while it holds",
+                "vetoCode": "held_fields",
+                "vetoDetails": {
+                  "fields": [
+                    "lines"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 2950,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "anvil",
+                      "quantity": 2,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 1250,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "lines/1",
+                    "values": {
+                      "hold": "lines",
+                      "item": 1,
+                      "supplySchema": "Inventory",
+                      "supplyId": "rope",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 300,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "wrap/0",
+                    "values": {
+                      "hold": "wrap",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "wrap",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 150,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "update",
+              "key": "c1",
+              "patch": {
+                "wrapId": "rope"
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Holds vetoes update of Checkout c1: link wrap names what the claim holds; it does not move while the claim holds",
+              "details": {
+                "behavior": "Holds",
+                "action": "update",
+                "reason": "link wrap names what the claim holds; it does not move while the claim holds",
+                "vetoCode": "held_fields",
+                "vetoDetails": {
+                  "fields": [
+                    "wrap"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 2950,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "anvil",
+                      "quantity": 2,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 1250,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "lines/1",
+                    "values": {
+                      "hold": "lines",
+                      "item": 1,
+                      "supplySchema": "Inventory",
+                      "supplyId": "rope",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 300,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "wrap/0",
+                    "values": {
+                      "hold": "wrap",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "wrap",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 150,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "placed"
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "result": {
+              "from": "held",
+              "to": "placed"
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "committed",
+                  "total": {
+                    "amount": 2950,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "placed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "anvil",
+                      "quantity": 2,
+                      "state": "committed",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 1250,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "lines/1",
+                    "values": {
+                      "hold": "lines",
+                      "item": 1,
+                      "supplySchema": "Inventory",
+                      "supplyId": "rope",
+                      "quantity": 1,
+                      "state": "committed",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 300,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "wrap/0",
+                    "values": {
+                      "hold": "wrap",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "wrap",
+                      "quantity": 1,
+                      "state": "committed",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 150,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "anvil",
+                "row": {
+                  "own": {
+                    "title": "anvil",
+                    "priceCents": 1250,
+                    "reorderAt": 1
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 0
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "rope",
+                "row": {
+                  "own": {
+                    "title": "rope",
+                    "priceCents": 300
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 4,
+                      "held": 0
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "wrap",
+                "row": {
+                  "own": {
+                    "title": "wrap",
+                    "priceCents": 150
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 25,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "listStockMovements",
+              "params": {}
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seq": 2,
+                  "kind": "commit",
+                  "delta": -2,
+                  "onHand": 1,
+                  "holder": {
+                    "schema": "Checkout",
+                    "id": "c1"
+                  },
+                  "hold": "lines",
+                  "item": 0,
+                  "actor": "alice",
+                  "at": 1792573200000
+                },
+                {
+                  "seq": 1,
+                  "kind": "receive",
+                  "delta": 3,
+                  "onHand": 3,
+                  "reason": "delivery",
+                  "actor": "sam",
+                  "at": 1792573200000
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "committed",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "commit",
+                      "delta": -2,
+                      "onHand": 1,
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "actor": "alice",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "returned"
+              }
+            },
+            "request": "request-17"
+          },
+          "expect": {
+            "result": {
+              "from": "placed",
+              "to": "returned"
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "anvil",
+                    "quantity": 2
+                  },
+                  {
+                    "inventoryId": "rope",
+                    "quantity": 1
+                  }
+                ],
+                "wrapCount": 1,
+                "wrapId": "wrap"
+              },
+              "owned": {
+                "Holds": {
+                  "state": "returned",
+                  "total": {
+                    "amount": 2950,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "returned",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "anvil",
+                      "quantity": 2,
+                      "state": "returned",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 1250,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "lines/1",
+                    "values": {
+                      "hold": "lines",
+                      "item": 1,
+                      "supplySchema": "Inventory",
+                      "supplyId": "rope",
+                      "quantity": 1,
+                      "state": "returned",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 300,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "key": "wrap/0",
+                    "values": {
+                      "hold": "wrap",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "wrap",
+                      "quantity": 1,
+                      "state": "returned",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 150,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "anvil",
+                "row": {
+                  "own": {
+                    "title": "anvil",
+                    "priceCents": 1250,
+                    "reorderAt": 1
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 3,
+                      "held": 0
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "rope",
+                "row": {
+                  "own": {
+                    "title": "rope",
+                    "priceCents": 300
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 5,
+                      "held": 0
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Inventory",
+                "key": "wrap",
+                "row": {
+                  "own": {
+                    "title": "wrap",
+                    "priceCents": 150
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 2,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 29,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "listStockMovements",
+              "params": {
+                "limit": 1
+              }
+            },
+            "request": "request-18"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seq": 3,
+                  "kind": "return",
+                  "delta": 2,
+                  "onHand": 3,
+                  "holder": {
+                    "schema": "Checkout",
+                    "id": "c1"
+                  },
+                  "hold": "lines",
+                  "item": 0,
+                  "actor": "alice",
+                  "at": 1792573200000
+                }
+              ],
+              "next": "YWZ0ZXI6Mw"
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 3,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 2,
+                      "state": "returned",
+                      "unitPrice": 1250,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 3,
+                      "onHand": 3,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "commit",
+                      "delta": -2,
+                      "onHand": 1,
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "actor": "alice",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "return",
+                      "delta": 2,
+                      "onHand": 3,
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "actor": "alice",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 14,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 23,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 24,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 27,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 28,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Stock and Holds > two claims for the last unit: one holds it, the other is unavailable until it is let go; a delete releases what a claim holds and leaves what it committed sold",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Inventory",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "priceCents",
+              "type": "object"
+            },
+            {
+              "name": "reorderAt",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Inventory",
+              "uses": [
+                {
+                  "behavior": "Stock",
+                  "config": {
+                    "permission": "stock.adjust",
+                    "price": {
+                      "field": "priceCents",
+                      "currency": "GBP"
+                    },
+                    "lowAt": {
+                      "field": "reorderAt"
+                    },
+                    "maxPerHold": 5
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priceCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reorderAt",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Checkout",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "lines",
+              "type": "array"
+            },
+            {
+              "name": "wrapCount",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Checkout",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "cart",
+                      "held",
+                      "placed",
+                      "expired",
+                      "cancelled",
+                      "returned"
+                    ],
+                    "initial": "cart",
+                    "transitions": [
+                      {
+                        "from": "cart",
+                        "to": "held"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "expired"
+                      },
+                      {
+                        "from": "held",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "placed",
+                        "to": "returned"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Holds",
+                  "config": {
+                    "holds": {
+                      "lines": {
+                        "each": {
+                          "field": "lines",
+                          "target": "inventoryId"
+                        },
+                        "schema": "Inventory",
+                        "quantity": {
+                          "field": "quantity"
+                        }
+                      }
+                    },
+                    "takeOn": [
+                      "held"
+                    ],
+                    "commitOn": [
+                      "placed"
+                    ],
+                    "releaseOn": [
+                      "expired",
+                      "cancelled"
+                    ],
+                    "returnOn": [
+                      "returned"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "lines",
+                  "type": "Line"
+                },
+                {
+                  "name": "wrapCount",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "tea",
+              "own": {
+                "title": "tea",
+                "priceCents": 400
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "tea",
+            "row": {
+              "own": {
+                "title": "tea",
+                "priceCents": 400
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "tea",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 1,
+                "reason": "delivery"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "onHand": 1,
+              "held": 0,
+              "available": 1,
+              "movement": 1
+            },
+            "row": {
+              "own": {
+                "title": "tea",
+                "priceCents": 400
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 1,
+                      "onHand": 1,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "pending",
+                  "total": {
+                    "amount": 0,
+                    "currency": null
+                  }
+                },
+                "Workflow": {
+                  "status": "cart",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "pending",
+                  "total": {
+                    "amount": 0,
+                    "currency": null
+                  }
+                },
+                "Workflow": {
+                  "status": "cart",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "held"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "cart",
+              "to": "held"
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 400,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "tea",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 400,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 1
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "held"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Holds vetoes transition of Checkout c2: 1 asked of Inventory tea, which has 0 available",
+              "details": {
+                "behavior": "Holds",
+                "action": "transition",
+                "reason": "1 asked of Inventory tea, which has 0 available",
+                "vetoCode": "unavailable",
+                "vetoDetails": {
+                  "items": [
+                    {
+                      "code": "unavailable",
+                      "reason": "1 asked of Inventory tea, which has 0 available",
+                      "supply": {
+                        "schema": "Inventory",
+                        "id": "tea"
+                      },
+                      "hold": "lines",
+                      "item": 0,
+                      "asked": {
+                        "quantity": 1
+                      },
+                      "available": 0
+                    }
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "pending",
+                  "total": {
+                    "amount": 0,
+                    "currency": null
+                  }
+                },
+                "Workflow": {
+                  "status": "cart",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "delete",
+              "key": "tea"
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Stock vetoes delete of Inventory tea: it holds units for 1 items of claims; they are released or committed first",
+              "details": {
+                "behavior": "Stock",
+                "action": "delete",
+                "reason": "it holds units for 1 items of claims; they are released or committed first",
+                "vetoCode": "held",
+                "vetoDetails": {
+                  "held": 1
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "tea",
+                "priceCents": 400
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 1
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "holds": [
+                  {
+                    "key": "Checkout/c1/lines/0",
+                    "values": {
+                      "holderSchema": "Checkout",
+                      "holderId": "c1",
+                      "hold": "lines",
+                      "item": 0,
+                      "quantity": 1,
+                      "state": "held",
+                      "unitPrice": 400,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "retired": false
+                    }
+                  }
+                ],
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 1,
+                      "onHand": 1,
+                      "reason": "delivery",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "cancelled"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "from": "held",
+              "to": "cancelled"
+            },
+            "row": {
+              "own": {
+                "title": "c1",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "released",
+                  "total": {
+                    "amount": 400,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "cancelled",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "tea",
+                      "quantity": 1,
+                      "state": "released",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 400,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "held"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "from": "cart",
+              "to": "held"
+            },
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 400,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "tea",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 400,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 1
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "delete",
+              "key": "c2"
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "params": {}
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "pending",
+                  "total": {
+                    "amount": 0,
+                    "currency": null
+                  }
+                },
+                "Workflow": {
+                  "status": "cart",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "held"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "from": "cart",
+              "to": "held"
+            },
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "held",
+                  "total": {
+                    "amount": 400,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "held",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "tea",
+                      "quantity": 1,
+                      "state": "held",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 400,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 1,
+                      "held": 1
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "placed"
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "from": "held",
+              "to": "placed"
+            },
+            "row": {
+              "own": {
+                "title": "c2",
+                "lines": [
+                  {
+                    "inventoryId": "tea",
+                    "quantity": 1
+                  }
+                ]
+              },
+              "owned": {
+                "Holds": {
+                  "state": "committed",
+                  "total": {
+                    "amount": 400,
+                    "currency": "GBP"
+                  }
+                },
+                "Workflow": {
+                  "status": "placed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Holds": {
+                "items": [
+                  {
+                    "key": "lines/0",
+                    "values": {
+                      "hold": "lines",
+                      "item": 0,
+                      "supplySchema": "Inventory",
+                      "supplyId": "tea",
+                      "quantity": 1,
+                      "state": "committed",
+                      "takenAt": 1792573200000,
+                      "unitPrice": 400,
+                      "currency": "GBP"
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 0,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 24,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Checkout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "delete",
+              "key": "c2"
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "others": [
+              {
+                "type": "Inventory",
+                "key": "tea",
+                "row": {
+                  "own": {
+                    "title": "tea",
+                    "priceCents": 400
+                  },
+                  "owned": {
+                    "Stock": {
+                      "onHand": 0,
+                      "held": 0
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "delete",
+              "key": "tea"
+            },
+            "request": "request-15"
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 17,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 19,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 22,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 25,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Stock > counts are received, adjusted and counted with the permission, each a movement of the row's ledger paged newest first, and below_held holds what is on hand",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Inventory",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "priceCents",
+              "type": "object"
+            },
+            {
+              "name": "reorderAt",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Inventory",
+              "uses": [
+                {
+                  "behavior": "Stock",
+                  "config": {
+                    "permission": "stock.adjust",
+                    "price": {
+                      "field": "priceCents",
+                      "currency": "GBP"
+                    },
+                    "lowAt": {
+                      "field": "reorderAt"
+                    },
+                    "maxPerHold": 5
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priceCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reorderAt",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "anvil",
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "anvil",
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 10,
+                "reason": "delivery"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "alice may not receive stock of Inventory anvil: it needs permission stock.adjust"
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 0,
+                  "held": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 10,
+                "reason": "delivery",
+                "reference": "DN-1"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "onHand": 10,
+              "held": 0,
+              "available": 10,
+              "movement": 1
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 10,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "adjustStock",
+              "params": {
+                "delta": -3,
+                "reason": "damaged"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "onHand": 7,
+              "held": 0,
+              "available": 7,
+              "movement": 2
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 7,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "adjustStock",
+              "params": {
+                "delta": 0,
+                "reason": "nothing"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "onHand": 7,
+              "held": 0,
+              "available": 7,
+              "movement": null
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 7,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "countStock",
+              "params": {
+                "onHand": 1,
+                "reason": "stock take"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "onHand": 1,
+              "held": 0,
+              "available": 1,
+              "movement": 3
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "count",
+                      "delta": -6,
+                      "onHand": 1,
+                      "reason": "stock take",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "adjustStock",
+              "params": {
+                "delta": -2,
+                "reason": "lost"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Stock vetoes adjustStock of Inventory anvil: an adjustment of -2 leaves -1 on hand, below 0",
+              "details": {
+                "behavior": "Stock",
+                "action": "adjustStock",
+                "reason": "an adjustment of -2 leaves -1 on hand, below 0",
+                "vetoCode": "below_held",
+                "vetoDetails": {
+                  "onHand": -1,
+                  "held": 0
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "count",
+                      "delta": -6,
+                      "onHand": 1,
+                      "reason": "stock take",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "sam",
+              "permissions": [
+                "stock.adjust"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "receiveStock",
+              "params": {
+                "quantity": 0,
+                "reason": "none"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation receiveStock of behavior Stock: /quantity: must be >= 1",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/quantity",
+                    "message": "must be >= 1"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "count",
+                      "delta": -6,
+                      "onHand": 1,
+                      "reason": "stock take",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "listStockMovements",
+              "params": {
+                "limit": 2
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seq": 3,
+                  "kind": "count",
+                  "delta": -6,
+                  "onHand": 1,
+                  "reason": "stock take",
+                  "actor": "sam",
+                  "at": 1792573200000
+                },
+                {
+                  "seq": 2,
+                  "kind": "adjust",
+                  "delta": -3,
+                  "onHand": 7,
+                  "reason": "damaged",
+                  "actor": "sam",
+                  "at": 1792573200000
+                }
+              ],
+              "next": "YWZ0ZXI6Mg"
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "count",
+                      "delta": -6,
+                      "onHand": 1,
+                      "reason": "stock take",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Inventory",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "anvil",
+              "useId": "Stock",
+              "operation": "listStockMovements",
+              "params": {
+                "limit": 2,
+                "cursor": "YWZ0ZXI6Mg"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seq": 1,
+                  "kind": "receive",
+                  "delta": 10,
+                  "onHand": 10,
+                  "reason": "delivery",
+                  "reference": "DN-1",
+                  "actor": "sam",
+                  "at": 1792573200000
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "anvil",
+                "priceCents": 1250,
+                "reorderAt": 1
+              },
+              "owned": {
+                "Stock": {
+                  "onHand": 1,
+                  "held": 0
+                }
+              }
+            },
+            "subRows": {
+              "Stock": {
+                "movements": [
+                  {
+                    "key": "1",
+                    "values": {
+                      "kind": "receive",
+                      "delta": 10,
+                      "onHand": 10,
+                      "reason": "delivery",
+                      "reference": "DN-1",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "2",
+                    "values": {
+                      "kind": "adjust",
+                      "delta": -3,
+                      "onHand": 7,
+                      "reason": "damaged",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "3",
+                    "values": {
+                      "kind": "count",
+                      "delta": -6,
+                      "onHand": 1,
+                      "reason": "stock take",
+                      "actor": "sam",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Stock and Holds > a config is held to its schema, the type's fields and Workflow, and ISO 4217",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Inventory",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "priceCents",
+              "type": "object"
+            },
+            {
+              "name": "reorderAt",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Inventory",
+              "uses": [
+                {
+                  "behavior": "Stock",
+                  "config": {
+                    "permission": "stock.adjust",
+                    "price": {
+                      "field": "priceCents",
+                      "currency": "GBP"
+                    },
+                    "lowAt": {
+                      "field": "reorderAt"
+                    },
+                    "maxPerHold": 5
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priceCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reorderAt",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Checkout",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "lines",
+              "type": "array"
+            },
+            {
+              "name": "wrapCount",
+              "type": "object"
+            },
+            {
+              "name": "wrapId",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Checkout",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "cart",
+                      "held",
+                      "placed",
+                      "expired",
+                      "cancelled",
+                      "returned"
+                    ],
+                    "initial": "cart",
+                    "transitions": [
+                      {
+                        "from": "cart",
+                        "to": "held"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "placed"
+                      },
+                      {
+                        "from": "held",
+                        "to": "expired"
+                      },
+                      {
+                        "from": "held",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "cart",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "placed",
+                        "to": "returned"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Holds",
+                  "config": {
+                    "holds": {
+                      "lines": {
+                        "each": {
+                          "field": "lines",
+                          "target": "inventoryId"
+                        },
+                        "schema": "Inventory",
+                        "quantity": {
+                          "field": "quantity"
+                        }
+                      },
+                      "wrap": {
+                        "link": "wrap",
+                        "quantity": {
+                          "field": "wrapCount"
+                        }
+                      }
+                    },
+                    "takeOn": [
+                      "held"
+                    ],
+                    "commitOn": [
+                      "placed"
+                    ],
+                    "releaseOn": [
+                      "expired",
+                      "cancelled"
+                    ],
+                    "returnOn": [
+                      "returned"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "lines",
+                  "type": "Line"
+                },
+                {
+                  "name": "wrapCount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "wrapId",
+                  "type": "string",
+                  "relation": {
+                    "name": "wrap",
+                    "type": "Inventory"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Inventory: behavior Stock config: must have required property 'permission'",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Stock",
+                    "index": 0,
+                    "behavior": "Stock",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "must have required property 'permission'"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "ABC"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Inventory: behavior Stock config: price.currency \"ABC\" is not an active ISO 4217 currency code",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Stock",
+                    "index": 0,
+                    "behavior": "Stock",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Inventory: behavior Stock config: price.currency \"ABC\" is not an active ISO 4217 currency code"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "title",
+                    "currency": "GBP"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Inventory: behavior Stock config: price.field \"title\" is not an integer field of Inventory",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Stock",
+                    "index": 0,
+                    "behavior": "Stock",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Inventory: behavior Stock config: price.field \"title\" is not an integer field of Inventory"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "lowAt": {
+                    "field": "missing"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Inventory: behavior Stock config: lowAt.field \"missing\" is not a field of Inventory (its fields: title, priceCents, reorderAt)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Stock",
+                    "index": 0,
+                    "behavior": "Stock",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Inventory: behavior Stock config: lowAt.field \"missing\" is not a field of Inventory (its fields: title, priceCents, reorderAt)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Inventory",
+            "uses": [
+              {
+                "behavior": "Stock",
+                "config": {
+                  "permission": "stock.adjust",
+                  "price": {
+                    "field": "priceCents",
+                    "currency": "GBP"
+                  },
+                  "lowAt": {
+                    "field": "reorderAt"
+                  },
+                  "maxPerHold": 5
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priceCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reorderAt",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Checkout: behavior Holds config: Holds moves with the status of Workflow, which the type does not list",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Holds",
+                    "index": 0,
+                    "behavior": "Holds",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Checkout: behavior Holds config: Holds moves with the status of Workflow, which the type does not list"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "paid"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Checkout: behavior Holds config: takeOn names \"paid\", which is not a state of the type's Workflow (cart, held, placed, expired, cancelled, returned)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Holds",
+                    "index": 1,
+                    "behavior": "Holds",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Checkout: behavior Holds config: takeOn names \"paid\", which is not a state of the type's Workflow (cart, held, placed, expired, cancelled, returned)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "wrap": {
+                      "link": "gift",
+                      "quantity": 1
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Checkout: behavior Holds config: holds.wrap.link gift is not a to-one relation of Checkout (it has none), so a hold has no one supply to read",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Holds",
+                    "index": 1,
+                    "behavior": "Holds",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Checkout: behavior Holds config: holds.wrap.link gift is not a to-one relation of Checkout (it has none), so a hold has no one supply to read"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "held"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Checkout: behavior Holds config: takeOn and releaseOn both name \"held\": a state takes, commits, releases or returns",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Holds",
+                    "index": 1,
+                    "behavior": "Holds",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Checkout: behavior Holds config: takeOn and releaseOn both name \"held\": a state takes, commits, releases or returns"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 12,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "items",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Checkout: behavior Holds config: holds.lines.each.field \"items\" is not a field of Checkout (its fields: title, lines, wrapCount)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Holds",
+                    "index": 1,
+                    "behavior": "Holds",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Checkout: behavior Holds config: holds.lines.each.field \"items\" is not a field of Checkout (its fields: title, lines, wrapCount)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 13,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    },
+                    "wrap": {
+                      "link": "wrap",
+                      "quantity": {
+                        "field": "wrapCount"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "wrapId",
+                "type": "string",
+                "relation": {
+                  "name": "wrap",
+                  "type": "Inventory"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Checkout",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "cart",
+                    "held",
+                    "placed",
+                    "expired",
+                    "cancelled",
+                    "returned"
+                  ],
+                  "initial": "cart",
+                  "transitions": [
+                    {
+                      "from": "cart",
+                      "to": "held"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "placed"
+                    },
+                    {
+                      "from": "held",
+                      "to": "expired"
+                    },
+                    {
+                      "from": "held",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cart",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "placed",
+                      "to": "returned"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Holds",
+                "config": {
+                  "holds": {
+                    "lines": {
+                      "each": {
+                        "field": "lines",
+                        "target": "inventoryId"
+                      },
+                      "schema": "Inventory",
+                      "quantity": {
+                        "field": "quantity"
+                      }
+                    },
+                    "wrap": {
+                      "link": "wrap",
+                      "quantity": {
+                        "field": "wrapCount"
+                      }
+                    }
+                  },
+                  "takeOn": [
+                    "held"
+                  ],
+                  "commitOn": [
+                    "placed"
+                  ],
+                  "releaseOn": [
+                    "expired",
+                    "cancelled"
+                  ],
+                  "returnOn": [
+                    "returned"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "lines",
+                "type": "Line"
+              },
+              {
+                "name": "wrapCount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "wrapId",
+                "type": "string",
+                "relation": {
+                  "name": "wrap",
+                  "type": "Inventory"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

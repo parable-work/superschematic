@@ -542,6 +542,20 @@ impl Sort {
     }
 }
 
+/// Whether a value is one a sorted field of a kind holds, as a row holds
+/// it: an instant as its text or its epoch milliseconds, a UUID in either
+/// form, and a number, a boolean or a text as one.
+fn holds_kind(kind: &Kind, value: &Value) -> bool {
+    match kind {
+        Kind::DateTime => instant_of(value).is_some(),
+        Kind::Uuid => value.as_str().and_then(uuid_of).is_some(),
+        Kind::Number | Kind::Integer => value.is_number(),
+        Kind::Bool => value.is_boolean(),
+        Kind::Text | Kind::Enum(_) | Kind::Date => value.is_string(),
+        Kind::Json | Kind::Object(_) => true,
+    }
+}
+
 /// A sort compiled against a type: each term's place and kind, and its
 /// direction.
 #[derive(Clone, Debug)]
@@ -575,6 +589,60 @@ pub fn ordering(model: &Model, sorts: &[Sort]) -> Result<Order, Refusal> {
 }
 
 impl Order {
+    /// Each term's place, kind and whether it descends, in the sort's
+    /// order.
+    pub fn terms(&self) -> &[(Place, Kind, bool)] {
+        &self.terms
+    }
+
+    /// The kind of the key that breaks ties.
+    pub fn key_kind(&self) -> &Kind {
+        &self.key_kind
+    }
+
+    /// Whether the key breaks ties descending: when the first term
+    /// descends.
+    pub fn key_descends(&self) -> bool {
+        self.terms.first().is_some_and(|(_, _, desc)| *desc)
+    }
+
+    /// A cursor's sort values, `None` for no value, and its key: what
+    /// [`Order::cursor`] wrote. Refused when it is not one this sort
+    /// returned: a value or a key that is not of its field's kind among
+    /// them, which no row holds.
+    pub fn read_cursor(
+        &self,
+        cursor: &str,
+        type_name: &str,
+    ) -> Result<(Vec<Option<Value>>, String), Refusal> {
+        let wrong = || {
+            Refusal::invalid_argument(format!(
+                "list of {type_name}: the cursor is not one this sort returned"
+            ))
+        };
+        let tuple: Vec<Value> = serde_json::from_str(cursor).map_err(|_| wrong())?;
+        if tuple.len() != self.terms.len() + 1 {
+            return Err(wrong());
+        }
+        let Some(Value::String(key)) = tuple.last() else {
+            return Err(wrong());
+        };
+        if self.key_kind == Kind::Uuid && uuid_of(key).is_none() {
+            return Err(wrong());
+        }
+        let mut values = Vec::with_capacity(self.terms.len());
+        for ((_, kind, _), value) in self.terms.iter().zip(&tuple) {
+            if value.is_null() {
+                values.push(None);
+            } else if holds_kind(kind, value) {
+                values.push(Some(value.clone()));
+            } else {
+                return Err(wrong());
+            }
+        }
+        Ok((values, key.clone()))
+    }
+
     fn values(&self, row: &StoredRow) -> Vec<Option<Value>> {
         self.terms
             .iter()
@@ -644,26 +712,11 @@ impl Order {
         cursor: &str,
         type_name: &str,
     ) -> Result<Vec<&'r StoredRow>, Refusal> {
-        let wrong = || {
-            Refusal::invalid_argument(format!(
-                "list of {type_name}: the cursor is not one this sort returned"
-            ))
-        };
-        let tuple: Vec<Value> = serde_json::from_str(cursor).map_err(|_| wrong())?;
-        if tuple.len() != self.terms.len() + 1 {
-            return Err(wrong());
-        }
-        let Some(Value::String(key)) = tuple.last() else {
-            return Err(wrong());
-        };
-        let values: Vec<Option<Value>> = tuple[..self.terms.len()]
-            .iter()
-            .map(|value| (!value.is_null()).then(|| value.clone()))
-            .collect();
+        let (values, key) = self.read_cursor(cursor, type_name)?;
         Ok(rows
             .into_iter()
             .filter(|row| {
-                self.compare((&self.values(row), &row.id), (&values, key)) == Ordering::Greater
+                self.compare((&self.values(row), &row.id), (&values, &key)) == Ordering::Greater
             })
             .collect())
     }

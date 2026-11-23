@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Review, ReviewCommentsConversations, ReviewCommentsEdits, ReviewCommentsMessages, ReviewCommentsReactions, Ticket, TicketCommentsConversations, TicketCommentsEdits, TicketCommentsMessages, TicketCommentsReactions,  } from '@schemas/fixture-comments-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Review, ReviewCommentsConversations, ReviewCommentsDeliveries, ReviewCommentsDrafts, ReviewCommentsEdits, ReviewCommentsFollows, ReviewCommentsMessages, ReviewCommentsReactions, ReviewCommentsReads, Ticket, TicketCommentsConversations, TicketCommentsDeliveries, TicketCommentsDrafts, TicketCommentsEdits, TicketCommentsFollows, TicketCommentsMessages, TicketCommentsReactions, TicketCommentsReads,  } from '@schemas/fixture-comments-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-comments-db-types';
@@ -104,7 +104,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (10)
+### Types (18)
 
 
 - **Review** - A review's conversation of refs and code blocks alone, its bodies at
@@ -112,11 +112,19 @@ most 2000 code points, pinned and resolved by the permissions it names.
 
 - **ReviewCommentsConversations** - On a table, one row per row that has had a message, kept for the table as a whole: the greatest message id, reaction number and stand the row's conversation has given. Every write of a conversation moves its row's version, which holds two writes of one conversation apart; a delete of the row leaves it, so a row re-created with the key numbers on from it and never reuses an id.
 
+- **ReviewCommentsDeliveries** - On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.
+
+- **ReviewCommentsDrafts** - On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.
+
 - **ReviewCommentsEdits** - On a table, one row per edit of a message, keyed by the message and the edit's number: what the message held before the edit, who made it and when. A delete or a purge of the message deletes them, and so does a delete of the row.
+
+- **ReviewCommentsFollows** - On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:<name>; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.
 
 - **ReviewCommentsMessages** - On a table, one row per message of the row's conversation, keyed by its id: its thread and the message it quotes, its author, its state, its body, blocks and mentions, when it was posted and last edited, how many edits it has had, whether it is pinned, the clientId it was posted with, and for a top-level message who resolved its thread and when. A deleted message keeps its row; a purged one loses it. A delete of the row deletes them.
 
 - **ReviewCommentsReactions** - On a table, one row per reaction a subject holds on a message, keyed by its number on the row, which orders reactions: the message, the emoji, the subject and when. unreact deletes the caller's; a delete or a purge of the message deletes them, and so does a delete of the row.
+
+- **ReviewCommentsReads** - On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.
 
 - **Ticket** - A ticket's conversation (D77, D103's step 4): messages and their
 replies, edits within 15 minutes of a post, reactions, pins and resolved
@@ -125,11 +133,19 @@ edits and deletes another's message and purges.
 
 - **TicketCommentsConversations** - On a table, one row per row that has had a message, kept for the table as a whole: the greatest message id, reaction number and stand the row's conversation has given. Every write of a conversation moves its row's version, which holds two writes of one conversation apart; a delete of the row leaves it, so a row re-created with the key numbers on from it and never reuses an id.
 
+- **TicketCommentsDeliveries** - On a table, one row per message and subject that should hear of it, keyed by the message and the subject: each subject a message that comes to stand mentions and each follower of its thread but its author, and each subject an edit adds a mention of. A notifier or an agent dispatcher outside the core claims and settles them with claimDeliveries and settleDeliveries; the core sends nothing. The inbox reads its mentions from them. A delete or a purge of the message deletes them but the claimed ones, and so does a delete of the row.
+
+- **TicketCommentsDrafts** - On a table, one row per chunk a non-empty appendDraft added to a composing message's draft, keyed by the message and the chunk's offset: the draft is its chunks in offset order. A finish, an interrupt, a delete or a purge of the message deletes them, and so does a delete of the row.
+
 - **TicketCommentsEdits** - On a table, one row per edit of a message, keyed by the message and the edit's number: what the message held before the edit, who made it and when. A delete or a purge of the message deletes them, and so does a delete of the row.
+
+- **TicketCommentsFollows** - On a table, one row per subject and thread it has state on, keyed by the thread and the subject: whether it follows the thread, and its read marker on the thread's replies. A message that stands makes its author follow its thread, and its mentions too, but not a role:<name>; follow sets it, and markRead with a thread moves its marker. A purge of the thread, and a delete of the row, deletes them.
 
 - **TicketCommentsMessages** - On a table, one row per message of the row's conversation, keyed by its id: its thread and the message it quotes, its author, its state, its body, blocks and mentions, when it was posted and last edited, how many edits it has had, whether it is pinned, the clientId it was posted with, and for a top-level message who resolved its thread and when. A deleted message keeps its row; a purged one loses it. A delete of the row deletes them.
 
 - **TicketCommentsReactions** - On a table, one row per reaction a subject holds on a message, keyed by its number on the row, which orders reactions: the message, the emoji, the subject and when. unreact deletes the caller's; a delete or a purge of the message deletes them, and so does a delete of the row.
+
+- **TicketCommentsReads** - On a table, one row per subject that has a read marker on the row's conversation, keyed by the subject: the greatest stand of the top-level messages it has read, and when it last moved. markRead and a subject's own top-level message move it, never back. A delete of the row deletes them.
 
 
 

@@ -1444,6 +1444,18 @@ impl MemoryHost {
         key: &str,
         now: i64,
     ) -> Result<Map<String, Value>, Refusal> {
+        self.read_view_as(&Caller::default(), type_name, key, now)
+    }
+
+    /// [`MemoryHost::read_view`] as a caller: a field that is the reader's
+    /// (Comments' `unread`, D77) is the caller's.
+    pub fn read_view_as(
+        &self,
+        caller: &Caller,
+        type_name: &str,
+        key: &str,
+        now: i64,
+    ) -> Result<Map<String, Value>, Refusal> {
         let Some(spec) = self.store.live(type_name) else {
             return Ok(Map::new());
         };
@@ -1451,7 +1463,7 @@ impl MemoryHost {
             return Ok(Map::new());
         }
         let command = Command::new(
-            Caller::default(),
+            caller.clone(),
             now,
             Action::Read {
                 key: key.to_owned(),

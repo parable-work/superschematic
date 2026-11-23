@@ -74,9 +74,20 @@ pub(crate) fn select_rows(
     table: &str,
     conds: &[(&str, Value)],
 ) -> Result<Vec<Map<String, Value>>, Refusal> {
+    select_live(db, table, conds, None)
+}
+
+/// The rows of a table where its columns hold values and, when a column is
+/// named, that column holds NULL: a soft-deletable table's live rows.
+pub(crate) fn select_live(
+    db: &mut dyn Db,
+    table: &str,
+    conds: &[(&str, Value)],
+    live: Option<&str>,
+) -> Result<Vec<Map<String, Value>>, Refusal> {
     let dialect = db.dialect();
     let mut params = Vec::with_capacity(conds.len());
-    let mut wheres = Vec::with_capacity(conds.len());
+    let mut wheres = Vec::with_capacity(conds.len() + 1);
     for (i, (column, value)) in conds.iter().enumerate() {
         wheres.push(format!(
             "t.{} = {}",
@@ -84,6 +95,9 @@ pub(crate) fn select_rows(
             placeholder(dialect, i + 1)
         ));
         params.push(value.clone());
+    }
+    if let Some(live) = live {
+        wheres.push(format!("t.{} IS NULL", quote(live)));
     }
     let condition = if wheres.is_empty() {
         String::new()
@@ -139,6 +153,19 @@ pub(crate) fn update_rows(
     bump: Option<&str>,
     conds: &[(&str, Value)],
 ) -> Result<u64, Refusal> {
+    update_live(db, table, set, bump, conds, None)
+}
+
+/// [`update_rows`] of the rows whose `live` column, when one is named,
+/// holds NULL: a soft-deletable table's live rows.
+pub(crate) fn update_live(
+    db: &mut dyn Db,
+    table: &str,
+    set: &Map<String, Value>,
+    bump: Option<&str>,
+    conds: &[(&str, Value)],
+    live: Option<&str>,
+) -> Result<u64, Refusal> {
     let dialect = db.dialect();
     let target = quote(table);
     match dialect {
@@ -156,6 +183,9 @@ pub(crate) fn update_rows(
             for (column, value) in conds {
                 params.push(value.clone());
                 wheres.push(format!("{} = ?{}", quote(column), params.len()));
+            }
+            if let Some(live) = live {
+                wheres.push(format!("{} IS NULL", quote(live)));
             }
             if sets.is_empty() {
                 return Ok(0);
@@ -182,6 +212,9 @@ pub(crate) fn update_rows(
             for (column, value) in conds {
                 params.push(value.clone());
                 wheres.push(format!("{target}.{} = ${}", quote(column), params.len()));
+            }
+            if let Some(live) = live {
+                wheres.push(format!("{target}.{} IS NULL", quote(live)));
             }
             if sets.is_empty() {
                 return Ok(0);

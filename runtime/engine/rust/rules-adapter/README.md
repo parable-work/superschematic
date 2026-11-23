@@ -137,8 +137,12 @@ brief:
    for a row the change set deletes, hard or soft, every message of the
    row, and on a hard delete its sub-table rows. A `subRows` read is
    answered from the layout's columns in key order (`COLLATE "C"` on
-   Postgres); on SQLite one made while the command holds a lock is refused
-   as `internal`, since the unit has no check of it yet. A `linked` read is
+   Postgres); on SQLite one made while the command holds a lock is held to
+   its row's version, which the check of the row's own read under the lock
+   holds (a sub-table's rows change only with a write of their row, D103's
+   step 4). One whose row the run read under no lock is `internal`, and so
+   is one of a use whose behavior writes beside its rows, or writes through
+   an operation of the namespace, which moves no version. A `linked` read is
    answered from the layout's own column of the field, the key column
    first, live rows alone, after a key when given, in key order, `LIMIT
    limit + 1`, `more` set when the extra row comes back; a type the layout

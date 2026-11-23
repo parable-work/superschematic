@@ -875,6 +875,17 @@ jobs:
           bun run typecheck
           bun run test
 
+      - name: runtime/rules-handler/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        # Development mode's handler built for wasm32 (D117): every rules
+        # transcript and rules-dev's store session replayed over bun:sqlite,
+        # the routes and the event stream, and SQLite files read across this
+        # host and superschematic-dev, which the tests build.
+        working-directory: runtime/rules-handler/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
         env:
@@ -1236,6 +1247,25 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Runtime mode's scenarios (rules-runtime, D117) run the two binaries
+      # a runtime environment carries: the compiler's planner, here the
+      # core with no extension, over superscalar's static archive, and the
+      # Go migration runner, which needs no cgo. Without them the scenarios
+      # say so and pass.
+      - name: Build the planner and the migration runner runtime mode's scenarios run
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          scripts/superscalar-dep.sh --archive >/dev/null
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          go build -o "$GITHUB_WORKSPACE/bin/superschematic-core" ./internal/cmd/superschematic-core
+          (cd runtime/migrate/go && CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/bin/superschematic-migrate" ./cmd/superschematic-migrate)
+
       # The same commands as `make engine-rust`, inline: the Makefile runs
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
@@ -1266,11 +1296,16 @@ jobs:
       # through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in schemas of its own;
       # the test kit replays the hand-written core-pool.json whole, and
       # workqueue-lease.json's expireHolder steps among its 637 (D104).
+      # Runtime mode publishes through the binaries the step above built,
+      # in process and through a job, and holds its lists in SQL to
+      # development mode's answers.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          SUPERSCHEMATIC_BIN: ${{ github.workspace }}/bin/superschematic-core
+          SUPERSCHEMATIC_MIGRATE_BIN: ${{ github.workspace }}/bin/superschematic-migrate
         run: cargo test --workspace --all-features
 
       # Schedules' calendar as a project's Cargo graph may build it, jiff's

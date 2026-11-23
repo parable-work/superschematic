@@ -1,0 +1,2926 @@
+{
+  "components": {
+    "schemas": {
+      "CheckoutHoldsHoldName": {
+        "description": "A hold of Checkout's Holds, by name.",
+        "enum": [
+          "lines",
+          "wrap"
+        ],
+        "type": "string"
+      },
+      "CheckoutHoldsListHoldsResult": {
+        "description": "What Checkout's holds listHolds returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CheckoutHoldsListHoldsResultItems"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CheckoutHoldsListHoldsResultState"
+          },
+          "total": {
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
+      "CheckoutHoldsListHoldsResultItems": {
+        "properties": {
+          "check": {
+            "description": "For a pending item: the supply's checkHold answer now.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CheckoutHoldsListHoldsResultItemsCheck"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "currency": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "hold": {
+            "$ref": "#/components/schemas/CheckoutHoldsHoldName",
+            "description": "The hold's name in the config."
+          },
+          "id": {
+            "description": "The supply's id.",
+            "type": "string"
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "The units it asks, of counted supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The supply's schema.",
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When the time it asks starts, of timed supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CheckoutHoldsListHoldsResultItemsState"
+          },
+          "unitPrice": {
+            "description": "The unit price the supply held it at, in the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "id",
+          "item",
+          "schema",
+          "state"
+        ],
+        "type": "object"
+      },
+      "CheckoutHoldsListHoldsResultItemsCheck": {
+        "description": "For a pending item: the supply's checkHold answer now.",
+        "properties": {
+          "code": {
+            "description": "When it would not: the code holdFor would veto with.",
+            "nullable": true,
+            "type": "string"
+          },
+          "details": {
+            "description": "When it would not: the veto's details.",
+            "nullable": true
+          },
+          "fits": {
+            "description": "Whether holdFor would hold the item now.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "When it would not: why.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fits"
+        ],
+        "type": "object"
+      },
+      "CheckoutHoldsListHoldsResultItemsState": {
+        "enum": [
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "CheckoutHoldsListHoldsResultState": {
+        "enum": [
+          "none",
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "CheckoutHoldsRetakeHoldsResult": {
+        "description": "What Checkout's holds retakeHolds returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CheckoutHoldsRetakeHoldsResultItems"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CheckoutHoldsRetakeHoldsResultState"
+          },
+          "total": {
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
+      "CheckoutHoldsRetakeHoldsResultItems": {
+        "properties": {
+          "currency": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endMs": {
+            "description": "When it ends.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "hold": {
+            "$ref": "#/components/schemas/CheckoutHoldsHoldName",
+            "description": "The hold's name in the config."
+          },
+          "id": {
+            "description": "The supply's id.",
+            "type": "string"
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "The units it asks, of counted supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The supply's schema.",
+            "type": "string"
+          },
+          "startMs": {
+            "description": "When the time it asks starts, of timed supply.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CheckoutHoldsRetakeHoldsResultItemsState"
+          },
+          "unitPrice": {
+            "description": "The unit price the supply held it at, in the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "id",
+          "item",
+          "schema",
+          "state"
+        ],
+        "type": "object"
+      },
+      "CheckoutHoldsRetakeHoldsResultItemsState": {
+        "enum": [
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "CheckoutHoldsRetakeHoldsResultState": {
+        "enum": [
+          "none",
+          "pending",
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "CheckoutStatusState": {
+        "description": "A state of Checkout's status Workflow.",
+        "enum": [
+          "cart",
+          "held",
+          "placed",
+          "expired",
+          "cancelled",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "CheckoutStatusTransitionInput": {
+        "description": "The parameters of Checkout's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CheckoutStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/CheckoutStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "CheckoutStatusTransitionResult": {
+        "description": "What Checkout's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/CheckoutStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/CheckoutStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "InventoryStockAdjustStockInput": {
+        "description": "The parameters of Inventory's stock adjustStock.",
+        "properties": {
+          "delta": {
+            "description": "The units to add; negative to take away. 0 changes nothing.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "delta",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "InventoryStockAdjustStockResult": {
+        "description": "What Inventory's stock adjustStock returns.",
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "held",
+          "onHand"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCheckHoldInput": {
+        "description": "The parameters of Inventory's stock checkHold.",
+        "properties": {
+          "also": {
+            "description": "What the claim's other items still to hold ask of this instance, which the answer counts as taken.",
+            "items": {
+              "$ref": "#/components/schemas/InventoryStockCheckHoldInputAlso"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/InventoryStockCheckHoldInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCheckHoldInputAlso": {
+        "properties": {
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCheckHoldInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCheckHoldResult": {
+        "description": "What Inventory's stock checkHold returns.",
+        "properties": {
+          "code": {
+            "description": "When it would not: the code holdFor would veto with.",
+            "nullable": true,
+            "type": "string"
+          },
+          "details": {
+            "description": "When it would not: the veto's details.",
+            "nullable": true
+          },
+          "fits": {
+            "description": "Whether holdFor would hold the item now.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "When it would not: why.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fits"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCommitForInput": {
+        "description": "The parameters of Inventory's stock commitFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/InventoryStockCommitForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCommitForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCommitForResult": {
+        "description": "What Inventory's stock commitFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventoryStockCommitForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCommitForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "InventoryStockCountStockInput": {
+        "description": "The parameters of Inventory's stock countStock.",
+        "properties": {
+          "onHand": {
+            "description": "The units counted.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "onHand",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "InventoryStockCountStockResult": {
+        "description": "What Inventory's stock countStock returns.",
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "held",
+          "onHand"
+        ],
+        "type": "object"
+      },
+      "InventoryStockHoldForInput": {
+        "description": "The parameters of Inventory's stock holdFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/InventoryStockHoldForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockHoldForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockHoldForResult": {
+        "description": "What Inventory's stock holdFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventoryStockHoldForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "InventoryStockHoldForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "InventoryStockListStockMovementsInput": {
+        "description": "The parameters of Inventory's stock listStockMovements.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many; 50 when absent.",
+            "format": "int64",
+            "maximum": 500,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "InventoryStockListStockMovementsResult": {
+        "description": "What Inventory's stock listStockMovements returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryStockListStockMovementsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "InventoryStockListStockMovementsResultItems": {
+        "properties": {
+          "actor": {
+            "description": "The subject of the principal whose call moved it.",
+            "type": "string"
+          },
+          "at": {
+            "description": "When, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "delta": {
+            "description": "The units it added; negative for units taken away.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "hold": {
+            "description": "The claim's hold.",
+            "nullable": true,
+            "type": "string"
+          },
+          "holder": {
+            "description": "The claim a commit or a return was for.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InventoryStockListStockMovementsResultItemsHolder"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "item": {
+            "description": "The item's index in its hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InventoryStockListStockMovementsResultItemsKind",
+            "description": "What moved the count: receive, adjust and count by a caller with the permission, commit by a claim's commitFor, return by its returnFor."
+          },
+          "onHand": {
+            "description": "What was on hand after it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "reference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "seq": {
+            "description": "The movement's sequence number, per instance, from 1.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "actor",
+          "at",
+          "delta",
+          "kind",
+          "onHand",
+          "seq"
+        ],
+        "type": "object"
+      },
+      "InventoryStockListStockMovementsResultItemsHolder": {
+        "description": "The claim a commit or a return was for.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockListStockMovementsResultItemsKind": {
+        "description": "What moved the count: receive, adjust and count by a caller with the permission, commit by a claim's commitFor, return by its returnFor.",
+        "enum": [
+          "receive",
+          "adjust",
+          "count",
+          "commit",
+          "return"
+        ],
+        "type": "string"
+      },
+      "InventoryStockReceiveStockInput": {
+        "description": "The parameters of Inventory's stock receiveStock.",
+        "properties": {
+          "quantity": {
+            "description": "How many units arrived.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reference": {
+            "description": "What the units came with, such as a delivery note's number.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReceiveStockResult": {
+        "description": "What Inventory's stock receiveStock returns.",
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "held",
+          "onHand"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReleaseForInput": {
+        "description": "The parameters of Inventory's stock releaseFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/InventoryStockReleaseForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReleaseForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReleaseForResult": {
+        "description": "What Inventory's stock releaseFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventoryStockReleaseForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReleaseForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "InventoryStockReturnForInput": {
+        "description": "The parameters of Inventory's stock returnFor.",
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/InventoryStockReturnForInputHolder",
+            "description": "The claim the call is for: its schema and id."
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold",
+          "holder",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReturnForInputHolder": {
+        "description": "The claim the call is for: its schema and id.",
+        "properties": {
+          "id": {
+            "description": "The claim's id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The claim's schema.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReturnForResult": {
+        "description": "What Inventory's stock returnFor returns.",
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventoryStockReturnForResultState",
+            "description": "The item's state in this supply's record after the call."
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "type": "object"
+      },
+      "InventoryStockReturnForResultState": {
+        "description": "The item's state in this supply's record after the call.",
+        "enum": [
+          "held",
+          "committed",
+          "released",
+          "returned"
+        ],
+        "type": "string"
+      },
+      "ProblemDetails": {
+        "description": "An error response in the Problem Details format (RFC 9457).",
+        "properties": {
+          "code": {
+            "description": "The stable error code, when the problem has one.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What went wrong with this request.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Structured facts about the refusal, such as the entity or the path it concerns. Only some refusals have it."
+          },
+          "errors": {
+            "description": "The fields or filters that failed validation. Only a validation or filter error has it."
+          },
+          "requestId": {
+            "description": "The ID of the request, when the problem has one.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "example": 400,
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short summary, usually the text of the HTTP status.",
+            "example": "Bad Request",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem type. It is `about:blank`: the status and `code` identify the problem.",
+            "example": "about:blank",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-commerce-api schema",
+    "title": "Fixture-Commerce-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/checkout/{id}/holds/list-holds": {
+      "post": {
+        "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.",
+        "operationId": "CheckoutHoldsHoldsListHoldsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CheckoutHoldsListHoldsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Checkout holds: list holds",
+        "tags": [
+          "checkout-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "checkout.holds.list-holds",
+          "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Checkout holds: list holds",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/checkout/{id}/holds/retake-holds": {
+      "post": {
+        "description": "Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.",
+        "operationId": "CheckoutHoldsHoldsRetakeHoldsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CheckoutHoldsRetakeHoldsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Checkout holds: retake holds",
+        "tags": [
+          "checkout-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "checkout.holds.retake-holds",
+          "description": "Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Checkout holds: retake holds",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/checkout/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "CheckoutHoldsStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CheckoutStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Checkout status: transition",
+        "tags": [
+          "checkout-holds"
+        ],
+        "x-superschematic-docs": {
+          "capability": "checkout.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Checkout status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/adjust-stock": {
+      "post": {
+        "description": "Adds a delta, positive or negative, to what is on hand, with a reason: damage, loss, a correction. Needs the config's permission. Refused when it leaves fewer on hand than claims hold, unless the config allows backorder.",
+        "operationId": "InventoryStockStockAdjustStockHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockAdjustStockInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockAdjustStockResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: adjust stock",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.adjust-stock",
+          "description": "Adds a delta, positive or negative, to what is on hand, with a reason: damage, loss, a correction. Needs the config's permission. Refused when it leaves fewer on hand than claims hold, unless the config allows backorder.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: adjust stock",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/check-hold": {
+      "post": {
+        "description": "Answers whether holdFor would hold what an item asks now, and when not, why.",
+        "operationId": "InventoryStockStockCheckHoldHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockCheckHoldInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockCheckHoldResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: check hold",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.check-hold",
+          "description": "Answers whether holdFor would hold what an item asks now, and when not, why.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Inventory stock: check hold",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/commit-for": {
+      "post": {
+        "description": "Makes what an item of a claim holds the claim's for good, once the claim's item is committed.",
+        "operationId": "InventoryStockStockCommitForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockCommitForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockCommitForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: commit for",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.commit-for",
+          "description": "Makes what an item of a claim holds the claim's for good, once the claim's item is committed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: commit for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/count-stock": {
+      "post": {
+        "description": "Sets what is on hand to a count, with a reason, recording the difference as a movement; a count equal to what is on hand records nothing. Needs the config's permission, and its .override for a count below what claims hold.",
+        "operationId": "InventoryStockStockCountStockHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockCountStockInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockCountStockResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: count stock",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.count-stock",
+          "description": "Sets what is on hand to a count, with a reason, recording the difference as a movement; a count equal to what is on hand records nothing. Needs the config's permission, and its .override for a count below what claims hold.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: count stock",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/hold-for": {
+      "post": {
+        "description": "Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.",
+        "operationId": "InventoryStockStockHoldForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockHoldForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockHoldForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: hold for",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.hold-for",
+          "description": "Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: hold for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/list-stock-movements": {
+      "post": {
+        "description": "Lists the instance's movements, newest first, one page at a time: each change of what is on hand, by kind, with its delta, reason, the claim and item it was for, who made it and when.",
+        "operationId": "InventoryStockStockListStockMovementsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockListStockMovementsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockListStockMovementsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: list stock movements",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.list-stock-movements",
+          "description": "Lists the instance's movements, newest first, one page at a time: each change of what is on hand, by kind, with its delta, reason, the claim and item it was for, who made it and when.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Inventory stock: list stock movements",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/receive-stock": {
+      "post": {
+        "description": "Adds units that arrived to what is on hand, with a reason and an optional reference, such as a delivery note's. Needs the config's permission.",
+        "operationId": "InventoryStockStockReceiveStockHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockReceiveStockInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockReceiveStockResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: receive stock",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.receive-stock",
+          "description": "Adds units that arrived to what is on hand, with a reason and an optional reference, such as a delivery note's. Needs the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: receive stock",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/release-for": {
+      "post": {
+        "description": "Frees what an item of a claim holds, once the claim's item is released.",
+        "operationId": "InventoryStockStockReleaseForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockReleaseForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockReleaseForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: release for",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.release-for",
+          "description": "Frees what an item of a claim holds, once the claim's item is released.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: release for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/inventory/{id}/stock/return-for": {
+      "post": {
+        "description": "Takes back units an item of a claim committed, once the claim's item is returned.",
+        "operationId": "InventoryStockStockReturnForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryStockReturnForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InventoryStockReturnForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inventory stock: return for",
+        "tags": [
+          "inventory-stock"
+        ],
+        "x-superschematic-docs": {
+          "capability": "inventory.stock.return-for",
+          "description": "Takes back units an item of a claim committed, once the claim's item is returned.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Inventory stock: return for",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

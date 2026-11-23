@@ -1,8 +1,9 @@
 //! A message as the sub-table `messages` holds it, the record every
 //! operation returns for one (`comments-contract.md`, "The message
-//! record", as batches 2 and 3 amend it: `postedAt` and `stand`), the
-//! fields a read computes from them, and the conversation's high-water
-//! marks in the shared table `conversations`.
+//! record", as batches 2 to 4 amend it: `postedAt`, `stand`, a composing
+//! message's draft as its body, and `for`), the fields a read computes from
+//! them, and the conversation's high-water marks in the shared table
+//! `conversations`.
 
 use std::collections::BTreeMap;
 
@@ -11,14 +12,18 @@ use superschematic_rules::{Cx, Hook, SubRow, View};
 
 use super::checks::whole;
 use super::{
-    CommentsConfig, CONVERSATIONS, EDITS, LAST_MESSAGE_AT, MESSAGES, MESSAGES_FIELD, REACTIONS,
-    THREADS,
+    CommentsConfig, COMPOSING_FIELD, CONVERSATIONS, DRAFTS, EDITS, LAST_MESSAGE_AT, MESSAGES,
+    MESSAGES_FIELD, REACTIONS, THREADS,
 };
 
 /// A message posted and standing.
 pub(super) const POSTED: &str = "posted";
 /// A message deleted, which keeps its place.
 pub(super) const DELETED: &str = "deleted";
+/// A message begun and not finished: its draft is its chunks.
+pub(super) const COMPOSING: &str = "composing";
+/// A composing message stopped, standing with what was written.
+pub(super) const INTERRUPTED: &str = "interrupted";
 
 /// The most participants a top-level record names.
 const PARTICIPANTS: usize = 10;
@@ -33,6 +38,7 @@ pub(super) struct Message {
     pub thread: Option<i64>,
     pub quotes: Option<i64>,
     pub author: String,
+    pub for_subject: Option<String>,
     pub state: String,
     pub body: String,
     pub blocks: Value,
@@ -45,7 +51,10 @@ pub(super) struct Message {
     pub pinned: bool,
     pub client_id: Option<String>,
     pub resolved_by: Option<String>,
+    pub resolved_for: Option<String>,
     pub resolved_at: Option<i64>,
+    pub draft_length: Option<i64>,
+    pub last_append_at: Option<i64>,
 }
 
 impl Message {
@@ -59,6 +68,7 @@ impl Message {
             thread: int("thread"),
             quotes: int("quotes"),
             author: text("author").unwrap_or_default(),
+            for_subject: text("forSubject"),
             state: text("state").unwrap_or_else(|| POSTED.to_owned()),
             body: text("body").unwrap_or_default(),
             blocks: list(row.value("blocks")),
@@ -71,7 +81,10 @@ impl Message {
             pinned: row.value("pinned").and_then(Value::as_bool) == Some(true),
             client_id: text("clientId"),
             resolved_by: text("resolvedBy"),
+            resolved_for: text("resolvedFor"),
             resolved_at: int("resolvedAt"),
+            draft_length: int("draftLength"),
+            last_append_at: int("lastAppendAt"),
         })
     }
 
@@ -85,10 +98,15 @@ impl Message {
         self.state == DELETED
     }
 
-    /// Whether it stands: posted, holding text its author wrote, which the
-    /// counts count.
+    /// Whether it is composing: begun and not finished.
+    pub fn composing(&self) -> bool {
+        self.state == COMPOSING
+    }
+
+    /// Whether it stands: posted or interrupted, holding text its author
+    /// wrote, which the counts count.
     pub fn stands(&self) -> bool {
-        self.state == POSTED
+        self.state == POSTED || self.state == INTERRUPTED
     }
 
     /// Whether its thread is resolved.
@@ -117,6 +135,7 @@ pub(super) struct Reaction {
     pub message: i64,
     pub emoji: String,
     pub subject: String,
+    pub for_subject: Option<String>,
     pub at: i64,
 }
 
@@ -137,6 +156,10 @@ impl Reaction {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            for_subject: row
+                .value("forSubject")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             at: row.value("at").and_then(whole).unwrap_or_default(),
         })
     }
@@ -156,6 +179,24 @@ pub(super) fn reaction_key(number: i64) -> String {
 /// in ten digits, joined by a dot.
 pub(super) fn edit_key(message: i64, number: i64) -> String {
     format!("{message:0KEY_WIDTH$}.{number:0KEY_WIDTH$}")
+}
+
+/// The key of a draft's chunk: the message's id and the chunk's offset,
+/// each in ten digits, joined by a dot, so a message's chunks are in
+/// offset order.
+pub(super) fn chunk_key(message: i64, offset: i64) -> String {
+    format!("{message:0KEY_WIDTH$}.{offset:0KEY_WIDTH$}")
+}
+
+/// The key of a row of a subject on a message or a thread: the id in ten
+/// digits, a dot, and the subject.
+pub(super) fn subject_key(id: i64, subject: &str) -> String {
+    format!("{id:0KEY_WIDTH$}.{subject}")
+}
+
+/// The name of a composing message's idle deadline.
+pub(super) fn idle_deadline(id: i64) -> String {
+    format!("idle.{}", message_key(id))
 }
 
 /// The conversation's messages, as the run has them, in id order.
@@ -180,6 +221,64 @@ pub(super) fn reactions_of(view: &View<'_, CommentsConfig>) -> Hook<Vec<Reaction
 /// message's by number.
 pub(super) fn edits_of(view: &View<'_, CommentsConfig>) -> Hook<Vec<SubRow>> {
     view.sub_rows(EDITS)
+}
+
+/// Each composing message's draft, by message: its chunks concatenated in
+/// offset order.
+pub(super) fn drafts_of(view: &View<'_, CommentsConfig>) -> Hook<BTreeMap<i64, String>> {
+    Ok(drafts(&view.sub_rows(DRAFTS)?))
+}
+
+/// The drafts the chunks of a sub-table make, by message.
+pub(super) fn drafts(chunks: &[SubRow]) -> BTreeMap<i64, String> {
+    let mut out: BTreeMap<i64, String> = BTreeMap::new();
+    for chunk in chunks {
+        let message = chunk.value("message").and_then(whole).unwrap_or_default();
+        let text = chunk
+            .value("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        out.entry(message).or_default().push_str(text);
+    }
+    out
+}
+
+/// What a record of a message reads of its conversation: its messages,
+/// reactions and drafts as the run has them.
+pub(super) struct Talk {
+    pub messages: Vec<Message>,
+    pub reactions: Vec<Reaction>,
+    pub drafts: BTreeMap<i64, String>,
+}
+
+impl Talk {
+    /// The conversation of the row the view is on.
+    pub fn of(view: &View<'_, CommentsConfig>) -> Hook<Talk> {
+        Ok(Talk {
+            messages: messages_of(view)?,
+            reactions: reactions_of(view)?,
+            drafts: drafts_of(view)?,
+        })
+    }
+
+    /// The record of a message, `mine` for the subject.
+    pub fn record(&self, message: &Message, subject: &str) -> Value {
+        let draft = message
+            .composing()
+            .then(|| self.drafts.get(&message.id).cloned().unwrap_or_default());
+        record(
+            message,
+            draft.as_deref(),
+            &self.messages,
+            &self.reactions,
+            subject,
+        )
+    }
+
+    /// The message of an id.
+    pub fn find(&self, id: i64) -> Option<&Message> {
+        self.messages.iter().find(|message| message.id == id)
+    }
 }
 
 /// The conversation's high-water marks, and the version of its shared row
@@ -244,9 +343,9 @@ impl Conversation {
     }
 }
 
-/// The three fields a read computes: how many messages stand, the latest
-/// standing one's postedAt (absent while none stands), and the standing
-/// top-level messages, open and resolved.
+/// The fields a read computes: how many messages stand, the latest
+/// standing one's postedAt (absent while none stands), the standing
+/// top-level messages, open and resolved, and the subjects composing.
 pub(super) fn fields(messages: &[Message]) -> Map<String, Value> {
     let standing: Vec<&Message> = messages.iter().filter(|m| m.stands()).collect();
     let mut fields = Map::new();
@@ -260,14 +359,28 @@ pub(super) fn fields(messages: &[Message]) -> Map<String, Value> {
     threads.insert("open".into(), Value::from(tops.len() - resolved));
     threads.insert("resolved".into(), Value::from(resolved));
     fields.insert(THREADS.into(), Value::Object(threads));
+    // Each subject composing, once, by the least id of its composing
+    // messages: the messages are in id order.
+    let mut composing: Vec<&str> = Vec::new();
+    for message in messages.iter().filter(|m| m.composing()) {
+        if !composing.contains(&message.author.as_str()) {
+            composing.push(&message.author);
+        }
+    }
+    fields.insert(
+        COMPOSING_FIELD.into(),
+        Value::Array(composing.into_iter().map(Value::from).collect()),
+    );
     fields
 }
 
 /// The record of a message, `mine` computed for `subject`: its members in
-/// the contract's order, absent ones left out; a top-level message's
-/// thread members from the conversation's messages.
+/// the contract's order, absent ones left out; a composing message's body
+/// its draft; a top-level message's thread members from the conversation's
+/// messages.
 pub(super) fn record(
     message: &Message,
+    draft: Option<&str>,
     messages: &[Message],
     reactions: &[Reaction],
     subject: &str,
@@ -281,8 +394,14 @@ pub(super) fn record(
         out.insert("quotes".into(), Value::from(quotes));
     }
     out.insert("author".into(), Value::from(message.author.as_str()));
+    if let Some(acted_for) = &message.for_subject {
+        out.insert("for".into(), Value::from(acted_for.as_str()));
+    }
     out.insert("state".into(), Value::from(message.state.as_str()));
-    out.insert("body".into(), Value::from(message.body.as_str()));
+    out.insert(
+        "body".into(),
+        Value::from(draft.unwrap_or(message.body.as_str())),
+    );
     out.insert("blocks".into(), message.blocks.clone());
     out.insert("mentions".into(), message.mentions.clone());
     out.insert(
@@ -322,6 +441,9 @@ pub(super) fn record(
         if let (Some(by), Some(at)) = (&message.resolved_by, message.resolved_at) {
             let mut resolved = Map::new();
             resolved.insert("by".into(), Value::from(by.as_str()));
+            if let Some(acted_for) = &message.resolved_for {
+                resolved.insert("for".into(), Value::from(acted_for.as_str()));
+            }
             resolved.insert("at".into(), Value::from(at));
             out.insert("resolved".into(), Value::Object(resolved));
         }
@@ -384,6 +506,9 @@ mod tests {
         assert_eq!(reaction_key(42), "0000000042");
         assert_eq!(edit_key(3, 2), "0000000003.0000000002");
         assert!(edit_key(2, 10) < edit_key(3, 1));
+        assert!(chunk_key(2, 9) < chunk_key(2, 10));
+        assert_eq!(subject_key(4, "agent:ada"), "0000000004.agent:ada");
+        assert_eq!(idle_deadline(5), "idle.0000000005");
     }
 
     #[test]
@@ -398,5 +523,21 @@ mod tests {
         );
         assert_eq!(list(None), serde_json::json!([]));
         assert_eq!(list(Some(&serde_json::json!("x"))), serde_json::json!([]));
+    }
+
+    #[test]
+    fn a_draft_is_its_chunks_in_offset_order() {
+        let chunk = |message: i64, offset: i64, text: &str| {
+            SubRow::new(
+                chunk_key(message, offset),
+                serde_json::json!({"message": message, "chunkOffset": offset, "text": text})
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        };
+        let found = drafts(&[chunk(2, 0, "Ha"), chunk(2, 2, "lf"), chunk(3, 0, "x")]);
+        assert_eq!(found.get(&2).map(String::as_str), Some("Half"));
+        assert_eq!(found.get(&3).map(String::as_str), Some("x"));
     }
 }

@@ -36,6 +36,32 @@ pub struct Record {
     pub versions: BTreeMap<String, i64>,
 }
 
+impl Record {
+    /// The record as its document, which the runner that applies the
+    /// publish's plan writes in the transaction that finishes it
+    /// (`superschematic-migrate apply --record`, version 1).
+    pub fn document(&self) -> Result<Vec<u8>, Refusal> {
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "service": self.service,
+            "modelHash": self.model_hash,
+            "documents": self.documents,
+            "layout": self.layout,
+            "versions": self.versions,
+        }))
+        .map_err(|error| crate::values::internal(format!("the record is no JSON: {error}")))
+    }
+
+    /// Whether another record holds the same publish: its model, documents
+    /// and versions.
+    pub(crate) fn same(&self, other: &Record) -> bool {
+        self.service == other.service
+            && self.model_hash == other.model_hash
+            && self.documents == other.documents
+            && self.versions == other.versions
+    }
+}
+
 /// One type as the store serves it: the handler's model of its document,
 /// its table's layout, and the column of each own field the model holds.
 #[derive(Clone, Debug)]
@@ -49,11 +75,13 @@ pub(crate) struct Served {
     pub version: i64,
 }
 
-/// The types of a record, by name, as the store serves them.
+/// The types of a record, by name, as the store serves them, and their
+/// models, which a list's filter compiles against.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Types {
     pub model_hash: String,
     pub types: BTreeMap<String, Served>,
+    pub models: BTreeMap<String, Model>,
 }
 
 impl Types {
@@ -152,7 +180,8 @@ pub(crate) fn serve(
         ) {
             done.response?;
         }
-        let model = document::read(&document, declarations)?;
+        let mut model = document::read(&document, declarations)?;
+        resolve(&mut model, &record.documents, declarations);
         if model.key.name != table.key.field {
             return Err(invalid(
                 type_name,
@@ -203,10 +232,31 @@ pub(crate) fn serve(
             },
         );
     }
+    let models = types
+        .iter()
+        .map(|(name, served)| (name.clone(), served.model.clone()))
+        .collect();
     Ok(Types {
         model_hash: record.model_hash.clone(),
         types,
+        models,
     })
+}
+
+/// Gives each relation's member its target's key type, as the handler's
+/// live models have it: the member's column holds the target's key.
+fn resolve(model: &mut Model, documents: &[Value], declarations: &Declarations) {
+    for field in &mut model.fields {
+        let Some(relation) = &field.relation else {
+            continue;
+        };
+        let target = type_document(documents, &relation.target)
+            .and_then(|document| document::read(&document, declarations).ok());
+        if let Some(target) = target {
+            field.type_name.clone_from(&target.key.type_name);
+            field.kind = target.key.kind.clone();
+        }
+    }
 }
 
 /// What a type's version follows: its own definition and the scalars and

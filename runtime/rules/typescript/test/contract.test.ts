@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -386,18 +386,28 @@ test('declarations are the registered files, each field typed and the value fiel
   const contracts = (name: string): readonly DeclaredContract[] => byName(name).contracts ?? [];
   expect(contracts('Pool').map(c => [c.name, c.role])).toEqual([['Capacity', 'asks']]);
   expect(contracts('Budget').map(c => [c.name, c.role])).toEqual([['Capacity', 'implements']]);
-  expect(declarations.filter(d => (d.contracts ?? []).length > 0).map(d => d.name)).toEqual(['Budget', 'Pool']);
+  // Supply (D70, D103's step 4): Stock implements it, Holds asks it.
+  expect(contracts('Stock').map(c => [c.name, c.role])).toEqual([['Supply', 'implements']]);
+  expect(contracts('Holds').map(c => [c.name, c.role])).toEqual([['Supply', 'asks']]);
+  expect(contracts('Calendar').map(c => [c.name, c.role])).toEqual([['Supply', 'implements']]);
+  expect(declarations.filter(d => (d.contracts ?? []).length > 0).map(d => d.name)).toEqual(['Budget', 'Pool', 'Stock', 'Holds', 'Calendar']);
   // Lease's expireHolder runs on the table as a whole, which the core now
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
   expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool']);
-  // Comments keeps its messages, edits and reactions in sub-tables of the
-  // row and each conversation's high-water marks in a table of the table as
-  // a whole; its writes are beside the row (D103's step 4), and its fields
-  // are computed at a read, so it owns no column.
+  // Comments keeps its messages, draft chunks, read markers, follows,
+  // deliveries, edits and reactions in sub-tables of the row and each
+  // conversation's high-water marks in a table of the table as a whole;
+  // its writes are beside the row (D103's step 4), and its fields are
+  // computed at a read, so it owns no column. It arms a composing message's
+  // idle deadline and declares the signals of D77's primitive 2.
   const comments = byName('Comments');
   expect(comments.tables?.map(t => `${t.name} by ${t.key}${t.scope === 'schema' ? ', shared' : ''}`)).toEqual([
     'messages by message',
+    'drafts by chunk',
+    'reads by subject',
+    'follows by follow',
+    'deliveries by delivery',
     'edits by edit',
     'reactions by reaction',
     'conversations by conversation, shared',
@@ -405,6 +415,12 @@ test('declarations are the registered files, each field typed and the value fiel
   expect(comments.fields?.filter(f => f.type !== undefined)).toEqual([]);
   expect(comments.operations?.filter(o => o.beside === true).map(o => o.name)).toContain('post');
   expect(comments.operations?.filter(o => o.beside === true && o.writes !== true)).toEqual([]);
+  expect(comments.armsDeadlines).toBe(true);
+  expect(comments.signals?.map(s => [s.name, s.access])).toEqual([
+    ['typing', 'read'],
+    ['viewing', 'read'],
+    ['draft', 'operation'],
+  ]);
   // Derived keeps each derived field's hashes, override and attempts in a
   // sub-table keyed by the field, computes fields and stale at a read, and
   // pulls and settles through operations of the table as a whole; and
