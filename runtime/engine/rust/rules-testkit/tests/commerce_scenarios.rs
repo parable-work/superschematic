@@ -1,0 +1,52 @@
+//! The engine's commerce recordings replayed on the core (D70, D103's step
+//! 4): Stock's counts, movements and holds (`commerce-stock.json`), Holds'
+//! takes, commits, releases and returns over Stock (`commerce-holds.json`),
+//! and a hold's expiry through Timers (`commerce-holds-timers.json`). The
+//! engine's Links link is a to-one relation on a table, so a `link` hold
+//! reads the relation's own field. Every step the replayer maps must answer
+//! as the engine did, each refusal compared whole, and the steps it maps
+//! must not drop below each file's floor.
+
+use superschematic_rules_testkit::{ported, replay_path, scenario_path};
+
+fn replays(name: &str, floor: usize) {
+    let report =
+        replay_path(&scenario_path(name), &ported).unwrap_or_else(|error| panic!("{error}"));
+    println!("{}", report.details());
+    assert!(
+        report.mismatches().is_empty(),
+        "the core answered otherwise than the engine:\n{}",
+        report.details()
+    );
+    assert!(
+        report.checked() >= floor,
+        "{} steps checked, under the floor of {floor}:\n{}",
+        report.checked(),
+        report.details()
+    );
+}
+
+/// The steps of `commerce-stock.json` the replayer maps and compares.
+const STOCK_FLOOR: usize = 60;
+
+#[test]
+fn stock_scenarios_replay_on_the_core() {
+    replays("commerce-stock", STOCK_FLOOR);
+}
+
+/// The steps of `commerce-holds.json` the replayer maps and compares.
+const HOLDS_FLOOR: usize = 92;
+
+#[test]
+fn holds_scenarios_replay_on_the_core() {
+    replays("commerce-holds", HOLDS_FLOOR);
+}
+
+/// The steps of `commerce-holds-timers.json` the replayer maps and
+/// compares.
+const HOLDS_TIMERS_FLOOR: usize = 20;
+
+#[test]
+fn holds_timers_scenarios_replay_on_the_core() {
+    replays("commerce-holds-timers", HOLDS_TIMERS_FLOOR);
+}

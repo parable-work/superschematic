@@ -104,16 +104,19 @@
 //! assert!(matches!(step, Step::Done(Outcome::Changed(_))));
 //! ```
 
+mod ajv;
 pub mod approvals;
 pub mod budget;
 pub mod calendar;
 pub mod capacity;
 pub mod comments;
 pub mod constants;
+pub mod currency;
 mod declared;
 pub mod dependencies;
 pub mod derived;
 mod flow;
+pub mod holds;
 pub mod lease;
 mod moves;
 pub mod numbering;
@@ -131,7 +134,9 @@ pub mod schedules;
 mod schema;
 pub mod seats;
 pub mod staterules;
+pub mod stock;
 pub mod subjects;
+pub mod supply;
 pub mod timers;
 mod values;
 pub mod workflow;
@@ -145,6 +150,7 @@ pub use constants::{
 };
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use derived::{Derived, DerivedConfig, DerivedField};
+pub use holds::{Holds, HoldsConfig};
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
 pub use numbering::{Numbering, NumberingConfig};
@@ -164,6 +170,7 @@ pub use rollups::{RollupFunction, RollupSpec, Rollups, RollupsConfig, MAX_ROLLUP
 pub use schedules::{Schedules, SchedulesConfig, SchedulesKind, SchedulesRetry};
 pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
+pub use stock::{Stock, StockConfig};
 pub use timers::{
     deadlines_field, parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart,
     TimersThen, TimersUntil,
@@ -179,7 +186,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 21] = [
+pub const NAMES: [&str; 23] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -201,6 +208,8 @@ pub const NAMES: [&str; 21] = [
     comments::NAME,
     derived::NAME,
     provenance::NAME,
+    stock::NAME,
+    holds::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -208,7 +217,7 @@ pub const NAMES: [&str; 21] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 21] = [
+pub const DECLARATIONS: [&str; 23] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -230,12 +239,14 @@ pub const DECLARATIONS: [&str; 21] = [
     comments::DECLARATION,
     derived::DECLARATION,
     provenance::DECLARATION,
+    stock::DECLARATION,
+    holds::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
 /// declaration's `contracts` may give: what one behavior asks of the uses
 /// that implement it, resolved by their declarations.
-pub const CONTRACTS: [&str; 1] = [capacity::NAME];
+pub const CONTRACTS: [&str; 2] = [capacity::NAME, supply::NAME];
 
 /// A core with every behavior ported so far, in the engine's order, and
 /// the default permission matcher: what a host runs, extended with its own
@@ -263,6 +274,8 @@ pub fn core() -> Core {
         .with(Comments)
         .with(Derived)
         .with(Provenance)
+        .with(Stock)
+        .with(Holds)
 }
 
 #[cfg(test)]
@@ -294,6 +307,8 @@ mod tests {
     fn every_declarations_contracts_are_the_cores() {
         let core = core();
         let mut implementers = Vec::new();
+        let mut suppliers = Vec::new();
+        let mut askers = Vec::new();
         for name in NAMES {
             let declaration = core.declaration(name).expect("registered");
             for contract in declaration.contracts.iter().chain(&declaration.asks) {
@@ -305,8 +320,29 @@ mod tests {
             if declaration.implements(capacity::NAME) {
                 implementers.push(name);
             }
+            if declaration.implements(supply::NAME) {
+                suppliers.push(name);
+                // A supply serves the contract's writes as operations of
+                // its rows and checkHold as one that only reads.
+                for operation in [supply::HOLD_FOR, supply::COMMIT_FOR, supply::RELEASE_FOR] {
+                    assert!(
+                        declaration
+                            .find_operation(operation)
+                            .is_some_and(|declared| declared.writes),
+                        "{name} serves {operation}"
+                    );
+                }
+                assert!(declaration
+                    .find_operation(supply::CHECK_HOLD)
+                    .is_some_and(|declared| !declared.writes));
+            }
+            if declaration.asks_contract(supply::NAME) {
+                askers.push(name);
+            }
         }
         assert_eq!(implementers, [budget::NAME]);
+        assert_eq!(suppliers, [stock::NAME]);
+        assert_eq!(askers, [holds::NAME]);
         let config = BudgetConfig::default();
         let params = serde_json::json!({});
         let query =
