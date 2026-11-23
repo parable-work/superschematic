@@ -947,3 +947,70 @@ fn sqlite_busy_retry() {
         assert_eq!(st.steps.len(), 1);
     }
 }
+
+/// The finish hook runs in the transaction of the plan's last step, after
+/// the model is recorded: what it writes commits with the model, and a
+/// refusal of it rolls the step back, so the model does not move and the
+/// next apply runs the step again (D117's record of a runtime publish).
+#[test]
+fn the_finish_hook_writes_with_the_last_step() {
+    let dir = TempDir::new();
+    let path = dir.file("shop.db");
+    let conn = open(&path);
+    let create = plan("01-create");
+    let last = create.steps.len();
+
+    let mut refusing = quiet(&conn).finish(|conn| {
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS record (model TEXT)")?;
+        Err("no record".into())
+    });
+    match refusing.apply(&create, Phase::All) {
+        Err(Error::Step(err)) => {
+            assert_eq!(err.index, last);
+            assert!(err.to_string().contains("no record"), "{err}");
+        }
+        other => panic!("apply = {other:?}, want the last step to fail on the hook's refusal"),
+    }
+    let st = status(&mut quiet(&conn), "shop");
+    assert_eq!(st.model_hash, "", "the model did not move");
+    assert_eq!(st.plan_hash.as_deref(), Some(create.hash.as_str()));
+    assert_eq!(st.steps.len(), last - 1, "the last step rolled back");
+    assert!(
+        strings(
+            &path,
+            "SELECT name FROM sqlite_master WHERE name = 'record'"
+        )
+        .is_empty(),
+        "the hook's writes rolled back with it"
+    );
+
+    let to = create.to.clone();
+    let mut recording = quiet(&conn).finish(move |conn| {
+        let (model, plan): (String, Option<String>) = conn.query_row(
+            "SELECT model_hash, plan_hash FROM superschematic_schema_state WHERE service = 'shop'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(
+            (model.as_str(), plan),
+            (to.as_str(), None),
+            "the model is recorded first"
+        );
+        conn.execute_batch("CREATE TABLE record (model TEXT)")?;
+        conn.execute("INSERT INTO record (model) VALUES (?1)", [model])?;
+        Ok(())
+    });
+    let result = apply(&mut recording, &create, Phase::All);
+    assert!(result.finished, "{result:?}");
+    assert_eq!(result.ran, [last], "it resumed at the last step");
+    assert_eq!(
+        strings(&path, "SELECT model FROM record"),
+        std::slice::from_ref(&create.to)
+    );
+    let again = apply(&mut recording, &create, Phase::All);
+    assert!(
+        again.already_applied,
+        "an applied plan runs no hook: {again:?}"
+    );
+    assert_eq!(strings(&path, "SELECT model FROM record").len(), 1);
+}

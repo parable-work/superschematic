@@ -120,11 +120,14 @@ there as RFC 3339 UTC text with microseconds
 ## `apply`
 
 ```
-superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
+superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--record record.json] [--database-url URL]
 ```
 
 `--plan -` reads the plan from stdin, as a runtime environment's publish
-hands it over (D117). `--database-url` defaults to `$DATABASE_URL`. A
+hands it over (D117). `--record` writes runtime mode's record of the
+publish in the transaction that finishes the plan (Runtime records,
+below); it takes a file, since stdin is the plan's. `--database-url`
+defaults to `$DATABASE_URL`. A
 `postgres://` or `postgresql://` URL selects Postgres; a `sqlite:` URL, a
 `file:` URI or a path selects a SQLite file; a
 `d1://<account id>/<database id>` URL selects a Cloudflare D1 database,
@@ -247,6 +250,33 @@ on D1):
    they were, as a runner that predates `expanded` does for every plan.
    When the plan's last step finishes, set `model_hash` to `to`, `model`
    to `toModel` and `dialect`, and clear `plan_hash` and `plan_phase`.
+   With `--record`, write the record in the same transaction, after the
+   state; a failure there rolls the transaction back, as a failed step
+   does.
+
+## Runtime records
+
+A runtime environment's servers (D117's runtime mode,
+`runtime/engine/rust/rules-runtime`) serve each type's table through the
+layout of the last publish, which they read from `superschematic_runtime`
+beside the state tables. A publish's plan and its record move together:
+the runner writes the record in the transaction that finishes the plan,
+so a server never reads `model_hash` at the plan's `to` before the layout
+it serves the new tables through. The record document:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `version` | integer | `1`. |
+| `service` | string | The DB service, the plan's. |
+| `modelHash` | string | The model the plan ends at, the plan's `to`. |
+| `documents` | array | The schema documents published. |
+| `layout` | object | The layout document the compiler wrote for them. |
+| `versions` | object | Each type's version, by name. |
+
+The runner refuses a record of another service or another model before
+it runs anything. It creates the table when it is missing (`service` the
+primary key, `model_hash`, `documents`, `layout` and `versions` as text,
+`published_at` the time of the write) and replaces its one row.
 
 ## `status`
 
@@ -304,7 +334,8 @@ A database:
 | `database` | string | With `cloudSql`: the database's name on the instance. |
 | `databaseUrl` | string | Without `cloudSql`: the database's URL, as `--database-url` takes it. |
 | `plan` | string | Optional. The plan whose phase to run: a path or a `gs://` URL, read relative to the job document's. |
-| `privileges` | object | Optional. `readWrite`, the roles that read and write the DB service's tables, and `engine`, optional, the engine's schema for the deployables that open the engine (D58): `schema`, the engine's schema (`engine`), `role`, the role that owns it, and `members`, the roles that open the engine. |
+| `record` | string | Optional, with `plan`. Runtime mode's record of a publish (Runtime records, above), read as `plan` is: the job writes it, and gives `privileges`' roles theirs, in the transaction that finishes the plan. |
+| `privileges` | object | Optional. `readWrite`, the roles that read and write the DB service's tables; `readState`, optional, which gives those roles SELECT alone on `superschematic_schema_state` and `superschematic_runtime`, the reads a runtime server follows a publish by; and `engine`, optional, the engine's schema for the deployables that open the engine (D58): `schema`, the engine's schema (`engine`), `role`, the role that owns it, and `members`, the roles that open the engine. |
 
 With `cloudSql`, the runner reaches each database through the Cloud SQL Go
 connector, which dials the instance by its connection name over TLS with
@@ -323,8 +354,13 @@ those objects, and USAGE on those schemas, back from any other role the
 user gave them to, all in one transaction, so the roles listed are the
 roles that hold them. A role the user is granted, such as
 `cloudsqlsuperuser` on Cloud SQL, keeps what it holds.
-An empty `readWrite` takes every such grant back. Only the Postgres
-driver gives privileges.
+An empty `readWrite` takes every such grant back. With `readState` the
+record's table is left out of those grants too, and the roles get SELECT
+and nothing more on it and on the state table, which every other role
+loses. A database with a `record` makes these grants in the transaction
+that finishes its plan as well, so a server that follows the publish may
+already read and write the plan's new tables. Only the Postgres driver
+gives privileges.
 
 Then `engine` readies the engine's schema for the deployables that open
 the engine, each as a database user of its own, in one transaction. It

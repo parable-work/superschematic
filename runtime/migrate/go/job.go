@@ -75,6 +75,13 @@ type JobDatabase struct {
 	// job that only gives the servers that connect their privileges.
 	Plan string `json:"plan,omitempty"`
 
+	// Record is runtime mode's record of a publish (D117, ReadRecord), a
+	// path or a gs:// URL read as Plan is: the job writes it, and gives
+	// Privileges' roles theirs, in the transaction that finishes the
+	// plan, so a server never reads the plan's model before the layout
+	// and the privileges it serves the new tables with. It needs a plan.
+	Record string `json:"record,omitempty"`
+
 	// Privileges, when set, are the privileges the job gives after the
 	// plan's phase. Nil leaves every privilege as it is.
 	Privileges *Privileges `json:"privileges,omitempty"`
@@ -91,6 +98,12 @@ type Privileges struct {
 	// left out, and so is the engine's schema, Engine's. An empty list
 	// takes every such privilege back.
 	ReadWrite []string `json:"readWrite"`
+
+	// ReadState also gives ReadWrite's roles SELECT, and no other
+	// privilege, on the runner's state table and on runtime mode's record
+	// table, which a runtime environment's servers read to follow a
+	// publish (D117), and takes it back from any other role.
+	ReadState bool `json:"readState,omitempty"`
 
 	// Engine, when set, gives the deployables that open the engine (D58)
 	// on the DB service's database its schema, after ReadWrite.
@@ -192,6 +205,9 @@ func ReadJob(doc []byte) (*Job, error) {
 		if d.Plan == "" && d.Privileges == nil {
 			return nil, fmt.Errorf("job document: service %s has neither a plan nor privileges", d.Service)
 		}
+		if d.Record != "" && d.Plan == "" {
+			return nil, fmt.Errorf("job document: service %s has a record and no plan, whose finish writes it", d.Service)
+		}
 	}
 	return &job, nil
 }
@@ -249,22 +265,35 @@ type Granter interface {
 	// from every other role the connection's user granted it to, and
 	// readies the extension the engine's Search needs.
 	GrantEngine(ctx context.Context, engine EnginePrivileges) (*EngineGrants, error)
+
+	// GrantReadWriteIn is GrantReadWrite in the caller's transaction: a
+	// runtime publish's grants, which the transaction that finishes its
+	// plan makes (Runner.Finish).
+	GrantReadWriteIn(ctx context.Context, conn Conn, roles []string, except Except) (*Grants, error)
 }
 
 // Except is what GrantReadWrite leaves out: tables by name, in any
 // schema, and every object of a schema, with the grants on the schema.
+// Read are tables, by name, among Tables, that the roles get SELECT on
+// alone, and every other role loses every privilege on.
 type Except struct {
 	Tables  []string
 	Schemas []string
+	Read    []string
 }
 
 // GrantExcept is what a job's GrantReadWrite leaves out: the runner's
 // state tables, and the engine's schema and the extensions' schema when p
-// gives the engine its own.
+// gives the engine its own. With ReadState it leaves runtime mode's record
+// table out too, and the roles read it and the state table.
 func GrantExcept(p *Privileges) Except {
 	except := Except{Tables: StateTables()}
 	if p != nil && p.Engine != nil {
 		except.Schemas = []string{p.Engine.Schema, EngineExtensionSchema}
+	}
+	if p != nil && p.ReadState {
+		except.Tables = append(except.Tables, RecordTable)
+		except.Read = []string{stateTable, RecordTable}
 	}
 	return except
 }

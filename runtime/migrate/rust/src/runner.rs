@@ -36,6 +36,7 @@ pub struct Runner<'c> {
     waits: Vec<Duration>,
     sleep: Box<dyn FnMut(Duration) + 'c>,
     after_step: Option<AfterStep<'c>>,
+    finish: Option<Finish<'c>>,
 }
 
 /// Receives the runner's lines.
@@ -43,6 +44,9 @@ type Log<'c> = Box<dyn FnMut(&str) + 'c>;
 
 /// Runs after each step a run finishes.
 type AfterStep<'c> = Box<dyn FnMut(&Step) -> Result<(), BoxError> + 'c>;
+
+/// Runs in the transaction that finishes a plan.
+type Finish<'c> = Box<dyn FnMut(&Connection) -> Result<(), BoxError> + 'c>;
 
 /// What one [`Runner::apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -106,7 +110,21 @@ impl<'c> Runner<'c> {
             waits: DEFAULT_WAITS.to_vec(),
             sleep: Box::new(std::thread::sleep),
             after_step: None,
+            finish: None,
         })
+    }
+
+    /// Runs `hook` in the transaction that finishes a plan, after the
+    /// state records the plan's model as the applied one: what must change
+    /// with the model or not at all, such as runtime mode's record of the
+    /// layout its servers read (D117), so no reader sees the model move
+    /// without it. An error it returns rolls that transaction back, the
+    /// plan's last step with it, and fails the run as that step's
+    /// [`Error::Step`], or as [`Error::Stopped`] when the transaction ran no
+    /// step; the next apply resumes at that step.
+    pub fn finish(mut self, hook: impl FnMut(&Connection) -> Result<(), BoxError> + 'c) -> Self {
+        self.finish = Some(Box::new(hook));
+        self
     }
 
     /// Sets how long the connection waits for another connection's lock
@@ -256,6 +274,7 @@ impl<'c> Runner<'c> {
 
         // A phase with no steps, or a run that resumed after its last step
         // committed, changes the state here.
+        let mut finish = self.finish.take();
         let progress = self.write(|conn| {
             let st = state::read_state(conn, &plan.service)?;
             if st.plan_hash != plan.hash {
@@ -268,8 +287,10 @@ impl<'c> Runner<'c> {
                 return Err(not_in_progress(plan));
             }
             let finished = state::finished_steps(conn, &plan.hash)?;
-            advance(conn, plan, &st, &finished)
-        })?;
+            advance(conn, plan, &st, &finished, &mut finish)
+        });
+        self.finish = finish;
+        let progress = progress?;
         result.expand_done = progress.expand_done;
         result.finished = progress.finished;
         if result.finished {
@@ -391,7 +412,7 @@ impl<'c> Runner<'c> {
         let mut attempt = 0;
         loop {
             let began = Instant::now();
-            let err = match transactional_step(self.conn, plan, step) {
+            let err = match transactional_step(self.conn, plan, step, &mut self.finish) {
                 Ok(outcome) => {
                     match outcome {
                         StepOutcome::Ran => {
@@ -542,12 +563,14 @@ struct Progress {
 /// Step 8 of apply: when every expand step has finished and the plan has
 /// contract steps, `plan_phase` records it, with the plan's expanded model
 /// as the applied model when it has one; when every step has finished, the
-/// plan's model becomes the applied model.
+/// plan's model becomes the applied model, and the runner's finish hook
+/// runs in the same transaction ([`Runner::finish`]).
 fn advance(
     conn: &Connection,
     plan: &Plan,
     st: &State,
     finished: &BTreeSet<usize>,
+    finish: &mut Option<Finish<'_>>,
 ) -> Result<Progress, Error> {
     let pending = |phase: Option<Phase>| {
         plan.steps.iter().any(|step| {
@@ -560,6 +583,9 @@ fn advance(
     };
     if progress.finished {
         state::set_model(conn, plan.model())?;
+        if let Some(hook) = finish {
+            hook(conn).map_err(Error::Stopped)?;
+        }
     } else if progress.expand_done && st.plan_phase.is_empty() {
         state::set_expand_done(conn, plan)?;
     }
@@ -595,6 +621,7 @@ fn transactional_step(
     conn: &Connection,
     plan: &Plan,
     step: &Step,
+    finish: &mut Option<Finish<'_>>,
 ) -> Result<StepOutcome, StepError> {
     let transaction = if step.foreign_keys_off {
         Transaction::ForeignKeysOff
@@ -622,7 +649,7 @@ fn transactional_step(
         }
         state::insert_log(conn, plan, step, &started_at, &state::now())?;
         finished.insert(step.index);
-        advance(conn, plan, &st, &finished)?;
+        advance(conn, plan, &st, &finished, finish)?;
         Ok(StepOutcome::Ran)
     })
     .map_err(|failure| {
