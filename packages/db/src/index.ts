@@ -81,6 +81,8 @@ export type {
   Numbering,
   NumberingConfig,
   OnDeleteAction,
+  Payments,
+  PaymentsOn,
   Pool,
   PoolAvailability,
   PoolOn,

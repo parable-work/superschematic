@@ -1,9 +1,9 @@
-// Type-level checks of Stock<T, C>, Holds<T, C> and Calendar<T, C> (D70,
-// D103's step 4).
+// Type-level checks of Stock<T, C>, Holds<T, C>, Calendar<T, C> and
+// Payments<T, C> (D70, D103's step 4).
 // Nothing imports this file: `bun run typecheck`, which `make ts` runs,
 // checks it, and fails on an expected error (@ts-expect-error) that no
 // longer errors.
-import type { Calendar, CalendarOn, HoldOn, Holds, HoldsOn, Stock, StockOn } from "./index";
+import type { Calendar, CalendarOn, HoldOn, Holds, HoldsOn, Payments, PaymentsOn, Stock, StockOn } from "./index";
 
 // The carriers impose no members: a table implements them with its own
 // fields alone, and their first type argument is the table itself. An
@@ -76,3 +76,42 @@ const noZone: CalendarOn<Desk> = { hours: { mon: [["09:00", "17:00"]] } };
 const someday: CalendarOn<Desk> = { timeZone: "UTC", hours: { someday: [["09:00", "17:00"]] } };
 // @ts-expect-error capacity.field is the table's own
 const unknownCapacity: CalendarOn<Desk> = { timeZone: "UTC", hours: {}, capacity: { field: "seats" } };
+
+// An order that takes payments over its own total, and a refund of one.
+export abstract class Order
+  implements
+    Payments<Order, {
+      amount: { field: "totalCents" };
+      currency: "GBP";
+      require: { placed: "paid" };
+      voidOn: ["cancelled"];
+      refunds: { permission: "payments.refund" };
+      record: { permission: "payments.record" };
+    }>
+{
+  id: string;
+  totalCents: number;
+}
+
+export abstract class Refund
+  implements
+    Payments<Refund, {
+      refundOf: { link: "order" };
+      amount: { field: "amountCents" };
+      currency: "GBP";
+      issueOn: ["approved"];
+      record: { permission: "payments.record" };
+    }>
+{
+  id: string;
+  amountCents: number;
+  order: string;
+}
+
+const fromHolds: PaymentsOn<Order> = { amount: { holds: true }, record: { permission: "payments.record" }, capture: "manual", captureOn: ["held"] };
+// @ts-expect-error an amount field is the table's own
+const unknownAmount: PaymentsOn<Order> = { amount: { field: "total" }, currency: "GBP", record: { permission: "payments.record" } };
+// @ts-expect-error the adapter's permission is named
+const noRecord: PaymentsOn<Order> = { amount: { field: "totalCents" }, currency: "GBP" };
+// @ts-expect-error require waits for authorized or paid
+const waitsForever: PaymentsOn<Order> = { amount: { field: "totalCents" }, currency: "GBP", require: { placed: "settled" }, record: { permission: "p" } };

@@ -115,6 +115,14 @@ const commerceFixture = "fixture-commerce-db"
 // closure and setting a sub-table row with no repository.
 const calendarFixture = "fixture-calendar-db"
 
+// paymentsFixture is the DB fixture whose Order takes payments over its
+// own total and whose Refund refunds one, each implementing Payments
+// beside its status Workflow (D70 on D103's step 4): their operations under
+// Payments(), listPaymentActions among them, each attempt, action, refund,
+// issue and provider event a sub-table or shared table row with no
+// repository.
+const paymentsFixture = "fixture-payments-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -133,7 +141,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -280,6 +288,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// Calendar(), findAvailability taking no key, no repository of a
 		// sub-table, no upserts, and no queue.
 		{calendarFixture, []string{"repository_booking.go", "repository_desk.go", "rules.go"}},
+		// Tables of Payments (D70 on D103's step 4): its operations under
+		// Payments(), listPaymentActions taking no key, no repository of a
+		// sub-table or the shared table, no upserts, and no queue.
+		{paymentsFixture, []string{"repository_order.go", "repository_refund.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

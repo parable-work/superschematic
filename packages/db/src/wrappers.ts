@@ -927,3 +927,48 @@ export interface CalendarOn<T> {
  * the first type argument is the table itself.
  */
 export type Calendar<T, C extends CalendarOn<T>> = NonNullable<unknown>;
+
+/** Payments' config on a table (D70, D103's step 4): what the row owes, an own integer field in a currency or the total of the table's Holds; the states a move into waits for money, voids in and captures in; what a refund drawn directly and the provider's adapter need; and, on a refund row, the relation to what it refunds and the states that issue it. */
+export interface PaymentsOn<T> {
+  /** What the row owes: an own integer field in its currency's minor units, or the total of the table's Holds, which the table lists before Payments. */
+  readonly amount: { readonly field: Extract<keyof T, string> } | { readonly holds: true };
+  /** The currency of an amount from a field: an ISO 4217 code or the own field that holds one. */
+  readonly currency?: string | { readonly field: Extract<keyof T, string> };
+  /** automatic (the default) or manual, which captures in captureOn's states. */
+  readonly capture?: "automatic" | "manual";
+  /** With capture manual, the states whose entry captures what is authorized. */
+  readonly captureOn?: readonly string[];
+  /** By state of the table's Workflow, what a move into it waits for: everything due authorized, or paid. */
+  readonly require?: Readonly<Record<string, "authorized" | "paid">>;
+  /** The states whose entry voids the attempts a provider can still void. */
+  readonly voidOn?: readonly string[];
+  /** Whether money captured in a voidOn state is refunded or kept for an operator; keep when absent. */
+  readonly afterRelease?: "refund" | "keep";
+  /** What refundPayment needs; a refund row refunds when absent. */
+  readonly refunds?: { readonly permission: string };
+  /** What the provider's adapter needs: recordPaymentEvent, listPaymentActions and settleRefundFor. */
+  readonly record: { readonly permission: string };
+  /** On a refund row, the required to-one relation to the row it refunds. */
+  readonly refundOf?: { readonly link: Extract<keyof T, string> };
+  /** On a refund row, the states whose entry asks the row it refunds for its amount. */
+  readonly issueOn?: readonly string[];
+}
+
+/**
+ * What a row owes and how it is settled (D70, D103's step 4): `export
+ * abstract class Order implements Payments<Order, { amount: { field:
+ * "totalCents" }; currency: "GBP"; require: { placed: "paid" }; record: {
+ * permission: "payments.record" } }>`. The type stays a table, beside its
+ * status Workflow. Payments keeps due, authorized, captured, refunded,
+ * outstanding, overpaid, currency and state as owned columns, which a
+ * Reactions rule hears, its attempts, actions, refunds and a refund row's
+ * issues in sub-tables (order_payments_attempts and the rest), and the
+ * provider events in a table kept for the table as a whole; attempts is
+ * computed at a read. Its operations (payments.openPayment,
+ * recordPaymentEvent, capturePayment, voidPayment, refundPayment,
+ * refundFor, settleRefundFor, and listPaymentActions on the table as a
+ * whole) record what a provider's adapter is to do and what it reports;
+ * the core calls no provider. Like Timers, it resolves to the empty object
+ * type; the first type argument is the table itself.
+ */
+export type Payments<T, C extends PaymentsOn<T>> = NonNullable<unknown>;

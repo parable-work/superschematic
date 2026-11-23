@@ -140,6 +140,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// calendar, findAvailability taking no key, its sub-tables with no
 		// repository, no upserts, and the sub-tables in the layout.
 		{service: "fixture-calendar-db", behaviors: true},
+		// Tables of Payments (D70 on D103's step 4): its operations under
+		// payments, listPaymentActions taking no key, its sub-tables and its
+		// shared table with no repository, no upserts, and the tables in
+		// the layout.
+		{service: "fixture-payments-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},
