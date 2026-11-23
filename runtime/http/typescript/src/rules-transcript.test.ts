@@ -143,6 +143,11 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-comments', floor: 238 },
   { file: 'core-comments-beside', floor: 25 },
   { file: 'core-derived-provenance', floor: 75 },
+  // D70 on the core (D103's step 4): Stock and Holds through Supply, each
+  // take a supply's lock.
+  { file: 'core-holds', floor: 71 },
+  { file: 'core-holds-timers', floor: 14 },
+  { file: 'core-commerce', floor: 66 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

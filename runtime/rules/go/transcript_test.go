@@ -108,6 +108,11 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-comments.transcript.json", 238},
 	{"../../engine/testdata/rules/core-comments-beside.transcript.json", 25},
 	{"../../engine/testdata/rules/core-derived-provenance.transcript.json", 75},
+	// D70 on the core (D103's step 4): Stock and Holds through Supply,
+	// each take a supply's lock.
+	{"../../engine/testdata/rules/core-holds.transcript.json", 71},
+	{"../../engine/testdata/rules/core-holds-timers.transcript.json", 14},
+	{"../../engine/testdata/rules/core-commerce.transcript.json", 66},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
