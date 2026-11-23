@@ -796,3 +796,179 @@ export interface ProvenanceOn<T> {
  * the table itself.
  */
 export type Provenance<T, C extends ProvenanceOn<T>> = NonNullable<unknown>;
+
+/** A count Stock reads, or the own field of the table that holds one. */
+export type StockAmountOn<T> = number | { readonly field: Extract<keyof T, string> };
+
+/** Stock's config on a table (D70, D103's step 4): the permission receiving, adjusting and counting need, the unit price a hold returns, when a row reads low, the most one item holds, and whether a hold may take more than is available. */
+export interface StockOn<T> {
+  /** What receiveStock, adjustStock and countStock need; a count below what claims hold needs its .override. */
+  readonly permission: string;
+  /** The own integer field that holds the unit price, in its currency's minor units, and the currency: an ISO 4217 code or the own field that holds one. */
+  readonly price?: { readonly field: Extract<keyof T, string>; readonly currency: string | { readonly field: Extract<keyof T, string> } };
+  /** Stock.low is true while available is at or below this count or the own field's. */
+  readonly lowAt?: StockAmountOn<T>;
+  /** The most units one claim item holds, at least 1. */
+  readonly maxPerHold?: number;
+  /** Whether a hold may take more than is available; false when absent. */
+  readonly backorder?: boolean;
+}
+
+/**
+ * Units a supply counts (D70, D103's step 4): `export abstract class
+ * Inventory implements Stock<Inventory, { permission: "stock.adjust";
+ * price: { field: "priceCents"; currency: "GBP" } }>`. The type stays a
+ * table. Stock keeps onHand and held as owned columns (stock_on_hand,
+ * stock_held), each change of what is on hand a row of its ledger
+ * (inventory_stock_movements) and its record of each claim item it holds
+ * in another (inventory_stock_holds); available and low are computed at a
+ * read. Its operations (stock.receiveStock, adjustStock, countStock and
+ * listStockMovements) change and read them, and it implements the contract
+ * Supply: Holds calls its holdFor, commitFor, releaseFor and returnFor on
+ * the row, each holding the row's lock, and asks its checkHold, so a caller
+ * takes units through a claim alone. Like Timers, it resolves to the empty
+ * object type; the first type argument is the table itself.
+ */
+export type Stock<T, C extends StockOn<T>> = NonNullable<unknown>;
+
+/** What each item of a hold asks: a quantity of units, a count or an own field (an each hold's element's field), or an interval of time from a date-time field, ending at another or after durationMs. */
+export type HoldAskOn =
+  | { readonly quantity: number | { readonly field: string } }
+  | { readonly interval: { readonly start: string; readonly end: string } | { readonly start: string; readonly durationMs: number } };
+
+/** One hold of HoldsOn<T> (D70): a to-one relation of the table (one item), or an own list field each of whose elements names a key of the supply table schema; the supply implements Supply (Stock or Calendar). */
+export type HoldOn<T> = HoldAskOn &
+  (
+    | { readonly link: Extract<keyof T, string> }
+    | { readonly each: { readonly field: Extract<keyof T, string>; readonly target: string }; readonly schema: string }
+  );
+
+/** Holds' config on a table (D70, D103's step 4): the holds by name, the states of the table's Workflow that take, commit, release and return them, and the most items a claim holds. */
+export interface HoldsOn<T> {
+  /** The holds, by name: camelCase, at most 16. */
+  readonly holds: Readonly<Record<string, HoldOn<T>>>;
+  /** The states whose entry takes the holds; the create alone when absent. */
+  readonly takeOn?: readonly string[];
+  /** The states whose entry commits what is held. */
+  readonly commitOn?: readonly string[];
+  /** The states whose entry lets go of what is held. */
+  readonly releaseOn?: readonly string[];
+  /** The states whose entry puts committed units back. */
+  readonly returnOn?: readonly string[];
+  /** The most items the holds ask together, 1 to 1000; 100 when absent. */
+  readonly maxItems?: number;
+  /** The Workflow whose status moves the holds: its field, when the table has several. */
+  readonly status?: string;
+}
+
+/**
+ * One claim's holds on any supply, tied to its Workflow (D70, D103's step
+ * 4): `export abstract class Checkout implements Holds<Checkout, { holds: {
+ * lines: { each: { field: "lines"; target: "inventoryId" }; schema:
+ * "Inventory"; quantity: { field: "quantity" } } }; takeOn: ["held"];
+ * commitOn: ["placed"]; releaseOn: ["cancelled"] }>`. The type stays a
+ * table, beside its status Workflow. Holds keeps state and total as owned
+ * columns (holds_state, holds_total), which a Reactions rule hears, and
+ * each item it has taken in a sub-table (checkout_holds_items); items is
+ * computed at a read, the items not taken yet pending. Entering a takeOn
+ * state takes every item or none through each supply's Supply, under each
+ * supply's lock; commitOn, releaseOn and returnOn move them on; an update
+ * of a field a hold reads while it holds is refused. Its operations
+ * (holds.retakeHolds, listHolds) take again and read. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Holds<T, C extends HoldsOn<T>> = NonNullable<unknown>;
+
+/** A day's opening hours, each range `["HH:MM", "HH:MM"]` from 00:00 to 24:00, by day of the week. */
+export type CalendarDaysOn = Readonly<
+  Partial<Record<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun", readonly (readonly [string, string])[]>>
+>;
+
+/** Calendar's config on a table (D70, D103's step 4): weekly hours in an IANA time zone, how many holds may overlap, the grid and the length bounds of a hold, its buffers, the lead time and horizon, and the permission that sets a row's own hours and closures. */
+export interface CalendarOn<T> {
+  /** The IANA time zone the hours are in, read in the database the core bundles. */
+  readonly timeZone: string;
+  /** The weekly opening hours, by day. */
+  readonly hours: CalendarDaysOn;
+  /** How many holds may overlap at once, 1 to 10000, or the own integer field that holds it; 1 when absent. */
+  readonly capacity?: number | { readonly field: Extract<keyof T, string> };
+  /** The start grid, a whole number of slotMs after an opening time; any whole minute when absent. */
+  readonly slotMs?: number;
+  /** The shortest hold; slotMs, or a minute, when absent. */
+  readonly minMs?: number;
+  /** The longest hold, at most 31 days; a day when absent. */
+  readonly maxMs?: number;
+  /** The time kept free before and after each hold. */
+  readonly bufferMs?: { readonly before?: number; readonly after?: number };
+  /** How soon after now a hold may start; 0 when absent. */
+  readonly leadMs?: number;
+  /** How far ahead of now a hold may start; no limit when absent. */
+  readonly horizonMs?: number;
+  /** What setOpeningHours, addClosure and removeClosure need; nobody may call them when absent. */
+  readonly permission?: string;
+}
+
+/**
+ * Time a supply opens (D70, D103's step 4): `export abstract class Desk
+ * implements Calendar<Desk, { timeZone: "Europe/London"; hours: { mon:
+ * [["09:00", "17:30"]] }; slotMs: 900000; permission: "desk.manage" }>`.
+ * The type stays a table. Calendar keeps its record of each claim item
+ * that holds time of the row (desk_calendar_bookings), the row's closures
+ * (desk_calendar_closures) and its own hours, time zone and count of
+ * closures (desk_calendar_settings) in sub-tables; its fields timeZone,
+ * hours and closures are computed at a read. Its operations
+ * (calendar.setOpeningHours, addClosure, removeClosure, listBookings, and
+ * findAvailability on the table as a whole) set and read them, and it
+ * implements the contract Supply: Holds calls its holdFor, commitFor and
+ * releaseFor on the row, each holding the row's lock, and asks its
+ * checkHold, so a caller books time through a claim alone. Stock and
+ * Calendar conflict. Like Timers, it resolves to the empty object type;
+ * the first type argument is the table itself.
+ */
+export type Calendar<T, C extends CalendarOn<T>> = NonNullable<unknown>;
+
+/** Payments' config on a table (D70, D103's step 4): what the row owes, an own integer field in a currency or the total of the table's Holds; the states a move into waits for money, voids in and captures in; what a refund drawn directly and the provider's adapter need; and, on a refund row, the relation to what it refunds and the states that issue it. */
+export interface PaymentsOn<T> {
+  /** What the row owes: an own integer field in its currency's minor units, or the total of the table's Holds, which the table lists before Payments. */
+  readonly amount: { readonly field: Extract<keyof T, string> } | { readonly holds: true };
+  /** The currency of an amount from a field: an ISO 4217 code or the own field that holds one. */
+  readonly currency?: string | { readonly field: Extract<keyof T, string> };
+  /** automatic (the default) or manual, which captures in captureOn's states. */
+  readonly capture?: "automatic" | "manual";
+  /** With capture manual, the states whose entry captures what is authorized. */
+  readonly captureOn?: readonly string[];
+  /** By state of the table's Workflow, what a move into it waits for: everything due authorized, or paid. */
+  readonly require?: Readonly<Record<string, "authorized" | "paid">>;
+  /** The states whose entry voids the attempts a provider can still void. */
+  readonly voidOn?: readonly string[];
+  /** Whether money captured in a voidOn state is refunded or kept for an operator; keep when absent. */
+  readonly afterRelease?: "refund" | "keep";
+  /** What refundPayment needs; a refund row refunds when absent. */
+  readonly refunds?: { readonly permission: string };
+  /** What the provider's adapter needs: recordPaymentEvent, listPaymentActions and settleRefundFor. */
+  readonly record: { readonly permission: string };
+  /** On a refund row, the required to-one relation to the row it refunds. */
+  readonly refundOf?: { readonly link: Extract<keyof T, string> };
+  /** On a refund row, the states whose entry asks the row it refunds for its amount. */
+  readonly issueOn?: readonly string[];
+}
+
+/**
+ * What a row owes and how it is settled (D70, D103's step 4): `export
+ * abstract class Order implements Payments<Order, { amount: { field:
+ * "totalCents" }; currency: "GBP"; require: { placed: "paid" }; record: {
+ * permission: "payments.record" } }>`. The type stays a table, beside its
+ * status Workflow. Payments keeps due, authorized, captured, refunded,
+ * outstanding, overpaid, currency and state as owned columns, which a
+ * Reactions rule hears, its attempts, actions, refunds and a refund row's
+ * issues in sub-tables (order_payments_attempts and the rest), and the
+ * provider events in a table kept for the table as a whole; attempts is
+ * computed at a read. Its operations (payments.openPayment,
+ * recordPaymentEvent, capturePayment, voidPayment, refundPayment,
+ * refundFor, settleRefundFor, and listPaymentActions on the table as a
+ * whole) record what a provider's adapter is to do and what it reports;
+ * the core calls no provider. Like Timers, it resolves to the empty object
+ * type; the first type argument is the table itself.
+ */
+export type Payments<T, C extends PaymentsOn<T>> = NonNullable<unknown>;

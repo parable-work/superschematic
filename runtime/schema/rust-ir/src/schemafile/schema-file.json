@@ -1462,6 +1462,11 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "status": {
+                    "description": "On a table, the Workflow whose status takes, commits, releases and returns the holds: the field a Workflow is anchored on, or Workflow for one the type implements. Implied when the type has one Workflow.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "takeOn": {
                     "description": "The states of the type's Workflow whose entry takes the holds, and the create into one of them; the create alone when absent.",
                     "items": {

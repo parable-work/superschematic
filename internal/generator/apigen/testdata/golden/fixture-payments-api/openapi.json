@@ -1,0 +1,3994 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "OrderPaymentsCapturePaymentInput": {
+        "description": "The parameters of Order's payments capturePayment.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsCapturePaymentResult": {
+        "description": "What Order's payments capturePayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OrderPaymentsCapturePaymentResultKind"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "attempt",
+          "currency",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsCapturePaymentResultKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsListPaymentActionsInput": {
+        "description": "The parameters of Order's payments listPaymentActions.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many; 50 when absent.",
+            "format": "int64",
+            "maximum": 500,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsListPaymentActionsResult": {
+        "description": "What Order's payments listPaymentActions returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderPaymentsListPaymentActionsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsListPaymentActionsResultItems": {
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "at": {
+            "description": "When it was recorded, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "id": {
+            "description": "The instance.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OrderPaymentsListPaymentActionsResultItemsKind"
+          },
+          "providerRef": {
+            "nullable": true,
+            "type": "string"
+          },
+          "refund": {
+            "nullable": true,
+            "type": "string"
+          },
+          "returnUrl": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "at",
+          "attempt",
+          "currency",
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsListPaymentActionsResultItemsKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsOpenPaymentInput": {
+        "description": "The parameters of Order's payments openPayment.",
+        "properties": {
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "returnUrl": {
+            "description": "Where the provider sends the payer back to, when it does.",
+            "maxLength": 2048,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsOpenPaymentResult": {
+        "description": "What Order's payments openPayment returns.",
+        "properties": {
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderPaymentsOpenPaymentResultStatus"
+          }
+        },
+        "required": [
+          "amount",
+          "attempt",
+          "currency",
+          "provider",
+          "status"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsOpenPaymentResultStatus": {
+        "enum": [
+          "open",
+          "requiresAction",
+          "processing",
+          "authorized",
+          "captured",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsRecordPaymentEventInput": {
+        "description": "The parameters of Order's payments recordPaymentEvent.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "at": {
+            "description": "When the provider says it happened, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "brand": {
+            "description": "A card's brand, for display.",
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "An ISO 4217 code; the engine checks it is one.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "The provider's id of the event.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OrderPaymentsRecordPaymentEventInputKind",
+            "description": "What happened."
+          },
+          "last4": {
+            "description": "A card's last four digits, for display.",
+            "nullable": true,
+            "pattern": "^[0-9]{4}$",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "At most ten string pairs the adapter keeps with the event.",
+            "nullable": true,
+            "type": "object"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "providerRef": {
+            "description": "The provider's id of the payment.",
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9_-]{1,255}$",
+            "type": "string"
+          },
+          "refund": {
+            "description": "For a refund's outcome: the refund's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "at",
+          "currency",
+          "eventId",
+          "kind",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRecordPaymentEventInputKind": {
+        "description": "What happened.",
+        "enum": [
+          "requiresAction",
+          "processing",
+          "authorized",
+          "captured",
+          "failed",
+          "cancelled",
+          "refunded",
+          "refundFailed"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsRecordPaymentEventResult": {
+        "description": "What Order's payments recordPaymentEvent returns.",
+        "properties": {
+          "applied": {
+            "description": "Whether the event moved anything; false for a repeat or a late event.",
+            "type": "boolean"
+          },
+          "attempt": {
+            "description": "The attempt's status after it, when it names one.",
+            "nullable": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/OrderPaymentsRecordPaymentEventResultState",
+            "description": "Payments.state after it."
+          }
+        },
+        "required": [
+          "applied",
+          "state"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRecordPaymentEventResultState": {
+        "description": "Payments.state after it.",
+        "enum": [
+          "unpaid",
+          "pending",
+          "authorized",
+          "paid",
+          "partiallyRefunded",
+          "refunded"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsRefundForInput": {
+        "description": "The parameters of Order's payments refundFor.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "refund": {
+            "$ref": "#/components/schemas/OrderPaymentsRefundForInputRefund",
+            "description": "The refund instance: its schema and id."
+          }
+        },
+        "required": [
+          "amount",
+          "idempotencyKey",
+          "refund"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRefundForInputRefund": {
+        "description": "The refund instance: its schema and id.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRefundForResult": {
+        "description": "What Order's payments refundFor returns.",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refund": {
+            "description": "The refund's id here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "currency",
+          "refund"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRefundPaymentInput": {
+        "description": "The parameters of Order's payments refundPayment.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "idempotencyKey",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRefundPaymentResult": {
+        "description": "What Order's payments refundPayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refund": {
+            "description": "The refund's id.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderPaymentsRefundPaymentResultStatus"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "currency",
+          "refund",
+          "status"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsRefundPaymentResultStatus": {
+        "enum": [
+          "requested",
+          "sent",
+          "succeeded",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsSettleRefundForInput": {
+        "description": "The parameters of Order's payments settleRefundFor.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "of": {
+            "$ref": "#/components/schemas/OrderPaymentsSettleRefundForInputOf",
+            "description": "The instance refunded: its schema and id."
+          },
+          "refund": {
+            "description": "The refund's id there.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderPaymentsSettleRefundForInputStatus"
+          }
+        },
+        "required": [
+          "amount",
+          "of",
+          "refund",
+          "status"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsSettleRefundForInputOf": {
+        "description": "The instance refunded: its schema and id.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsSettleRefundForInputStatus": {
+        "enum": [
+          "succeeded",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsSettleRefundForResult": {
+        "description": "What Order's payments settleRefundFor returns.",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/OrderPaymentsSettleRefundForResultState",
+            "description": "Payments.state after it."
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsSettleRefundForResultState": {
+        "description": "Payments.state after it.",
+        "enum": [
+          "unpaid",
+          "pending",
+          "authorized",
+          "paid",
+          "partiallyRefunded",
+          "refunded"
+        ],
+        "type": "string"
+      },
+      "OrderPaymentsVoidPaymentInput": {
+        "description": "The parameters of Order's payments voidPayment.",
+        "properties": {
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsVoidPaymentResult": {
+        "description": "What Order's payments voidPayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OrderPaymentsVoidPaymentResultKind"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "attempt",
+          "currency",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "OrderPaymentsVoidPaymentResultKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "OrderStatusState": {
+        "description": "A state of Order's status Workflow.",
+        "enum": [
+          "cart",
+          "held",
+          "placed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "OrderStatusTransitionInput": {
+        "description": "The parameters of Order's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/OrderStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "OrderStatusTransitionResult": {
+        "description": "What Order's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/OrderStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/OrderStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsCapturePaymentInput": {
+        "description": "The parameters of Refund's payments capturePayment.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsCapturePaymentResult": {
+        "description": "What Refund's payments capturePayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RefundPaymentsCapturePaymentResultKind"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "attempt",
+          "currency",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsCapturePaymentResultKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsListPaymentActionsInput": {
+        "description": "The parameters of Refund's payments listPaymentActions.",
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "nullable": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many; 50 when absent.",
+            "format": "int64",
+            "maximum": 500,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsListPaymentActionsResult": {
+        "description": "What Refund's payments listPaymentActions returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RefundPaymentsListPaymentActionsResultItems"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsListPaymentActionsResultItems": {
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "at": {
+            "description": "When it was recorded, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "id": {
+            "description": "The instance.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RefundPaymentsListPaymentActionsResultItemsKind"
+          },
+          "providerRef": {
+            "nullable": true,
+            "type": "string"
+          },
+          "refund": {
+            "nullable": true,
+            "type": "string"
+          },
+          "returnUrl": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "at",
+          "attempt",
+          "currency",
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsListPaymentActionsResultItemsKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsOpenPaymentInput": {
+        "description": "The parameters of Refund's payments openPayment.",
+        "properties": {
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "returnUrl": {
+            "description": "Where the provider sends the payer back to, when it does.",
+            "maxLength": 2048,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsOpenPaymentResult": {
+        "description": "What Refund's payments openPayment returns.",
+        "properties": {
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RefundPaymentsOpenPaymentResultStatus"
+          }
+        },
+        "required": [
+          "amount",
+          "attempt",
+          "currency",
+          "provider",
+          "status"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsOpenPaymentResultStatus": {
+        "enum": [
+          "open",
+          "requiresAction",
+          "processing",
+          "authorized",
+          "captured",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsRecordPaymentEventInput": {
+        "description": "The parameters of Refund's payments recordPaymentEvent.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "at": {
+            "description": "When the provider says it happened, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "brand": {
+            "description": "A card's brand, for display.",
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "An ISO 4217 code; the engine checks it is one.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "The provider's id of the event.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RefundPaymentsRecordPaymentEventInputKind",
+            "description": "What happened."
+          },
+          "last4": {
+            "description": "A card's last four digits, for display.",
+            "nullable": true,
+            "pattern": "^[0-9]{4}$",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "At most ten string pairs the adapter keeps with the event.",
+            "nullable": true,
+            "type": "object"
+          },
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "providerRef": {
+            "description": "The provider's id of the payment.",
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9_-]{1,255}$",
+            "type": "string"
+          },
+          "refund": {
+            "description": "For a refund's outcome: the refund's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "at",
+          "currency",
+          "eventId",
+          "kind",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRecordPaymentEventInputKind": {
+        "description": "What happened.",
+        "enum": [
+          "requiresAction",
+          "processing",
+          "authorized",
+          "captured",
+          "failed",
+          "cancelled",
+          "refunded",
+          "refundFailed"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsRecordPaymentEventResult": {
+        "description": "What Refund's payments recordPaymentEvent returns.",
+        "properties": {
+          "applied": {
+            "description": "Whether the event moved anything; false for a repeat or a late event.",
+            "type": "boolean"
+          },
+          "attempt": {
+            "description": "The attempt's status after it, when it names one.",
+            "nullable": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/RefundPaymentsRecordPaymentEventResultState",
+            "description": "Payments.state after it."
+          }
+        },
+        "required": [
+          "applied",
+          "state"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRecordPaymentEventResultState": {
+        "description": "Payments.state after it.",
+        "enum": [
+          "unpaid",
+          "pending",
+          "authorized",
+          "paid",
+          "partiallyRefunded",
+          "refunded"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsRefundForInput": {
+        "description": "The parameters of Refund's payments refundFor.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "refund": {
+            "$ref": "#/components/schemas/RefundPaymentsRefundForInputRefund",
+            "description": "The refund instance: its schema and id."
+          }
+        },
+        "required": [
+          "amount",
+          "idempotencyKey",
+          "refund"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRefundForInputRefund": {
+        "description": "The refund instance: its schema and id.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRefundForResult": {
+        "description": "What Refund's payments refundFor returns.",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refund": {
+            "description": "The refund's id here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "currency",
+          "refund"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRefundPaymentInput": {
+        "description": "The parameters of Refund's payments refundPayment.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "idempotencyKey",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRefundPaymentResult": {
+        "description": "What Refund's payments refundPayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refund": {
+            "description": "The refund's id.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RefundPaymentsRefundPaymentResultStatus"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "currency",
+          "refund",
+          "status"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsRefundPaymentResultStatus": {
+        "enum": [
+          "requested",
+          "sent",
+          "succeeded",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsSettleRefundForInput": {
+        "description": "The parameters of Refund's payments settleRefundFor.",
+        "properties": {
+          "amount": {
+            "description": "In the currency's minor units.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "of": {
+            "$ref": "#/components/schemas/RefundPaymentsSettleRefundForInputOf",
+            "description": "The instance refunded: its schema and id."
+          },
+          "refund": {
+            "description": "The refund's id there.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RefundPaymentsSettleRefundForInputStatus"
+          }
+        },
+        "required": [
+          "amount",
+          "of",
+          "refund",
+          "status"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsSettleRefundForInputOf": {
+        "description": "The instance refunded: its schema and id.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsSettleRefundForInputStatus": {
+        "enum": [
+          "succeeded",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsSettleRefundForResult": {
+        "description": "What Refund's payments settleRefundFor returns.",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/RefundPaymentsSettleRefundForResultState",
+            "description": "Payments.state after it."
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsSettleRefundForResultState": {
+        "description": "Payments.state after it.",
+        "enum": [
+          "unpaid",
+          "pending",
+          "authorized",
+          "paid",
+          "partiallyRefunded",
+          "refunded"
+        ],
+        "type": "string"
+      },
+      "RefundPaymentsVoidPaymentInput": {
+        "description": "The parameters of Refund's payments voidPayment.",
+        "properties": {
+          "attempt": {
+            "description": "The attempt's id.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsVoidPaymentResult": {
+        "description": "What Refund's payments voidPayment returns.",
+        "properties": {
+          "action": {
+            "description": "The action's id: the idempotency key the adapter sends the provider.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RefundPaymentsVoidPaymentResultKind"
+          }
+        },
+        "required": [
+          "action",
+          "amount",
+          "attempt",
+          "currency",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RefundPaymentsVoidPaymentResultKind": {
+        "enum": [
+          "create",
+          "capture",
+          "void",
+          "refund"
+        ],
+        "type": "string"
+      },
+      "RefundStatusState": {
+        "description": "A state of Refund's status Workflow.",
+        "enum": [
+          "requested",
+          "approved",
+          "issued"
+        ],
+        "type": "string"
+      },
+      "RefundStatusTransitionInput": {
+        "description": "The parameters of Refund's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RefundStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/RefundStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "RefundStatusTransitionResult": {
+        "description": "What Refund's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/RefundStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/RefundStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-payments-api schema",
+    "title": "Fixture-Payments-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/order/payments/list-payment-actions": {
+      "post": {
+        "description": "Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.",
+        "operationId": "OrderPaymentsPaymentsListPaymentActionsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsListPaymentActionsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsListPaymentActionsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: list payment actions",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.list-payment-actions",
+          "description": "Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Order payments: list payment actions",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/capture-payment": {
+      "post": {
+        "description": "Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.",
+        "operationId": "OrderPaymentsPaymentsCapturePaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsCapturePaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsCapturePaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: capture payment",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.capture-payment",
+          "description": "Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: capture payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/open-payment": {
+      "post": {
+        "description": "Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.",
+        "operationId": "OrderPaymentsPaymentsOpenPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsOpenPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsOpenPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: open payment",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.open-payment",
+          "description": "Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: open payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/record-payment-event": {
+      "post": {
+        "description": "Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.",
+        "operationId": "OrderPaymentsPaymentsRecordPaymentEventHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsRecordPaymentEventInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsRecordPaymentEventResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: record payment event",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.record-payment-event",
+          "description": "Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: record payment event",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/refund-for": {
+      "post": {
+        "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.",
+        "operationId": "OrderPaymentsPaymentsRefundForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsRefundForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsRefundForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: refund for",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.refund-for",
+          "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: refund for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/refund-payment": {
+      "post": {
+        "description": "Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.",
+        "operationId": "OrderPaymentsPaymentsRefundPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsRefundPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsRefundPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: refund payment",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.refund-payment",
+          "description": "Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: refund payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/settle-refund-for": {
+      "post": {
+        "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.",
+        "operationId": "OrderPaymentsPaymentsSettleRefundForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsSettleRefundForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsSettleRefundForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: settle refund for",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.settle-refund-for",
+          "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: settle refund for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/payments/void-payment": {
+      "post": {
+        "description": "Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.",
+        "operationId": "OrderPaymentsPaymentsVoidPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPaymentsVoidPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPaymentsVoidPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order payments: void payment",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.payments.void-payment",
+          "description": "Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order payments: void payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/order/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "OrderPaymentsStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Order status: transition",
+        "tags": [
+          "order-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "order.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Order status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/payments/list-payment-actions": {
+      "post": {
+        "description": "Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.",
+        "operationId": "RefundPaymentsPaymentsListPaymentActionsHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsListPaymentActionsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsListPaymentActionsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: list payment actions",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.list-payment-actions",
+          "description": "Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Refund payments: list payment actions",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/capture-payment": {
+      "post": {
+        "description": "Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.",
+        "operationId": "RefundPaymentsPaymentsCapturePaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsCapturePaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsCapturePaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: capture payment",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.capture-payment",
+          "description": "Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: capture payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/open-payment": {
+      "post": {
+        "description": "Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.",
+        "operationId": "RefundPaymentsPaymentsOpenPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsOpenPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsOpenPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: open payment",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.open-payment",
+          "description": "Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: open payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/record-payment-event": {
+      "post": {
+        "description": "Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.",
+        "operationId": "RefundPaymentsPaymentsRecordPaymentEventHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsRecordPaymentEventInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsRecordPaymentEventResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: record payment event",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.record-payment-event",
+          "description": "Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: record payment event",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/refund-for": {
+      "post": {
+        "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.",
+        "operationId": "RefundPaymentsPaymentsRefundForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsRefundForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsRefundForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: refund for",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.refund-for",
+          "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: refund for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/refund-payment": {
+      "post": {
+        "description": "Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.",
+        "operationId": "RefundPaymentsPaymentsRefundPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsRefundPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsRefundPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: refund payment",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.refund-payment",
+          "description": "Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: refund payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/settle-refund-for": {
+      "post": {
+        "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.",
+        "operationId": "RefundPaymentsPaymentsSettleRefundForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsSettleRefundForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsSettleRefundForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: settle refund for",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.settle-refund-for",
+          "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: settle refund for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/payments/void-payment": {
+      "post": {
+        "description": "Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.",
+        "operationId": "RefundPaymentsPaymentsVoidPaymentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentsVoidPaymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundPaymentsVoidPaymentResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund payments: void payment",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.payments.void-payment",
+          "description": "Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund payments: void payment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/refund/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "RefundPaymentsStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RefundStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refund status: transition",
+        "tags": [
+          "refund-payments"
+        ],
+        "x-superschematic-docs": {
+          "capability": "refund.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Refund status: transition",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

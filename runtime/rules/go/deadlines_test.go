@@ -336,17 +336,29 @@ func TestTheCoreReadsARowsSubTableRows(t *testing.T) {
 			{"key":"respond","values":{"armedFrom":"1000","baseAt":1000,"dueAt":2500,"fired":false}}
 		]},"held":0}]}`)
 
-		// Under a lock, a store whose locks are fenced has no check of it
-		// yet.
+		// Under a lock, a store whose locks are fenced holds the read to its
+		// row's version, so a run that read no row of it under the lock has
+		// nothing to hold it to (D103's step 4).
 		core = script(t, `{"lock":["Ticket/x"]}`, `{"read":[`+read+`]}`, changed(""))
 		err = inTx(t, db, rules.Host{Core: core, Layout: layout}, nil, func(host rules.Host, _ *rulestest.Tx) error {
 			_, err := rules.Execute(context.Background(), host, "Ticket", fire(uuidKey), nil)
 			return err
 		})
 		if db.Dialect == rules.DialectSQLite {
-			wantRefusal(t, err, rules.Refusal{Code: rules.CodeInternal, Status: 500, Class: "Error", Message: "rules: a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)"})
+			wantRefusal(t, err, rules.Refusal{Code: rules.CodeInternal, Status: 500, Class: "Error", Message: "rules: a read under a lock of sub-table rows of Ticket " + uuidKey + " is held to its row's version, and the run read no row of it under the lock (D103)"})
 		} else if err != nil {
 			t.Errorf("a read of sub-table rows under a lock on Postgres: %v", err)
+		}
+		// With its row read under the lock too, the unit checks the row's
+		// version, which holds its sub-tables'.
+		rowRead := fmt.Sprintf(`{"kind":"row","type":"Ticket","key":%q}`, uuidKey)
+		core = script(t, `{"lock":["Ticket/x"]}`, `{"read":[`+rowRead+`,`+read+`]}`, changed(""))
+		err = inTx(t, db, rules.Host{Core: core, Layout: layout}, nil, func(host rules.Host, _ *rulestest.Tx) error {
+			_, err := rules.Execute(context.Background(), host, "Ticket", fire(uuidKey), nil)
+			return err
+		})
+		if err != nil {
+			t.Errorf("a read of a row and its sub-table rows under a lock: %v", err)
 		}
 	})
 }

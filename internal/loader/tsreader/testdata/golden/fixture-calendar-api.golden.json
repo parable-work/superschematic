@@ -1,0 +1,39 @@
+{
+  "name": "fixture-calendar-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-calendar-db",
+      "types": [
+        "Booking",
+        "Desk"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-calendar-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "DeskCalendar",
+      "comment": "A desk's time for any signed-in caller (D70, D103's step 4):\nsetOpeningHours, addClosure and removeClosure under calendar, which need\ndesk.manage, listBookings, findAvailability on the table as a whole, and\nthe contract Supply's operations, which a caller's direct call is\nnot_requested of unless it changes nothing: a booking takes time\nthrough its Holds alone.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Desk"
+      },
+      "auth": true
+    },
+    {
+      "name": "BookingHolds",
+      "comment": "A booking's holds: retakeHolds and listHolds under holds, beside the\nstatus Workflow's transition, whose moves take, commit and release its\nslot.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Booking"
+      },
+      "auth": true
+    }
+  ]
+}

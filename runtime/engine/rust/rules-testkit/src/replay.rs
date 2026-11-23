@@ -405,6 +405,14 @@ const MAX_DEPTH_REASON: &str = "the engine's runner stops a chain at its depth l
 /// Why an engine opened with a value store is not mapped.
 const VALUES_REASON: &str = "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)";
 
+/// Why a list that filters on a field a behavior computes at a read is not
+/// compared.
+const COMPUTED_FILTER: &str = "a list filtered on a field a behavior computes at a read (Stock.low), which a table holds no column of: a table's list filters its columns (D103's step 4)";
+
+/// Why a step whose refusal's reason names the engine's namespace is not
+/// compared.
+const NAMESPACE_REASON: &str = "the engine's veto names its namespace in its reason (Holds' no_supply: \"does not exist in namespace default\"), which the core does not know: a table's database is its namespace (D103)";
+
 /// Why a scenario stops after a runDue whose recording failed.
 const HALTED_RUN: &str = "the engine halts a subscription that fails, which hears nothing after it; a table's change queue fails the one message and hears the next (D103)";
 
@@ -1148,6 +1156,24 @@ impl<'r> Run<'r> {
                 .is_some_and(|spec| spec.fields.iter().any(|field| field.relation.is_some()));
             if linked && names_links(error) {
                 return Done::Skipped(LINKS_REFUSAL.to_owned());
+            }
+            // A veto refuses with no write, so passing over one whose
+            // reason names the engine's namespace leaves the host as the
+            // engine left its store.
+            let reason = error
+                .get("details")
+                .and_then(|details| details.get("reason"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let behavior = error
+                .get("details")
+                .and_then(|details| details.get("behavior"))
+                .and_then(Value::as_str);
+            if error.get("code").and_then(Value::as_str) == Some("vetoed")
+                && behavior == Some(superschematic_rules_behaviors::holds::NAME)
+                && reason.contains(" does not exist in namespace ")
+            {
+                return Done::Skipped(NAMESPACE_REASON.to_owned());
             }
         }
         let cx = Cx {
@@ -2407,8 +2433,24 @@ impl<'r> Run<'r> {
                         params,
                     },
                 );
+                let recording = self.recording;
                 self.execute(cx.at, type_name, command)
                     .map(|applied| applied.result().clone())
+                    .map_err(|mut refusal| {
+                        // The engine's veto of an operation of the schema
+                        // names an instance with no id (`of Desk : `), which
+                        // a host writes from the refusal of a command with
+                        // no row, as it writes a namespace the core does not
+                        // know (Calendar's findAvailability).
+                        if recording && refusal.class == "BehaviorVetoError" {
+                            refusal.message = refusal.message.replacen(
+                                &format!(" of {type_name}: "),
+                                &format!(" of {type_name} : "),
+                                1,
+                            );
+                        }
+                        refusal
+                    })
             }
             _ => {
                 return Done::Skipped(format!(
@@ -2492,6 +2534,20 @@ impl<'r> Run<'r> {
             return Done::Skipped(
                 "a filter other than equality, which the reference host does not take".to_owned(),
             );
+        }
+        if let Some(spec) = self.engines[cx.at].host.store().live(type_name) {
+            let core = self.engines[cx.at].host.core();
+            let computed = filters.keys().any(|name| {
+                name.split_once('.').is_some_and(|(use_id, field)| {
+                    spec.use_of(use_id).is_some_and(|(_, entry)| {
+                        core.declaration(&entry.behavior)
+                            .is_some_and(|declaration| declaration.is_computed(field))
+                    })
+                })
+            });
+            if computed {
+                return Done::Skipped(COMPUTED_FILTER.to_owned());
+            }
         }
         let predated: BTreeMap<String, Vec<(String, Vec<String>)>> = self.engines[cx.at]
             .host

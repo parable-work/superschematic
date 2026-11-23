@@ -1,0 +1,1299 @@
+{
+  "types": {
+    "Order": {
+      "type": "Order",
+      "table": "order",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "totalCents",
+          "column": "total_cents",
+          "type": "Generic.Int64"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Payments",
+          "behavior": "Payments",
+          "member": "payments",
+          "fields": [
+            {
+              "name": "due",
+              "field": "paymentsDue",
+              "column": "payments_due",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "authorized",
+              "field": "paymentsAuthorized",
+              "column": "payments_authorized",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "captured",
+              "field": "paymentsCaptured",
+              "column": "payments_captured",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "refunded",
+              "field": "paymentsRefunded",
+              "column": "payments_refunded",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "outstanding",
+              "field": "paymentsOutstanding",
+              "column": "payments_outstanding",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "overpaid",
+              "field": "paymentsOverpaid",
+              "column": "payments_overpaid",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "currency",
+              "field": "paymentsCurrency",
+              "column": "payments_currency",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "field": "paymentsState",
+              "column": "payments_state",
+              "type": "string"
+            }
+          ],
+          "operations": [
+            {
+              "name": "openPayment",
+              "writes": true
+            },
+            {
+              "name": "recordPaymentEvent",
+              "writes": true
+            },
+            {
+              "name": "capturePayment",
+              "writes": true
+            },
+            {
+              "name": "voidPayment",
+              "writes": true
+            },
+            {
+              "name": "refundPayment",
+              "writes": true
+            },
+            {
+              "name": "listPaymentActions",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "refundFor",
+              "writes": true
+            },
+            {
+              "name": "settleRefundFor",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "attempts",
+              "table": "order_payments_attempts",
+              "row": "order_id",
+              "key": {
+                "name": "attempt",
+                "field": "attempt",
+                "column": "attempt",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "due",
+                  "field": "due",
+                  "column": "due",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "authorized",
+                  "field": "authorized",
+                  "column": "authorized",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "captured",
+                  "field": "captured",
+                  "column": "captured",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "brand",
+                  "field": "brand",
+                  "column": "brand",
+                  "type": "string"
+                },
+                {
+                  "name": "last4",
+                  "field": "last4",
+                  "column": "last4",
+                  "type": "string"
+                },
+                {
+                  "name": "returnUrl",
+                  "field": "returnUrl",
+                  "column": "return_url",
+                  "type": "string"
+                },
+                {
+                  "name": "openedAt",
+                  "field": "openedAt",
+                  "column": "opened_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "actions",
+              "table": "order_payments_actions",
+              "row": "order_id",
+              "key": {
+                "name": "action",
+                "field": "action",
+                "column": "action",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "doneAt",
+                  "field": "doneAt",
+                  "column": "done_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "refunds",
+              "table": "order_payments_refunds",
+              "row": "order_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "originSchema",
+                  "field": "originSchema",
+                  "column": "origin_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "originId",
+                  "field": "originId",
+                  "column": "origin_id",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "issues",
+              "table": "order_payments_issues",
+              "row": "order_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "ofSchema",
+                  "field": "ofSchema",
+                  "column": "of_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "ofId",
+                  "field": "ofId",
+                  "column": "of_id",
+                  "type": "string"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "enteredAt",
+                  "field": "enteredAt",
+                  "column": "entered_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "events",
+              "table": "order_payments_events",
+              "key": {
+                "name": "event",
+                "field": "event",
+                "column": "event",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "eventId",
+                  "field": "eventId",
+                  "column": "event_id",
+                  "type": "string"
+                },
+                {
+                  "name": "rowKey",
+                  "field": "rowKey",
+                  "column": "row_key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "applied",
+                  "field": "applied",
+                  "column": "applied",
+                  "type": "boolean"
+                },
+                {
+                  "name": "metadata",
+                  "field": "metadata",
+                  "column": "metadata",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "recordedAt",
+                  "field": "recordedAt",
+                  "column": "recorded_at",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Order",
+        "uses": [
+          {
+            "behavior": "Payments",
+            "config": {
+              "amount": {
+                "field": "totalCents"
+              },
+              "currency": "GBP",
+              "record": {
+                "permission": "payments.record"
+              },
+              "refunds": {
+                "permission": "payments.refund"
+              },
+              "require": {
+                "placed": "paid"
+              },
+              "voidOn": [
+                "cancelled"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "cart",
+              "states": [
+                "cart",
+                "held",
+                "placed",
+                "cancelled"
+              ],
+              "transitions": [
+                {
+                  "from": "cart",
+                  "to": "held"
+                },
+                {
+                  "from": "held",
+                  "to": "placed"
+                },
+                {
+                  "from": "cart",
+                  "to": "cancelled"
+                },
+                {
+                  "from": "held",
+                  "to": "cancelled"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "totalCents",
+            "type": "Generic.Int64"
+          }
+        ]
+      }
+    },
+    "Refund": {
+      "type": "Refund",
+      "table": "refund",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "amountCents",
+          "column": "amount_cents",
+          "type": "Generic.Int64"
+        },
+        {
+          "field": "reason",
+          "column": "reason",
+          "type": "string"
+        },
+        {
+          "field": "orderId",
+          "column": "order_id",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Payments",
+          "behavior": "Payments",
+          "member": "payments",
+          "fields": [
+            {
+              "name": "due",
+              "field": "paymentsDue",
+              "column": "payments_due",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "authorized",
+              "field": "paymentsAuthorized",
+              "column": "payments_authorized",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "captured",
+              "field": "paymentsCaptured",
+              "column": "payments_captured",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "refunded",
+              "field": "paymentsRefunded",
+              "column": "payments_refunded",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "outstanding",
+              "field": "paymentsOutstanding",
+              "column": "payments_outstanding",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "overpaid",
+              "field": "paymentsOverpaid",
+              "column": "payments_overpaid",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "currency",
+              "field": "paymentsCurrency",
+              "column": "payments_currency",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "field": "paymentsState",
+              "column": "payments_state",
+              "type": "string"
+            }
+          ],
+          "operations": [
+            {
+              "name": "openPayment",
+              "writes": true
+            },
+            {
+              "name": "recordPaymentEvent",
+              "writes": true
+            },
+            {
+              "name": "capturePayment",
+              "writes": true
+            },
+            {
+              "name": "voidPayment",
+              "writes": true
+            },
+            {
+              "name": "refundPayment",
+              "writes": true
+            },
+            {
+              "name": "listPaymentActions",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "refundFor",
+              "writes": true
+            },
+            {
+              "name": "settleRefundFor",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "attempts",
+              "table": "refund_payments_attempts",
+              "row": "refund_id",
+              "key": {
+                "name": "attempt",
+                "field": "attempt",
+                "column": "attempt",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "due",
+                  "field": "due",
+                  "column": "due",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "authorized",
+                  "field": "authorized",
+                  "column": "authorized",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "captured",
+                  "field": "captured",
+                  "column": "captured",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "brand",
+                  "field": "brand",
+                  "column": "brand",
+                  "type": "string"
+                },
+                {
+                  "name": "last4",
+                  "field": "last4",
+                  "column": "last4",
+                  "type": "string"
+                },
+                {
+                  "name": "returnUrl",
+                  "field": "returnUrl",
+                  "column": "return_url",
+                  "type": "string"
+                },
+                {
+                  "name": "openedAt",
+                  "field": "openedAt",
+                  "column": "opened_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "actions",
+              "table": "refund_payments_actions",
+              "row": "refund_row_id",
+              "key": {
+                "name": "action",
+                "field": "action",
+                "column": "action",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "doneAt",
+                  "field": "doneAt",
+                  "column": "done_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "refunds",
+              "table": "refund_payments_refunds",
+              "row": "refund_row_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "originSchema",
+                  "field": "originSchema",
+                  "column": "origin_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "originId",
+                  "field": "originId",
+                  "column": "origin_id",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "issues",
+              "table": "refund_payments_issues",
+              "row": "refund_row_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "ofSchema",
+                  "field": "ofSchema",
+                  "column": "of_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "ofId",
+                  "field": "ofId",
+                  "column": "of_id",
+                  "type": "string"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "enteredAt",
+                  "field": "enteredAt",
+                  "column": "entered_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "events",
+              "table": "refund_payments_events",
+              "key": {
+                "name": "event",
+                "field": "event",
+                "column": "event",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "eventId",
+                  "field": "eventId",
+                  "column": "event_id",
+                  "type": "string"
+                },
+                {
+                  "name": "rowKey",
+                  "field": "rowKey",
+                  "column": "row_key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "applied",
+                  "field": "applied",
+                  "column": "applied",
+                  "type": "boolean"
+                },
+                {
+                  "name": "metadata",
+                  "field": "metadata",
+                  "column": "metadata",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "recordedAt",
+                  "field": "recordedAt",
+                  "column": "recorded_at",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Refund",
+        "uses": [
+          {
+            "behavior": "Payments",
+            "config": {
+              "amount": {
+                "field": "amountCents"
+              },
+              "currency": "GBP",
+              "issueOn": [
+                "approved"
+              ],
+              "record": {
+                "permission": "payments.record"
+              },
+              "refundOf": {
+                "link": "order"
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "requested",
+              "states": [
+                "requested",
+                "approved",
+                "issued"
+              ],
+              "transitions": [
+                {
+                  "from": "requested",
+                  "to": "approved"
+                },
+                {
+                  "from": "approved",
+                  "to": "issued"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "amountCents",
+            "type": "Generic.Int64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "orderId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "order",
+              "type": "Order"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -427,6 +427,8 @@ export interface RulesCore {
   run(spec: CoreTypeSpec, command: CoreCommand, answers?: CoreAnswers): CoreStep;
   /** The define check of each spec: null for one the core takes, its refusal for one it refuses. A host checks its layout's specs when it first runs a command. */
   check?(specs: readonly CoreTypeSpec[]): (CoreRefusal | null)[];
+  /** The registered behaviors' declarations, as much of each as the adapter reads: whether an operation writes beside its row (D77's primitive 1), or writes as an operation of the namespace (D77's primitive 3), either of which a read of its use's sub-tables under a fenced lock has no check of. */
+  declarations?(): readonly { readonly name: string; readonly operations?: readonly { readonly beside?: boolean; readonly writes?: boolean; readonly scope?: string }[] }[];
 }
 
 // ---- The layout document (internal/generator/behaviorlayout) ----
@@ -1548,9 +1550,10 @@ async function settle(host: RulesHost, spec: CoreTypeSpec, command: CoreCommand)
     }
     if ('read' in step) {
       for (const request of step.read) {
-        if (request.kind === 'subRows' && locks.length > 0 && host.store.locks === 'fenced') {
-          // fencesOf has no check of a sub-table's rows to put in the unit.
-          throw internal('a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)');
+        if (request.kind === 'subRows' && locks.length > 0 && host.store.locks === 'fenced' && writesBeside(host, request.type, request.useId)) {
+          // fencesOf holds a sub-table's rows to their row's version, which
+          // a use that writes beside its rows does not move.
+          throw internal(`a read under a lock of sub-table rows of ${request.type}'s use ${request.useId}, whose behavior writes beside its rows, has no check on SQLite or D1 yet (D103)`);
         }
         if (request.kind === 'linked' && locks.length > 0 && host.store.locks === 'fenced') {
           // Nor of the rows that link to a row.
@@ -1887,9 +1890,31 @@ function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStateme
     } else if (request.kind === 'hasRows' && 'hasRows' in answer) {
       const any = `SELECT 1 FROM ${quote(table.table)}${table.live ? ` WHERE ${quote(table.live.column)} IS NULL` : ''}`;
       fences.push({ text: `${answer.hasRows ? '' : 'NOT '}EXISTS (${any})`, values: [], check: true });
+    } else if (request.kind === 'subRows') {
+      // A sub-table's rows change only with a write of their row, which
+      // moves its version, so the check of the row's own read under the
+      // lock holds them too (Stock's records, Calendar's bookings, D103's
+      // step 4).
+      const rowHeld = reads.some(read => (read.held ?? 0) > 0 && read.request.kind === 'row' && read.request.type === request.type && read.request.key === request.key);
+      if (!rowHeld) throw internal(`a read under a lock of sub-table rows of ${request.type} ${request.key} is held to its row's version, and the run read no row of it under the lock (D103)`);
     }
   }
   return fences;
+}
+
+/**
+ * Whether a use's behavior writes beside its rows (D77's primitive 1), or
+ * through an operation of the namespace that writes (D77's primitive 3),
+ * which writes its use's sub-table rows beside the row as one beside it
+ * does: its sub-tables then change with no write of the row, so a read of
+ * them under a lock has no row's version to hold it to. A core that gives
+ * no declarations is taken to write none beside.
+ */
+function writesBeside(host: RulesHost, type: string, useId: string): boolean {
+  const behavior = host.layout.types[type]?.uses.find(use => use.id === useId)?.behavior;
+  if (behavior === undefined) return false;
+  const declaration = host.core.declarations?.().find(known => known.name === behavior);
+  return declaration?.operations?.some(operation => operation.beside === true || (operation.scope === 'namespace' && operation.writes === true)) ?? false;
 }
 
 /** The condition a fenced statement or a read adds for a soft-deletable table: the row is live. */

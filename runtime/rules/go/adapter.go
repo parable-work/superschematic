@@ -896,8 +896,17 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 		}
 		return Answer{Kind: ReadKindComposing, Specs: specs}, nil
 	case ReadKindSubRows:
+		// A read of sub-table rows under a fenced lock is held to its
+		// row's version (fencesOf), unless its use's behavior writes
+		// beside its rows, which moves no version.
 		if held > 0 && host.Store.Locks() == LocksFenced {
-			return Answer{}, Internal("a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)")
+			beside, err := writesBeside(host, request.Type, request.UseID)
+			if err != nil {
+				return Answer{}, err
+			}
+			if beside {
+				return Answer{}, Internal("a read under a lock of sub-table rows of %s's use %s, whose behavior writes beside its rows, has no check on SQLite or D1 yet (D103)", request.Type, request.UseID)
+			}
 		}
 		table := host.Layout.Types[request.Type]
 		if table == nil {
@@ -1009,9 +1018,61 @@ func fencesOf(host Host, reads []Answered) ([]Statement, error) {
 				not = "NOT "
 			}
 			fences = append(fences, Statement{Text: not + "EXISTS (" + rows + ")", Values: []any{}, Check: true})
+		case read.Request.Kind == ReadKindSubRows && read.Answer.Kind == ReadKindSubRows:
+			// A sub-table's rows change only with a write of their row,
+			// which moves its version, so the check of the row's own read
+			// under the lock holds them too (Stock's records, Calendar's
+			// bookings, D103's step 4).
+			rowHeld := false
+			for _, other := range reads {
+				if other.Held > 0 && other.Request.Kind == ReadKindRow && other.Request.Type == read.Request.Type && other.Request.Key == read.Request.Key {
+					rowHeld = true
+					break
+				}
+			}
+			if !rowHeld {
+				return nil, Internal("a read under a lock of sub-table rows of %s %s is held to its row's version, and the run read no row of it under the lock (D103)", read.Request.Type, read.Request.Key)
+			}
 		}
 	}
 	return fences, nil
+}
+
+// writesBeside reports whether a use's behavior writes beside its rows
+// (D77's primitive 1), or through an operation of the namespace that
+// writes (D77's primitive 3), which writes its use's sub-table rows beside
+// the row as one beside it does: its sub-tables then change with no write
+// of the row, so a read of them under a lock has no row's version to hold
+// it to.
+func writesBeside(host Host, typeName, useID string) (bool, error) {
+	table := host.Layout.Types[typeName]
+	if table == nil {
+		return false, nil
+	}
+	behavior := ""
+	for _, use := range table.Uses {
+		if use.ID == useID {
+			behavior = use.Behavior
+		}
+	}
+	if behavior == "" {
+		return false, nil
+	}
+	declarations, err := host.core().Declarations()
+	if err != nil {
+		return false, err
+	}
+	for _, declaration := range declarations {
+		if declaration.Name != behavior {
+			continue
+		}
+		for _, operation := range declaration.Operations {
+			if operation.Beside || (operation.Scope == "namespace" && operation.Writes) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // live is the condition a fenced statement or a read adds for a

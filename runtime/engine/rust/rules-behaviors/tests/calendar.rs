@@ -478,8 +478,19 @@ fn an_unknown_zone_is_refused_and_a_name_is_matched_as_the_database_spells_it() 
 
 #[test]
 fn calendar_reads_no_clock() {
-    let source = include_str!("../src/calendar.rs");
-    for call in ["Timestamp::now", "Zoned::now", "TimeZone::system"] {
-        assert!(!source.contains(call), "calendar.rs names {call}");
+    // Nor any zone but the bundled database's.
+    for (name, source) in [
+        ("cron.rs", include_str!("../src/calendar/cron.rs")),
+        ("time.rs", include_str!("../src/calendar/time.rs")),
+        ("behavior.rs", include_str!("../src/calendar/behavior.rs")),
+    ] {
+        for call in [
+            "Timestamp::now",
+            "Zoned::now",
+            "TimeZone::system",
+            "TimeZone::get(",
+        ] {
+            assert!(!source.contains(call), "calendar/{name} names {call}");
+        }
     }
 }

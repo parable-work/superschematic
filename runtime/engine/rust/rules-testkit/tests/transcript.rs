@@ -382,6 +382,37 @@ const COMMENTS_BESIDE_FLOOR: usize = 25;
 /// reads of rows. An adapter's replay holds its own count to this one.
 const DERIVED_PROVENANCE_FLOOR: usize = 75;
 
+/// The steps `core-holds.transcript.json` holds, of the engine's
+/// `commerce-holds.json` (D70 on the core, D103's step 4).
+const HOLDS_FLOOR: usize = 71;
+
+/// The steps `core-holds-timers.transcript.json` holds, of the engine's
+/// `commerce-holds-timers.json` (D70 on the core, D103's step 4).
+const HOLDS_TIMERS_FLOOR: usize = 14;
+
+/// The steps `core-commerce.transcript.json` holds, of the hand-written
+/// `core-commerce.json` (D70 on the core, D103's step 4).
+const COMMERCE_FLOOR: usize = 66;
+
+/// The steps `core-bookings.transcript.json` holds, of the engine's
+/// `commerce-calendar.json` (D70 on the core, D103's step 4): Calendar's
+/// time held through a booking's Holds.
+const BOOKINGS_FLOOR: usize = 83;
+
+/// The steps `core-calendar.transcript.json` holds, of the hand-written
+/// `core-calendar.json` (D70 on the core, D103's step 4).
+const CALENDAR_FLOOR: usize = 47;
+
+/// The steps `core-refunds.transcript.json` holds, of the engine's
+/// `commerce-payments-refunds.json` (D70 on the core, D103's step 4): a
+/// refund row's refundFor and settleRefundFor, each a call on the other
+/// row, beside Approvals and Reactions.
+const REFUNDS_FLOOR: usize = 52;
+
+/// The steps `core-payments.transcript.json` holds, of the hand-written
+/// `core-payments.json` (D70 on the core, D103's step 4).
+const PAYMENTS_FLOOR: usize = 73;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -411,6 +442,14 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ),
         ("core-revisions", "core-revisions", REVISIONS_FLOOR),
         ("core-comments", "core-comments", COMMENTS_FLOOR),
+        ("core-holds", "commerce-holds", HOLDS_FLOOR),
+        (
+            "core-holds-timers",
+            "commerce-holds-timers",
+            HOLDS_TIMERS_FLOOR,
+        ),
+        ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
+        ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -464,6 +503,9 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-pool", POOL_FLOOR, true),
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
+        ("core-commerce", COMMERCE_FLOOR, false),
+        ("core-calendar", CALENDAR_FLOOR, false),
+        ("core-payments", PAYMENTS_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

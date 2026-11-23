@@ -1,0 +1,2639 @@
+{
+  "name": "core-calendar",
+  "description": "Calendar and Holds on a table, D70 and D103's step 4, through the contract Supply: a booking whose Workflow is anchored on its status field holds time of a desk, a to-one relation, as it enters held, and commits it as it is booked; the desk's one place unavailable to a second booking of the slot, the second take deciding over the first; holdFor's rules (outside_hours, off_grid) through Holds' checkHold; findAvailability, an operation of the table as a whole, and its window; listBookings; the closures and hours the permission sets, a closure and a new zone refused over held time; the delete of a booking that waits for its committed time and of a desk that holds it; and each one's define refusals. Cases written by hand in the recorded format. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D103, step 4): runtime/engine/testdata/rules/scenarios/core-calendar.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Calendar and Holds > a booking holds its slot as it enters held and commits it as it is booked; the one place is unavailable to a second booking; holdFor's rules in their order; findAvailability over the table; the delete waits while committed time is to come",
+      "behaviors": [
+        "Calendar",
+        "Holds",
+        "Links",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "mo": {
+          "subject": "mo",
+          "permissions": [
+            "desk.manage"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": null,
+            "instanceType": "Desk"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Desk"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Booking",
+              "types": {
+                "Booking": {
+                  "name": "Booking",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "held",
+                          "booked",
+                          "expired",
+                          "cancelled"
+                        ],
+                        "initial": "draft",
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "booked"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "draft",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "desk": {
+                            "schema": "Desk"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "holds": {
+                          "slot": {
+                            "link": "desk",
+                            "interval": {
+                              "start": "slotStart",
+                              "end": "slotEnd"
+                            }
+                          }
+                        },
+                        "takeOn": [
+                          "held"
+                        ],
+                        "commitOn": [
+                          "booked"
+                        ],
+                        "releaseOn": [
+                          "expired",
+                          "cancelled"
+                        ]
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "slotStart",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "slotEnd",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": null,
+            "instanceType": "Booking"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Booking"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            {
+              "title": "By the window"
+            },
+            {
+              "id": "d1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Desk",
+            "id": "d1",
+            "data": {
+              "title": "By the window"
+            },
+            "behaviors": {
+              "Calendar": {
+                "timeZone": "Europe/London",
+                "hours": {
+                  "mon": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "sat": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ]
+                },
+                "closures": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "b1",
+              "slotStart": "2026-10-22T09:00:00Z",
+              "slotEnd": "2026-10-22T10:00:00Z"
+            },
+            {
+              "id": "b1",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "title": "b1",
+              "slotStart": "2026-10-22T09:00:00Z",
+              "slotEnd": "2026-10-22T10:00:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792659600000,
+                    "endMs": 1792663200000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "draft",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "title": "b1",
+              "slotStart": "2026-10-22T09:00:00Z",
+              "slotEnd": "2026-10-22T10:00:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "held",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792659600000,
+                    "endMs": 1792663200000,
+                    "state": "held"
+                  }
+                ],
+                "state": "held",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "b2",
+              "slotStart": "2026-10-22T09:30:00Z",
+              "slotEnd": "2026-10-22T10:30:00Z"
+            },
+            {
+              "id": "b2",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b2",
+            "data": {
+              "title": "b2",
+              "slotStart": "2026-10-22T09:30:00Z",
+              "slotEnd": "2026-10-22T10:30:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792661400000,
+                    "endMs": 1792665000000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b2",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes transition of Booking b2: Desk d1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+            "details": {
+              "behavior": "Holds",
+              "action": "transition",
+              "reason": "Desk d1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+              "vetoCode": "unavailable",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "code": "unavailable",
+                    "reason": "Desk d1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+                    "supply": {
+                      "schema": "Desk",
+                      "id": "d1"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "asked": {
+                      "interval": {
+                        "startMs": 1792661400000,
+                        "endMs": 1792665000000
+                      }
+                    },
+                    "conflict": {
+                      "startMs": 1792659600000,
+                      "endMs": 1792663200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "early",
+              "slotStart": "2026-10-22T07:30:00Z",
+              "slotEnd": "2026-10-22T08:30:00Z"
+            },
+            {
+              "id": "early",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "early",
+            "data": {
+              "title": "early",
+              "slotStart": "2026-10-22T07:30:00Z",
+              "slotEnd": "2026-10-22T08:30:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792654200000,
+                    "endMs": 1792657800000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "early",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes transition of Booking early: Desk d1 is not open for all of 2026-10-22 08:30 to 2026-10-22 09:30 Europe/London",
+            "details": {
+              "behavior": "Holds",
+              "action": "transition",
+              "reason": "Desk d1 is not open for all of 2026-10-22 08:30 to 2026-10-22 09:30 Europe/London",
+              "vetoCode": "unavailable",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "code": "outside_hours",
+                    "reason": "Desk d1 is not open for all of 2026-10-22 08:30 to 2026-10-22 09:30 Europe/London",
+                    "supply": {
+                      "schema": "Desk",
+                      "id": "d1"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "asked": {
+                      "interval": {
+                        "startMs": 1792654200000,
+                        "endMs": 1792657800000
+                      }
+                    },
+                    "timeZone": "Europe/London"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "grid",
+              "slotStart": "2026-10-22T12:05:00Z",
+              "slotEnd": "2026-10-22T12:35:00Z"
+            },
+            {
+              "id": "grid",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "grid",
+            "data": {
+              "title": "grid",
+              "slotStart": "2026-10-22T12:05:00Z",
+              "slotEnd": "2026-10-22T12:35:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792670700000,
+                    "endMs": 1792672500000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "grid",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes transition of Booking grid: 2026-10-22 13:05 to 2026-10-22 13:35 Europe/London does not start a whole number of 15 minutes after an opening time of Desk d1",
+            "details": {
+              "behavior": "Holds",
+              "action": "transition",
+              "reason": "2026-10-22 13:05 to 2026-10-22 13:35 Europe/London does not start a whole number of 15 minutes after an opening time of Desk d1",
+              "vetoCode": "unavailable",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "code": "off_grid",
+                    "reason": "2026-10-22 13:05 to 2026-10-22 13:35 Europe/London does not start a whole number of 15 minutes after an opening time of Desk d1",
+                    "supply": {
+                      "schema": "Desk",
+                      "id": "d1"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "asked": {
+                      "interval": {
+                        "startMs": 1792670700000,
+                        "endMs": 1792672500000
+                      }
+                    },
+                    "slotMs": 900000
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "findAvailability",
+            {
+              "startMs": 1792656000000,
+              "endMs": 1792666800000,
+              "durationMs": 3600000,
+              "limit": 10
+            }
+          ],
+          "expect": {
+            "slots": [
+              {
+                "id": "d1",
+                "startMs": 1792656000000,
+                "endMs": 1792659600000,
+                "remaining": 1
+              },
+              {
+                "id": "d1",
+                "startMs": 1792663200000,
+                "endMs": 1792666800000,
+                "remaining": 1
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1",
+            "checkHold",
+            {
+              "holder": {
+                "schema": "Booking",
+                "id": "b9"
+              },
+              "hold": "slot",
+              "item": 0,
+              "interval": {
+                "startMs": 1792659600000,
+                "endMs": 1792663200000
+              }
+            }
+          ],
+          "expect": {
+            "fits": false,
+            "code": "unavailable",
+            "reason": "Desk d1 is held for part of 2026-10-22 10:00 to 2026-10-22 11:00 Europe/London",
+            "details": {
+              "supply": {
+                "schema": "Desk",
+                "id": "d1"
+              },
+              "hold": "slot",
+              "item": 0,
+              "asked": {
+                "interval": {
+                  "startMs": 1792659600000,
+                  "endMs": 1792663200000
+                }
+              },
+              "conflict": {
+                "startMs": 1792659600000,
+                "endMs": 1792663200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "booked"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "booked"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "title": "b1",
+              "slotStart": "2026-10-22T09:00:00Z",
+              "slotEnd": "2026-10-22T10:00:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "booked",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792659600000,
+                    "endMs": 1792663200000,
+                    "state": "committed"
+                  }
+                ],
+                "state": "committed",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1",
+            "listBookings",
+            {
+              "startMs": 1792573200000,
+              "endMs": 1795165200000
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "holder": {
+                  "schema": "Booking",
+                  "id": "b1"
+                },
+                "hold": "slot",
+                "item": 0,
+                "startMs": 1792659600000,
+                "endMs": 1792663200000,
+                "state": "committed"
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "findAvailability",
+            {
+              "startMs": 1792573200000,
+              "endMs": 1795338000000,
+              "durationMs": 3600000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Calendar vetoes findAvailability of Desk: findAvailability reads at most 31 days at once, not 32 days",
+            "details": {
+              "behavior": "Calendar",
+              "action": "findAvailability",
+              "reason": "findAvailability reads at most 31 days at once, not 32 days",
+              "vetoCode": "window_too_long",
+              "vetoDetails": {
+                "maxMs": 2678400000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.delete",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1"
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes delete of Booking b1: the claim holds 1 committed item of time that has not ended",
+            "details": {
+              "behavior": "Holds",
+              "action": "delete",
+              "reason": "the claim holds 1 committed item of time that has not ended",
+              "vetoCode": "committed",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.delete",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1"
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Calendar vetoes delete of Desk d1: it holds time for 1 claim item",
+            "details": {
+              "behavior": "Calendar",
+              "action": "delete",
+              "reason": "it holds time for 1 claim item",
+              "vetoCode": "held"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Calendar > closures and hours need the permission; a closure over held time is has_bookings, and the zone does not move under time to come",
+      "behaviors": [
+        "Calendar",
+        "Holds",
+        "Links",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "mo": {
+          "subject": "mo",
+          "permissions": [
+            "desk.manage"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": null,
+            "instanceType": "Desk"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Desk"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Booking",
+              "types": {
+                "Booking": {
+                  "name": "Booking",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "held",
+                          "booked",
+                          "expired",
+                          "cancelled"
+                        ],
+                        "initial": "draft",
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "booked"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "draft",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "desk": {
+                            "schema": "Desk"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "holds": {
+                          "slot": {
+                            "link": "desk",
+                            "interval": {
+                              "start": "slotStart",
+                              "end": "slotEnd"
+                            }
+                          }
+                        },
+                        "takeOn": [
+                          "held"
+                        ],
+                        "commitOn": [
+                          "booked"
+                        ],
+                        "releaseOn": [
+                          "expired",
+                          "cancelled"
+                        ]
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "slotStart",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "slotEnd",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": null,
+            "instanceType": "Booking"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Booking"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            {
+              "title": "By the window"
+            },
+            {
+              "id": "d1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Desk",
+            "id": "d1",
+            "data": {
+              "title": "By the window"
+            },
+            "behaviors": {
+              "Calendar": {
+                "timeZone": "Europe/London",
+                "hours": {
+                  "mon": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "sat": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ]
+                },
+                "closures": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1",
+            "addClosure",
+            {
+              "startMs": 1792656000000,
+              "endMs": 1792659600000,
+              "reason": "training"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not addClosure on Desk d1: it needs permission desk.manage"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "addClosure",
+            {
+              "startMs": 1792656000000,
+              "endMs": 1792659600000,
+              "reason": "training"
+            }
+          ],
+          "expect": {
+            "closure": "closure-1",
+            "startMs": 1792656000000,
+            "endMs": 1792659600000,
+            "reason": "training"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Desk",
+            "id": "d1",
+            "data": {
+              "title": "By the window"
+            },
+            "behaviors": {
+              "Calendar": {
+                "timeZone": "Europe/London",
+                "hours": {
+                  "mon": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "sat": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ]
+                },
+                "closures": [
+                  {
+                    "closure": "closure-1",
+                    "startMs": 1792656000000,
+                    "endMs": 1792659600000,
+                    "reason": "training"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "b1",
+              "slotStart": "2026-10-22T08:30:00Z",
+              "slotEnd": "2026-10-22T09:30:00Z"
+            },
+            {
+              "id": "b1",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "title": "b1",
+              "slotStart": "2026-10-22T08:30:00Z",
+              "slotEnd": "2026-10-22T09:30:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792657800000,
+                    "endMs": 1792661400000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes transition of Booking b1: Desk d1 is closed for part of 2026-10-22 09:30 to 2026-10-22 10:30 Europe/London: training",
+            "details": {
+              "behavior": "Holds",
+              "action": "transition",
+              "reason": "Desk d1 is closed for part of 2026-10-22 09:30 to 2026-10-22 10:30 Europe/London: training",
+              "vetoCode": "unavailable",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "code": "closed",
+                    "reason": "Desk d1 is closed for part of 2026-10-22 09:30 to 2026-10-22 10:30 Europe/London: training",
+                    "supply": {
+                      "schema": "Desk",
+                      "id": "d1"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "asked": {
+                      "interval": {
+                        "startMs": 1792657800000,
+                        "endMs": 1792661400000
+                      }
+                    },
+                    "closure": {
+                      "closure": "closure-1",
+                      "startMs": 1792656000000,
+                      "endMs": 1792659600000,
+                      "reason": "training"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "title": "b2",
+              "slotStart": "2026-10-22T10:00:00Z",
+              "slotEnd": "2026-10-22T11:00:00Z"
+            },
+            {
+              "id": "b2",
+              "behaviors": {
+                "Links": {
+                  "desk": "d1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b2",
+            "data": {
+              "title": "b2",
+              "slotStart": "2026-10-22T10:00:00Z",
+              "slotEnd": "2026-10-22T11:00:00Z"
+            },
+            "behaviors": {
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Holds": {
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Desk",
+                    "id": "d1",
+                    "startMs": 1792663200000,
+                    "endMs": 1792666800000,
+                    "state": "pending"
+                  }
+                ],
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                }
+              },
+              "Links": {
+                "targets": {
+                  "desk": {
+                    "schema": "Desk",
+                    "id": "d1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b2",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "draft",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "addClosure",
+            {
+              "startMs": 1792665000000,
+              "endMs": 1792668600000,
+              "reason": "cleaning"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Calendar vetoes addClosure of Desk d1: Desk d1 holds time for 1 claim item over the closure; force keeps them and needs the permission's override",
+            "details": {
+              "behavior": "Calendar",
+              "action": "addClosure",
+              "reason": "Desk d1 holds time for 1 claim item over the closure; force keeps them and needs the permission's override",
+              "vetoCode": "has_bookings",
+              "vetoDetails": {
+                "holds": [
+                  {
+                    "holder": {
+                      "schema": "Booking",
+                      "id": "b2"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "startMs": 1792663200000,
+                    "endMs": 1792666800000,
+                    "state": "held"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "setOpeningHours",
+            {
+              "timeZone": "America/New_York"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Calendar vetoes setOpeningHours of Desk d1: Desk d1 changes its time zone from Europe/London to America/New_York only while it holds no time that has not ended, and it holds time for 1 claim item",
+            "details": {
+              "behavior": "Calendar",
+              "action": "setOpeningHours",
+              "reason": "Desk d1 changes its time zone from Europe/London to America/New_York only while it holds no time that has not ended, and it holds time for 1 claim item",
+              "vetoCode": "has_bookings",
+              "vetoDetails": {
+                "holds": [
+                  {
+                    "holder": {
+                      "schema": "Booking",
+                      "id": "b2"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "startMs": 1792663200000,
+                    "endMs": 1792666800000,
+                    "state": "held"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "removeClosure",
+            {
+              "closure": "closure-9"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Calendar vetoes removeClosure of Desk d1: Desk d1 has no closure closure-9",
+            "details": {
+              "behavior": "Calendar",
+              "action": "removeClosure",
+              "reason": "Desk d1 has no closure closure-9",
+              "vetoCode": "no_closure"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "removeClosure",
+            {
+              "closure": "closure-1"
+            }
+          ],
+          "expect": {
+            "closure": "closure-1",
+            "startMs": 1792656000000,
+            "endMs": 1792659600000,
+            "reason": "training"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b2",
+            "transition",
+            {
+              "to": "cancelled"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "cancelled"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mo",
+          "args": [
+            "Desk",
+            "d1",
+            "setOpeningHours",
+            {
+              "timeZone": "America/New_York"
+            }
+          ],
+          "expect": {
+            "hours": {
+              "mon": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "tue": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "wed": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "thu": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "fri": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "sat": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ]
+            },
+            "timeZone": "America/New_York"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Desk",
+            "id": "d1",
+            "data": {
+              "title": "By the window"
+            },
+            "behaviors": {
+              "Calendar": {
+                "timeZone": "America/New_York",
+                "hours": {
+                  "mon": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "sat": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ]
+                },
+                "closures": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.delete",
+          "principal": "alice",
+          "args": [
+            "Desk",
+            "d1"
+          ],
+          "expect": true
+        }
+      ]
+    },
+    {
+      "name": "Calendar > a config is held to the bundled time zones, the type's fields and its own bounds",
+      "behaviors": [
+        "Calendar",
+        "Holds",
+        "Links",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "mo": {
+          "subject": "mo",
+          "permissions": [
+            "desk.manage"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Mars/Olympus",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Desk/behaviors/0/config: type Desk: behavior Calendar config: timeZone \"Mars/Olympus\" is not a time zone of the IANA database the core bundles: an IANA name, such as Europe/London",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Desk/behaviors/0/config",
+                  "message": "type Desk: behavior Calendar config: timeZone \"Mars/Olympus\" is not a time zone of the IANA database the core bundles: an IANA name, such as Europe/London"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": {
+                          "field": "title"
+                        },
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Desk/behaviors/0/config: type Desk: behavior Calendar config: capacity.field \"title\" is not an integer field of Desk",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Desk/behaviors/0/config",
+                  "message": "type Desk: behavior Calendar config: capacity.field \"title\" is not an integer field of Desk"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 3600000,
+                        "maxMs": 1800000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Desk/behaviors/0/config: type Desk: behavior Calendar config: minMs (3600000) is longer than maxMs (1800000): no hold could be made",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Desk/behaviors/0/config",
+                  "message": "type Desk: behavior Calendar config: minMs (3600000) is longer than maxMs (1800000): no hold could be made"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "10:00",
+                              "09:00"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Desk/behaviors/0/config: type Desk: behavior Calendar config: hours/mon/0: must close after it opens",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Desk/behaviors/0/config",
+                  "message": "type Desk: behavior Calendar config: hours/mon/0: must close after it opens"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Desk",
+              "types": {
+                "Desk": {
+                  "name": "Desk",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "timeZone": "Europe/London",
+                        "hours": {
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "sat": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "capacity": 1,
+                        "slotMs": 900000,
+                        "minMs": 900000,
+                        "maxMs": 7200000,
+                        "permission": "desk.manage"
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": null,
+            "instanceType": "Desk"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Desk"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Desk",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Booking",
+              "types": {
+                "Booking": {
+                  "name": "Booking",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "held",
+                          "booked",
+                          "expired",
+                          "cancelled"
+                        ],
+                        "initial": "draft",
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "booked"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "draft",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "holds": {
+                          "slot": {
+                            "link": "desk",
+                            "interval": {
+                              "start": "slotStart",
+                              "end": "slotEnd"
+                            }
+                          }
+                        },
+                        "takeOn": [
+                          "held"
+                        ],
+                        "commitOn": [
+                          "booked"
+                        ],
+                        "releaseOn": [
+                          "expired",
+                          "cancelled"
+                        ]
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "slotStart",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "slotEnd",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Booking/behaviors/1/config: type Booking: behavior Holds config: holds.slot.link desk is not a to-one relation of Booking (it has none), so a hold has no one supply to read",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Booking/behaviors/1/config",
+                  "message": "type Booking: behavior Holds config: holds.slot.link desk is not a to-one relation of Booking (it has none), so a hold has no one supply to read"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Booking",
+              "types": {
+                "Booking": {
+                  "name": "Booking",
+                  "role": "EmbeddedStruct",
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "held",
+                          "booked",
+                          "expired",
+                          "cancelled"
+                        ],
+                        "initial": "draft",
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "booked"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "draft",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "desk": {
+                            "schema": "Desk"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "holds": {
+                          "slot": {
+                            "link": "desk",
+                            "interval": {
+                              "start": "slotStart",
+                              "end": "slotEnd"
+                            }
+                          }
+                        },
+                        "takeOn": [
+                          "held"
+                        ],
+                        "commitOn": [
+                          "booked"
+                        ],
+                        "releaseOn": [
+                          "expired",
+                          "cancelled"
+                        ]
+                      }
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "slotStart",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "slotEnd",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": null,
+            "instanceType": "Booking"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Booking"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": 1,
+            "published": true
+          }
+        }
+      ]
+    }
+  ]
+}

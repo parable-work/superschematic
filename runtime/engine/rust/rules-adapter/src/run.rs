@@ -1099,15 +1099,20 @@ async fn settle<S: Store>(
             Step::Read(requests) => {
                 for request in requests {
                     // A store whose locks are fenced checks each read made
-                    // under one in the unit that writes, and has no check
-                    // of sub-table rows, of the rows that link to a row or
-                    // of a table's rows yet (D103, left for later).
+                    // under one in the unit that writes: a sub-table's rows
+                    // through their row's version (fences_of), and it has
+                    // no check of the rows that link to a row or of a
+                    // table's rows yet (D103, left for later).
                     if store.fenced() && !answers.locks.is_empty() {
                         match request {
-                            ReadRequest::SubRows { .. } => return Err(internal(
-                                "a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)",
-                            )
-                            .into()),
+                            ReadRequest::SubRows { type_name, use_id, .. }
+                                if writes_beside(host, &type_name, &use_id) =>
+                            {
+                                return Err(internal(format!(
+                                    "a read under a lock of sub-table rows of {type_name}'s use {use_id}, whose behavior writes beside its rows, has no check on SQLite or D1 yet (D103)"
+                                ))
+                                .into())
+                            }
                             ReadRequest::Linked { .. } => return Err(internal(
                                 "a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)",
                             )
@@ -1786,10 +1791,49 @@ fn fences_of<S: Store>(
                 let any = format!("SELECT 1 FROM {}{}", quote(&table.table), live_where(table));
                 fences.push(Statement::check(format!("{not}EXISTS ({any})"), Vec::new()));
             }
+            // A sub-table's rows change only with a write of their row,
+            // which moves its version (a use that writes beside its rows
+            // was refused as it asked), so the check of the row's own read
+            // under the lock holds them too (Stock's records, Calendar's
+            // bookings, D103's step 4). A run that read them under the lock
+            // and not their row has nothing to hold them to.
+            (ReadRequest::SubRows { type_name, key, .. }, Answer::SubRows(_)) => {
+                if layout.table(type_name).is_none() {
+                    continue;
+                }
+                let row_held = answers.reads.iter().any(|read| {
+                    read.held > 0
+                        && matches!(&read.request, ReadRequest::Row { type_name: of, key: at } if of == type_name && at == key)
+                });
+                if !row_held {
+                    return Err(internal(format!(
+                        "a read under a lock of sub-table rows of {type_name} {key} is held to its row's version, and the run read no row of it under the lock (D103)"
+                    ))
+                    .into());
+                }
+            }
             _ => {}
         }
     }
     Ok(fences)
+}
+
+/// Whether a use's behavior writes beside its rows (D77's primitive 1),
+/// or through an operation of the namespace that writes (D77's primitive
+/// 3), which writes its use's sub-table rows beside the row as one beside
+/// it does: its sub-tables then change with no write of the row, so a read
+/// of them under a lock has no row's version to hold it to.
+fn writes_beside(host: &Host<'_>, type_name: &str, use_id: &str) -> bool {
+    host.layout
+        .table(type_name)
+        .and_then(|table| table.uses.iter().find(|used| used.id == use_id))
+        .and_then(|used| host.core.declaration(&used.behavior))
+        .is_some_and(|declaration| {
+            declaration
+                .operations
+                .iter()
+                .any(|operation| operation.beside || (operation.namespace && operation.writes))
+        })
 }
 
 /// The statements of a change set, in the order of a unit (D103): every row

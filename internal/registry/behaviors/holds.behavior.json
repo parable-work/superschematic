@@ -92,10 +92,14 @@
         "uniqueItems": true,
         "items": {"type": "string", "minLength": 1}
       },
-      "maxItems": {"description": "The most items the claim's holds may ask together; 100 when absent.", "type": "integer", "minimum": 1, "maximum": 1000}
+      "maxItems": {"description": "The most items the claim's holds may ask together; 100 when absent.", "type": "integer", "minimum": 1, "maximum": 1000},
+      "status": {"description": "On a table, the Workflow whose status takes, commits, releases and returns the holds: the field a Workflow is anchored on, or Workflow for one the type implements. Implied when the type has one Workflow.", "type": "string", "minLength": 1}
     }
   },
   "requires": ["Workflow"],
+  "contracts": [
+    {"name": "Supply", "role": "asks", "description": "Asks each supply an item names whether the item fits (checkHold) before a take, and calls its holdFor, commitFor, releaseFor and returnFor on the supply's row as the claim's status moves."}
+  ],
   "fields": [
     {
       "name": "items",
@@ -103,11 +107,34 @@
     },
     {
       "name": "state",
-      "description": "The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed."
+      "description": "The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed.",
+      "type": "string"
     },
     {
       "name": "total",
-      "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
+      "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
+      "type": "Generic.JSON"
+    }
+  ],
+  "tables": [
+    {
+      "name": "items",
+      "description": "On a table, each item the claim has taken, keyed by its hold and index: the supply it names, what it asks, its state and the unit price the supply held it at, and the Workflow entry it was taken at. An item its fields ask that it has not taken is no row; the items field shows it pending.",
+      "key": "key",
+      "fields": [
+        {"name": "key", "description": "The hold's name and the item's index, joined by /.", "type": "string"},
+        {"name": "hold", "description": "The hold's name.", "type": "string"},
+        {"name": "item", "description": "The item's index in its hold.", "type": "Generic.Int64"},
+        {"name": "supplySchema", "description": "The supply's type.", "type": "string"},
+        {"name": "supplyId", "description": "The supply's key.", "type": "string"},
+        {"name": "quantity", "description": "The units of counted supply it asks.", "type": "Generic.Int64"},
+        {"name": "startMs", "description": "When the time it asks starts, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "endMs", "description": "When the time it asks ends, in epoch milliseconds.", "type": "Generic.Int64"},
+        {"name": "state", "description": "pending, held, committed, released or returned.", "type": "string"},
+        {"name": "unitPrice", "description": "The unit price the supply held it at, in the currency's minor units.", "type": "Generic.Int64"},
+        {"name": "currency", "description": "The unit price's currency.", "type": "string"},
+        {"name": "takenAt", "description": "The Workflow's enteredAt at the take, which tells a later entry of a takeOn state from this one.", "type": "Generic.Int64"}
+      ]
     }
   ],
   "operations": [

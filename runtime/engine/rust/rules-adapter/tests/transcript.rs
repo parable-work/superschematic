@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 27] = [
+const TRANSCRIPTS: [(&str, usize); 34] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -119,6 +119,13 @@ const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-comments", COMMENTS_FLOOR),
     ("core-comments-beside", COMMENTS_BESIDE_FLOOR),
     ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR),
+    ("core-holds", HOLDS_FLOOR),
+    ("core-holds-timers", HOLDS_TIMERS_FLOOR),
+    ("core-commerce", COMMERCE_FLOOR),
+    ("core-bookings", BOOKINGS_FLOOR),
+    ("core-calendar", CALENDAR_FLOOR),
+    ("core-refunds", REFUNDS_FLOOR),
+    ("core-payments", PAYMENTS_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -297,6 +304,49 @@ const COMMENTS_BESIDE_FLOOR: usize = 25;
 /// settle's writes of the rows it reaches through applyDerived, and
 /// Provenance's inReview an owned column.
 const DERIVED_PROVENANCE_FLOOR: usize = 75;
+
+/// core-holds' floor (D70 on the core, D103's step 4): 71 steps of the
+/// engine's commerce-holds.json, 55 commands and 16 checks, each take a
+/// supply's lock and each supply's write of a claim's item a call on the
+/// supply's row, its records and movements rows of its sub-tables.
+const HOLDS_FLOOR: usize = 71;
+
+/// core-holds-timers' floor (D70 on the core, D103's step 4): 14 steps, 10
+/// commands and 4 checks, a hold let go by the Timers deadline that moves
+/// its claim to expired.
+const HOLDS_TIMERS_FLOOR: usize = 14;
+
+/// core-commerce's floor (D70 on the core, D103's step 4): 66 steps of the
+/// scenarios written by hand, 43 commands and 23 checks: a link hold over a
+/// relation, two claims for the last unit, a delete that releases, and the
+/// define refusals.
+const COMMERCE_FLOOR: usize = 66;
+
+/// core-bookings' floor (D70 on the core, D103's step 4): 83 steps of the
+/// engine's commerce-calendar.json, 63 commands and 20 checks, each booking
+/// a call on its desk's row under the supply's lock, its records, closures
+/// and settings rows of the desk's sub-tables, and findAvailability a
+/// command without a row over a read across the desks.
+const BOOKINGS_FLOOR: usize = 83;
+
+/// core-calendar's floor (D70 on the core, D103's step 4): 47 steps of the
+/// scenarios written by hand, 30 commands and 17 checks: a booking's
+/// Workflow anchored on its status field, the one place taken once,
+/// closures and the zone refused over held time, and the define refusals.
+const CALENDAR_FLOOR: usize = 47;
+
+/// core-refunds' floor (D70 on the core, D103's step 4): 52 steps of the
+/// engine's commerce-payments-refunds.json, 42 commands and 10 checks: a
+/// refund row's refundFor and settleRefundFor, each a call on the other
+/// row, beside Approvals' sign-offs and Reactions' moves.
+const REFUNDS_FLOOR: usize = 52;
+
+/// core-payments' floor (D70 on the core, D103's step 4): 73 steps of the
+/// scenarios written by hand, 51 commands and 22 checks: attempts, actions,
+/// refunds and issues rows of the use's sub-tables, the provider events
+/// rows of its shared table, and listPaymentActions a command without a row
+/// over a read across the table.
+const PAYMENTS_FLOOR: usize = 73;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

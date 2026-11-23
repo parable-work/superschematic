@@ -835,6 +835,29 @@ Most are load errors; knowing them saves a build round-trip:
   the Workflow's move into its state. For who wrote the row as a whole,
   the audit fields (`createdBy`, `updatedBy`, D87) are enough. Neither
   behavior can be removed from a table with rows.
+- When a table sells units or books time, implement the commerce
+  behaviors on it rather than counters and overlap checks of your own
+  (D70, D103): `implements Stock<Inventory, { permission: "stock.adjust";
+  price: { field: "priceCents"; currency: "GBP" } }>` on what is counted,
+  `implements Calendar<Desk, { timeZone: "Europe/London"; hours: { mon:
+  [["09:00", "17:30"]] }; capacity: 1; permission: "desk.manage" }>` on
+  what is booked, `implements Holds<Checkout, { holds: { lines: { each: {
+  field: "lines"; target: "inventoryId" }; schema: "Inventory"; quantity:
+  { field: "quantity" } } }; takeOn: ["held"]; commitOn: ["placed"];
+  releaseOn: ["expired", "cancelled"] }>` beside a `status: Workflow<{ ...
+  }>` on the claim, and `implements Payments<Order, { amount: { field:
+  "totalCents" }; currency: "GBP"; require: { placed: "paid" }; record: {
+  permission: "payments.record" } }>` on what is paid. A hold names a
+  table that implements `Supply` (Stock, Calendar, or a behavior of your
+  own), through an `each` list or a to-one relation (`link`). Move the
+  claim's status to take, commit and release; never call a supply's
+  `holdFor` or `releaseFor` yourself, which is `not_requested`. Let a
+  Timers deadline expire a hold. A take locks the supply rows it reads,
+  so two claims for the last unit never both hold it. Never write
+  `stock_on_hand`, `stock_held` or a behavior's sub-tables by hand: the
+  ledger stops agreeing. Give no card fields to a schema; a card goes to
+  the provider's hosted fields, and an adapter of your own records the
+  provider's events with `payments.recordPaymentEvent`.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

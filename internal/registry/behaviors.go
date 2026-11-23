@@ -343,9 +343,19 @@ const (
 // Contracts are the contracts the behaviors' core defines (D104): each a
 // name a declaration's contracts may give. Capacity, whether a row has room
 // now and when it will (superschematic_rules_behaviors::capacity), is the
-// first; superschematic_rules_behaviors::CONTRACTS lists the same, which a
-// test holds this list to.
-var Contracts = []string{"Capacity"}
+// first; Supply, how a claim holds what a supply gives
+// (superschematic_rules_behaviors::supply, D70), which Stock and Calendar
+// implement and Holds asks, the second, and the first whose writes are
+// operations of the supply's row; superschematic_rules_behaviors::CONTRACTS
+// lists the same, which a test holds this list to.
+var Contracts = []string{"Capacity", "Supply"}
+
+// contractsEnginesMeet are the contracts an engine's behaviors meet by
+// operation names, so a behavior an engine runs may ask one: the engine's
+// Holds invokes holdFor, commitFor, releaseFor, returnFor and checkHold by
+// name on the instance an item names (D70), which the core's Holds asks
+// through Supply (D103).
+var contractsEnginesMeet = []string{"Supply"}
 
 // Contract returns the behavior's contract named name, or false.
 func (d BehaviorDeclaration) Contract(name string) (BehaviorContract, bool) {
@@ -833,7 +843,9 @@ func checkBehaviorEvents(decl BehaviorDeclaration) error {
 // extension's behavior, since the core alone asks and answers a contract
 // and an extension's behavior runs in its engine (D58), and asked only by a
 // behavior the core alone implements (RulesPackage), since no engine asks
-// one. A behavior of any core package implements one: an engine's
+// one, or of a contract an engine's behaviors meet by operation names
+// (contractsEnginesMeet: Supply, which the engine's Holds invokes by name,
+// D70). A behavior of any core package implements one: an engine's
 // declaration parser shifts the member out unread, as it does tables.
 func checkBehaviorContracts(decl BehaviorDeclaration, spec BehaviorSpec) error {
 	seen := map[string]bool{}
@@ -851,7 +863,7 @@ func checkBehaviorContracts(decl BehaviorDeclaration, spec BehaviorSpec) error {
 		if spec.Extension != "" {
 			return fmt.Errorf("registry: behavior %s of extension %s names contract %s, which the behaviors' core asks and answers: an extension's behavior runs in its engine (D58)", decl.Name, spec.Extension, contract.Name)
 		}
-		if contract.Role == ContractRoleAsks && spec.Package != RulesPackage {
+		if contract.Role == ContractRoleAsks && spec.Package != RulesPackage && !slices.Contains(contractsEnginesMeet, contract.Name) {
 			return fmt.Errorf("registry: behavior %s asks contract %s, which only a behavior the behaviors' core alone implements (package %s) asks: an engine asks no contract", decl.Name, contract.Name, RulesPackage)
 		}
 	}

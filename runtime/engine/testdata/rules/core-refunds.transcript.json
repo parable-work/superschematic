@@ -1,0 +1,6201 @@
+{
+  "file": "core-refunds",
+  "source": "runtime/engine/testdata/scenarios/commerce-payments-refunds.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance",
+    "Stock",
+    "Holds",
+    "Calendar",
+    "Payments"
+  ],
+  "scenarios": [
+    {
+      "name": "Payments refunds > a refund is asked once approved, one approval pays one refund whatever the key, and the provider settles it",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "totalCents",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "closed"
+                    ],
+                    "initial": "open",
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Payments",
+                  "config": {
+                    "amount": {
+                      "field": "totalCents"
+                    },
+                    "currency": "GBP",
+                    "record": {
+                      "permission": "payments.record"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "totalCents",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Refund",
+          "fields": [
+            {
+              "name": "amountCents",
+              "type": "object"
+            },
+            {
+              "name": "reason",
+              "type": "string"
+            },
+            {
+              "name": "orderId",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Refund",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "requested",
+                      "approved",
+                      "issued",
+                      "rejected",
+                      "failed"
+                    ],
+                    "initial": "requested",
+                    "transitions": [
+                      {
+                        "from": "requested",
+                        "to": "approved"
+                      },
+                      {
+                        "from": "requested",
+                        "to": "rejected"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "issued"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "failed",
+                        "to": "approved"
+                      }
+                    ],
+                    "outcomes": {
+                      "rejected": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Approvals",
+                  "config": {
+                    "gates": {
+                      "approved": {
+                        "count": 2,
+                        "permission": "refunds.approve"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Payments",
+                  "config": {
+                    "refundOf": {
+                      "link": "order"
+                    },
+                    "amount": {
+                      "field": "amountCents"
+                    },
+                    "currency": "GBP",
+                    "issueOn": [
+                      "approved"
+                    ],
+                    "record": {
+                      "permission": "payments.record"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "Payments.state",
+                            "to": "refunded"
+                          }
+                        },
+                        "then": {
+                          "transition": "issued"
+                        }
+                      },
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "Payments.state",
+                            "from": "pending",
+                            "to": "unpaid"
+                          }
+                        },
+                        "then": {
+                          "transition": "failed"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "amountCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "orderId",
+                  "type": "string",
+                  "relation": {
+                    "name": "order",
+                    "type": "Order"
+                  }
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Refund",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "requested",
+                    "approved",
+                    "issued",
+                    "rejected",
+                    "failed"
+                  ],
+                  "initial": "requested",
+                  "transitions": [
+                    {
+                      "from": "requested",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "requested",
+                      "to": "rejected"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "issued"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "failed",
+                      "to": "approved"
+                    }
+                  ],
+                  "outcomes": {
+                    "rejected": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "refunds.approve"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "refundOf": {
+                    "link": "order"
+                  },
+                  "amount": {
+                    "field": "amountCents"
+                  },
+                  "currency": "GBP",
+                  "issueOn": [
+                    "approved"
+                  ],
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "to": "refunded"
+                        }
+                      },
+                      "then": {
+                        "transition": "issued"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "from": "pending",
+                          "to": "unpaid"
+                        }
+                      },
+                      "then": {
+                        "transition": "failed"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "amountCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reason",
+                "type": "string"
+              },
+              {
+                "name": "orderId",
+                "type": "string",
+                "relation": {
+                  "name": "order",
+                  "type": "Order"
+                }
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Refund",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "requested",
+                    "approved",
+                    "issued",
+                    "rejected",
+                    "failed"
+                  ],
+                  "initial": "requested",
+                  "transitions": [
+                    {
+                      "from": "requested",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "requested",
+                      "to": "rejected"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "issued"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "failed",
+                      "to": "approved"
+                    }
+                  ],
+                  "outcomes": {
+                    "rejected": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "refunds.approve"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "refundOf": {
+                    "link": "order"
+                  },
+                  "amount": {
+                    "field": "amountCents"
+                  },
+                  "currency": "GBP",
+                  "issueOn": [
+                    "approved"
+                  ],
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "to": "refunded"
+                        }
+                      },
+                      "then": {
+                        "transition": "issued"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "from": "pending",
+                          "to": "unpaid"
+                        }
+                      },
+                      "then": {
+                        "transition": "failed"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "amountCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reason",
+                "type": "string"
+              },
+              {
+                "name": "orderId",
+                "type": "string",
+                "relation": {
+                  "name": "order",
+                  "type": "Order"
+                }
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 3000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "openPayment",
+              "params": {
+                "provider": "acmepay",
+                "idempotencyKey": "k"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "attempt": "pay_request-2:Payments:pay:1",
+              "provider": "acmepay",
+              "amount": 3000,
+              "currency": "GBP",
+              "status": "open"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 3000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "open",
+                      "authorized": 0,
+                      "captured": 0,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "recordPaymentEvent",
+              "params": {
+                "provider": "acmepay",
+                "eventId": "e-paid",
+                "kind": "captured",
+                "amount": 3000,
+                "currency": "GBP",
+                "at": 1792573200000,
+                "attempt": "pay_request-2:Payments:pay:1"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "applied": true,
+              "attempt": {
+                "attempt": "pay_request-2:Payments:pay:1",
+                "provider": "acmepay",
+                "amount": 3000,
+                "currency": "GBP",
+                "status": "captured",
+                "captured": 3000,
+                "openedAt": 1792573200000,
+                "updatedAt": 1792573200000
+              },
+              "state": "paid"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "rf-1",
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "rf-1",
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "Refund:rf-1.0"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 is requested, not in a state that issues it (approved)",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 is requested, not in a state that issues it (approved)",
+                "vetoCode": "not_linked",
+                "vetoDetails": {
+                  "refund": {
+                    "schema": "Refund",
+                    "id": "rf-1"
+                  }
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "bob",
+              "at": 1792573200000,
+              "signedBy": [
+                "bob"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "carol",
+              "at": 1792573200000,
+              "signedBy": [
+                "bob",
+                "carol"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "approved"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "from": "requested",
+              "to": "approved"
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "requested",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Order",
+                "key": "o1",
+                "row": {
+                  "own": {
+                    "title": "o1",
+                    "totalCents": 3000
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 3000,
+                      "authorized": 0,
+                      "captured": 3000,
+                      "refunded": 0,
+                      "outstanding": 0,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "paid"
+                    },
+                    "Workflow": {
+                      "status": "open",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Payments",
+              "operation": "listPaymentActions",
+              "params": {
+                "provider": "acmepay"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "action": "act_request-8:Payments:act:1",
+                  "kind": "refund",
+                  "attempt": "pay_request-2:Payments:pay:1",
+                  "amount": 1000,
+                  "currency": "GBP",
+                  "id": "o1",
+                  "at": 1792573200000,
+                  "refund": "rf_request-8:Payments:rf:1"
+                }
+              ],
+              "next": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "x1"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+                "vetoCode": "key_reused",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "idempotencyKey": "Refund:rf-1.0"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "requested",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "x2"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+                "vetoCode": "key_reused",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "idempotencyKey": "Refund:rf-1.0"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "requested",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "Refund:rf-1.1"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is requested; it asks one at a time",
+                "vetoCode": "key_reused",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "idempotencyKey": "Refund:rf-1.0"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "requested",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "Refund:rf-1.0"
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "refund": "rf_request-8:Payments:rf:1",
+              "action": "act_request-8:Payments:act:1",
+              "amount": 1000,
+              "currency": "GBP"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "requested",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Payments",
+              "operation": "listPaymentActions",
+              "params": {
+                "provider": "acmepay"
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "action": "act_request-8:Payments:act:1",
+                  "kind": "refund",
+                  "attempt": "pay_request-2:Payments:pay:1",
+                  "amount": 1000,
+                  "currency": "GBP",
+                  "id": "o1",
+                  "at": 1792573200000,
+                  "refund": "rf_request-8:Payments:rf:1"
+                }
+              ],
+              "next": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Payments",
+              "operation": "settleRefundFor",
+              "params": {
+                "of": {
+                  "schema": "Order",
+                  "id": "o1"
+                },
+                "refund": "rf_request-8:Payments:rf:1",
+                "status": "succeeded",
+                "amount": 1000
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes settleRefundFor of Refund rf-1: Order o1 records refund rf_request-8:Payments:rf:1 requested with 0 refunded, not succeeded with 1000",
+              "details": {
+                "behavior": "Payments",
+                "action": "settleRefundFor",
+                "reason": "Order o1 records refund rf_request-8:Payments:rf:1 requested with 0 refunded, not succeeded with 1000",
+                "vetoCode": "not_linked",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "status": "requested",
+                  "refunded": 0
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "requested",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Payments",
+              "operation": "settleRefundFor",
+              "params": {
+                "of": {
+                  "schema": "Order",
+                  "id": "o1"
+                },
+                "refund": "rf_request-8:Payments:rf:1",
+                "status": "succeeded",
+                "amount": 1000
+              }
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "alice may not settle a refund of Refund rf-1: it needs permission payments.record"
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "requested",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 24,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "recordPaymentEvent",
+              "params": {
+                "provider": "acmepay",
+                "eventId": "e-rf",
+                "kind": "refunded",
+                "amount": 1000,
+                "currency": "GBP",
+                "at": 1792573200000,
+                "refund": "rf_request-8:Payments:rf:1"
+              }
+            },
+            "request": "request-17"
+          },
+          "expect": {
+            "result": {
+              "applied": true,
+              "attempt": {
+                "attempt": "pay_request-2:Payments:pay:1",
+                "provider": "acmepay",
+                "amount": 3000,
+                "currency": "GBP",
+                "status": "captured",
+                "captured": 3000,
+                "openedAt": 1792573200000,
+                "updatedAt": 1792573200000
+              },
+              "state": "partiallyRefunded"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 1000,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "partiallyRefunded"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Refund",
+                "key": "rf-1",
+                "row": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 1000,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "refunded"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1000,
+                "idempotencyKey": "x3"
+              }
+            },
+            "request": "request-18"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is succeeded; it asks one at a time",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 asked refund rf_request-8:Payments:rf:1 of 1000 under idempotencyKey Refund:rf-1.0, which is succeeded; it asks one at a time",
+                "vetoCode": "key_reused",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "idempotencyKey": "Refund:rf-1.0"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 1000,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "partiallyRefunded"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-8:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-8:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 27,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Payments",
+              "operation": "settleRefundFor",
+              "params": {
+                "of": {
+                  "schema": "Order",
+                  "id": "o1"
+                },
+                "refund": "rf_request-8:Payments:rf:1",
+                "status": "succeeded",
+                "amount": 900
+              }
+            },
+            "request": "request-19"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes settleRefundFor of Refund rf-1: Order o1 records refund rf_request-8:Payments:rf:1 succeeded with 1000 refunded, not succeeded with 900",
+              "details": {
+                "behavior": "Payments",
+                "action": "settleRefundFor",
+                "reason": "Order o1 records refund rf_request-8:Payments:rf:1 succeeded with 1000 refunded, not succeeded with 900",
+                "vetoCode": "not_linked",
+                "vetoDetails": {
+                  "refund": "rf_request-8:Payments:rf:1",
+                  "status": "succeeded",
+                  "refunded": 1000
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 1000,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "refunded"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 28,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "insert",
+                "at": 1792573200000,
+                "after": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "requested",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-20"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 1000,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "refunded"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 28,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "requested",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "pending"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-21"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 1000,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "refunded"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 28,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "pending"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 1000,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "refunded"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-22"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 1000,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "refunded"
+                },
+                "Workflow": {
+                  "status": "issued",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 28,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 1000,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "refunded"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1000,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1000,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 1000,
+                      "outstanding": 1000,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "refunded"
+                    },
+                    "Workflow": {
+                      "status": "issued",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-23"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1000,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 1000,
+                  "outstanding": 1000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "refunded"
+                },
+                "Workflow": {
+                  "status": "issued",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-8:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1000,
+                      "currency": "GBP",
+                      "status": "succeeded",
+                      "refunded": 1000,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        },
+        {
+          "step": 16,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 25,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 29,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 30,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Payments refunds > a failed refund turns the Refund failed, and approving it again asks under the next key",
+      "clock": {
+        "fixed": 1792573200000
+      },
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "totalCents",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "closed"
+                    ],
+                    "initial": "open",
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Payments",
+                  "config": {
+                    "amount": {
+                      "field": "totalCents"
+                    },
+                    "currency": "GBP",
+                    "record": {
+                      "permission": "payments.record"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "totalCents",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Refund",
+          "fields": [
+            {
+              "name": "amountCents",
+              "type": "object"
+            },
+            {
+              "name": "reason",
+              "type": "string"
+            },
+            {
+              "name": "orderId",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Refund",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "requested",
+                      "approved",
+                      "issued",
+                      "rejected",
+                      "failed"
+                    ],
+                    "initial": "requested",
+                    "transitions": [
+                      {
+                        "from": "requested",
+                        "to": "approved"
+                      },
+                      {
+                        "from": "requested",
+                        "to": "rejected"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "issued"
+                      },
+                      {
+                        "from": "approved",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "failed",
+                        "to": "approved"
+                      }
+                    ],
+                    "outcomes": {
+                      "rejected": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Approvals",
+                  "config": {
+                    "gates": {
+                      "approved": {
+                        "count": 2,
+                        "permission": "refunds.approve"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Payments",
+                  "config": {
+                    "refundOf": {
+                      "link": "order"
+                    },
+                    "amount": {
+                      "field": "amountCents"
+                    },
+                    "currency": "GBP",
+                    "issueOn": [
+                      "approved"
+                    ],
+                    "record": {
+                      "permission": "payments.record"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "Payments.state",
+                            "to": "refunded"
+                          }
+                        },
+                        "then": {
+                          "transition": "issued"
+                        }
+                      },
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "Payments.state",
+                            "from": "pending",
+                            "to": "unpaid"
+                          }
+                        },
+                        "then": {
+                          "transition": "failed"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "amountCents",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "orderId",
+                  "type": "string",
+                  "relation": {
+                    "name": "order",
+                    "type": "Order"
+                  }
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Refund",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "requested",
+                    "approved",
+                    "issued",
+                    "rejected",
+                    "failed"
+                  ],
+                  "initial": "requested",
+                  "transitions": [
+                    {
+                      "from": "requested",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "requested",
+                      "to": "rejected"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "issued"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "failed",
+                      "to": "approved"
+                    }
+                  ],
+                  "outcomes": {
+                    "rejected": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "refunds.approve"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "refundOf": {
+                    "link": "order"
+                  },
+                  "amount": {
+                    "field": "amountCents"
+                  },
+                  "currency": "GBP",
+                  "issueOn": [
+                    "approved"
+                  ],
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "to": "refunded"
+                        }
+                      },
+                      "then": {
+                        "transition": "issued"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "from": "pending",
+                          "to": "unpaid"
+                        }
+                      },
+                      "then": {
+                        "transition": "failed"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "amountCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reason",
+                "type": "string"
+              },
+              {
+                "name": "orderId",
+                "type": "string",
+                "relation": {
+                  "name": "order",
+                  "type": "Order"
+                }
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Refund",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "requested",
+                    "approved",
+                    "issued",
+                    "rejected",
+                    "failed"
+                  ],
+                  "initial": "requested",
+                  "transitions": [
+                    {
+                      "from": "requested",
+                      "to": "approved"
+                    },
+                    {
+                      "from": "requested",
+                      "to": "rejected"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "issued"
+                    },
+                    {
+                      "from": "approved",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "failed",
+                      "to": "approved"
+                    }
+                  ],
+                  "outcomes": {
+                    "rejected": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Approvals",
+                "config": {
+                  "gates": {
+                    "approved": {
+                      "count": 2,
+                      "permission": "refunds.approve"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "refundOf": {
+                    "link": "order"
+                  },
+                  "amount": {
+                    "field": "amountCents"
+                  },
+                  "currency": "GBP",
+                  "issueOn": [
+                    "approved"
+                  ],
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "to": "refunded"
+                        }
+                      },
+                      "then": {
+                        "transition": "issued"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "Payments.state",
+                          "from": "pending",
+                          "to": "unpaid"
+                        }
+                      },
+                      "then": {
+                        "transition": "failed"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "amountCents",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "reason",
+                "type": "string"
+              },
+              {
+                "name": "orderId",
+                "type": "string",
+                "relation": {
+                  "name": "order",
+                  "type": "Order"
+                }
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 3000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "openPayment",
+              "params": {
+                "provider": "acmepay",
+                "idempotencyKey": "k"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "attempt": "pay_request-2:Payments:pay:1",
+              "provider": "acmepay",
+              "amount": 3000,
+              "currency": "GBP",
+              "status": "open"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 3000,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "open",
+                      "authorized": 0,
+                      "captured": 0,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "recordPaymentEvent",
+              "params": {
+                "provider": "acmepay",
+                "eventId": "e-paid",
+                "kind": "captured",
+                "amount": 3000,
+                "currency": "GBP",
+                "at": 1792573200000,
+                "attempt": "pay_request-2:Payments:pay:1"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "applied": true,
+              "attempt": {
+                "attempt": "pay_request-2:Payments:pay:1",
+                "provider": "acmepay",
+                "amount": 3000,
+                "currency": "GBP",
+                "status": "captured",
+                "captured": 3000,
+                "openedAt": 1792573200000,
+                "updatedAt": 1792573200000
+              },
+              "state": "paid"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "create",
+              "id": "rf-1",
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "rf-1",
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "bob",
+              "at": 1792573200000,
+              "signedBy": [
+                "bob"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "carol",
+              "at": 1792573200000,
+              "signedBy": [
+                "bob",
+                "carol"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "requested",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "approved"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "from": "requested",
+              "to": "approved"
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "requested",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Order",
+                "key": "o1",
+                "row": {
+                  "own": {
+                    "title": "o1",
+                    "totalCents": 3000
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 3000,
+                      "authorized": 0,
+                      "captured": 3000,
+                      "refunded": 0,
+                      "outstanding": 0,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "paid"
+                    },
+                    "Workflow": {
+                      "status": "open",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Payments",
+              "operation": "listPaymentActions",
+              "params": {
+                "provider": "acmepay"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "action": "act_request-7:Payments:act:1",
+                  "kind": "refund",
+                  "attempt": "pay_request-2:Payments:pay:1",
+                  "amount": 1200,
+                  "currency": "GBP",
+                  "id": "o1",
+                  "at": 1792573200000,
+                  "refund": "rf_request-7:Payments:rf:1"
+                }
+              ],
+              "next": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "recordPaymentEvent",
+              "params": {
+                "provider": "acmepay",
+                "eventId": "e-f",
+                "kind": "refundFailed",
+                "amount": 1200,
+                "currency": "GBP",
+                "at": 1792573200000,
+                "refund": "rf_request-7:Payments:rf:1"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "applied": true,
+              "attempt": {
+                "attempt": "pay_request-2:Payments:pay:1",
+                "provider": "acmepay",
+                "amount": 3000,
+                "currency": "GBP",
+                "status": "captured",
+                "captured": 3000,
+                "openedAt": 1792573200000,
+                "updatedAt": 1792573200000
+              },
+              "state": "paid"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-7:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-7:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "failed",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Refund",
+                "key": "rf-1",
+                "row": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "insert",
+                "at": 1792573200000,
+                "after": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "requested",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "requested",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "pending"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "pending"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "failed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "change",
+              "key": "rf-1",
+              "change": {
+                "write": "update",
+                "at": 1792573200000,
+                "before": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "approved",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "amountCents": 1200,
+                    "reason": "damaged",
+                    "createdBy": "alice",
+                    "orderId": "o1"
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 1200,
+                      "authorized": 0,
+                      "captured": 0,
+                      "refunded": 0,
+                      "outstanding": 1200,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "unpaid"
+                    },
+                    "Workflow": {
+                      "status": "failed",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "failed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573200000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1200,
+                "idempotencyKey": "Refund:rf-1.0"
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Payments vetoes refundFor of Order o1: Refund rf-1 is failed, not in a state that issues it (approved)",
+              "details": {
+                "behavior": "Payments",
+                "action": "refundFor",
+                "reason": "Refund rf-1 is failed, not in a state that issues it (approved)",
+                "vetoCode": "not_linked",
+                "vetoDetails": {
+                  "refund": {
+                    "schema": "Refund",
+                    "id": "rf-1"
+                  }
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-7:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-7:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "failed",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573201000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "bob",
+              "at": 1792573201000,
+              "signedBy": [
+                "bob"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "failed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573201000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": [
+                "refunds.approve"
+              ]
+            },
+            "now": 1792573201000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Approvals",
+              "operation": "signOff",
+              "params": {
+                "state": "approved"
+              }
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "result": {
+              "state": "approved",
+              "subject": "carol",
+              "at": 1792573201000,
+              "signedBy": [
+                "bob",
+                "carol"
+              ],
+              "count": 2
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "unpaid"
+                },
+                "Workflow": {
+                  "status": "failed",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573201000
+                    }
+                  },
+                  {
+                    "key": "0000000004",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573201000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Refund",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573201000,
+            "action": {
+              "kind": "operation",
+              "key": "rf-1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "approved"
+              }
+            },
+            "request": "request-17"
+          },
+          "expect": {
+            "result": {
+              "from": "failed",
+              "to": "approved"
+            },
+            "row": {
+              "own": {
+                "amountCents": 1200,
+                "reason": "damaged",
+                "createdBy": "alice",
+                "orderId": "o1"
+              },
+              "owned": {
+                "Payments": {
+                  "due": 1200,
+                  "authorized": 0,
+                  "captured": 0,
+                  "refunded": 0,
+                  "outstanding": 1200,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "pending"
+                },
+                "Workflow": {
+                  "status": "approved",
+                  "enteredAt": 1792573201000
+                }
+              }
+            },
+            "subRows": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573200000,
+                      "consumedAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "state": "approved",
+                      "subject": "bob",
+                      "at": 1792573201000,
+                      "consumedAt": 1792573201000
+                    }
+                  },
+                  {
+                    "key": "0000000004",
+                    "values": {
+                      "state": "approved",
+                      "subject": "carol",
+                      "at": 1792573201000,
+                      "consumedAt": 1792573201000
+                    }
+                  }
+                ]
+              },
+              "Payments": {
+                "issues": [
+                  {
+                    "key": "rf_request-17:Payments:rf:1",
+                    "values": {
+                      "seq": 2,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.1",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "requested",
+                      "refunded": 0,
+                      "enteredAt": 1792573201000,
+                      "at": 1792573201000,
+                      "updatedAt": 1792573201000
+                    }
+                  },
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "ofSchema": "Order",
+                      "ofId": "o1",
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "status": "failed",
+                      "refunded": 0,
+                      "enteredAt": 1792573200000,
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            },
+            "others": [
+              {
+                "type": "Order",
+                "key": "o1",
+                "row": {
+                  "own": {
+                    "title": "o1",
+                    "totalCents": 3000
+                  },
+                  "owned": {
+                    "Payments": {
+                      "due": 3000,
+                      "authorized": 0,
+                      "captured": 3000,
+                      "refunded": 0,
+                      "outstanding": 0,
+                      "overpaid": 0,
+                      "currency": "GBP",
+                      "state": "paid"
+                    },
+                    "Workflow": {
+                      "status": "open",
+                      "enteredAt": 1792573200000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "adapter",
+              "permissions": [
+                "payments.record"
+              ]
+            },
+            "now": 1792573201000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Payments",
+              "operation": "listPaymentActions",
+              "params": {
+                "provider": "acmepay"
+              }
+            },
+            "request": "request-18"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "action": "act_request-17:Payments:act:1",
+                  "kind": "refund",
+                  "attempt": "pay_request-2:Payments:pay:1",
+                  "amount": 1200,
+                  "currency": "GBP",
+                  "id": "o1",
+                  "at": 1792573201000,
+                  "refund": "rf_request-17:Payments:rf:1"
+                }
+              ],
+              "next": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1792573201000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Payments",
+              "operation": "refundFor",
+              "params": {
+                "refund": {
+                  "schema": "Refund",
+                  "id": "rf-1"
+                },
+                "amount": 1200,
+                "idempotencyKey": "Refund:rf-1.1"
+              }
+            },
+            "request": "request-19"
+          },
+          "expect": {
+            "result": {
+              "refund": "rf_request-17:Payments:rf:1",
+              "action": "act_request-17:Payments:act:1",
+              "amount": 1200,
+              "currency": "GBP"
+            },
+            "row": {
+              "own": {
+                "title": "o1",
+                "totalCents": 3000
+              },
+              "owned": {
+                "Payments": {
+                  "due": 3000,
+                  "authorized": 0,
+                  "captured": 3000,
+                  "refunded": 0,
+                  "outstanding": 0,
+                  "overpaid": 0,
+                  "currency": "GBP",
+                  "state": "paid"
+                },
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1792573200000
+                }
+              }
+            },
+            "subRows": {
+              "Payments": {
+                "actions": [
+                  {
+                    "key": "act_request-17:Payments:act:1",
+                    "values": {
+                      "seq": 3,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-17:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "at": 1792573201000
+                    }
+                  },
+                  {
+                    "key": "act_request-2:Payments:act:1",
+                    "values": {
+                      "seq": 1,
+                      "kind": "create",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  },
+                  {
+                    "key": "act_request-7:Payments:act:1",
+                    "values": {
+                      "seq": 2,
+                      "kind": "refund",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "refund": "rf_request-7:Payments:rf:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "at": 1792573200000,
+                      "doneAt": 1792573200000
+                    }
+                  }
+                ],
+                "attempts": [
+                  {
+                    "key": "pay_request-2:Payments:pay:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "k",
+                      "provider": "acmepay",
+                      "amount": 3000,
+                      "currency": "GBP",
+                      "due": 3000,
+                      "status": "captured",
+                      "authorized": 0,
+                      "captured": 3000,
+                      "openedAt": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ],
+                "refunds": [
+                  {
+                    "key": "rf_request-17:Payments:rf:1",
+                    "values": {
+                      "seq": 2,
+                      "idempotencyKey": "Refund:rf-1.1",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "requested",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573201000,
+                      "updatedAt": 1792573201000
+                    }
+                  },
+                  {
+                    "key": "rf_request-7:Payments:rf:1",
+                    "values": {
+                      "seq": 1,
+                      "idempotencyKey": "Refund:rf-1.0",
+                      "attempt": "pay_request-2:Payments:pay:1",
+                      "provider": "acmepay",
+                      "amount": 1200,
+                      "currency": "GBP",
+                      "reason": "refund Refund rf-1",
+                      "status": "failed",
+                      "refunded": 0,
+                      "originSchema": "Refund",
+                      "originId": "rf-1",
+                      "at": 1792573200000,
+                      "updatedAt": 1792573200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        },
+        {
+          "step": 17,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Payments refunds > a refund schema records with its order's permission",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "totalCents",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "closed"
+                    ],
+                    "initial": "open",
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Payments",
+                  "config": {
+                    "amount": {
+                      "field": "totalCents"
+                    },
+                    "currency": "GBP",
+                    "record": {
+                      "permission": "payments.record"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "totalCents",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Payments",
+                "config": {
+                  "amount": {
+                    "field": "totalCents"
+                  },
+                  "currency": "GBP",
+                  "record": {
+                    "permission": "payments.record"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "totalCents",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 4,
+          "call": "schemas.define",
+          "reason": "the engine's refusal names its Links; a table's link is a relation, which the core names so (D103)"
+        }
+      ]
+    }
+  ]
+}

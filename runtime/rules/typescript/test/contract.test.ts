@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -386,7 +386,11 @@ test('declarations are the registered files, each field typed and the value fiel
   const contracts = (name: string): readonly DeclaredContract[] => byName(name).contracts ?? [];
   expect(contracts('Pool').map(c => [c.name, c.role])).toEqual([['Capacity', 'asks']]);
   expect(contracts('Budget').map(c => [c.name, c.role])).toEqual([['Capacity', 'implements']]);
-  expect(declarations.filter(d => (d.contracts ?? []).length > 0).map(d => d.name)).toEqual(['Budget', 'Pool']);
+  // Supply (D70, D103's step 4): Stock implements it, Holds asks it.
+  expect(contracts('Stock').map(c => [c.name, c.role])).toEqual([['Supply', 'implements']]);
+  expect(contracts('Holds').map(c => [c.name, c.role])).toEqual([['Supply', 'asks']]);
+  expect(contracts('Calendar').map(c => [c.name, c.role])).toEqual([['Supply', 'implements']]);
+  expect(declarations.filter(d => (d.contracts ?? []).length > 0).map(d => d.name)).toEqual(['Budget', 'Pool', 'Stock', 'Holds', 'Calendar']);
   // Lease's expireHolder runs on the table as a whole, which the core now
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');

@@ -527,12 +527,12 @@ describe('the host loop on any core', () => {
     }
   });
 
-  test('a read of sub-table rows under a lock refuses the command as internal on a store whose locks are fenced, and is answered on one that holds them', async () => {
+  test('a read of sub-table rows under a lock is held to its row version on a store whose locks are fenced, refused when the run read no row of it under the lock, and is answered on one that holds them', async () => {
     const subRows = { kind: 'subRows' as const, type: 'Order', key, useId: 'status', table: 'notes' };
     const steps: CoreStep[] = [{ lock: ['Order/x'] }, { read: [subRows] }, changed({})];
-    const fenced = memoryStore('sqlite', draftRow);
+    const fenced = memoryStore('sqlite', { k: 'a', c0: '1970-01-01T00:00:07.000Z', c1: 1 });
     await expect(execute({ core: scripted(steps).core, layout: keeping, store: { ...fenced.store, locks: 'fenced' } }, 'Order', transition('paid'))).rejects.toMatchObject({
-      refusal: { code: 'internal', message: 'rules: a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)' },
+      refusal: { code: 'internal', message: `rules: a read under a lock of sub-table rows of Order ${key} is held to its row's version, and the run read no row of it under the lock (D103)` },
     });
     const held = memoryStore('postgres', { k: 'a', c0: new Date(7000), c1: true });
     const { core, answers } = scripted(steps);

@@ -108,6 +108,19 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-comments.transcript.json", 361},
 	{"../../engine/testdata/rules/core-comments-beside.transcript.json", 25},
 	{"../../engine/testdata/rules/core-derived-provenance.transcript.json", 75},
+	// D70 on the core (D103's step 4): Stock and Holds through Supply,
+	// each take a supply's lock.
+	{"../../engine/testdata/rules/core-holds.transcript.json", 71},
+	{"../../engine/testdata/rules/core-holds-timers.transcript.json", 14},
+	{"../../engine/testdata/rules/core-commerce.transcript.json", 66},
+	// Calendar's time held through a booking's Holds, under the desk's
+	// lock, and findAvailability over the desks.
+	{"../../engine/testdata/rules/core-bookings.transcript.json", 83},
+	{"../../engine/testdata/rules/core-calendar.transcript.json", 47},
+	// Payments (D70 on the core): the refund pair, each a call on the
+	// other row, and the hand-written cases.
+	{"../../engine/testdata/rules/core-refunds.transcript.json", 52},
+	{"../../engine/testdata/rules/core-payments.transcript.json", 73},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

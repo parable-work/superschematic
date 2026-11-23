@@ -36,7 +36,7 @@ use superschematic_rules_testkit::{
 
 /// The transcripts and the floors `superschematic-rules-adapter`'s replay
 /// holds them to: each store replays every one.
-const TRANSCRIPTS: [(&str, usize); 27] = [
+const TRANSCRIPTS: [(&str, usize); 34] = [
     ("core-workflow", 96),
     ("core-timers", 139),
     ("core-reactions", 618),
@@ -64,6 +64,13 @@ const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-comments", 361),
     ("core-comments-beside", 25),
     ("core-derived-provenance", 75),
+    ("core-holds", 71),
+    ("core-holds-timers", 14),
+    ("core-commerce", 66),
+    ("core-bookings", 83),
+    ("core-calendar", 47),
+    ("core-refunds", 52),
+    ("core-payments", 73),
 ];
 
 fn transcript(name: &str) -> Transcript {

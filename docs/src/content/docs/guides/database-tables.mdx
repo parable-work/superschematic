@@ -1804,6 +1804,8 @@ or types a field as a Numbering or implements Revisions
 or Comments ([A row's conversation](#a-rows-conversation)),
 or implements Derived and Provenance
 ([Fields a model fills, and who set each](#fields-a-model-fills-and-who-set-each)),
+or Stock, Calendar, Holds and Payments
+([Units and time a claim holds, and what it owes](#units-and-time-a-claim-holds-and-what-it-owes)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3420,3 +3422,116 @@ stale fields yet. Neither behavior can be removed from a table with rows.
 A raw write of the table runs none of these rules: its derived fields'
 hashes catch up at the row's next write through the core, and its fields
 go unrecorded.
+
+### Units and time a claim holds, and what it owes
+
+Four behaviors sell and book on tables (D70, D103). `Stock` counts units
+of a row: an inventory record, a ticket type. `Calendar` opens a row's
+time: a desk, a stylist, a room. `Holds` holds units and time for a
+claim, a checkout or a booking, as its Workflow moves. `Payments` keeps
+what a row owes and the payments and refunds that settle it. The
+[commerce guide](/superschematic/guides/commerce/) covers each one's
+rules; this section covers what a table gets.
+
+```ts
+// shop-db
+export abstract class Inventory
+  implements
+    Stock<Inventory, {
+      permission: "stock.adjust";
+      price: { field: "priceCents"; currency: "GBP" };
+      lowAt: { field: "reorderAt" };
+      maxPerHold: 5;
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  priceCents: Generic.Int64;
+  reorderAt: Nullable<Generic.Int64>;
+}
+
+@jsonField
+export abstract class Line {
+  inventoryId: string;
+  quantity: Generic.Int64;
+}
+
+export abstract class Checkout
+  implements
+    Holds<Checkout, {
+      holds: {
+        lines: { each: { field: "lines"; target: "inventoryId" }; schema: "Inventory"; quantity: { field: "quantity" } };
+        wrap: { link: "wrap"; quantity: 1 };
+      };
+      takeOn: ["held"];
+      commitOn: ["placed"];
+      releaseOn: ["expired", "cancelled"];
+      returnOn: ["returned"];
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  lines: Line[];
+  wrap: Nullable<Relation<Inventory>>;
+  status: Workflow<{ states: ["cart", "held", "placed", "expired", "cancelled", "returned"]; transitions: [/* ... */] }>;
+}
+```
+
+A hold is an `each` list of the claim, one item per element, or a `link`,
+a to-one relation of the table, one item. The build refuses a hold whose
+table does not implement the contract `Supply`, which `Stock` and
+`Calendar` implement and a behavior of your own may. A hold asks a
+quantity of a `Stock` and an interval of a `Calendar`. `Holds` reads the
+status of the table's one Workflow, or of the one its `status` names.
+
+What each keeps on the table:
+
+| Behavior | Owned columns | Sub-tables | Computed at a read |
+| --- | --- | --- | --- |
+| `Stock` | `stock_on_hand`, `stock_held` | `holds`, the record of each claim item it holds; `movements`, its ledger | `available`, `low` |
+| `Calendar` | none | `bookings`, the record of each item; `closures`; `settings`, a row's own hours and time zone | `timeZone`, `hours`, `closures` |
+| `Holds` | `holds_state`, `holds_total` | `items`, each item the claim has taken | `items` |
+| `Payments` | `payments_due`, `payments_authorized`, `payments_captured`, `payments_refunded`, `payments_outstanding`, `payments_overpaid`, `payments_currency`, `payments_state` | `attempts`, `actions`, `refunds`, `issues`; a shared `events` table, one row per provider event | `attempts` |
+
+Entering a `takeOn` state takes every item or none. `Holds` asks each
+supply `checkHold` before the move, and the move is `unavailable` with a
+list of every item that does not fit. It then calls the supply's
+`holdFor` on the supply's row, through the core, in the same
+transaction. Entering `commitOn`, `releaseOn` and `returnOn` states
+commits, releases and returns. A Timers deadline, a Reactions move and a
+caller's transition each count, since `Holds` reads the status the write
+left. `holds_state` and `payments_state` are columns, so a Reactions
+rule hears `Holds.state` turn `committed` and `Payments.state` turn
+`paid`.
+
+Two claims for the last unit, or two bookings of one slot, do not both
+hold it. A take locks each supply row it reads, `Supply/<table>/<key>`,
+in key order. On Postgres the lock is a transaction's advisory lock. On
+SQLite and D1 the unit that writes checks that each row read under the
+lock is still at the version read. A supply's sub-tables move only with
+its row, so that check holds its records too. Every write of a supply's
+row is held to its version as well, so the second claim runs again and
+finds nothing left. No exclusion constraint backs `Calendar` on
+Postgres: one holds capacity 1 alone, with no buffers, and D83 declares
+none.
+
+```ts
+const staff = orm.withBehaviorCaller({ subject: "sam", permissions: ["stock.adjust"] });
+await staff.inventory.stock.receiveStock(tea, { quantity: 3, reason: "delivery" });
+await orm.checkout.status.transition(cart, { to: "held" });   // holds every line, or is unavailable
+await orm.checkout.status.transition(cart, { to: "placed" }); // commits them: a commit movement of the ledger
+```
+
+The supply's `holdFor`, `commitFor`, `releaseFor` and `returnFor` are
+routes too, but a direct call is `not_requested` unless the claim's
+`Holds` already shows the item in the state the call moves it to. A
+supply row is not deleted while it holds anything (`held`). A claim's
+delete releases what it holds and leaves what it committed sold. A raw
+write of a behavior's column runs none of these rules: the counts and
+the ledger stop agreeing, so do not write them by hand.
+
+What a table does not have yet: `Stock.low` is computed at a read, so a
+list does not filter on it; a Payments event applies once per table and
+provider, where the engine applied it once per namespace.
