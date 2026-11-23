@@ -364,6 +364,22 @@ describe('the host loop on any core', () => {
     expect(answers[1]!.reads!.map(r => r.answer)).toEqual([{ hasRows: true }, { spec }, { spec: null }]);
   });
 
+  test("a composing read answers the layout's types that compose the behavior, in name order (D77's primitive 3)", async () => {
+    const basket: CoreTypeSpec = { ...spec, name: 'Basket' };
+    const note: CoreTypeSpec = { name: 'Note' };
+    const three: RulesLayout = {
+      types: {
+        Order: layout.types.Order!,
+        Note: { ...layout.types.Order!, type: 'Note', table: 'note', uses: [], spec: note },
+        Basket: { ...layout.types.Order!, type: 'Basket', table: 'basket', spec: basket },
+      },
+    };
+    const { core, answers } = scripted([{ read: [{ kind: 'composing', behavior: 'Workflow' }, { kind: 'composing', behavior: 'Comments' }] }, changed({})]);
+    const { store } = memoryStore('postgres', draftRow);
+    await execute({ core, layout: three, store }, 'Order', transition('paid'));
+    expect(answers[1]!.reads!.map(r => r.answer)).toEqual([{ specs: [basket, spec] }, { specs: [] }]);
+  });
+
   test('a read, a step or a write of a kind the adapter does not take refuses the command as internal', async () => {
     const { store } = memoryStore('postgres', draftRow);
     const refusalOf = async (steps: CoreStep[]) => {

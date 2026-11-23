@@ -185,7 +185,11 @@ export type CoreAction =
   /** An operation of a use on the table as a whole (D104), one its declaration's scope schema gives: no row, so no key, and no preconditions. */
   | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
-  | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange };
+  | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange }
+  /** A caller's signal about a row (D77's primitive 2): the use whose behavior declares it, its name and its data. The core holds it to the declaration and writes nothing; the change set's signals hold the one sent. */
+  | { readonly kind: 'signal'; readonly key: string; readonly useId: string; readonly name: string; readonly data?: unknown }
+  /** An operation of the namespace as a whole (D77's primitive 3), by its behavior and name: it runs on no type and no row, over the types that compose the behavior (CoreReadRequest composing). */
+  | { readonly kind: 'namespaceOperation'; readonly behavior: string; readonly operation: string; readonly params?: unknown };
 
 /** What a write did to a row (D103): superschematic_rules::WriteKind. */
 export type CoreWriteKind = 'insert' | 'update' | 'delete';
@@ -250,7 +254,9 @@ export type CoreReadRequest =
       readonly limit: number;
     }
   /** The row of a key of a use's shared table, kept for the type's table as a whole (D103's step 4), with its version. */
-  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string };
+  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string }
+  /** The live versions of the types that compose a behavior, in name order (D77's primitive 3): what an operation of the namespace runs over. The adapter answers its layout's types that compose it, since a table's API authorizes. */
+  | { readonly kind: 'composing'; readonly behavior: string };
 
 /** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
 export interface CoreTableRef {
@@ -304,7 +310,9 @@ export type CoreAnswer =
   | { readonly spec: CoreTypeSpec | null }
   | { readonly subRows: readonly CoreSubRow[] }
   | { readonly linked: CoreLinkedRows }
-  | { readonly sharedRow: CoreSharedRow | null };
+  | { readonly sharedRow: CoreSharedRow | null }
+  /** The types a composing read asks for (D77's primitive 3), in name order. */
+  | { readonly specs: readonly CoreTypeSpec[] };
 
 /** One answered request, and how many locks the host held when it made the read. */
 export interface CoreAnswered {
@@ -408,6 +416,14 @@ export type CoreDeadlineChange =
   | { readonly kind: 'arm'; readonly row: CoreRowRef; readonly useId: string; readonly name: string; readonly at: number; readonly payload: unknown }
   | { readonly kind: 'clear'; readonly row: CoreRowRef; readonly useId: string; readonly name: string };
 
+/** A signal a command sends about a row (superschematic_rules::Signal, D77's primitive 2): the row, the use whose behavior declares it, its name and its data, at most 4096 bytes of compact JSON. The adapter stores none: its caller publishes each once its transaction commits, and drops them when it rolls back. */
+export interface CoreSignal {
+  readonly row: CoreRowRef;
+  readonly useId: string;
+  readonly name: string;
+  readonly data: unknown;
+}
+
 /** Everything one command changes, and what it returns. */
 export interface CoreChangeSet {
   readonly rows: readonly CoreRowWrite[];
@@ -416,6 +432,8 @@ export interface CoreChangeSet {
   readonly sharedRows?: readonly CoreSharedRowWrite[];
   readonly events: readonly CoreOutboxEvent[];
   readonly deadlines: readonly CoreDeadlineChange[];
+  /** The signals it sends (D77's primitive 2), stored nowhere; absent for none. */
+  readonly signals?: readonly CoreSignal[];
   readonly result: unknown;
 }
 
@@ -1682,6 +1700,17 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
       return { linked: await readRows(host, request.type, request.equal, request.tables, request.after, request.limit) };
     case 'sharedRow':
       return { sharedRow: await readSharedRow(host, request.type, request.useId, request.table, request.key) };
+    case 'composing':
+      // The layout's types that compose the behavior, in name order: an
+      // operation of the namespace runs over them (D77's primitive 3). The
+      // layout is one database's and the table's API authorizes, so none is
+      // left out (D103).
+      return {
+        specs: Object.keys(host.layout.types)
+          .sort()
+          .map(name => host.layout.types[name]!.spec)
+          .filter(spec => (spec.uses ?? []).some(use => use.behavior === request.behavior)),
+      };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -1870,8 +1899,8 @@ export async function readQueuedEvents(host: RulesHost, type: string): Promise<Q
  * writes: a row read is still at the version read, a row read absent is
  * still absent, and a table read to have rows still has them, or still
  * none, each of a soft-deletable table's live rows. A read of a type the
- * layout lacks, or of a spec, answers from the layout and needs none.
- * Answers made before the latest lock are asked for again, so a command
+ * layout lacks, of a spec, or of the types that compose a behavior, answers
+ * from the layout and needs none. Answers made before the latest lock are asked for again, so a command
  * that takes a lock decides on reads made under it alone.
  */
 function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStatement[] {
@@ -1879,7 +1908,7 @@ function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStateme
   const dialect = host.store.dialect;
   const fences: RulesStatement[] = [];
   for (const { request, answer, held } of reads) {
-    if ((held ?? 0) === 0 || request.kind === 'spec') continue;
+    if ((held ?? 0) === 0 || request.kind === 'spec' || request.kind === 'composing') continue;
     const table = host.layout.types[request.type];
     if (table === undefined) continue;
     if (request.kind === 'row' && 'row' in answer) {
