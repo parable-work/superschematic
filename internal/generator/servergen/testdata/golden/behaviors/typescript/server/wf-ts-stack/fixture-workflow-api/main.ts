@@ -35,6 +35,9 @@ const DEFAULT_PORT = 8080;
 /** How long the requests in flight at SIGTERM or SIGINT have to finish. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+/** How often the drain looks at the requests still in flight. */
+const DRAIN_POLL_MS = 20;
+
 /** How long each check /readyz makes may take. */
 const READINESS_TIMEOUT_MS = 2_000;
 
@@ -44,6 +47,8 @@ const READINESS_TIMEOUT_MS = 2_000;
  */
 interface BunServer {
   readonly port: number;
+  /** The requests the server has taken and not yet answered in full. */
+  readonly pendingRequests: number;
   stop(closeActiveConnections?: boolean): Promise<void>;
 }
 
@@ -209,19 +214,25 @@ async function connect(service: string, field: string, db: Database): Promise<Po
 
 /**
  * Stops taking requests and gives those in flight SHUTDOWN_TIMEOUT_MS to
- * finish, then closes the connections still open. It ends the pools last.
+ * finish, then closes the connections still open. It waits on the
+ * requests, not on Bun's stop(), which also waits for an idle keep-alive
+ * connection until Bun closes it at its idle timeout, as long as the
+ * grace: a client or a load balancer that keeps a connection open would
+ * make every stop late. It ends the pools last.
  * It rejects when requests were still in flight.
  */
 async function drain(server: BunServer, pools: readonly Pool[]): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<boolean>(resolve => {
-    timer = setTimeout(() => resolve(true), SHUTDOWN_TIMEOUT_MS);
-  });
-  const late = await Promise.race([server.stop().then(() => false), timedOut]);
-  clearTimeout(timer);
-  if (late) await server.stop(true);
+  const stopped = server.stop();
+  const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+  while (server.pendingRequests > 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
+  }
+  const pending = server.pendingRequests;
+  const late = pending > 0;
+  await server.stop(true);
+  await stopped;
   await Promise.allSettled(pools.map(pool => pool.end()));
-  if (late) throw new Error(`requests were still in flight ${SHUTDOWN_TIMEOUT_MS} ms after the signal`);
+  if (late) throw new Error(`${pending} request(s) were still in flight ${SHUTDOWN_TIMEOUT_MS} ms after the signal`);
 }
 
 main().catch((error: unknown) => {

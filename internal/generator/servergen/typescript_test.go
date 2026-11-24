@@ -621,7 +621,17 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	if !strings.Contains(shop.out.String(), `"msg":"shutting down"`) {
 		t.Errorf("ts-shop did not log its shutdown:\n%s", shop.out.String())
 	}
+	// This test's client keeps the connection of a request it has just
+	// made to ts-pricing open, idle. The drain waits on the requests in
+	// flight, none, and closes the rest, where Bun's stop() alone would wait
+	// for Bun to close that connection at its idle timeout, 10 s after the
+	// request, as long as the drain's grace.
+	pricing.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
+	begin := time.Now()
 	pricing.stop(t)
+	if took := time.Since(begin); took > 5*time.Second {
+		t.Errorf("ts-pricing took %s to stop with no request in flight:\n%s", took, pricing.out.String())
+	}
 
 	// Counter serves ts-pricing and ts-shop, whose cart asks ts-pricing for
 	// its quote at the loopback URL the local connector derives for a call
