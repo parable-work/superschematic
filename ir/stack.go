@@ -225,6 +225,13 @@ type Stack struct {
 	// site's own origin, as `stack dev`'s proxy serves it (D82).
 	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
 
+	// Images are what the stack adds to the images of its deployables
+	// (D144): system packages, and a Dockerfile of the project's that
+	// extends the generated image. An image serves every environment, so
+	// the stack names its additions once, here, and no environment's
+	// settings change them.
+	Images []*DeployableImage `json:"images,omitempty" yaml:"images,omitempty"`
+
 	// Deployables are the declared deployables: those that differ from the
 	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
@@ -256,6 +263,30 @@ type Origin struct {
 	// APIs are the API services the origin serves, each one the site
 	// calls. Empty is every API the site calls.
 	APIs []ServiceRef `json:"apis,omitempty" yaml:"apis,omitempty"`
+}
+
+// DeployableImage is one element of `@stack`'s images (D144): what the
+// stack adds to the image of one deployable that runs code, a server, a
+// job, a worker, a deriver, an app or an engine's runner. At least one of
+// Packages and Extend is set.
+type DeployableImage struct {
+	// Of names the deployable, as a settings element's `of` does: a
+	// service's handle or a declared server's class, with a job, a worker,
+	// a deriver, an app or the runner beside the handle.
+	Of DeployableRef `json:"of" yaml:"of"`
+
+	// Packages are Debian packages the image's final stage installs with
+	// `apt-get install --no-install-recommends`: a headless browser, a PDF
+	// tool, fonts. Each is a package's name, with no version.
+	Packages []string `json:"packages,omitempty" yaml:"packages,omitempty"`
+
+	// Extend is the path of a Dockerfile the project owns, slash-separated
+	// and relative to the repository root, the parent of the schemas root,
+	// as the naming file's implementation paths are. A deploy builds the
+	// generated image, then builds this file with the build argument BASE
+	// set to that image, and deploys the result. The directory that holds
+	// the file is in the build context, so it copies what lies beside it.
+	Extend string `json:"extend,omitempty" yaml:"extend,omitempty"`
 }
 
 // DeployableDecl is a declared deployable, such as an `@server` class. It
@@ -399,7 +430,7 @@ type EnvValue struct {
 }
 
 // StackDecl is the declaration of a stack's `@stack` class: Stack's
-// Deploy, Expose and Origins.
+// Deploy, Expose, Origins and Images.
 type StackDecl struct {
 	// Deploy names the entry points.
 	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
@@ -409,6 +440,9 @@ type StackDecl struct {
 
 	// Origins put a site and APIs it calls on one origin (D91).
 	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
+
+	// Images are what the stack adds to its deployables' images (D144).
+	Images []*DeployableImage `json:"images,omitempty" yaml:"images,omitempty"`
 }
 
 // ServerDecl is the declaration of an `@server` class: a declared server
@@ -475,6 +509,7 @@ func StackOf(schema *Schema) *Stack {
 				Deploy:  td.Stack.Deploy,
 				Expose:  td.Stack.Expose,
 				Origins: td.Stack.Origins,
+				Images:  td.Stack.Images,
 			}
 		}
 		if td.Server != nil {

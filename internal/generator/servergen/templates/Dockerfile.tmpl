@@ -67,6 +67,27 @@
 # The build stage links the binary against Debian's glibc, and the image runs
 # it on distroless cc, which holds the glibc and libgcc it needs and nothing
 # else, as a non-root user.
+{{- with .Docker.Image }}
+{{- if .Packages }}
+#
+# The stack adds Debian packages to the image (D144), and distroless has no
+# apt-get to install one with, so the image runs the binary on the slim
+# image of the Debian release the build stage links it against, with what
+# distroless cc held beside glibc, the CA certificates, OpenSSL and the
+# time zones, as the same non-root user:
+#
+#   {{ join .Packages " " }}
+{{- end }}
+{{- if .Extend }}
+#
+# The stack extends the image with a Dockerfile of the project's (D144),
+# which the context holds, with the directory beside it. A deploy builds
+# this file, then that one with the build argument BASE naming the image
+# this one built, and deploys the result:
+#
+#   docker build -f {{ .Extend }} --build-arg BASE=<the image this file built> .
+{{- end }}
+{{- end }}
 
 ARG GO_VERSION={{ .GoVersion }}
 {{- if .Docker.Archives }}
@@ -180,9 +201,24 @@ WORKDIR /src/{{ .Docker.Context }}
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -mod=mod -trimpath -o /out/{{ .Binary }} .
+{{- if and .Docker.Image .Docker.Image.Packages }}
+
+FROM debian:trixie-slim
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+{{- range .Docker.Image.Install }}
+      {{ . }} \
+{{- end }}
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 65532 nonroot \
+    && useradd --uid 65532 --gid 65532 --create-home nonroot
+COPY --from=build /out/{{ .Binary }} /{{ .Binary }}
+USER nonroot
+{{- else }}
 
 FROM gcr.io/distroless/cc-debian13:nonroot
 COPY --from=build /out/{{ .Binary }} /{{ .Binary }}
+{{- end }}
 {{- if not .Background }}
 ENV PORT=8080
 EXPOSE 8080

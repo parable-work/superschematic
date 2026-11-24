@@ -415,7 +415,11 @@ release tag exists.
   a serverless NEG, `fullPathMatch` with `pathPrefixRewrite`, the route
   rules' error response serving the fallback and passing the API's 404,
   and `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`; a bucket's CORS rules,
-  and a browser's preflight and upload from a page against them (D148).
+  and a browser's preflight and upload from a page against them (D148);
+  an image the stack adds packages to or extends: a Cloud Build of two
+  steps whose second reads the first's image from the build's daemon, a
+  Go and a Rust binary on `debian:trixie-slim` as `nonroot`, and Bun's
+  image taking `apt-get install` (D144).
 - **Cloudflare.** The storefront on Workers and a D1-backed TypeScript API,
   the target's own done line (D64, L 7086); `TestRealD1`, which the D1
   migration driver waits for (D27, L 3012); destroy order, the bucket
@@ -1588,25 +1592,6 @@ client it is in, and nothing in a server asks.
 
 Build: the service config, `envgen`, the three HTTP runtimes, the four
 SDK generators and the client SDKs guide.
-
-## D144. A deployable's image takes system packages, and a project may extend the generated image (D30 amended)
-
-A generated Dockerfile is written whole and never edited. A workload that
-needs a program beside its runtime, a headless browser or a PDF tool or
-fonts, has no place to ask for it.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A stack names an image's additions once for a deployable, not per environment, since one image serves every environment: `image: { packages?, extend? }`. | A setting per environment, which makes an image per environment |
-| `packages` are Debian package names. The final stage installs them with `apt-get install --no-install-recommends`, sorted, and removes the package lists. A stage whose base has no `apt-get` is given the Debian base the TypeScript image uses when a deployable names packages. | An arbitrary `RUN` line, which is a Dockerfile by another name |
-| `extend` is the path of a Dockerfile the project owns. The deploy builds the generated image, then builds this file with `BASE` set to it, and deploys the result. It is the escape hatch, and the docs say what belongs in `packages` first. | No way past the generator |
-| The image's identity, which decides whether a deploy rebuilds, includes the packages and the digest of the extension file. | |
-| `stack dev` runs processes on the host and installs nothing. It prints once, at the start, the packages each deployable names. | Installing on a developer's machine |
-| A platform with no image, Cloudflare's, refuses the setting as unrealizable. | Ignoring it |
-
-Build: the stack's schema and resolver, `servergen`'s three Dockerfile
-templates, `internal/stackdeploy/images.go`, `stack dev`, the targets'
-checks and the stacks guide.
 
 ## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
 

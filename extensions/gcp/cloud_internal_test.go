@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,36 @@ import (
 
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// TestBuildSteps (D144): a build of one Dockerfile is one docker build,
+// tagged as the image it pushes. A build that a Dockerfile of the
+// project's extends is two: the generated Dockerfile, tagged for the
+// build's own daemon alone, then the extending one, whose BASE build
+// argument names that tag, tagged as the image.
+func TestBuildSteps(t *testing.T) {
+	args := func(spec BuildSpec) [][]string {
+		var out [][]string
+		for _, step := range buildSteps(spec) {
+			if step.GetName() != dockerStep || !slices.Equal(step.GetEnv(), []string{"DOCKER_BUILDKIT=1"}) {
+				t.Errorf("a step runs %s with %v", step.GetName(), step.GetEnv())
+			}
+			out = append(out, step.GetArgs())
+		}
+		return out
+	}
+	image := "us-east1-docker.pkg.dev/acme/shop/shop-api:context-abc"
+	if got, want := args(BuildSpec{Dockerfile: "dist/Dockerfile", Image: image}), [][]string{{"build", "-f", "dist/Dockerfile", "-t", image, "."}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a build of one Dockerfile runs %v, want %v", got, want)
+	}
+	got := args(BuildSpec{Dockerfile: "dist/Dockerfile", Extend: "docker/shop-api.Dockerfile", Image: image})
+	want := [][]string{
+		{"build", "-f", "dist/Dockerfile", "-t", "superschematic-generated:base", "."},
+		{"build", "-f", "docker/shop-api.Dockerfile", "--build-arg", "BASE=superschematic-generated:base", "-t", image, "."},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("an extended build runs %v, want %v", got, want)
+	}
+}
 
 // TestBuildEnded: waitBuild stops at every status but the four of a build
 // that has yet to end. A status Cloud Build adds fails here until it is

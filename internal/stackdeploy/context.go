@@ -40,6 +40,10 @@ type Context struct {
 	// Dockerfile is the Dockerfile's path inside the context.
 	Dockerfile string
 
+	// Extend is the path inside the context of the Dockerfile that extends
+	// the image Dockerfile builds (D144), or empty.
+	Extend string
+
 	// Files counts the regular files and links it holds, and Size the
 	// bytes of its tar stream.
 	Files int
@@ -51,9 +55,11 @@ type Context struct {
 // file is `<Dockerfile>.dockerignore` beside the Dockerfile, else
 // `.dockerignore` at root, else none. As Docker's client does, the context
 // always holds the Dockerfile and its ignore file, whatever the ignore
-// file says. It refuses a context that lacks a path the ignore file takes
-// in by name (checkTakenIn).
-func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
+// file says, and the Dockerfile at extend, when one extends the image
+// (D144): a path under root, absolute or relative to it. It refuses a
+// context that lacks a path the ignore file takes in by name
+// (checkTakenIn).
+func WriteContext(w io.Writer, root, dockerfile string, extend ...string) (*Context, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -73,6 +79,25 @@ func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
 	}
 	out := &Context{Dockerfile: filepath.ToSlash(rel)}
 	always := map[string]bool{out.Dockerfile: true}
+	for _, e := range extend {
+		if e == "" {
+			continue
+		}
+		if !filepath.IsAbs(e) {
+			e = filepath.Join(root, filepath.FromSlash(e))
+		}
+		r, err := filepath.Rel(root, e)
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("the Dockerfile %s, which extends the image, lies outside its build context %s", e, root)
+		}
+		if info, err := os.Stat(e); err != nil {
+			return nil, fmt.Errorf("the Dockerfile that extends the image: %w", err)
+		} else if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("the Dockerfile %s, which extends the image, is not a file", e)
+		}
+		out.Extend = filepath.ToSlash(r)
+		always[out.Extend] = true
+	}
 	ignorePath := dockerfile + ".dockerignore"
 	if _, err := os.Stat(ignorePath); err != nil {
 		ignorePath = filepath.Join(root, ".dockerignore")

@@ -298,6 +298,11 @@ const (
 	BucketCORSSchema        = registry.BucketCORSSchema
 	BucketCORSMaxAgeSeconds = registry.BucketCORSMaxAgeSeconds
 
+	// ImageBaseArg is the build argument a Dockerfile that extends a
+	// generated image takes, which names that image (D144): an
+	// ImageBuilder passes it when a BuildRequest names one in Extend.
+	ImageBaseArg = registry.ImageBaseArg
+
 	// SQLDialectPostgres and SQLDialectSQLite are the SQL dialects a
 	// database platform declares.
 	SQLDialectPostgres = registry.SQLDialectPostgres

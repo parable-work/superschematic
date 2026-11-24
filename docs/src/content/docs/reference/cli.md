@@ -1005,7 +1005,11 @@ design is section 8.3 of
    builds last.
 2. Read the environment the build resolved to
    `<out>/stack/<stack>/<environment>/environment.json`: `--environment`,
-   or the stack's one environment on the local target.
+   or the stack's one environment on the local target. When the stack
+   [adds to an image](/superschematic/guides/stacks/#add-to-an-image),
+   print once the packages and the extending Dockerfile each deployable
+   names: dev runs each as a process on this machine and installs
+   nothing (D144).
 3. Start the environment's Postgres container,
    `superschematic-<stack>-<environment>-<checkout>-postgres`, published on
    127.0.0.1 only, and create a database per DB schema it hosts.

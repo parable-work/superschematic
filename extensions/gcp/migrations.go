@@ -518,7 +518,7 @@ func (e Extension) migrateImage(ctx context.Context, env *ir.ResolvedEnvironment
 	}
 	repo := imageRepository(v, env.Stack, migrateImage)
 	object := buildPrefix + kebab(env.Stack) + "/" + migrateImage + "/" + version + ".tar.gz"
-	return e.build(ctx, v, env.Stack, repo, version, "Dockerfile", object, archive.Bytes(), log)
+	return e.build(ctx, v, env.Stack, repo, version, "Dockerfile", "", object, archive.Bytes(), log)
 }
 
 // migrationJobName is the name of the stack's migration job, which no

@@ -611,3 +611,63 @@ export abstract class InstancesOnApp {}
   settings: [{ of: ShopDb, app: "Backoffice" }],
 })
 export abstract class AppOfDb {}
+
+// What the stack adds to its deployables' images (D144): a server by its
+// API's handle or its declared class, and a job, a worker, a deriver, an
+// app or an engine's runner beside a handle, as a settings element names
+// one, with packages, a Dockerfile to extend with, or both.
+@stack({
+  deploy: [ShopApi, ShopOrders, ShopCart, ShopFulfilment, ShopSupport, ShopStock],
+  images: [
+    { of: ShopApi, packages: ["chromium", "fonts-liberation"] },
+    { of: Backend, extend: "docker/backend.Dockerfile" },
+    { of: ShopCart, job: "SendDigest", packages: ["poppler-utils"], extend: "docker/digest/Dockerfile" },
+    { of: ShopFulfilment, worker: "FulfilOrders", packages: ["tini"] },
+    { of: ShopSupport, deriver: "TriageTickets", packages: ["tini"] },
+    { of: ShopStock, app: "Backoffice", packages: ["tini"] },
+    { of: ShopDb, runner: true, packages: ["tini"] },
+  ],
+})
+export abstract class ImageShop {}
+
+@stack({
+  deploy: [ShopCart],
+  // @ts-expect-error a job the API does not declare
+  images: [{ of: ShopCart, job: "PrintLabels", packages: ["tini"] }],
+})
+export abstract class ImageOfAnUnknownJob {}
+
+@stack({
+  deploy: [ShopFulfilment],
+  // @ts-expect-error a worker the API does not declare
+  images: [{ of: ShopFulfilment, worker: "PrintLabels", packages: ["tini"] }],
+})
+export abstract class ImageOfAnUnknownWorker {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error a bucket runs no image
+  images: [{ of: ShopMedia, packages: ["tini"] }],
+})
+export abstract class ImageOfABucket {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error a database runs no image; its engine's runner does, named with runner: true
+  images: [{ of: ShopDb, packages: ["tini"] }],
+})
+export abstract class ImageOfADatabase {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error an image takes packages and extend, and no command to run
+  images: [{ of: ShopApi, run: "apt-get install -y chromium" }],
+})
+export abstract class ImageWithARunLine {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error packages are names
+  images: [{ of: ShopApi, packages: [1] }],
+})
+export abstract class ImageWithANumber {}

@@ -54,6 +54,33 @@ func TestTSWriterWritesOrigins(t *testing.T) {
 	}
 }
 
+// TestTSWriterWritesImages: @stack's images are written with each
+// deployable as a settings element names one, its packages and the
+// Dockerfile that extends it, as the reader reads them back (D144).
+func TestTSWriterWritesImages(t *testing.T) {
+	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
+	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	db := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
+	schema := ir.NewSchema("shop-stack", ir.SchemaKindStack)
+	schema.Types["Backend"] = &ir.TypeDef{Name: "Backend", Role: ir.RoleEmbeddedStruct, Server: &ir.ServerDecl{Serves: []ir.ServiceRef{orders}}}
+	schema.Types["Shop"] = &ir.TypeDef{Name: "Shop", Role: ir.RoleEmbeddedStruct, Stack: &ir.StackDecl{
+		Deploy: []ir.ServiceRef{api, orders},
+		Images: []*ir.DeployableImage{
+			{Of: ir.DeployableRef{Service: &api}, Packages: []string{"fonts-liberation", "chromium"}},
+			{Of: ir.DeployableRef{Deployable: "Backend"}, Extend: "docker/backend.Dockerfile"},
+			{Of: ir.DeployableRef{Service: &orders, Worker: "FulfilOrders"}, Packages: []string{"tini"}, Extend: "docker/fulfil/Dockerfile"},
+			{Of: ir.DeployableRef{Service: &db, Runner: true}, Packages: []string{"tini"}},
+		},
+	}}
+	schema.Types["Dev"] = &ir.TypeDef{Name: "Dev", Role: ir.RoleEmbeddedStruct, Environment: &ir.EnvironmentDecl{Target: "local"}}
+	source := writtenSource(t, schema, FormatTS)
+	want := `images: [{ of: ShopApi, packages: ["fonts-liberation", "chromium"] }, { of: Backend, extend: "docker/backend.Dockerfile" }, ` +
+		`{ of: ShopOrders, worker: "FulfilOrders", packages: ["tini"], extend: "docker/fulfil/Dockerfile" }, { of: ShopDb, runner: true, packages: ["tini"] }]`
+	if !strings.Contains(source, want) {
+		t.Errorf("written TypeScript lacks %s:\n%s", want, source)
+	}
+}
+
 // TestTSWriterWritesApps: an app is exposed, and set in an environment's
 // settings, beside its API's handle (D78), as the reader reads it back.
 func TestTSWriterWritesApps(t *testing.T) {

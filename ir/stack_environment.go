@@ -124,6 +124,12 @@ type ResolvedDeployable struct {
 	// (D64). Empty for every other kind.
 	Artifact Artifact `json:"artifact,omitempty"`
 
+	// Image is what the stack adds to the deployable's image (D144): the
+	// packages its final stage installs and the Dockerfile that extends
+	// it. Nil when the stack names none. It is the same in every
+	// environment, since one image serves them all.
+	Image *ResolvedImage `json:"image,omitempty"`
+
 	// Job is what a job runs and when; nil for every other kind.
 	Job *ResolvedJob `json:"job,omitempty"`
 
@@ -180,6 +186,17 @@ type ResolvedDeployable struct {
 	// Bindings bind every config field of a server or a job, sorted by
 	// field. An optional field with no value and no default has none.
 	Bindings []*Binding `json:"bindings,omitempty"`
+}
+
+// ResolvedImage is what a stack adds to one deployable's image (D144).
+type ResolvedImage struct {
+	// Packages are the Debian packages the image's final stage installs,
+	// sorted, each once.
+	Packages []string `json:"packages,omitempty"`
+
+	// Extend is the Dockerfile that extends the generated image, a
+	// slash-separated path relative to the repository root, or empty.
+	Extend string `json:"extend,omitempty"`
 }
 
 // HasImage reports whether a deploy builds, pins and records an image for

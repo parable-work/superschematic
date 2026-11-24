@@ -39,6 +39,34 @@ func callsServices() []stack.Service {
 	})
 }
 
+// TestWorkersRefuseImageAdditions (D144): a Worker runs a bundle, with no
+// system to install a package into and no Dockerfile to extend, so a stack
+// that adds to a Worker's image is refused as unrealizable on cloudflare,
+// rather than deployed without what it asked for. The same stack resolves
+// on the local target, which runs a process and installs nothing.
+func TestWorkersRefuseImageAdditions(t *testing.T) {
+	reg := assemble(t)
+	for name, image := range map[string]ir.DeployableImage{
+		"packages":     {Of: stacktest.Of(stacktest.ShopStorefront), Packages: []string{"fonts-liberation", "chromium"}},
+		"a Dockerfile": {Of: stacktest.Of(stacktest.ShopStorefront), Extend: "docker/storefront.Dockerfile"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := callsStack()
+			s.Images = []*ir.DeployableImage{&image}
+			_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
+			refusedWith(t, errs, stack.CodeUnrealizable, "server shop-storefront: the stack adds to its image (")
+			refusedWith(t, errs, stack.CodeUnrealizable, "), and platform cloudflare.workers builds no image for it but a bundle; leave it out of the stack's images")
+			dev, errs := resolveOver(t, reg, s, callsServices(), "Dev")
+			if errs != nil {
+				t.Fatalf("Dev, on the local target: %v", errs)
+			}
+			if dev.Deployable("shop-storefront").Image == nil {
+				t.Error("Dev's shop-storefront carries no image")
+			}
+		})
+	}
+}
+
 // callsStack deploys two Workers, shop-storefront, exposed, and
 // shop-pricing, internal, which the storefront calls through a service
 // binding, and the bucket shop-media, which the storefront lists, on R2:

@@ -443,6 +443,12 @@ export abstract class Preview extends Staging {}
   serves shop-api under `/api/shop-api` on shop-web's address, as `stack
   dev`'s proxy serves it, and `apis` left out serves every API the site
   calls.
+- **`images`** list what the stack adds to the image of a deployable
+  that runs code (D144, section 8.2): `{ of: ShopApi, packages:
+  ["chromium"] }`, or `{ of: ShopOrders, worker: "PrintInvoices", extend:
+  "docker/invoices/Dockerfile" }`. `of` names the deployable as a settings
+  element does, each once. The stack holds them, not an environment,
+  since one image serves every environment.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
@@ -2044,6 +2050,60 @@ root's Cargo workspace with `cargo build --release --locked`, frozen to
 the workspace's lockfile, which the project commits too, on `rust` at the
 release `tools.env` pins, and runs the binary on distroless `cc` as a
 non-root user (section 8.6).
+
+**What a stack adds to an image (D144).** A generated Dockerfile is
+written whole and never edited, so a workload that needs a program beside
+its runtime, a headless browser, a PDF tool or fonts, asks for it in the
+stack: `@stack`'s `images` name, per deployable that runs code, `packages`
+and `extend`.
+
+- **Where it is declared.** In `@stack`, beside `expose` and `origins`,
+  as a list of `{ of, packages?, extend? }`, the deployable named as a
+  settings element names one. An image serves every environment, so no
+  environment's settings hold it: a setting per environment would make an
+  image per environment. A default server has no class to hang a key on,
+  and a job or a worker is named only beside its API's handle, so the
+  list is the one place that names every deployable once.
+- **`packages`** are Debian package names, with no version, option or
+  shell word (`registry.CheckDeployableImage`). The final stage installs
+  them with `apt-get install --no-install-recommends`, sorted, and removes
+  the package lists. A TypeScript image's final stage is Bun's image, a
+  Debian one, and installs them before it leaves root. A Go or Rust
+  image's is distroless `cc`, which has no `apt-get`, so with packages it
+  starts instead from `debian:trixie-slim`, the release its build stage
+  links the binary against and distroless `cc` is built from, installs
+  beside them what distroless held, the CA certificates, OpenSSL and the
+  time zones, and runs the binary as a user it makes with distroless's
+  name and id, `nonroot`, 65532. Not taken: an arbitrary `RUN` line,
+  which is a Dockerfile by another name.
+- **`extend`** is the path of a Dockerfile the project owns, relative to
+  the repository root. A deploy builds the generated image, then builds
+  this file with the build argument `BASE` set to it
+  (`registry.ImageBaseArg`), and deploys the result. Its context is the
+  generated image's: the generated ignore file takes in the extending
+  Dockerfile and, unless that is the context's root, the directory that
+  holds it, so the file copies what lies beside it. The stack's build
+  refuses a path that names no file. It is the escape hatch, and
+  `packages` come first.
+- **The seam.** A `registry.BuildRequest` names the extending Dockerfile
+  in `Extend`, and the target's `ImageBuilder` runs both builds and
+  returns the second image. The gcp target runs them as two steps of one
+  Cloud Build: the generated Dockerfile, tagged for the build's own daemon
+  alone, then the extending one, which is the image the build pushes.
+- **Identity.** An image's identity is its build context's digest (section
+  11.2). The generated Dockerfile holds the packages, and the context
+  always holds the extending Dockerfile, whatever the ignore file says, so
+  a change to either builds the image again. A context `stack prepare`
+  wrote records the extending Dockerfile's path beside the generated
+  one's.
+- **Resolution.** Every environment's `environment.json` records the
+  additions on the deployable (`image`). A deployable whose platform
+  builds no image, a bundle on Cloudflare Workers or an environment's one
+  binary, is refused as unrealizable when the stack adds to its image:
+  ignoring the setting would deploy the workload without what it asked
+  for. `stack dev` runs each deployable as a process on the host and
+  installs nothing; as it starts it prints once what the stack adds to
+  each image.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
 the scalar library allows; the archives superscalar's own release

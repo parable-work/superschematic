@@ -471,11 +471,13 @@ type RustRunnerInput struct {
 	// document.
 	TypesDir string
 
-	// Naming, RepositoryRoot, Paths and EngineProject are as a RustInput's.
+	// Naming, RepositoryRoot, Paths, EngineProject and Image are as a
+	// RustInput's.
 	Naming         naming.Naming
 	RepositoryRoot string
 	Paths          naming.LocalPaths
 	EngineProject  *EngineProject
+	Image          *ImageInput
 }
 
 // RustRunner is what a Rust runner's entrypoint runs: the engine of its
@@ -530,6 +532,7 @@ func PlanRustRunner(in RustRunnerInput) (*RustServer, error) {
 		Paths:          in.Paths,
 		EngineTypes:    map[string]string{in.Database: in.TypesDir},
 		EngineProject:  in.EngineProject,
+		Image:          in.Image,
 	}
 	if _, err := s.newRustEngine(rin, d, in.Engine, taken); err != nil {
 		return nil, err
@@ -544,6 +547,11 @@ func PlanRustRunner(in RustRunnerInput) (*RustServer, error) {
 	s.Docker, s.NoDocker, err = planRustDocker(rin, s, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(rin.Image, s.Kind, s.Name, rin.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", rin.Stack, err)
+		}
 	}
 	return s, nil
 }

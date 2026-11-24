@@ -3965,6 +3965,29 @@
       ],
       "type": "object"
     },
+    "DeployableImage": {
+      "additionalProperties": false,
+      "properties": {
+        "extend": {
+          "default": "",
+          "type": "string"
+        },
+        "of": {
+          "$ref": "#/$defs/DeployableRef"
+        },
+        "packages": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "of"
+      ],
+      "type": "object"
+    },
     "DeployableRef": {
       "additionalProperties": false,
       "properties": {
@@ -6450,6 +6473,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/DeployableRef"
+          },
+          "type": "array"
+        },
+        "images": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableImage"
           },
           "type": "array"
         },

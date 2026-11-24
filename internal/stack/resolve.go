@@ -251,9 +251,11 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.defaultDerivers()
 	r.defaultApps()
 	r.defaultRunners()
+	r.resolveImages()
 	r.applySettings()
 	r.disableDeployables()
 	r.place()
+	r.checkImages()
 	r.checkIdentityDatabases()
 	r.expose()
 	r.dropUnplaced()
@@ -1371,6 +1373,11 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	c.ResourceName = deepCopy(d.ResourceName)
 	c.Address = deepCopy(d.Address)
 	c.PublicAddress = deepCopy(d.PublicAddress)
+	if d.Image != nil {
+		image := *d.Image
+		image.Packages = slices.Clone(d.Image.Packages)
+		c.Image = &image
+	}
 	if d.Job != nil {
 		job := *d.Job
 		c.Job = &job

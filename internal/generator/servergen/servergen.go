@@ -220,6 +220,10 @@ type Input struct {
 	// rules-wasm crate's staticlib, and a release's archives hold.
 	RulesGo string
 
+	// Image is what the stack adds to the entrypoint's image, nil when it
+	// adds nothing (D144).
+	Image *ImageInput
+
 	// opensEngine is true when the entrypoint opens an engine (D58), whose
 	// archive its image must link.
 	opensEngine bool
@@ -662,6 +666,10 @@ type Docker struct {
 	// hold it.
 	LinksRules bool
 
+	// Image is what the stack adds to the image, nil when it adds
+	// nothing (D144).
+	Image *Image
+
 	// Include are the paths the build context holds.
 	Include []string
 }
@@ -1008,6 +1016,11 @@ func Plan(in Input) (*Server, error) {
 	s.Docker, s.NoDocker, err = planDocker(in, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(in.Image, s.Kind, s.Name, in.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", in.Stack, err)
+		}
 	}
 	return s, nil
 }

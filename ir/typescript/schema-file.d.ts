@@ -107,6 +107,12 @@ export interface DatabaseDecl {
   hosts: ServiceRef[];
 }
 
+export interface DeployableImage {
+  extend?: string;
+  of: DeployableRef;
+  packages?: string[];
+}
+
 export interface DeployableRef {
   app?: string;
   deployable?: string;
@@ -752,6 +758,7 @@ export interface SourceRef {
 export interface StackDecl {
   deploy?: ServiceRef[];
   expose?: DeployableRef[];
+  images?: DeployableImage[];
   origins?: Origin[];
 }
 

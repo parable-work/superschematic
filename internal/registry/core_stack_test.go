@@ -227,6 +227,86 @@ func TestStackDecoratorReadsOrigins(t *testing.T) {
 	}
 }
 
+// TestStackDecoratorReadsImages (D144): @stack's images name a deployable
+// as a settings element names one, a job, a worker, a deriver, an app or
+// the runner beside a handle, with the packages its image installs and
+// the Dockerfile that extends it. An element with a key it does not have,
+// a job beside a class, or no packages in its list is refused, and
+// verification refuses a package that is no Debian package's name, a path
+// outside the repository and an element that adds nothing.
+func TestStackDecoratorReadsImages(t *testing.T) {
+	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
+	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	db := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
+	shop := &ir.TypeDef{Name: "Shop"}
+	if err := applyStackDecorator(t, "stack", shop, map[string]any{
+		"deploy": []any{handle("shop-api", "API")},
+		"images": []any{
+			map[string]any{"of": handle("shop-api", "API"), "packages": []any{"fonts-liberation", "chromium"}},
+			map[string]any{"of": class("Backend"), "extend": "docker/backend.Dockerfile"},
+			map[string]any{"of": handle("shop-orders", "API"), "worker": "FulfilOrders", "packages": []any{"tini"}, "extend": "docker/fulfil/Dockerfile"},
+			map[string]any{"of": handle("shop-orders", "API"), "job": "ShipOrders", "packages": []any{"tini"}},
+			map[string]any{"of": handle("shop-db", "DB"), "runner": true, "packages": []any{"tini"}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []*ir.DeployableImage{
+		{Of: ir.DeployableRef{Service: &api}, Packages: []string{"fonts-liberation", "chromium"}},
+		{Of: ir.DeployableRef{Deployable: "Backend"}, Extend: "docker/backend.Dockerfile"},
+		{Of: ir.DeployableRef{Service: &orders, Worker: "FulfilOrders"}, Packages: []string{"tini"}, Extend: "docker/fulfil/Dockerfile"},
+		{Of: ir.DeployableRef{Service: &orders, Job: "ShipOrders"}, Packages: []string{"tini"}},
+		{Of: ir.DeployableRef{Service: &db, Runner: true}, Packages: []string{"tini"}},
+	}
+	if !reflect.DeepEqual(shop.Stack.Images, want) {
+		t.Errorf("@stack wrote images %+v, want %+v", shop.Stack.Images, want)
+	}
+	for _, c := range []struct {
+		element map[string]any
+		want    string
+	}{
+		{map[string]any{"packages": []any{"tini"}}, "@stack argument"},
+		{map[string]any{"of": handle("shop-api", "API"), "run": "apt-get install -y chromium"}, "@stack argument"},
+		{map[string]any{"of": handle("shop-api", "API"), "packages": []any{}}, "@stack argument"},
+		{map[string]any{"of": handle("shop-api", "API"), "packages": "chromium"}, "@stack argument"},
+		{map[string]any{"of": class("Backend"), "job": "ShipOrders", "packages": []any{"tini"}}, "job ShipOrders names a job of the API service of names, but of names no service"},
+		{map[string]any{"of": class("Backend"), "runner": true, "packages": []any{"tini"}}, "runner names the engine's runner of the DB service of names, but of names no service"},
+	} {
+		err := applyStackDecorator(t, "stack", &ir.TypeDef{Name: "C"}, map[string]any{"images": []any{c.element}})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("@stack images %v = %v, want a refusal saying %q", c.element, err, c.want)
+		}
+	}
+	for name, c := range map[string]struct {
+		image ir.DeployableImage
+		want  string
+	}{
+		"nothing":             {ir.DeployableImage{}, "names no packages and no Dockerfile to extend with"},
+		"a version":           {ir.DeployableImage{Packages: []string{"chromium=120"}}, `package "chromium=120" is no Debian package name`},
+		"an upper-case name":  {ir.DeployableImage{Packages: []string{"Chromium"}}, `package "Chromium" is no Debian package name`},
+		"one letter":          {ir.DeployableImage{Packages: []string{"x"}}, `package "x" is no Debian package name`},
+		"an option":           {ir.DeployableImage{Packages: []string{"-y"}}, `package "-y" is no Debian package name`},
+		"a package twice":     {ir.DeployableImage{Packages: []string{"tini", "tini"}}, "package tini is named twice"},
+		"an absolute path":    {ir.DeployableImage{Extend: "/Dockerfile"}, `extend is "/Dockerfile"`},
+		"a path that climbs":  {ir.DeployableImage{Extend: "docker/../../Dockerfile"}, `extend is "docker/../../Dockerfile"`},
+		"a path not cleaned":  {ir.DeployableImage{Extend: "./docker/Dockerfile"}, `extend is "./docker/Dockerfile"`},
+		"a Windows separator": {ir.DeployableImage{Extend: `docker\Dockerfile`}, "extend is"},
+	} {
+		if err := CheckDeployableImage(&c.image); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: CheckDeployableImage = %v, want one saying %q", name, err, c.want)
+		}
+	}
+	for _, image := range []ir.DeployableImage{
+		{Packages: []string{"libstdc++6", "fonts-liberation", "python3.12", "g++"}},
+		{Extend: "Dockerfile.extend"},
+		{Packages: []string{"tini"}, Extend: "docker/shop-api/Dockerfile"},
+	} {
+		if err := CheckDeployableImage(&image); err != nil {
+			t.Errorf("CheckDeployableImage(%+v) = %v", image, err)
+		}
+	}
+}
+
 func TestStackDecoratorsRefuseWhatTheyCannotDeclare(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

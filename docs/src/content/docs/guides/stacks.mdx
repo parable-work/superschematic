@@ -40,7 +40,8 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and an engine in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | |
+| [packages and a Dockerfile of your own in a deployable's image](#add-to-an-image): `images` in `@stack`, the three generated Dockerfiles, the image's identity, `stack dev`'s notice and the refusal on a platform that builds no image | a build of the extended image by `docker build` alone: the deploy runs the second build |
 | [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
@@ -411,7 +412,7 @@ export abstract class Production {}
 export abstract class Preview extends Staging {}
 ```
 
-- **`@stack({ deploy, expose, origins })`** declares the stack, once per
+- **`@stack({ deploy, expose, origins, images })`** declares the stack, once per
   schema. `deploy` names the entry points, API and DB handles; every
   service they reach through `authDb`, DB dependencies and `calls` joins
   the stack, so `shop-db` needs no mention. `expose` names what is
@@ -420,6 +421,8 @@ export abstract class Preview extends Staging {}
   "Backoffice" }` ([Apps](#apps)). Everything else is internal.
   `origins` put a site and the APIs it calls on one origin, `{ site:
   ShopWeb, apis: [ShopApi] }` ([Static sites](#static-sites)).
+  `images` list what the stack adds to a deployable's image, `{ of:
+  ShopApi, packages: ["chromium"] }` ([Add to an image](#add-to-an-image)).
 - **`@server({ serves })`** declares one server for the listed APIs in
   place of their default servers. Here `Orders` serves `shop-orders`, and
   takes its edges from it: `shop-db` through `authDb`, `shop-api` through
@@ -1643,6 +1646,88 @@ from a checkout, which ships no archives; the build says why. Outside an
 image, `stack dev` and `superschematic env` fetch the same archives for
 your machine ([Run it locally](#run-it-locally)).
 
+## Add to an image
+
+A generated Dockerfile is written whole on every build and never edited.
+A workload that needs a program beside its runtime, a headless browser, a
+PDF tool or fonts, asks for it in the stack (D144). `@stack` lists, per
+deployable that runs code, what the stack adds to its image:
+
+```ts
+@stack({
+  deploy: [ShopApi, ShopOrders],
+  expose: [ShopApi],
+  images: [
+    { of: ShopApi, packages: ["chromium", "fonts-liberation"] },
+    { of: ShopOrders, worker: "PrintInvoices", packages: ["poppler-utils"], extend: "docker/invoices/Dockerfile" }
+  ]
+})
+export abstract class Shop {}
+```
+
+`of` names the deployable as a settings element does: an API's handle for
+its server, an `@server` class, or a `job`, `worker`, `deriver` or `app`
+beside an API's handle, or `runner: true` beside a DB's. Each deployable
+has an image of its own, so a server and its API's worker are named
+apart, each once. The stack names an image's additions, not an
+environment: one image serves every environment, so no environment's
+settings change them.
+
+| Key | Holds |
+| --- | --- |
+| `packages` | Debian package names, with no version. The image's final stage installs them with `apt-get install --no-install-recommends`, sorted, and removes the package lists |
+| `extend` | the path of a Dockerfile the project owns, relative to the repository root, the parent of the schemas root. A deploy builds the generated image, then builds this file with the build argument `BASE` set to it, and deploys the result |
+
+Reach for `packages` first. A package's name is checked and sorted, a
+second image is never built, and the Dockerfile stays one file a build
+writes. `extend` is the escape hatch for what a package's name cannot
+say: a font file of your own, a binary from a release page, a
+configuration file:
+
+```dockerfile
+# docker/invoices/Dockerfile
+ARG BASE
+FROM ${BASE}
+COPY docker/invoices/acme-sans.ttf /usr/share/fonts/truetype/acme/acme-sans.ttf
+```
+
+Its build context is the generated image's, the repository root cut down
+by the generated ignore file, which takes in the extending Dockerfile and
+the directory that holds it, so it copies what lies beside it. One at the
+repository's root brings itself alone, since its directory is the whole
+repository. Keep the image's entrypoint and user as the generated image
+sets them, or the platform runs something else. The stack's build refuses
+an `extend` that names no file.
+
+What the final stage runs on:
+
+| Language | With no packages | With packages |
+| --- | --- | --- |
+| TypeScript | Bun's image, a Debian one | the same, with the packages installed before it leaves root |
+| Go, Rust | distroless `cc`, as a non-root user | `debian:trixie-slim`, the release the build stage links the binary against, as the same non-root user (`nonroot`, 65532), with the CA certificates, OpenSSL and time zones distroless held, since distroless has no `apt-get` |
+
+An image's identity is its build context's digest, and a deploy builds it
+again only when that changes. The generated Dockerfile holds the
+packages, and the context holds the extending Dockerfile, so a change to
+either builds the image again and nothing else's.
+
+`stack dev` runs each deployable as a process on your machine and
+installs nothing. As it starts, it prints once what the stack adds to
+each image, so you install it yourself where a deployable needs it there:
+
+```
+Stack shop-stack adds to these images, and stack dev runs each deployable as a process on this machine and installs nothing.
+Install what each needs here to run it as its image does (D144):
+  server   shop-api                 packages chromium, fonts-liberation
+  worker   shop-orders-print-invoices packages poppler-utils; extended with docker/invoices/Dockerfile
+```
+
+A platform that builds no image refuses the setting as unrealizable
+rather than ignore it: a Worker on the cloudflare target runs a bundle,
+with no system to install a package into, and an environment that builds
+as [one binary](#build-one-binary) has none either. A stack that deploys
+one deployable to both gcp and cloudflare leaves it out of `images`.
+
 ## Deploy to Google Cloud
 
 The gcp target is `extensions/gcp`, linked in the installed binary. Its
@@ -1857,7 +1942,10 @@ such as a superscalar checkout a CI runner never made, or that holds one
 under a symbolic link, is refused before anything is uploaded. `--image
 <server>=...` takes a server's image by digest instead of building it,
 and `--no-build` builds nothing. A deploy keeps the image the manifest
-records for a server whose context did not change. A parameterized
+records for a server whose context did not change. An image the stack
+[extends](#add-to-an-image) builds in one Cloud Build of two steps: the
+generated Dockerfile, tagged for the build's own daemon alone, then the
+extending one over it, which is the image the build pushes. A parameterized
 member takes its values with `--param pr=123`.
 
 A deploy runs your project's code: its sidecar documents through Bun,
