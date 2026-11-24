@@ -37,7 +37,10 @@ FROM rust:${RUST_VERSION}-trixie AS superscalar
 WORKDIR /superscalar
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.lock ./
 COPY third_party/superscalar/crates ./crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The cargo registry's cache mount is locked: cargo locks its package cache
+# in CARGO_HOME, outside the mount, so two stages that build at once would
+# unpack one crate into it together.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -p superscalar-ffi \
     && cp target/release/libsuperscalar_ffi.a /libsuperscalar_ffi.a
 
@@ -55,7 +58,7 @@ COPY runtime/migrate/rust runtime/migrate/rust
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.toml
 COPY third_party/superscalar/crates third_party/superscalar/crates
 COPY schemas/dist/engine/rust/queue-db schemas/dist/engine/rust/queue-db
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     { test -f schemas/dist/engine/rust/queue-db/Cargo.lock || cp runtime/engine/rust/Cargo.lock schemas/dist/engine/rust/queue-db/Cargo.lock; } \
     && cargo build --release --manifest-path schemas/dist/engine/rust/queue-db/ffi/Cargo.toml \
     && cp schemas/dist/engine/rust/queue-db/target/release/libschemas_queue_db_engine_ffi.a /libsuperschematic_engine.a

@@ -91,6 +91,9 @@ const DEFAULT_PORT = 8080;
 
 /** How long the requests in flight at SIGTERM or SIGINT have to finish. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/** How often the drain looks at the requests still in flight. */
+const DRAIN_POLL_MS = 20;
 {{- if .Databases }}
 
 /** How long each check /readyz makes may take. */
@@ -108,6 +111,8 @@ const ENGINE_TIMEOUT_SECONDS = 30;
  */
 interface BunServer {
   readonly port: number;
+  /** The requests the server has taken and not yet answered in full. */
+  readonly pendingRequests: number;
   stop(closeActiveConnections?: boolean): Promise<void>;
 }
 
@@ -446,18 +451,24 @@ function identityConfig(field: string): IdentityConfig | undefined {
 
 /**
  * Stops taking requests and gives those in flight SHUTDOWN_TIMEOUT_MS to
- * finish, then closes the connections still open.{{ if .SQLiteDatabases }} It closes the databases last.{{ else if .Engines }} It closes the engines
+ * finish, then closes the connections still open. It waits on the
+ * requests, not on Bun's stop(), which also waits for an idle keep-alive
+ * connection until Bun closes it at its idle timeout, as long as the
+ * grace: a client or a load balancer that keeps a connection open would
+ * make every stop late.{{ if .SQLiteDatabases }} It closes the databases last.{{ else if .Engines }} It closes the engines
  * after the requests in flight, then ends the pools.{{ else if .Databases }} It ends the pools last.{{ end }}
  * It rejects when requests were still in flight.
  */
 async function drain(server: BunServer{{ if .SQLiteDatabases }}, databases: readonly Dependency[]{{ else if .Databases }}, pools: readonly Pool[]{{ end }}{{ if .Engines }}, engines: readonly OpenedEngine[]{{ end }}): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<boolean>(resolve => {
-    timer = setTimeout(() => resolve(true), SHUTDOWN_TIMEOUT_MS);
-  });
-  const late = await Promise.race([server.stop().then(() => false), timedOut]);
-  clearTimeout(timer);
-  if (late) await server.stop(true);
+  const stopped = server.stop();
+  const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+  while (server.pendingRequests > 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
+  }
+  const pending = server.pendingRequests;
+  const late = pending > 0;
+  await server.stop(true);
+  await stopped;
 {{- if .Engines }}
   for (const engine of engines) engine.close();
 {{- end }}
@@ -466,7 +477,7 @@ async function drain(server: BunServer{{ if .SQLiteDatabases }}, databases: read
 {{- else if .Databases }}
   await Promise.allSettled(pools.map(pool => pool.end()));
 {{- end }}
-  if (late) throw new Error(`requests were still in flight ${SHUTDOWN_TIMEOUT_MS} ms after the signal`);
+  if (late) throw new Error(`${pending} request(s) were still in flight ${SHUTDOWN_TIMEOUT_MS} ms after the signal`);
 }
 
 main().catch((error: unknown) => {

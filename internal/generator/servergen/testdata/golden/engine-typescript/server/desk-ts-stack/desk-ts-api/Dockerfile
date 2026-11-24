@@ -49,7 +49,10 @@ FROM rust:${RUST_VERSION}-trixie AS addon
 WORKDIR /superscalar
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.lock ./
 COPY third_party/superscalar/crates ./crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The cargo registry's cache mount is locked: cargo locks its package cache
+# in CARGO_HOME, outside the mount, so two stages that build at once would
+# unpack one crate into it together.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -p superscalar-napi \
     && case "$(uname -m)" in \
       x86_64) triple=linux-x64-gnu ;; \
@@ -72,7 +75,7 @@ COPY runtime/http/rust runtime/http/rust
 COPY runtime/migrate/rust runtime/migrate/rust
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.toml
 COPY third_party/superscalar/crates third_party/superscalar/crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-engine-addon \
     && case "$(uname -m)" in \
       x86_64) triple=linux-x64-gnu ;; \

@@ -95,7 +95,10 @@ FROM rust:${RUST_VERSION}-trixie AS superscalar
 WORKDIR /superscalar
 COPY {{ .Docker.ScalarWorkspace }}/Cargo.toml {{ .Docker.ScalarWorkspace }}/Cargo.lock ./
 COPY {{ .Docker.ScalarWorkspace }}/crates ./crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The cargo registry's cache mount is locked: cargo locks its package cache
+# in CARGO_HOME, outside the mount, so two stages that build at once would
+# unpack one crate into it together.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -p superscalar-ffi \
     && cp target/release/libsuperscalar_ffi.a /libsuperscalar_ffi.a
 {{- if .Docker.VersionGraphGo }}
@@ -104,7 +107,7 @@ FROM rust:${RUST_VERSION}-trixie AS versiongraph
 WORKDIR /versiongraph
 COPY {{ .Docker.VersionGraphCrate }}/Cargo.toml {{ .Docker.VersionGraphCrate }}/Cargo.lock ./
 COPY {{ .Docker.VersionGraphCrate }}/src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release \
     && cp target/release/libsuperschematic_versiongraph.a /libsuperschematic_versiongraph.a
 {{- end }}
@@ -121,12 +124,12 @@ COPY {{ .Docker.Engine.Project }} {{ .Docker.Engine.Project }}
 {{- range .Docker.Engine.ProjectCrates }}
 COPY {{ . }} {{ . }}
 {{- end }}
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     { test -f {{ .Docker.Engine.Project }}/Cargo.lock || cp {{ .Docker.Engine.Workspace }}/Cargo.lock {{ .Docker.Engine.Project }}/Cargo.lock; } \
     && cargo build --release --manifest-path {{ .Docker.Engine.Project }}/ffi/Cargo.toml \
     && cp {{ .Docker.Engine.Project }}/target/release/{{ .Docker.Engine.ProjectArchive }} /libsuperschematic_engine.a
 {{- else }}
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release --manifest-path {{ .Docker.Engine.Workspace }}/Cargo.toml -p superschematic-engine-ffi \
     && cp {{ .Docker.Engine.Workspace }}/target/release/libsuperschematic_engine_ffi.a /libsuperschematic_engine.a
 {{- end }}
@@ -139,7 +142,7 @@ COPY {{ .Docker.Rules.Workspace }} {{ .Docker.Rules.Workspace }}
 {{- range .Docker.Rules.Crates }}
 COPY {{ . }} {{ . }}
 {{- end }}
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release --manifest-path {{ .Docker.Rules.Manifest }} \
     && cp {{ .Docker.Rules.Archive }} /libsuperschematic_rules.a
 {{- end }}
