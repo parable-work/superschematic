@@ -36,7 +36,10 @@ FROM rust:${RUST_VERSION}-trixie AS build
 WORKDIR /src
 COPY . .
 WORKDIR /src/schemas/dist/server/rs-merged-stack/Warehouse
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The cargo registry's cache mount is locked: cargo locks its package cache
+# in CARGO_HOME, outside the mount, so two stages that build at once would
+# unpack one crate into it together.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/target \
     if [ ! -f /src/schemas/dist/Cargo.lock ]; then \
       echo "schemas/dist/Cargo.lock is not in the context: build every service (superschematic build-all), which writes it, and commit it" >&2; exit 1; fi \
