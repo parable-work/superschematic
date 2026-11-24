@@ -78,7 +78,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
-| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, until stopped | its API's needs; its API's engine database (D74, section 8.8) |
+| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, or of its API's tables, through their repositories (D146, a TypeScript API's), until stopped | its API's needs; its API's database (D74, section 8.8) |
 | app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
@@ -3653,11 +3653,12 @@ Not built:
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
 
-#### Derivers (D74)
+#### Derivers (D74, D146)
 
-A deriver fills the Derived fields (D73) of the engine types of an API's
-engine database. It is declared on an empty class of the API, like a
-worker, and has no queue: the stale fields are its queue.
+A deriver fills the Derived fields (D73) of the types of an API's
+database: its engine types, or its tables that implement Derived (D103,
+D146). It is declared on an empty class of the API, like a worker, and
+has no queue: the stale fields are its queue.
 
 ```ts
 import { deriver } from "@superschematic/api";
@@ -3667,11 +3668,14 @@ import { deriver } from "@superschematic/api";
 export class TriageTickets {}
 ```
 
-- **What it derives.** `schemas` names engine types of the API's engine
-  database that compose Derived: every such type when it is absent. An
-  API imports no engine type, so it names them. The build refuses an
-  API with no engine database, a named type that does not compose
-  Derived, and a deriver that derives nothing.
+- **What it derives.** `schemas` names types of the API's database that
+  compose Derived, engine types or tables: every such type when it is
+  absent. An API imports no engine type, so it names them. A deriver
+  fills one kind, engine types through the engine or tables through
+  their repositories. The build refuses an API whose database has no type
+  that composes Derived, a named type that does not compose it, a
+  deriver whose schemas are of both kinds, and a deriver that derives
+  nothing.
 - **The project's code.** The API generator writes a `Derivers` type with
   one method per derived field of each schema, typed by the field: the
   item's `inputs` are the field's `from` fields with their own types,
@@ -3691,10 +3695,22 @@ export class TriageTickets {}
   the method of each, settles the answers in batches, and waits for a
   commit when nothing is stale. A method that throws or returns an
   error settles as a failure, which Derived counts as an attempt.
+- **Over tables** (D146). A TypeScript deriver of tables opens no
+  engine. Its entrypoint opens the database's repositories with
+  `withBehaviorCaller`, as the deployable's name holding each Derived
+  config's `permission`, and runs the HTTP runtime's `runDeriver`
+  (`@superschematic/http-runtime/deriver`) over each table's
+  `derived.staleDerivations` and `derived.settleDerivations`: the same
+  loop, which pulls again after five seconds when nothing is stale, a
+  table having no commit to wake it, and waits out a pull or a settle
+  that fails, a second, doubling to thirty. The repositories run on
+  Postgres, so the database lists `postgres` first. Rust and Go follow.
 - **Its principal.** The deployable's name as the subject, holding each
   derived type's name and each Derived config's `permission`. The
   engine's policy must admit it: with `{ rules }`, the build refuses a
-  stack whose rules name no `subject` of the deriver that allows.
+  stack whose rules name no `subject` of the deriver that allows. A
+  deriver of tables meets no policy: the core asks the config's
+  permission of its pulls and its settles.
 - **Settings.** `{ of: Api, deriver: "TriageTickets", enabled?,
   instances?, concurrency? }`: `instances` is 0 or 1, and `concurrency`
   how many answers run at a time.

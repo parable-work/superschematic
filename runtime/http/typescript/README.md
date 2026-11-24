@@ -237,6 +237,11 @@ Its entry points:
   only entry that imports `@redis/client`.
 - `@superschematic/http-runtime/worker`, the claim loop of a stack's
   worker (D53, below). It imports nothing.
+- `@superschematic/http-runtime/deriver`, the loop of a stack's deriver
+  over tables that implement Derived (D146): `runDeriver` pulls each
+  table's stale fields through its repository's `staleDerivations`, hands
+  each to the project's answer, and settles the answers with
+  `settleDerivations`. It imports nothing.
 - `@superschematic/http-runtime/telemetry`, OpenTelemetry trace export
   for a stack's server, job and worker on Bun (D67, below). It is the
   only entry that imports the `@opentelemetry/*` packages, so the other

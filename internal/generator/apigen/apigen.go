@@ -355,6 +355,11 @@ type APIOutput struct {
 	// the engine's permission policy asks of each engine type.
 	Engine *EngineInfo
 
+	// TableDerivers are the API's derivers that fill tables that implement
+	// Derived (D146), sorted by name; those that fill engine types are
+	// Engine's.
+	TableDerivers []DeriverInfo
+
 	// Auth is the provider's analysis of the upstream schema: it gates the
 	// ORM-backed auth store adapters in middleware.go on what the upstream
 	// schema actually declares.
@@ -854,6 +859,11 @@ type Options struct {
 	// database's IR and config.
 	Engine *EngineInfo
 
+	// TableDerivers are the API's derivers that fill tables that implement
+	// Derived (D146), which the generator package reads from the
+	// database's IR.
+	TableDerivers []DeriverInfo
+
 	// WritePermissions are the permissions the core checks on the writes
 	// of an operation that is not a behavior's (D104): the permission of
 	// each Constants and StateRules use of a table the operation updates a
@@ -912,6 +922,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
 		UUIDTypeExpr:        resolveUUIDTypeExpr(schema),
 		Engine:              opts.Engine,
+		TableDerivers:       opts.TableDerivers,
 	}
 
 	if opts.UpstreamSchema != "" && opts.UpstreamIR == nil {

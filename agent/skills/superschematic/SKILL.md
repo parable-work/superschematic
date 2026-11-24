@@ -204,8 +204,8 @@ path for when the store is unavailable.
   `serialize` for one waiting or one running message per key;
   `@enqueueOnChange` on a table to enqueue whatever writes its rows, with
   `backfill: true` (or `stack queue backfill`) for the rows already there; and
-  `@deriver` on an API class to fill an engine type's Derived fields from
-  a model.
+  `@deriver` on an API class to fill a table's or an engine type's Derived
+  fields from a model.
 - **What every writer must keep is declared.** A status that moves only
   along listed moves is an enum field with `@stateMachine` on its class,
   and a counter that writers compare and set is `@fenced` on its table:
@@ -823,8 +823,10 @@ Most are load errors; knowing them saves a build round-trip:
   `derived.settleDerivations`, presenting each item's `sourceHash`; both
   take no key. A caller's write of a derived field overrides it until
   `derived.rederive`. Never derive from a `Secret<T>` field. A `@deriver`
-  runs over engine types alone so far: on a table, run the loop in a
-  worker of your own through the repository.
+  of a TypeScript API runs that loop as a deployable of the stack (D146):
+  name the tables in `schemas` and implement one method per derived field
+  in `createDerivers`. In another language, run the loop in a worker of
+  your own through the repository.
 - When each field must say who set it, or a model's answers must wait
   for a person, implement Provenance beside it: `implements
   Provenance<Ticket, { review: { sources: ["Derived"]; below: 0.8;

@@ -728,11 +728,10 @@ Postgres, which D83's DDL has no form for (and which says capacity 1
 alone); two claims raced through a Go or a Rust API server; and the
 Reservation bundle (step 5).
 
-What Derived and Provenance left: a deriver deployable over a table that
-implements Derived (`internal/stack` takes a `@deriver` over such a table,
-the TypeScript and Rust deriver entrypoints open the database's
-repository as the deriver, a `DerivationSource` maps to the table's
-operations, and its answers are typed from the table's own fields); an
+What Derived and Provenance left: a Rust deriver deployable over a table
+that implements Derived (D146 built TypeScript's: `internal/stack` takes a
+`@deriver` over such a table, and the deriver's entrypoint opens the
+database's repositories as the deriver); an
 index for a deriver's pull, which scans rows a page at a time until a
 declaration may list a column (step 7); raw writes, which neither hears;
 the computed `fields` and `stale` served by the repositories and the API;
@@ -1629,20 +1628,22 @@ clients and the stacks and queues guides.
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 
-A table that composes Derived has `staleDerivations` and
-`settleDerivations` on its repository. A stack's deriver, the worker that
-calls a model and settles what it answers, reads engine types alone, so a
-compiled project writes that loop itself.
+Built: `@deriver({ schemas })` in a TypeScript API over a database of
+tables that implement Derived. The resolver admits it
+(`internal/stack/derivers.go`), the API's `Derivers` type is the one an
+engine database's deriver has, a method per derived field typed by the
+field, and the generated entrypoint opens the database's repositories as
+the deriver and runs the HTTP runtime's `runDeriver`
+(`@superschematic/http-runtime/deriver`) over each table's
+`staleDerivations` and `settleDerivations`
+(`docs/src/content/docs/guides/stacks.mdx`, Derivers). A deriver fills
+tables or engine types, not both: one whose schemas are of both kinds is
+refused, and names its schemas over a database that has both. The commit
+that built it names D146.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@deriver({ schemas })` in an API over a database of tables names tables that compose Derived, as it names engine types over an engine database. The resolver admits it, and the generated deriver runs the same loop over the tables' repositories: read a page of stale fields, hand each to the implementation's method for that field, settle the answers by hash. | A loop per application |
-| The implementation is the `Derivers` type the API already generates: a method per derived field, typed by the field. Nothing in it says which store it runs over. | A second shape for tables |
-| TypeScript first, since that is where a table's Derived operations are served. The entry keeps Rust and Go, and D74 keeps the model label and the cost cap. | |
-
-Build: `internal/stack/derivers.go`, the deriver entrypoint in
-`servergen`, the TypeScript runtime's loop, a fixture and the stacks
-guide.
+Left: a Rust and a Go deriver of tables, which the build refuses; a wake
+on a write, where the loop pulls again every five seconds; and D74's model
+label and cost cap, which stay D74's.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 

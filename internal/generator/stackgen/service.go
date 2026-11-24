@@ -112,6 +112,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 				svc.Derived = append(svc.Derived, td.Name)
 			}
 		}
+		svc.DerivedTables = codegen.DerivedTables(schema)
 	case ir.SchemaKindSite:
 		// Its calls are the APIs its code calls from the browser; where its
 		// code is, the stack's build reads with SiteOf (D55).

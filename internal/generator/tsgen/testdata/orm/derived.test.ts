@@ -11,8 +11,11 @@
 // key, each with the output its field's schema gives; its settle writes
 // the values as own fields through the core, Provenance records each with
 // the confidence the model gave and proposes the unsure one, which holds
-// the ticket's move to assigned until a reviewer accepts it; and a value
-// the field's enum refuses counts an attempt and writes no own field.
+// the ticket's move to assigned until a reviewer accepts it; a value the
+// field's enum refuses counts an attempt and writes no own field; and the
+// loop a stack's deriver runs over a table (runDeriver, D146) pulls a
+// ticket's stale fields, hands each to a model that is not one, and settles
+// its answers, on Postgres over the repository's own derived operations.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -20,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initSync } from '@superschematic/rules';
 import { execute, readRow, runCreate, sqliteRulesStore, type CoreCaller, type RulesHost } from '@superschematic/http-runtime/d1';
+import { runDeriver, type DerivationAnswer, type DerivationItem, type DerivedTable } from '@superschematic/http-runtime/deriver';
 import { openSqlite, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import { createOrm, fixtureDerivedProvenanceDbRules as layout } from './orm';
 import { alice, database, dsn } from './harness';
@@ -34,6 +38,8 @@ interface Tables {
   ticket(subject: string, body: string): Promise<string>;
   /** Runs one of Derived's operations of the table as a whole as the deriver. */
   pull(operation: string, params: Record<string, unknown>): Promise<any>;
+  /** Ticket's derived operations as a deriver's loop takes them, as the deriver. */
+  readonly derived: DerivedTable;
   /** Runs an operation of a use of a ticket, as alice or as the reviewer. */
   invoke(key: string, member: 'provenance' | 'status', operation: string, params: Record<string, unknown>, asReviewer?: boolean): Promise<any>;
   /** The ticket's own and owned fields as the store holds them. */
@@ -52,13 +58,15 @@ async function sqliteTables(): Promise<Tables> {
   const host: RulesHost = { core: initSync(), layout, store: sqliteRulesStore(db) };
   const caller: CoreCaller = { subject: alice, permissions: [] };
   const useIds = { provenance: 'Provenance', status: 'status' };
+  const pull = async (operation: string, params: Record<string, unknown>): Promise<any> => {
+    const action = { kind: 'tableOperation' as const, useId: 'Derived', operation, params };
+    return (await execute(host, 'Ticket', { caller: deriver, now: Date.now(), action })).result;
+  };
   return {
     dialect: 'bun:sqlite',
     ticket: (subject, body) => runCreate(host, 'Ticket', { subject, body }, caller),
-    async pull(operation, params) {
-      const action = { kind: 'tableOperation' as const, useId: 'Derived', operation, params };
-      return (await execute(host, 'Ticket', { caller: deriver, now: Date.now(), action })).result;
-    },
+    pull,
+    derived: { staleDerivations: params => pull('staleDerivations', params), settleDerivations: params => pull('settleDerivations', params) },
     async invoke(key, member, operation, params, asReviewer) {
       const action = { kind: 'operation' as const, key, useId: useIds[member], operation, params };
       return (await execute(host, 'Ticket', { caller: asReviewer ? reviewer : caller, now: Date.now(), action })).result;
@@ -86,6 +94,7 @@ async function postgresTables(): Promise<Tables> {
       return (await orm.ticket.createOne({ subject, body } as never)).id;
     },
     pull: (operation, params) => (deriving.ticket.derived as any)[operation](params),
+    derived: deriving.ticket.derived,
     invoke: (key, member, operation, params, asReviewer) => ((asReviewer ? reviewing : orm).ticket[member] as any)[operation](key, params),
     async row(key) {
       const row = (await orm.ticket.findOne({ id: { eq: key } } as never)) as any;
@@ -149,6 +158,48 @@ for (const dialect of dialects) {
       expect((await t.row(key)).category).toBeNull();
       const next = await t.pull('staleDerivations', { field: 'category' });
       expect(next.items.find((item: any) => item.id === key).attempt).toBe(2);
+    });
+
+    test(`a deriver's loop hands each stale field to a model and settles its answers, on ${dialect.name}`, async () => {
+      const key = await t.ticket('Refund please', 'Charged twice.');
+      const stop = new AbortController();
+      const asked: string[] = [];
+      // A model that is not one: it reads the inputs it is handed and
+      // answers within the output's enum, sure of itself.
+      const model = (table: string, item: DerivationItem): DerivationAnswer => {
+        if (item.id === key) asked.push(`${table}.${item.field} attempt ${item.attempt} with ${item.model}: ${item.instruction}`);
+        if (item.field === 'category') {
+          return { value: String(item.inputs.body).includes('Charged') ? 'billing' : 'other', confidence: 0.9 };
+        }
+        return { value: 'high', confidence: 0.9, usage: { inputTokens: 20, outputTokens: 1 } };
+      };
+      const settled: number[] = [];
+      const running = runDeriver({
+        tables: { Ticket: t.derived },
+        answer: model,
+        batchSize: 2,
+        concurrency: 2,
+        idleMs: 20,
+        signal: stop.signal,
+        onSettled: (_table, result) => settled.push(result.settled),
+        onRetry: error => {
+          throw error;
+        },
+      });
+      for (let i = 0; i < 500 && (await t.row(key)).priority === null; i++) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      stop.abort();
+      await running;
+      // Each answer is at 0.9, over the review's 0.8, so neither waits for a reviewer.
+      expect(await t.row(key)).toEqual({ category: 'billing', priority: 'high', inReview: false });
+      expect(asked.sort()).toEqual([
+        'Ticket.category attempt 1 with standard: Classify the request.',
+        'Ticket.priority attempt 1 with standard: How urgent is this? low, normal or high.',
+      ]);
+      expect(settled.reduce((sum, n) => sum + n, 0)).toBeGreaterThanOrEqual(2);
+      const after = await t.pull('staleDerivations', {});
+      expect(after.items.filter((item: any) => item.id === key)).toEqual([]);
     });
   });
 }

@@ -345,6 +345,11 @@ var ormStatements = []string{
 // column adds (D85), which the runtime's TableStatements declares optional.
 var encryptedStatements = []string{"stale", "reseal"}
 
+// RepositoryMember is the member of a database's repositories that holds
+// the repository of the table type typeName: the type's name with its
+// first letter in lower case (orm.ticket for Ticket).
+func RepositoryMember(typeName string) string { return lowerFirst(typeName) }
+
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
 var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries"}
@@ -421,7 +426,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			continue
 		}
 		info := types[t.Type]
-		member := lowerFirst(t.Type)
+		member := RepositoryMember(t.Type)
 		if slices.Contains(ormMembers, member) {
 			return nil, fmt.Errorf("tsgen: the repository of table %s would be the ORM's member %s, which the ORM holds itself; rename the table", t.Type, member)
 		}

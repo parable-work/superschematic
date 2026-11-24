@@ -6,14 +6,17 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 )
 
-// The derivers of a TypeScript API (D74): deps.ts declares Derivers, a
-// member per @deriver class, each an object of one method per derived
+// The derivers of a TypeScript API (D74, D146): deps.ts declares Derivers,
+// a member per @deriver class, each an object of one method per derived
 // field of its schemas, typed by the field through the database's
 // TypeScript types, and the type of the implementation's createDerivers.
-// A deriver's entrypoint hands each stale field to its method.
+// A deriver's entrypoint hands each stale field to its method. Nothing in
+// Derivers says which store a deriver runs over: one that fills engine
+// types and one that fills tables have the same shape.
 
 // DeriversFunc is the function an implementation of an API with derivers
 // exports, of the generated DeriversConstructor's type, which a deriver's
@@ -39,8 +42,15 @@ type DeriverInfo struct {
 	Concurrency int
 	BatchSize   int
 
-	// Schemas are the engine types it fills, in order.
+	// Schemas are the engine types or the tables it fills, in order.
 	Schemas []string
+
+	// Tables reports that its schemas are tables that implement Derived
+	// (D146): its entrypoint pulls and settles through each one's
+	// repository, Repositories[i] the member of the database's
+	// repositories that is Schemas[i]'s.
+	Tables       bool
+	Repositories []string
 
 	// Methods are its methods, one per derived field of its schemas, in
 	// the schemas' order and then by field.
@@ -48,7 +58,7 @@ type DeriverInfo struct {
 }
 
 // DeriverMethod is a method of a deriver: the derived field Field of the
-// engine type Schema, the method that answers it, the schema in camel
+// engine type or the table Schema, the method that answers it, the schema in camel
 // case and the field in Pascal case (ticketCategory), and the fields it is
 // derived from, the instruction and the model label of its config.
 type DeriverMethod struct {
@@ -93,15 +103,20 @@ func (m DeriverMethod) FromList() string {
 	return strings.Join(m.From[:len(m.From)-1], ", ") + " and " + m.From[len(m.From)-1]
 }
 
-// SetDerivers sets the API's derivers from its engine database, refusing
-// two methods of one deriver that one name would take.
-func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo) error {
+// SetDerivers sets the API's derivers, those of its engine database and
+// those that fill tables (D146), sorted by name, refusing two methods of
+// one deriver that one name would take.
+func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, tables []apigen.DeriverInfo) error {
 	o.Derivers = nil
-	if engine == nil {
-		return nil
+	var derivers []apigen.DeriverInfo
+	if engine != nil {
+		derivers = append(derivers, engine.Derivers...)
 	}
-	for _, d := range engine.Derivers {
+	derivers = append(derivers, tables...)
+	slices.SortStableFunc(derivers, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
+	for _, d := range derivers {
 		info := DeriverInfo{
+			Tables:      d.Tables,
 			Name:        d.Name,
 			Member:      tsutil.ToCamelCase(d.Name),
 			Interface:   tsutil.ToClassName(d.Name) + "Deriver",
@@ -113,6 +128,9 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo) error {
 		methods := map[string]string{}
 		for _, schema := range d.Schemas {
 			info.Schemas = append(info.Schemas, schema.Name)
+			if d.Tables {
+				info.Repositories = append(info.Repositories, tsgen.RepositoryMember(schema.Name))
+			}
 			for _, f := range schema.Fields {
 				m := DeriverMethod{
 					Schema:      schema.Name,
@@ -140,6 +158,30 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo) error {
 // deps.ts declares Derivers and DeriversConstructor.
 func (o *APIOutput) HasDerivers() bool { return len(o.Derivers) > 0 }
 
+// HasTableDerivers reports whether a deriver of the API fills tables
+// (D146), whose answers the behaviors' core judges.
+func (o *APIOutput) HasTableDerivers() bool {
+	return slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables })
+}
+
+// HasEngineDerivers reports whether a deriver of the API fills engine
+// types (D74).
+func (o *APIOutput) HasEngineDerivers() bool {
+	return slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return !d.Tables })
+}
+
+// DeriverJudge names what judges a deriver's answers in a comment: the
+// engine, the behaviors' core, or both.
+func (o *APIOutput) DeriverJudge() string {
+	switch {
+	case o.HasTableDerivers() && o.HasEngineDerivers():
+		return "the engine or the behaviors' core"
+	case o.HasTableDerivers():
+		return "the behaviors' core"
+	}
+	return "the engine"
+}
+
 // Deriver returns the deriver named name, or nil.
 func (o *APIOutput) Deriver(name string) *DeriverInfo {
 	for i := range o.Derivers {
@@ -152,7 +194,7 @@ func (o *APIOutput) Deriver(name string) *DeriverInfo {
 
 // DatabaseTypeImports are the types deps.ts imports from the database's
 // TypeScript types: the queues the API's workers handle and the engine
-// types its derivers fill, sorted and each once.
+// types and tables its derivers fill, sorted and each once.
 func (o *APIOutput) DatabaseTypeImports() []string {
 	out := o.WorkerQueues()
 	for _, d := range o.Derivers {
