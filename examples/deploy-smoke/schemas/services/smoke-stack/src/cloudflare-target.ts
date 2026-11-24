@@ -12,7 +12,7 @@ declare module "@superschematic/stack" {
       database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" } | { hyperdrive?: string; caching?: boolean };
       job: { logs?: boolean; cpuMs?: number; telemetry?: boolean };
       site: {};
-      bucket: { jurisdiction?: "eu" | "fedramp"; locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
+      bucket: { jurisdiction?: "eu" | "fedramp"; locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string }[] };
       worker: { logs?: boolean; cpuMs?: number; telemetry?: boolean; drainSeconds?: number };
     };
   }

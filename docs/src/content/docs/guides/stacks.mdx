@@ -486,6 +486,13 @@ declare module "@superschematic/stack" {
       bucket: {
         versioning?: boolean;
         deleteAfterDays?: number;
+        cors?: {
+          origins: string[];
+          methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[];
+          headers?: string[];
+          exposeHeaders?: string[];
+          maxAge?: string;
+        }[];
       };
       memoryStore: {
         nodeType?: "SHARED_CORE_NANO" | "STANDARD_SMALL" | "HIGHCPU_MEDIUM" | "HIGHMEM_MEDIUM" | "HIGHMEM_XLARGE" | "STANDARD_LARGE" | "HIGHMEM_2XLARGE" | "CUSTOM_PICO" | "CUSTOM_MICRO" | "CUSTOM_MINI";
@@ -546,7 +553,7 @@ TypeScript twin.
 | Key | What it sets |
 | --- | --- |
 | `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, memoryStoreImage, memoryStorePort }` |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, storageCorsHeaders, memoryStoreImage, memoryStorePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
 | `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
@@ -1716,6 +1723,7 @@ Settings and their defaults:
 | `gcp.cloudsql` | `diskSize` | Cloud SQL's |
 | `gcp.storage` | `versioning` | false |
 | `gcp.storage` | `deleteAfterDays` | none: objects stay until deleted |
+| `gcp.storage` | `cors` | none: the bucket answers no browser's preflight ([CORS rules](/superschematic/guides/buckets/#let-a-page-reach-the-bucket)) |
 | `gcp.memorystore` | `nodeType` | `SHARED_CORE_NANO` |
 | `gcp.memorystore` | `replicas` | `1`, of 0 to 5 |
 
@@ -2136,6 +2144,7 @@ Its settings:
 | `storageClass` | `Standard` | `InfrequentAccess` for new objects |
 | `deleteAfterDays` | none | a lifecycle rule deletes each object that many days after it was written |
 | `jurisdiction` | none | `eu` or `fedramp`: where R2 keeps the bucket's data; refused beside `locationHint`. Changing it replaces the bucket, which `stack plan` shows, and a bucket that holds objects stops the deploy, since R2 deletes only an empty one |
+| `cors` | none | the [CORS rules](/superschematic/guides/buckets/#let-a-page-reach-the-bucket) the bucket answers a browser with, as on gcp: an `r2BucketCors` beside the bucket |
 
 There is no `versioning`, which R2 lacks.
 

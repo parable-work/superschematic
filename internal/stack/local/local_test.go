@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -634,6 +635,34 @@ func wantFailure(t *testing.T, errs *stack.Errors, code stack.Code, text string)
 		}
 	}
 	t.Errorf("no %s failure containing %q in:\n%v", code, text, errs)
+}
+
+// TestStorageCORSHeaders (D148): the storage emulator answers a browser's
+// preflight from any origin with the request headers it allows itself, so
+// an environment that names none passes it no flag; the headers its
+// storageCorsHeaders value names reach it as -cors-headers, sorted and each
+// once, and a value that is no header name is refused.
+func TestStorageCORSHeaders(t *testing.T) {
+	reg := assemble(t)
+	args := func(env *ir.ResolvedEnvironment) string {
+		t.Helper()
+		var out []string
+		for _, arg := range env.Resources.Resource(local.StorageContainer).Properties["args"].([]any) {
+			out = append(out, fmt.Sprint(arg))
+		}
+		return strings.Join(out, " ")
+	}
+	if got := args(resolve(t, reg, shop(), stacktest.AcmeShop(), "Dev")); strings.Contains(got, "-cors-headers") {
+		t.Errorf("an environment with no storageCorsHeaders runs the emulator with %s", got)
+	}
+	s := shop()
+	s.Environments[0].Values = map[string]any{"storageCorsHeaders": []any{"x-upload-id", "x-goog-meta-owner", "x-upload-id"}}
+	if got, want := args(resolve(t, reg, s, stacktest.AcmeShop(), "Dev")), " -cors-headers x-goog-meta-owner,x-upload-id"; !strings.HasSuffix(got, want) {
+		t.Errorf("the emulator runs with %s, want it to end %s", got, want)
+	}
+	s = shop()
+	s.Environments[0].Values = map[string]any{"storageCorsHeaders": []any{"content type"}}
+	wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Dev"), stack.CodeInvalidValues, "storageCorsHeaders")
 }
 
 // TestRefusals: what a local environment cannot hold fails resolution,

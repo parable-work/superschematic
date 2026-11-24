@@ -58,7 +58,10 @@ func callsStack() *ir.Stack {
 			{
 				Name: "Staging", Target: cloudflare.Target, Values: values,
 				Settings: []*ir.DeployableSettings{
-					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30), "locationHint": "weur"}},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30), "locationHint": "weur", "cors": []any{map[string]any{
+						"origins": []any{"https://staging.acme.dev"}, "methods": []any{"GET", "PUT"},
+						"headers": []any{"content-type"}, "exposeHeaders": []any{"etag"}, "maxAge": "1h",
+					}}}},
 				},
 			},
 			{

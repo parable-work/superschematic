@@ -29,7 +29,8 @@ export interface Targets {
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container, of its storage emulator
- * (D54) and of its memory stores' Valkey container (D75), a server's, an
+ * (D54), with the request headers its CORS answers allow beside its own
+ * (D148), and of its memory stores' Valkey container (D75), a server's, an
  * app's (D78) and a site's settings its port, and a database, a job, a
  * worker, a bucket, an engine's runner (D58), a deriver (D74) and a memory
  * store (D75) take no settings. A port left out is derived from the
@@ -41,6 +42,7 @@ export interface LocalTarget {
     postgresPort?: number;
     storageImage?: string;
     storagePort?: number;
+    storageCorsHeaders?: readonly string[];
     memoryStoreImage?: string;
     memoryStorePort?: number;
   };

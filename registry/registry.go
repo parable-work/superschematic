@@ -239,6 +239,11 @@ type (
 	// unrealizable rather than as a failed lowering (D64).
 	UnrealizableError = registry.UnrealizableError
 
+	// BucketCORSRule is one rule of a bucket's `cors` setting, which
+	// BucketCORS reads from the settings a bucket platform's schema held
+	// to BucketCORSSchema (D148).
+	BucketCORSRule = registry.BucketCORSRule
+
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
 	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack, with
 	// its CISites) and its CIEnvironments with the renderer's CIOptions, to
@@ -286,6 +291,12 @@ const (
 	APILanguageRust       = registry.APILanguageRust
 	APILanguageTypeScript = registry.APILanguageTypeScript
 	APIProtocolREST       = registry.APIProtocolREST
+
+	// BucketCORSSchema is the JSON Schema of a bucket's `cors` setting,
+	// which a bucket platform's settings schema holds under `cors`, and
+	// BucketCORSMaxAgeSeconds the longest a rule's maxAge may be (D148).
+	BucketCORSSchema        = registry.BucketCORSSchema
+	BucketCORSMaxAgeSeconds = registry.BucketCORSMaxAgeSeconds
 
 	// SQLDialectPostgres and SQLDialectSQLite are the SQL dialects a
 	// database platform declares.
@@ -344,6 +355,12 @@ var (
 // deployable it cannot realize, such as a name its provider refuses, whose
 // reason is the format applied to args (D64).
 func Unrealizable(format string, args ...any) error { return registry.Unrealizable(format, args...) }
+
+// BucketCORS reads the `cors` rules of a bucket's settings, and refuses a
+// rule that admits PUT from any origin (D148).
+func BucketCORS(bucket string, settings map[string]any) ([]BucketCORSRule, error) {
+	return registry.BucketCORS(bucket, settings)
+}
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:
 // invocationPolicy, auto or ask, auto by default.

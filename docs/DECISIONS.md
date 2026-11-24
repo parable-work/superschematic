@@ -414,7 +414,8 @@ release tag exists.
   (D75, L 10405); a deriver (D74); D91's origin: the browser's Host through
   a serverless NEG, `fullPathMatch` with `pathPrefixRewrite`, the route
   rules' error response serving the fallback and passing the API's 404,
-  and `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`.
+  and `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`; a bucket's CORS rules,
+  and a browser's preflight and upload from a page against them (D148).
 - **Cloudflare.** The storefront on Workers and a D1-backed TypeScript API,
   the target's own done line (D64, L 7086); `TestRealD1`, which the D1
   migration driver waits for (D27, L 3012); destroy order, the bucket
@@ -432,7 +433,9 @@ release tag exists.
   invocation, node-postgres on the runtime, and a destroy that leaves the
   config and origin (D92); argon2id's CPU at the default cost (D92);
   the engineer's token reading the Hyperdrive config and TLS from the
-  deploying machine (D96).
+  deploying machine (D96); an R2 bucket's CORS rules, the `r2BucketCors`
+  node a plan refreshes with the planner's token, and a browser's
+  preflight and upload from a page against them (D148).
 - **GitHub Actions.** A generated workflow (D47), one against an engine
   checkout (D58), and `release.yml` with the archive fetch from a
   published release (D47); the provider mapping of D69 and its CEL.
@@ -1662,16 +1665,3 @@ at one points at the other.
 Build: the behaviors' core and its declarations, `behaviorlayout`,
 `ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
 guide.
-
-## D148. A bucket's settings take CORS rules (D54 amended)
-
-A browser that uploads to a signed URL needs the bucket to answer its
-preflight. The buckets guide lists this as not built on either target.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A bucket's settings in an environment take `cors`, a list of `{ origins, methods, headers?, exposeHeaders?, maxAge? }`. gcp writes it as the bucket's `cors`, and cloudflare as the R2 bucket's CORS rules. An origin of `*` is refused beside a private bucket's signed `PUT`; the rule names its origins. | A wildcard by default |
-| `stack dev`'s fake-gcs-server allows the local sites' origins, as the servers' CORS does. | |
-
-Build: `extensions/gcp/storage.go`, the cloudflare target's bucket, their
-settings schemas, `stack dev` and the buckets guide.

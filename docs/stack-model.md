@@ -1736,7 +1736,8 @@ The target sets defaults that `settings` can override:
   (`cpuAlwaysAllocated`);
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
-  it was written (D54);
+  it was written (D54), and no CORS rules, unless `cors` names some
+  (D148);
 - a memory store on one `SHARED_CORE_NANO` node (`nodeType`) with one
   replica (`replicas`, 0 to 5) (D75);
 - logs to Cloud Logging, and no trace export unless the environment's
@@ -2078,7 +2079,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | Stack concept | local |
 | --- | --- |
 | database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another, or from `pgvector/pgvector:0.8.7-pg16` when a DB service of the stack has a vector column (D84); it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
-| bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
+| bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem, and answers a browser's preflight from any origin, allowing the request headers of the `storageCorsHeaders` value beside its own (D148). A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | memoryStore | one Valkey container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`, on `local.valkey`, from `valkey/valkey:8.0.2-alpine`, the engine version `gcp.memorystore` pins, unless the `memoryStoreImage` value names another. It runs `valkey-server --save "" --appendonly no`, so it keeps nothing, with no TLS and no password, publishes its port on 127.0.0.1 only, and is ready once `valkey-cli ping` answers inside it. Every memoryStore deployable of the environment lowers to the same node, since each store's names start with its own name (D75) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
@@ -3795,17 +3796,36 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   checks, an RSA key in Go and TypeScript and an HMAC key in Rust:
   fake-gcs-server takes a PUT at an object's path only when it carries a
   V4 signature's parameters, and checks no signature.
+- **CORS (D148).** A page's upload to a signed URL, or its `fetch` of
+  one, is a cross-origin request, which the bucket must answer. A
+  bucket's settings in an environment take `cors`, a list of
+  `{ origins, methods, headers?, exposeHeaders?, maxAge? }`, in one shape
+  on every platform that keeps a bucket: the core holds its JSON Schema
+  (`registry.BucketCORSSchema`), which each platform puts in its settings
+  schema, and reads the checked rules (`registry.BucketCORS`), which each
+  platform writes in its provider's shape. An origin is a scheme and a
+  host, or `*` alone; `maxAge` is a duration of whole seconds, a day at
+  most. A rule that admits `PUT` from `*` is refused: the bucket is
+  private and a page writes through a URL an API signed, so the rule
+  names the origins of the pages that upload.
 - **Local.** `stack dev` runs fake-gcs-server in a container beside
   Postgres, one per environment, with a bucket per Bucket service
   (section 8.3). The container keeps its objects between runs, and
-  `--remove-data` removes them with it.
+  `--remove-data` removes them with it. The emulator answers a preflight
+  for every bucket alike, from any origin, so a local site's page uploads
+  with no setting, and the local bucket platform takes none. The request
+  headers it allows beside its own are the environment's
+  `storageCorsHeaders` value, which reaches it as `-cors-headers`.
 - **gcp.** A bucket is a `gcp:storage/bucket:Bucket`, pinned at
   pulumi-gcp 9.37.1, on the `gcp.storage` platform, with uniform
   bucket-level access and public access prevention enforced. Its name is
   `<project>-<stack>-<bucket>` (`acme-staging-shop-shop-media`), since
   bucket names are global, at most 63 characters, and holds no `google`,
   which Cloud Storage refuses. Its settings are `versioning`, off unless
-  set, and `deleteAfterDays`, a lifecycle rule's age. The connectors from
+  set, `deleteAfterDays`, a lifecycle rule's age, and `cors`, which
+  becomes the bucket's `cors`: a rule's `headers` and `exposeHeaders`
+  are the one `responseHeaders` list Cloud Storage keeps, and its
+  `maxAge` is `maxAgeSeconds` (D148). The connectors from
   a Cloud Run service, job and worker pool, in Go, TypeScript or Rust,
   grant the workload's account
   `roles/storage.objectUser` on the bucket and
@@ -5684,7 +5704,7 @@ declare module "@superschematic/stack" {
       job: { cpuMs?: number; logs?: boolean; telemetry?: boolean };
       worker: { logs?: boolean; cpuMs?: number; telemetry?: boolean; drainSeconds?: number };
       site: {};
-      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp" };
+      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp"; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string }[] };
     };
   }
 }
@@ -5708,7 +5728,7 @@ app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 | queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
-| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
+| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written, and `cors` an `r2BucketCors` (`<bucket>.cors`) with a rule per element, `cors-1`, `cors-2` (D148). Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
 | bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<env>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_<jurisdiction>_<bucket>`, `default` for a bucket in no jurisdiction: the bucket's objects alone. The value is `{name, binding, r2: {account, jurisdiction?, accessKeyId: <token id>, token: <token value, secret>}}`. |
 | site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
@@ -6386,14 +6406,16 @@ is flagged secret, so it reaches the Worker as a `secret_text` binding.
 `buckets-never-public` refuses an `r2ManagedDomain` or an `r2CustomDomain`
 on a Bucket service's bucket, whether it names the bucket by the node's
 output or by its name. A browser's PUT to a signed URL needs the
-bucket's CORS; that gap is shared with gcp and lands for both later.
+bucket's CORS, which the bucket's `cors` setting gives it, as on gcp
+(D148, section 8.9).
 
 The `cloudflare.r2` platform (D64, amended):
 - **Settings** are `locationHint`, the region R2 places the bucket in
   when it creates it, `storageClass`, `Standard` or `InfrequentAccess`
-  for new objects, `deleteAfterDays`, as gcp's, and `jurisdiction`, `eu`
+  for new objects, `deleteAfterDays`, as gcp's, `cors`, as gcp's (D148),
+  and `jurisdiction`, `eu`
   or `fedramp`, where R2 keeps the bucket's data (D64, amended): the
-  bucket and its lifecycle name it, the edge's token names the bucket's
+  bucket, its lifecycle and its CORS rules name it, the edge's token names the bucket's
   objects under it, and the R2 credential names it (`<FIELD>_R2_JURISDICTION`),
   so the runtime signs URLs for the jurisdiction's S3 host,
   `<account>.<jurisdiction>.r2.cloudflarestorage.com`. A jurisdiction beside
@@ -6645,10 +6667,10 @@ records no `workersSubdomain` is refused until bootstrap records it.
 
 The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
-`r2BucketLifecycle` and `accountToken`, written by `go run ./internal/tools/providerschemas` in
+`r2BucketLifecycle`, `r2BucketCors` (D148) and `accountToken`, written by `go run ./internal/tools/providerschemas` in
 `extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph
 and the bucket edges' tokens; each platform pins its own types as it
-comes, and the R2 platform has pinned `r2Bucket` and `r2BucketLifecycle`.
+comes, and the R2 platform has pinned `r2Bucket`, `r2BucketLifecycle` and `r2BucketCors`.
 pulumi-cloudflare's bridge
 metadata lists a single nested attribute's list fields with no element,
 which `pintool` reads, so the token's `condition.requestIp.ins` pins as

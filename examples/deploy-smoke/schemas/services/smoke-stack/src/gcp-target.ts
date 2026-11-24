@@ -12,7 +12,7 @@ declare module "@superschematic/stack" {
       database: { tier?: string; highAvailability?: boolean; version?: "POSTGRES_15" | "POSTGRES_16" | "POSTGRES_17"; deletionProtection?: boolean; diskSize?: number };
       job: { cpu?: string; memory?: string; telemetry?: boolean };
       site: {};
-      bucket: { versioning?: boolean; deleteAfterDays?: number };
+      bucket: { versioning?: boolean; deleteAfterDays?: number; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string }[] };
       worker: { cpu?: string; memory?: string; telemetry?: boolean };
       runner: { cpu?: string; memory?: string; telemetry?: boolean };
       deriver: { cpu?: string; memory?: string; telemetry?: boolean };

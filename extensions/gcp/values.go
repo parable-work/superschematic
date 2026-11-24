@@ -161,13 +161,16 @@ const cloudSQLSettings = `{
 }`
 
 // storageSettings is the schema of a bucket's settings on Cloud Storage
-// (D54): object versioning, off unless set, and the age in days at which
-// a lifecycle rule deletes an object.
+// (D54): object versioning, off unless set, the age in days at which
+// a lifecycle rule deletes an object, and the CORS rules the bucket
+// answers a browser with (D148), in the shape every bucket platform takes
+// (registry.BucketCORSSchema).
 const storageSettings = `{
   "type": "object",
   "properties": {
     "versioning": {"type": "boolean"},
-    "deleteAfterDays": {"type": "integer", "minimum": 1}
+    "deleteAfterDays": {"type": "integer", "minimum": 1},
+    "cors": ` + registry.BucketCORSSchema + `
   },
   "additionalProperties": false
 }`
