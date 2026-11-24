@@ -4833,17 +4833,48 @@
     "FileDownloadDef": {
       "additionalProperties": false,
       "properties": {
+        "cacheControl": {
+          "default": "",
+          "type": "string"
+        },
         "contentType": {
+          "type": "string"
+        },
+        "contentTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disposition": {
+          "default": "",
           "type": "string"
         },
         "filename": {
           "default": "",
           "type": "string"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/FileDownloadSandbox"
         }
       },
       "required": [
         "contentType"
       ],
+      "type": "object"
+    },
+    "FileDownloadSandbox": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "FileUploadConfig": {

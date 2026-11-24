@@ -528,9 +528,9 @@ function listOfListsResult(data: unknown): unknown {
   return Array.isArray(data) ? data.map((row: unknown) => row ?? []) : data;
 }
 
-function successResponse(result: unknown, requestId: string, spec: OperationSpec): Response {
+function successResponse(result: unknown, requestId: string, spec: OperationSpec, request?: Request): Response {
   if (result instanceof Response) return result;
-  if (spec.download) return downloadResponse(result, spec.download, requestId);
+  if (spec.download) return downloadResponse(result, spec.download, requestId, request);
   const shape = spec.outputIsArrayOfArrays ? listOfListsResult : (data: unknown) => data;
   if (result instanceof OperationResult) {
     return envelopeResponse(shape(result.data), requestId, result.status, result.headers);
@@ -764,7 +764,7 @@ export function mountOperation<E extends Env>(
   app.on(spec.method, path, c =>
     runRoute(c, spec, options, steps, async ctx => {
       const request = await decode(ctx, spec);
-      return successResponse(await withCaller(ctx.principal, () => handler(ctx, request)), ctx.requestId, spec);
+      return successResponse(await withCaller(ctx.principal, () => handler(ctx, request)), ctx.requestId, spec, ctx.raw);
     })
   );
   addRouteCheck(app, spec.method, path, spec, options, steps, async ctx => {

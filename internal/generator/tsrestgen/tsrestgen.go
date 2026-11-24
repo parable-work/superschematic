@@ -394,12 +394,31 @@ func (e EndpointInfo) InputDeclaredKeysLiteral() string {
 	return tsStringList(e.InputDeclaredKeys)
 }
 
-// DownloadLiteral is the operation table's download, its OperationDownload.
+// DownloadLiteral is the operation table's download, its OperationDownload:
+// the media type, and each member the schema writes beside it (D141).
 func (e EndpointInfo) DownloadLiteral() string {
-	if e.Download.Filename == "" {
-		return fmt.Sprintf("{ contentType: %s }", tsString(e.Download.ContentType))
+	download := e.Download
+	members := []string{"contentType: " + tsString(download.ContentType)}
+	if len(download.ContentTypes) > 0 {
+		members = append(members, "contentTypes: "+tsStringList(download.ContentTypes))
 	}
-	return fmt.Sprintf("{ contentType: %s, filename: %s }", tsString(e.Download.ContentType), tsString(e.Download.Filename))
+	if download.Filename != "" {
+		members = append(members, "filename: "+tsString(download.Filename))
+	}
+	if download.DispositionOrDefault() != ir.FileDispositionAttachment {
+		members = append(members, "disposition: "+tsString(download.Disposition))
+	}
+	if download.CacheControl != "" {
+		members = append(members, "cacheControl: "+tsString(download.CacheControl))
+	}
+	if download.Sandbox != nil {
+		if len(download.Sandbox.Allow) == 0 {
+			members = append(members, "sandbox: true")
+		} else {
+			members = append(members, "sandbox: "+tsStringList(download.Sandbox.Allow))
+		}
+	}
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // InputArgType is args.input's type: the input type, without its file
@@ -2182,11 +2201,14 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "Multipart: the files ("+strings.Join(names, ", ")+") arrive in args.files, checked against their fields' limits.")
 	}
 	if ep.Download != nil {
-		line := "Answers a file (" + ep.Download.ContentType + "): a FileDownload, its body and its filename"
+		line := "Answers a file (" + strings.Join(ep.Download.AllContentTypes(), ", or ") + "), " + ep.Download.DispositionOrDefault() + ": a FileDownload, its body and its filename"
 		if ep.Download.Filename != "" {
 			line += ", " + ep.Download.Filename + " when it names none"
 		}
-		lines = append(lines, line+".")
+		if len(ep.Download.ContentTypes) > 0 {
+			line += ", and its contentType when it is not the first"
+		}
+		lines = append(lines, line+". An etag or a lastModified beside them answers a matching request 304.")
 	}
 	if ep.WebhookProvider != "" {
 		lines = append(lines, "Webhook: the "+ep.WebhookProvider+" webhook verifier checks the request before every other step.")

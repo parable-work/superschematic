@@ -77,12 +77,24 @@ export interface OperationUpload {
   readonly extensions: readonly string[];
 }
 
-/** A FileDownload result (D81): the file the route answers in place of the envelope. */
+/** A FileDownload result (D81, D141): the file the route answers in place of the envelope. */
 export interface OperationDownload {
   /** The Content-Type the route answers with. */
   readonly contentType: string;
+  /** The media types the implementation may name in contentType's place (D141). */
+  readonly contentTypes?: readonly string[];
   /** The filename Content-Disposition offers when the implementation names none. */
   readonly filename?: string;
+  /** Content-Disposition's type (D141); attachment when absent. */
+  readonly disposition?: 'attachment' | 'inline';
+  /** The answer's Cache-Control, sent as written (D141); no-store when absent. */
+  readonly cacheControl?: string;
+  /**
+   * true adds Content-Security-Policy: sandbox and
+   * Cross-Origin-Resource-Policy: same-origin (D141); a list adds its
+   * tokens to the policy.
+   */
+  readonly sandbox?: boolean | readonly string[];
 }
 
 export interface OperationSpec {

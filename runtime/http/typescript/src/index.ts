@@ -184,8 +184,17 @@ export {
   uploadBodyLimitBytes,
 } from './upload.js';
 export type { UploadInput, UploadedFiles } from './upload.js';
-export { contentDisposition, downloadFilename, downloadResponse } from './download.js';
-export type { FileDownload } from './download.js';
+export {
+  contentDisposition,
+  downloadFilename,
+  downloadResponse,
+  entityTag,
+  ifNoneMatchNames,
+  notModified,
+  parseHttpDate,
+  sandboxPolicy,
+} from './download.js';
+export type { DownloadRequest, FileDownload } from './download.js';
 export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,

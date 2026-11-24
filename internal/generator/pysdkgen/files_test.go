@@ -53,7 +53,7 @@ func TestAFileDownloadIsADownloadedFile(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(methods, ", "); got != "export_statement -> DownloadedFile, original_statement -> DownloadedFile" {
+	if got := strings.Join(methods, ", "); got != "export_statement -> DownloadedFile, original_statement -> DownloadedFile, preview_statement -> DownloadedFile" {
 		t.Fatalf("download methods = %s", got)
 	}
 	python, err := findCompatiblePython()
@@ -92,6 +92,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition", "attachment")
+        elif self.path == "/api/statements/%%s/preview" %% account:
+            # An inline file of a media type the schema lists (D141).
+            body = b"<pre>x</pre>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Disposition", "inline; filename=\"statement.html\"; filename*=UTF-8''statement.html")
         else:
             body = json.dumps({"type": "about:blank", "title": "Not Found", "status": 404, "detail": "No statement", "code": "not_found"}).encode()
             self.send_response(404)
@@ -116,6 +122,10 @@ assert exported.content_type == "text/csv; charset=utf-8", exported.content_type
 
 original = sdk.statements.original_statement(account)
 assert original.content == bytes([0, 1, 2, 255]) and original.filename is None, original
+
+preview = sdk.statements.preview_statement(account)
+assert preview.content == b"<pre>x</pre>" and preview.filename == "statement.html", preview
+assert preview.content_type == "text/html; charset=utf-8", preview.content_type
 
 try:
     sdk.statements.export_statement("1VgEh72lXvTXkJ")

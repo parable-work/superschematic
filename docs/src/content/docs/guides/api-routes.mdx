@@ -615,10 +615,11 @@ export class CartQueries {
 ```
 
 - The implementation returns the file. In TypeScript it is
-  `{ body, filename?, headers? }`: the body is text, sent as UTF-8, bytes,
-  a `Blob`, or a `ReadableStream`, sent as the implementation writes it.
-  In Go it is `*FileDownload{Body, Filename, Header}`, whose `Body` the
-  route copies as it reads it and closes when it can.
+  `{ body, filename?, contentType?, etag?, lastModified?, headers? }`:
+  the body is text, sent as UTF-8, bytes, a `Blob`, or a
+  `ReadableStream`, sent as the implementation writes it. In Go it is
+  `*FileDownload{Body, Filename, ContentType, ETag, LastModified, Header}`,
+  whose `Body` the route copies as it reads it and closes when it can.
 - The server sets `Content-Type` to C's `contentType`, and
   `Content-Disposition` to an attachment under the implementation's
   filename, or C's `filename` when it names none (RFC 6266):
@@ -627,11 +628,11 @@ export class CartQueries {
   such letter, and each of `"`, `\` and `%`, as `_`, and `filename*` the
   name itself; a directory or a control character in the name is dropped.
   The Go and TypeScript servers write the same header for every name
-  (`runtime/http/testdata/content_disposition_parity.json`). Its
-  `Cache-Control` is `no-store` unless the implementation sets one, and a
-  refusal is still a problem body.
-- The OpenAPI document describes the 200 as C's media type, a binary
-  string, with its `Content-Disposition` header.
+  (`runtime/http/testdata/content_disposition_parity.json`). A refusal is
+  still a problem body.
+- Every file answer says `X-Content-Type-Options: nosniff`.
+- The OpenAPI document describes the 200 as each of C's media types, a
+  binary string, with the headers the answer carries, and a `GET`'s 304.
 - The TypeScript SDK returns `{ blob, filename, contentType }`, and the
   Go and Python SDKs a `DownloadedFile`
   ([Client SDKs](/superschematic/guides/client-sdks/#files)). The Rust SDK
@@ -640,6 +641,67 @@ export class CartQueries {
 - A file is no tool result: the [tool documents](/superschematic/reference/mcp-tools/)
   list the operation hidden, and the build refuses a visible `@mcp` on it.
   A `FileDownload` result is never null, encrypted or `@paginated`.
+
+### A file a page shows
+
+C takes four more members, for a file a browser renders in place, an
+image or a document in a frame, in place of saving it:
+
+```ts
+@rest(HttpMethod.GET, "statements/{accountId}/preview")
+previewStatement(accountId: Identity.UUID): FileDownload<{
+  contentType: "text/plain; charset=utf-8";
+  contentTypes: ["text/html; charset=utf-8"];
+  filename: "statement.txt";
+  disposition: "inline";
+  cacheControl: "private, no-cache";
+  sandbox: ["allow-popups"];
+}> {
+  throw new Error("schema declaration only");
+}
+```
+
+| Member | What it does |
+| --- | --- |
+| `disposition` | `"attachment"`, the default, or `"inline"`: `Content-Disposition` starts with that word |
+| `contentTypes` | The media types the implementation may answer in place of `contentType`. It names one as the file's `contentType` (Go: `ContentType`), written as the schema writes it. One outside the list is a 500, logged, so a route never serves a type its schema does not state |
+| `cacheControl` | The answer's `Cache-Control`, sent as written. Without it the answer says `no-store`. A `Cache-Control` among the implementation's headers replaces either |
+| `sandbox` | `true` adds `Content-Security-Policy: sandbox` and `Cross-Origin-Resource-Policy: same-origin`. A list adds its tokens to the policy: `["allow-scripts"]` answers `sandbox allow-scripts`. Each token starts `allow-` |
+
+An inline file that a person uploaded runs in the API's origin when it is
+HTML or SVG. Give such a route `sandbox`, which makes the document's
+origin opaque, or list only media types that cannot hold a script.
+`nosniff`, the sandbox and the resource policy are the route's: a header
+of the same name among the implementation's does not replace them.
+
+The implementation may return validators beside the body, and the route
+then answers a request that already holds the file with 304:
+
+```ts
+async previewStatement(args: PreviewStatementArgs): Promise<FileDownload> {
+  const statement = await deps.statements.last(args.accountId);
+  return { body: statement.stream(), etag: statement.hash, lastModified: statement.importedAt };
+}
+```
+
+| Member | What the route does |
+| --- | --- |
+| `etag` (Go: `ETag`) | Sends `ETag`. An opaque value is quoted, `v3` as `"v3"`; a value written as a tag, `"v3"` or `W/"v3"`, is sent as written. A value with a space, a quote or a character outside printable ASCII is a 500 |
+| `lastModified` (Go: `LastModified`) | Sends `Last-Modified`, to the second |
+
+A `GET` whose `If-None-Match` names the tag is answered 304 with no body:
+the tags are compared without their `W/`, and `*` names any tag. A request
+with no `If-None-Match` whose `If-Modified-Since` is at or after the
+file's time is answered 304 too. `If-Modified-Since` is not read when the
+request sends `If-None-Match` (RFC 9110, 13.1). The 304 carries the
+validators and the `Cache-Control`, and the route cancels a stream body,
+or closes a Go `Body`, without sending it. The implementation still runs
+on every request: it is what knows the file's tag. A browser only
+revalidates a file it was allowed to keep, so pair validators with a
+`cacheControl` such as `private, no-cache`.
+
+The Go and TypeScript servers answer each case alike
+(`runtime/http/testdata/file_answer_parity.json`).
 
 ## Errors
 

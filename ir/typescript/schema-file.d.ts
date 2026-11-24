@@ -325,8 +325,16 @@ export interface FieldDisplay {
 }
 
 export interface FileDownloadDef {
+  cacheControl?: string;
   contentType: string;
+  contentTypes?: string[];
+  disposition?: string;
   filename?: string;
+  sandbox?: FileDownloadSandbox;
+}
+
+export interface FileDownloadSandbox {
+  allow?: string[];
 }
 
 export interface FileUploadConfig {

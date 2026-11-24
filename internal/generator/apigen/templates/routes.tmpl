@@ -1582,7 +1582,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// Respond with result
 		{{- if .FileDownload }}
 		// A FileDownload result (D81): the file, not the envelope.
-		RespondFileDownload(w, r, {{ printf "%q" .FileDownload.ContentType }}, {{ printf "%q" .FileDownload.Filename }}, result)
+		RespondFile(w, r, {{ .FileSpecLiteral }}, result)
 		{{- else if .Page }}
 		// The page is the envelope's data, {items, next}: nil items are [] and
 		// no next is null.

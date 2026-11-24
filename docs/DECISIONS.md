@@ -1534,25 +1534,6 @@ Build: the registry, `ir`, the reserved class in the loader, `sqlgen`, the
 Go, TypeScript and Rust HTTP runtimes and servers, the four SDK
 generators, the tool manifest, the parity tests and the API routes guide.
 
-## D141. A file answer may be inline, carries validators, and may be sandboxed (D81 amended)
-
-`FileDownload<{ contentType, filename? }>` answers
-`Content-Disposition: attachment`. A file a page shows, an image or a
-document in a frame, has to be a manual route, which signs in its caller
-itself and writes its own headers.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `FileDownload<{ contentType, contentTypes?, filename?, disposition?, cacheControl?, sandbox? }>`. `disposition` is `attachment` (the default) or `inline`. `contentTypes` lists media types the implementation may answer in place of `contentType`; one it names outside the list is a 500. | A second result type for inline files |
-| The implementation may return `etag` and `lastModified` beside `body`. The runtime sends them, and answers 304 with no body to a matching `If-None-Match`, or to `If-Modified-Since` when the request names no tag, cancelling the body it was handed unread. | Validators each implementation compares itself |
-| `cacheControl` is sent as written. Absent, a file answer says `private, no-store` as it does now. | |
-| Every file answer says `X-Content-Type-Options: nosniff`. `sandbox: true` adds `Content-Security-Policy: sandbox` and `Cross-Origin-Resource-Policy: same-origin`; a list, `sandbox: ["allow-scripts"]`, adds those tokens to the policy. | Headers a route returns freely, which the next route forgets |
-| Go and TypeScript. The Rust server still refuses files (D81). | |
-
-Build: `runtime/http/typescript/src/download.ts` and Go's, the parity
-vectors beside `content_disposition_parity.json`, the servers'
-generators, the OpenAPI and the API routes guide.
-
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 
 A bucket's interface is `put`, `get`, `delete`, `list` and `signedUrl`.
