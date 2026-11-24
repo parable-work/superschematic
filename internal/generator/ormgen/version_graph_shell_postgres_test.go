@@ -45,7 +45,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		t.Fatalf("write graph release test: %v", err)
 	}
 	out := runORMModule(t, ormDir)
-	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
+	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeArranges", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)
 		}
@@ -63,12 +63,86 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 )
+
+// TestVersionGraphFacadeArranges saves parts, whose order is a string key,
+// under the keys OrderKeys makes, and moves one with Arrange: the facade
+// writes that row alone, and the tree reads in the order asked for (D137).
+func TestVersionGraphFacadeArranges(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph facade against Postgres")
+	}
+	db, _ := openShellDatabase(t, dsn)
+	ctx := WithUserID(context.Background(), mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"))
+	g := db.RecipeGraph()
+	keys, err := g.OrderKeys("", "", 3)
+	if err != nil || !reflect.DeepEqual(keys, []string{"F", "V", "k"}) {
+		t.Fatalf("OrderKeys = %v, %v, want F V k", keys, err)
+	}
+	if between, err := g.OrderKeys("V", "W", 1); err != nil || !reflect.DeepEqual(between, []string{"VV"}) {
+		t.Fatalf("OrderKeys between V and W = %v, %v, want VV", between, err)
+	}
+	if _, err := g.OrderKeys("V", "V", 1); err == nil || !strings.Contains(err.Error(), "no_order_key") {
+		t.Fatalf("OrderKeys between V and V = %v, want no_order_key", err)
+	}
+	recipe, err := db.Recipe.CreateOne(ctx, &types.Recipe{Title: "Bread"})
+	if err != nil {
+		t.Fatalf("create recipe: %v", err)
+	}
+	main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
+	if err != nil {
+		t.Fatalf("CreatePrimary: %v", err)
+	}
+	draft, err := g.Branch(ctx, *main.Id, "parts")
+	if err != nil {
+		t.Fatalf("Branch: %v", err)
+	}
+	saved, err := g.Save(ctx, *draft.Id, draft.Version, RecipeEdits{Part: GraphEdits[types.Part]{Upsert: []*types.Part{
+		{Rank: keys[0], Heading: "Mix"}, {Rank: keys[1], Heading: "Knead"}, {Rank: keys[2], Heading: "Bake"},
+	}}})
+	if err != nil {
+		t.Fatalf("save parts: %v", err)
+	}
+	mix, knead, bake := *saved.Saved.Part[0].EntityKey, *saved.Saved.Part[1].EntityKey, *saved.Saved.Part[2].EntityKey
+	arranged, err := g.Arrange(ctx, *draft.Id, saved.Ref.Version, types.RecipeEntityKind_Part, nil, []types.IdentityUUID{bake, mix, knead})
+	if err != nil {
+		t.Fatalf("Arrange: %v", err)
+	}
+	if len(arranged.Saved.Part) != 1 || arranged.Saved.Part[0].Heading != "Bake" || arranged.Saved.Part[0].Rank != "7" {
+		t.Fatalf("Arrange wrote %+v, want Bake alone at 7", arranged.Saved.Part)
+	}
+	if arranged.Ref.Version != saved.Ref.Version+1 {
+		t.Fatalf("Arrange left the ref at version %d, want %d", arranged.Ref.Version, saved.Ref.Version+1)
+	}
+	tree, err := g.Compose(ctx, *draft.Id)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	var headings []string
+	for _, part := range tree.Part {
+		headings = append(headings, part.Heading)
+	}
+	if !reflect.DeepEqual(headings, []string{"Bake", "Mix", "Knead"}) {
+		t.Fatalf("the arranged parts read %v", headings)
+	}
+	if _, err := g.Arrange(ctx, *draft.Id, arranged.Ref.Version, types.RecipeEntityKind_Part, nil, []types.IdentityUUID{bake, mix}); err == nil || !strings.Contains(err.Error(), "invalid_arrangement") {
+		t.Fatalf("Arrange of a list that lacks a child = %v, want invalid_arrangement", err)
+	}
+	if _, err := g.Arrange(ctx, *draft.Id, arranged.Ref.Version, types.RecipeEntityKind_Step, nil, nil); err == nil || !strings.Contains(err.Error(), "order_not_a_key") {
+		t.Fatalf("Arrange of a kind ordered by an integer = %v, want order_not_a_key", err)
+	}
+	if _, err := g.Arrange(ctx, *main.Id, main.Version, types.RecipeEntityKind_Part, nil, nil); !errors.Is(err, ErrPrimaryMergeOnly) {
+		t.Fatalf("Arrange on a primary line = %v, want ErrPrimaryMergeOnly", err)
+	}
+}
 
 func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
 	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")

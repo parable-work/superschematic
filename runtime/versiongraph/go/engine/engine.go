@@ -379,6 +379,88 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 	return result, nil
 }
 
+// Arrange puts one parent's children of kind in the order keys gives, on a
+// change set at version (D137). keys are the entity keys of every live
+// child of parent in the ref's tree, in the order wanted; an empty parent
+// is none, the rows of the kind that have no parent. The longest run of
+// children already in order keeps its order keys, and each other child
+// takes a new one between its neighbors', written as the ref's row of it.
+// It returns the ref at its new version and the rows written, in the order
+// wanted. The kind's order is a string key: the core refuses another with
+// order_not_a_key, and a list that is not exactly the parent's live
+// children with invalid_arrangement. It refuses a sealed ref, and a primary
+// line with ErrPrimaryMergeOnly.
+func (e *Engine) Arrange(ctx context.Context, actor, ref string, version int64, kind, parent string, keys []string) (*SaveResult, error) {
+	actor, err := actorID(actor)
+	if err != nil {
+		return nil, err
+	}
+	if err := ids(&ref); err != nil {
+		return nil, err
+	}
+	if _, err := e.kind(kind); err != nil {
+		return nil, err
+	}
+	if parent != "" {
+		if err := ids(&parent); err != nil {
+			return nil, err
+		}
+	}
+	wanted := make([]string, len(keys))
+	for i, key := range keys {
+		if wanted[i], err = id("entity key", key); err != nil {
+			return nil, err
+		}
+	}
+	result := &SaveResult{Saved: Tree{}}
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		r, err := e.readDraft(ctx, tx, ref, version)
+		if err != nil {
+			return err
+		}
+		composed, _, _, err := e.compose(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		composedJSON, err := composed.json()
+		if err != nil {
+			return err
+		}
+		arranged, err := versiongraph.Arrange(versiongraph.ArrangeRequest{
+			Descriptor: e.descriptor, Tree: composedJSON, Kind: kind, Parent: parent, Keys: wanted,
+		})
+		if err != nil {
+			return err
+		}
+		for _, row := range arranged.Rows {
+			stored, err := e.writeRow(ctx, tx, kind, r, row, false, actor)
+			if err != nil {
+				return err
+			}
+			result.Saved.add(kind, stored)
+		}
+		result.Ref, err = tx.UpdateRef(ctx, storage.RefUpdate{ID: r.ID, Version: r.Version, Actor: actor})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OrderKeys makes count order keys that sort strictly between before and
+// after, the start and the end when empty: evenly spread, each as short as
+// it can be (D137). A row saved with one of them as its order reads between
+// the rows that hold the bounds. The core makes them, so every language
+// makes the same keys.
+func OrderKeys(before, after string, count int) ([]string, error) {
+	result, err := versiongraph.OrderKeys(versiongraph.OrderKeysRequest{Before: before, After: after, Count: count})
+	if err != nil {
+		return nil, err
+	}
+	return result.Keys, nil
+}
+
 // Commit composes a change set at version, diffs it against its last
 // commit (or its base), writes a commit with a patch per changed entity and
 // moves the ref's head. It returns ErrNothingToCommit when nothing changed,

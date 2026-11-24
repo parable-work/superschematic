@@ -639,6 +639,109 @@ pub fn parse_note(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `Part` declares, by their wire names.
+pub const PART_FIELDS: &[&str] = &["id", "recipe", "parentKey", "rank", "heading", "entityKey", "ref", "deletedOnRef", "_version"];
+
+/// Validates a JSON value as `Part`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_part(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("recipe");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "recipe".to_owned(), nested, validate_recipe);
+        }
+        if rt::is_absent(field) {
+            errors.push("recipe", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("parentKey");
+        if !rt::is_absent(field) {
+            errors.set_result("parentKey", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("rank");
+        if rt::is_absent(field) {
+            errors.push("rank", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "rank", field);
+    }
+    {
+        let field = value.get("heading");
+        if rt::is_absent(field) {
+            errors.push("heading", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "heading", field);
+    }
+    {
+        let field = value.get("entityKey");
+        if !rt::is_absent(field) {
+            errors.set_result("entityKey", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("ref");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "ref".to_owned(), nested, validate_recipe_ref);
+        }
+        if rt::is_absent(field) {
+            errors.push("ref", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("deletedOnRef");
+        if rt::is_absent(field) {
+            errors.push("deletedOnRef", ValidationError::required());
+        }
+        rt::expect_boolean(&mut errors, "deletedOnRef", field);
+    }
+    {
+        let field = value.get("_version");
+        rt::expect_number(&mut errors, "_version", field);
+    }
+    errors
+}
+
+/// Validates a `Part` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_part_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_part)
+}
+
+/// Prepares a JSON value as `Part`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_part` decodes.
+pub fn prepare_part(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(mut object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::fill_default(&mut object, "deletedOnRef", "false", true);
+    rt::check_unknown_fields(&object, PART_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_part(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Part`: `prepare_part`, then decodes it.
+pub fn parse_part(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Part, rt::ParseError> {
+    let value = prepare_part(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `Recipe` declares, by their wire names.
 pub const RECIPE_FIELDS: &[&str] = &["id", "title", "createdAt", "createdBy"];
 

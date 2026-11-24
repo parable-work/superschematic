@@ -1438,29 +1438,6 @@ meant to land as one change:
 Sign-in through an identity provider is not among them. It is its own
 decision.
 
-## D137. A graph member's order may be a string key, so an insert writes one row and two inserts into one gap merge (D17 amended)
-
-A member's `order` is a `Generic.Int64` field, and the core merges it as
-any other content column. An insert between two siblings therefore
-renumbers every later sibling. On a change set each renumbered row is an
-override row of its own, and a merge reports each as changed on both sides
-when the other side inserted too. A tree of forty parts with one part
-added near its head writes thirty-eight rows that say nothing, and
-conflicts with anyone who did the same.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `order` names a `Generic.Int64` field or a string field. A string order is a key: one or more characters of `0-9A-Za-z`, compared by its bytes. The descriptor declares the column's class `string`, and its version stays 3, since a descriptor that was valid means what it meant. | A sequence merge in the core that renumbers integers, which removes the conflicts and still writes every later sibling; a float, which runs out of digits between two neighbors; a scalar of its own, which waits on superscalar; descriptor version 4, which changes every engine and every generated descriptor for a member nothing reads differently |
-| Rows sort by order, then by entity key, as they do now. Two rows of one parent may hold one key, and the entity key settles them: it is what two inserts into one gap on two refs produce. `validate` adds no finding for it. Its range finding applies to an integer order alone. | Refusing equal keys, which turns two inserts into a conflict again |
-| The core gains an operation, `order_keys`, `{before?, after?, count}` to `{keys}`: `count` keys that sort strictly between `before` and `after`, evenly spread, each as short as it can be. An absent bound is the start or the end. It is in the core so that every language makes the same keys, and the vectors hold it to that. | A helper per language, which four implementations would have to keep equal |
-| Each engine gains `Arrange(ref, version, kind, parent, keys)`: the entity keys of one parent's children in the order wanted. It keeps the longest run that is already in order and gives new order keys to the rest alone, as the ref's override rows. A list that is not exactly the parent's live children is refused. The generated facades expose it and `OrderKeys`. | Leaving the choice of which rows to rewrite to each application |
-| Merge keeps its rules. The order column is one atomic unit of its row: a move on one side merges with an edit of another unit on the other, and two moves of one entity to different keys conflict on that column. | A rule of its own for order |
-
-Build: the core (`descriptor.rs`, `tree.rs`, `validate.rs`, a new
-operation and its vectors), the loader's check
-(`internal/loader/verify/versiongraph.go`), the four engines and their
-facades, the scenarios, and the reference page.
-
 ## D138. `@graphOperations(Root)` serves a version graph's operations as routes with no implementation method, and a graph's commits and releases can enqueue (D17, D103, D106 amended)
 
 A graph's operations reach an application through the generated facade,

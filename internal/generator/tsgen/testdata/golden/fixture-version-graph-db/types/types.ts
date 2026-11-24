@@ -127,6 +127,42 @@ export function makeNote(overrides?: Partial<Note>): Note {
 }
 
 /**
+ * Part - A part of the recipe's write-up, nested under another part. Its rank is
+ * a string order key, so Arrange places it among its siblings.
+ */
+export interface Part {
+  id?: IdentityUUID | null;
+  recipe: Recipe;
+  parentKey?: IdentityUUID | null;
+  rank: string;
+  heading: string;
+  /** The entity's logical identity, shared by its rows on every ref. */
+  entityKey?: IdentityUUID | null;
+  /** The ref this row overrides the entity on. */
+  ref: RecipeRef;
+  /** True when the row deletes the entity on its ref. */
+  deletedOnRef: boolean;
+  _version: number;
+}
+
+/**
+ * PartDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<Part> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const PartDefaults: Partial<Part> = {
+  deletedOnRef: false,
+};
+
+/**
+ * makePart returns a Part initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makePart(overrides?: Partial<Part>): Part {
+  return { ...PartDefaults, ...(overrides || {}) } as Part;
+}
+
+/**
  * Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
  */
 export interface Recipe {

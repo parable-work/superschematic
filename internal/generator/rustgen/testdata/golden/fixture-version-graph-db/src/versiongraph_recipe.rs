@@ -128,6 +128,39 @@ pub const RECIPE_GRAPH_DESCRIPTOR: &str = r#"{
       }
     },
     {
+      "kind": "part",
+      "table": "part",
+      "historyTable": "part_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "root": "recipe_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "parent_key",
+        "kind": "part"
+      },
+      "order": "rank",
+      "excluded": [
+        "recipe_id"
+      ],
+      "history": {
+        "exclude": []
+      },
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "heading": "string",
+        "id": "uuid",
+        "parent_key": "uuid",
+        "rank": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
+    },
+    {
       "kind": "step",
       "table": "step",
       "historyTable": "step_history",
@@ -307,6 +340,26 @@ const RECIPE_NOTE_READS: &[Column] = &[
     Column::field("_version", "_version"),
 ];
 
+/// The columns a typed part upsert writes, each from its field.
+const RECIPE_PART_WRITES: &[Column] = &[
+    Column::field("parent_key", "parentKey"),
+    Column::field("rank", "rank"),
+    Column::field("heading", "heading"),
+    Column::field("entity_key", "entityKey"),
+];
+
+/// The columns a canonical part row gives a typed value, each into its
+/// field.
+const RECIPE_PART_READS: &[Column] = &[
+    Column::field("id", "id"),
+    Column::field("parent_key", "parentKey"),
+    Column::field("rank", "rank"),
+    Column::field("heading", "heading"),
+    Column::field("entity_key", "entityKey"),
+    Column::field("deleted_on_ref", "deletedOnRef"),
+    Column::field("_version", "_version"),
+];
+
 /// The columns a typed step upsert writes, each from its field.
 const RECIPE_STEP_WRITES: &[Column] = &[
     Column::field("position", "position"),
@@ -418,6 +471,7 @@ pub struct RecipeEdits {
     pub cover: RecipeKindEdits<Cover>,
     pub ingredient: RecipeKindEdits<Ingredient>,
     pub note: RecipeKindEdits<Note>,
+    pub part: RecipeKindEdits<Part>,
     pub step: RecipeKindEdits<Step>,
     pub tasting: RecipeKindEdits<Tasting>,
     pub utensil: RecipeKindEdits<Utensil>,
@@ -431,6 +485,7 @@ pub struct RecipeTree {
     pub cover: Vec<Cover>,
     pub ingredient: Vec<Ingredient>,
     pub note: Vec<Note>,
+    pub part: Vec<Part>,
     pub step: Vec<Step>,
     pub tasting: Vec<Tasting>,
     pub utensil: Vec<Utensil>,
@@ -572,6 +627,7 @@ impl RecipeGraph {
         self.kind_edits(&mut canonical, "cover", &edits.cover, RECIPE_COVER_WRITES)?;
         self.kind_edits(&mut canonical, "ingredient", &edits.ingredient, RECIPE_INGREDIENT_WRITES)?;
         self.kind_edits(&mut canonical, "note", &edits.note, RECIPE_NOTE_WRITES)?;
+        self.kind_edits(&mut canonical, "part", &edits.part, RECIPE_PART_WRITES)?;
         self.kind_edits(&mut canonical, "step", &edits.step, RECIPE_STEP_WRITES)?;
         self.kind_edits(&mut canonical, "tasting", &edits.tasting, RECIPE_TASTING_WRITES)?;
         self.kind_edits(&mut canonical, "utensil", &edits.utensil, RECIPE_UTENSIL_WRITES)?;
@@ -580,6 +636,38 @@ impl RecipeGraph {
             ref_: saved.ref_,
             saved: tree(saved.saved, String::new(), Vec::new())?,
         })
+    }
+
+    /// Puts one parent's children of `kind` in the order `keys` gives, on a
+    /// change set at `version`. `keys` are the entity keys of every live
+    /// child of `parent` in the ref's tree, in the order wanted; `None` is
+    /// no parent, the rows of the kind that have none. The longest run of
+    /// children already in order keeps its order keys and each other child
+    /// takes a new one, as the ref's row of it, so a move writes the rows
+    /// that moved and no others. It returns the ref at its new version and
+    /// the rows written. The kind's order is a string key: another is
+    /// refused with the core's code `order_not_a_key`, and a list that is
+    /// not exactly the parent's live children with `invalid_arrangement`.
+    /// It refuses a sealed ref, and a primary line with
+    /// `primary_merge_only`.
+    pub async fn arrange(&self, actor: &IdentityUUID, ref_: &IdentityUUID, version: i64, kind: &RecipeEntityKind, parent: Option<&IdentityUUID>, keys: &[IdentityUUID]) -> Result<RecipeSaveResult, engine::Error> {
+        let kind = facade::text("entity kind", kind)?;
+        let parent = parent.map(id).transpose()?;
+        let keys = keys.iter().map(id).collect::<Result<Vec<_>, _>>()?;
+        let saved = self.engine.arrange(&id(actor)?, &id(ref_)?, version, &kind, parent.as_deref(), &keys).await?;
+        Ok(RecipeSaveResult {
+            ref_: saved.ref_,
+            saved: tree(saved.saved, String::new(), Vec::new())?,
+        })
+    }
+
+    /// Makes `count` order keys that sort strictly between `before` and
+    /// `after`, the start and the end when `None`: evenly spread, each as
+    /// short as it can be. A row saved with one of them as its order reads
+    /// between the rows that hold the bounds. The version-graph core makes
+    /// them, so every language makes the same keys. It reads no database.
+    pub fn order_keys(before: Option<&str>, after: Option<&str>, count: usize) -> Result<Vec<String>, engine::Error> {
+        engine::order_keys(before, after, count)
     }
 
     /// Composes a change set at `version`, diffs it against its last commit
@@ -762,6 +850,11 @@ fn tree(rows: engine::Tree, content_hash: String, findings: Vec<engine::Finding>
             "note" => {
                 for row in rows {
                     out.note.push(facade::value("note", row, RECIPE_NOTE_READS)?);
+                }
+            }
+            "part" => {
+                for row in rows {
+                    out.part.push(facade::value("part", row, RECIPE_PART_READS)?);
                 }
             }
             "step" => {

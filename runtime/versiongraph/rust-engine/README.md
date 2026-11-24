@@ -11,9 +11,10 @@ canonical rows, the engine's rules and error codes, and the scenario
 format.
 
 ```
-src/engine.rs      Engine: create_primary, branch, save, commit, seal, merge, rebase,
-                   revert, release, released, materialize, compose, diff, history, discard;
-                   EngineOn, the same over a storage it borrows; Engine::run_on and ready
+src/engine.rs      Engine: create_primary, branch, save, arrange, commit, seal, merge,
+                   rebase, revert, release, released, materialize, compose, diff, history,
+                   discard; EngineOn, the same over a storage it borrows; Engine::run_on and
+                   ready
 src/sweep.rs       Engine::sweep and Engine::run_sweeper
 src/storage.rs     the Storage and Tx traits an adapter implements
 src/postgres/      the Postgres adapter, its Client seam and the tokio-postgres binding
@@ -22,7 +23,7 @@ src/fixed/         the fixed layout in either dialect (FixedLayout, Dialect), it
 src/sqlite/        the SQLite adapter: the fixed layout on SQLite under its names, the version
                    check, SQLite's result codes and the rusqlite binding
 src/canonical/     the canonical row rules for what Postgres returns
-src/core.rs        the core's operations over trees of canonical rows
+src/core.rs        the core's operations over trees of canonical rows, and order_keys
 src/error.rs       Error and its stable codes
 ```
 
@@ -53,6 +54,15 @@ write through a ref the ref's expected version. The engine's errors are
 `Error`; `Error::code()` is the stable code every language's engine shares
 (`version_conflict`, `primary_merge_only`, ...), or the core's code for an
 input it refused.
+
+A kind whose order column is a string holds order keys (D137).
+`engine.arrange(actor, &draft.id, version, "part", Some(parent), &keys)`
+puts one parent's live children in the order `keys` gives, their entity
+keys, and writes new order keys for the fewest rows it can, as the change
+set's own rows; `None` for the parent is the rows that have none. It
+returns what `save` does. `order_keys(before, after, count)` makes `count`
+keys strictly between two others, the start and the end when `None`, for a
+row a save places itself; it takes no engine.
 
 `engine.on(&storage)` runs the same operations over a storage the caller
 lends, which need not be `'static`: it may borrow a transaction the

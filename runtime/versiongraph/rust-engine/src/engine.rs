@@ -469,6 +469,31 @@ impl Engine {
         Ok(SaveResult { ref_, saved })
     }
 
+    /// Puts one parent's children of `kind` in the order `keys` gives, on a
+    /// change set at `version` (D137). `keys` are the entity keys of every
+    /// live child of `parent` in the ref's tree, in the order wanted; no
+    /// parent is the rows of the kind that have none. The longest run of
+    /// children already in order keeps its order keys, and each other child
+    /// takes a new one between its neighbors', written as the ref's row of
+    /// it. It returns the ref at its new version and the rows written, in
+    /// the order wanted. The kind's order is a string key: the core refuses
+    /// another with `order_not_a_key`, and a list that is not exactly the
+    /// parent's live children with `invalid_arrangement`. It refuses a
+    /// sealed ref, and a primary line with [`Error::PrimaryMergeOnly`].
+    pub async fn arrange(
+        &self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        kind: &str,
+        parent: Option<&str>,
+        keys: &[String],
+    ) -> Result<SaveResult, Error> {
+        self.on(&*self.storage)
+            .arrange(actor, ref_id, version, kind, parent, keys)
+            .await
+    }
+
     /// Composes a change set at `version`, diffs it against its last commit
     /// (or its base), writes a commit with a patch per changed entity and
     /// moves the ref's head. It returns [`Error::NothingToCommit`] when
@@ -1342,6 +1367,55 @@ impl<'a> EngineOn<'a> {
             .engine
             .save_in(&mut *tx, &actor, &ref_id, version, edits)
             .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::arrange`], over the borrowed storage.
+    pub async fn arrange(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        kind: &str,
+        parent: Option<&str>,
+        keys: &[String],
+    ) -> Result<SaveResult, Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        self.engine.kind(kind)?;
+        let parent = parent.map(|parent| id("parent", parent)).transpose()?;
+        let keys = keys
+            .iter()
+            .map(|key| id("entity key", key))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let r = self.engine.read_draft(tx, &ref_id, version).await?;
+            let (composed, _, _) = self.engine.compose_ref(tx, &r).await?;
+            let arranged = self
+                .engine
+                .core
+                .arrange(&composed, kind, parent.as_deref(), &keys)?;
+            let mut saved = Tree::new();
+            for row in arranged {
+                let stored = self
+                    .engine
+                    .write_row(tx, kind, &r, row, false, &actor)
+                    .await?;
+                saved.entry(kind.to_owned()).or_default().push(stored);
+            }
+            let ref_ = tx
+                .update_ref(RefUpdate {
+                    id: r.id.clone(),
+                    version: r.version,
+                    actor: actor.clone(),
+                    ..RefUpdate::default()
+                })
+                .await?;
+            Ok(SaveResult { ref_, saved })
+        }
+        .await;
         finish(tx, result).await
     }
 

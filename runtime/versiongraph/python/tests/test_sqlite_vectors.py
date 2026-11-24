@@ -525,6 +525,13 @@ def write_database(connection: sqlite3.Connection) -> None:
     ).ref
     dinner = i.commit(ANN, dinner.id, dinner.version, CommitOptions(message="dinner")).ref
     merged(i.merge(ANN, dinner.id, lunch.id, lunch.version, [], CommitOptions(message="supper", tag=True)))
+    # A kind ordered by a string key, as work the change set does not commit.
+    i.save(
+        ANN,
+        dinner.id,
+        dinner.version,
+        {"part": KindEdits(upsert=[row(entity_key="Intro", rank="V", heading="Before you start")])},
+    )
 
 
 # A character that splits a line for some reader: a control character, NEL,

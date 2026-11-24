@@ -24,6 +24,11 @@ release moves and released reads. A commit is snapshotted, its full pin set
 stored, when it is tagged, released, or snapshot_every commits past the
 nearest snapshot on its chain, and materialize stops at the nearest
 snapshot. sweep and run_sweeper are the graph's maintenance.
+
+A kind whose order is a string key (D137) is put in order by arrange, which
+keeps the longest run of a parent's children already in order and writes new
+keys for the rest. order_keys, a function of this module, makes the keys a
+save places a row with.
 """
 
 import json
@@ -90,6 +95,7 @@ __all__ = [
     "SweepOptions",
     "SweepReport",
     "Engine",
+    "order_keys",
 ]
 
 DEFAULT_WALK_CEILING = 4096
@@ -415,6 +421,49 @@ class Engine:
                         raise EntityNotFoundError(
                             f"entity not found on the ref: no {k.name} override of {entity_key}"
                         )
+            moved = tx.update_ref(RefUpdate(r.id, r.version, None, None, False, actor))
+            return SaveResult(moved, saved)
+
+        return self._storage.transact(run)
+
+    def arrange(
+        self, actor: str, ref: str, version: int, kind: str, parent: Optional[str], keys: Sequence[str]
+    ) -> SaveResult:
+        """Puts one parent's children of kind in the order keys gives, on a
+        change set at version (D137). keys are the entity keys of every live
+        child of parent in the ref's tree, in the order wanted; a parent of
+        None, or an empty one, is none: the rows of the kind that have no
+        parent. The longest run of children already in order keeps its order
+        keys, and each other child takes a new one between its neighbors',
+        written as the ref's row of it. It returns the ref at its new
+        version and the rows written, in the order wanted. The kind's order
+        is a string key: the core refuses another with order_not_a_key, and
+        a list that is not exactly the parent's live children with
+        invalid_arrangement. It refuses a sealed ref, and a primary line
+        with PrimaryMergeOnlyError."""
+        actor = _actor_id(actor)
+        ref = _id("id", ref)
+        self._kind(kind)
+        if parent:
+            parent = _id("id", parent)
+        wanted = [_id("entity key", key) for key in keys]
+
+        def run(tx: Tx) -> SaveResult:
+            saved: Tree = {}
+            r = self._read_draft(tx, ref, version)
+            request = (
+                '{"descriptor":'
+                + self._descriptor
+                + ',"tree":'
+                + _tree_json(self._compose(tx, r)[0])
+                + ',"kind":'
+                + write_string(kind)
+            )
+            if parent:
+                request += ',"parent":' + write_string(parent)
+            request += ',"keys":[' + ",".join(write_string(key) for key in wanted) + "]}"
+            for row in self._run("arrange", request)["rows"]:
+                saved.setdefault(kind, []).append(self._write_row(tx, kind, r, dumps(row), False, actor))
             moved = tx.update_ref(RefUpdate(r.id, r.version, None, None, False, actor))
             return SaveResult(moved, saved)
 
@@ -1160,6 +1209,22 @@ class Engine:
                     d = 0
                 distance[n.id] = d
         return written
+
+
+def order_keys(before: Optional[str], after: Optional[str], count: int) -> List[str]:
+    """Makes count order keys that sort strictly between before and after,
+    the start and the end when None or empty: evenly spread, each as short
+    as it can be (D137). A row saved with one of them as its order reads
+    between the rows that hold the bounds. The core makes them, so every
+    language makes the same keys, and refuses bounds no key lies between
+    with no_order_key."""
+    request: Dict[str, Any] = {"count": count}
+    if before:
+        request["before"] = before
+    if after:
+        request["after"] = after
+    keys: List[str] = json.loads(_core_run("order_keys", json.dumps(request)))["keys"]
+    return keys
 
 
 def _apply_patches(pins: _PinSet, patches: Mapping[_Entity, Patch]) -> None:

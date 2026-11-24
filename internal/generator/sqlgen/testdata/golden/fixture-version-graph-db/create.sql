@@ -48,6 +48,21 @@ CREATE TABLE note (
 
 COMMENT ON TABLE note IS 'A cook''s note, threaded under another note.';
 
+CREATE TABLE part (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  recipe_id UUID NOT NULL,
+  parent_key UUID,
+  rank TEXT NOT NULL,
+  heading TEXT NOT NULL,
+  entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
+  ref_id UUID NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
+  _version BIGINT DEFAULT 1 NOT NULL
+);
+
+COMMENT ON TABLE part IS 'A part of the recipe''s write-up, nested under another part. Its rank is
+a string order key, so Arrange places it among its siblings.';
+
 CREATE TABLE recipe (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   title TEXT NOT NULL,
@@ -80,7 +95,7 @@ CREATE TABLE recipe_patch (
   entity_id UUID NOT NULL,
   entity_version BIGINT NOT NULL,
   operation TEXT NOT NULL,
-  CONSTRAINT ck_recipe_patch_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil')),
+  CONSTRAINT ck_recipe_patch_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'part', 'step', 'tasting', 'utensil')),
   CONSTRAINT ck_recipe_patch_operation CHECK (operation IN ('ADD', 'UPDATE', 'DELETE'))
 );
 
@@ -125,7 +140,7 @@ CREATE TABLE recipe_snapshot_entry (
   entity_key UUID NOT NULL,
   entity_id UUID NOT NULL,
   entity_version BIGINT NOT NULL,
-  CONSTRAINT ck_recipe_snapshot_entry_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil'))
+  CONSTRAINT ck_recipe_snapshot_entry_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'part', 'step', 'tasting', 'utensil'))
 );
 
 COMMENT ON TABLE recipe_snapshot_entry IS 'One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.';
@@ -235,6 +250,20 @@ CREATE UNIQUE INDEX uq_note_history_id_version ON note_history (id, _version);
 CREATE INDEX idx_note_history_id_recorded ON note_history (id, recorded_at);
 
 COMMENT ON TABLE note_history IS 'Version history for note';
+
+CREATE TABLE part_history (
+  history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  id UUID NOT NULL,
+  _version BIGINT NOT NULL,
+  operation TEXT NOT NULL,
+  data JSONB NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_part_history_id_version ON part_history (id, _version);
+CREATE INDEX idx_part_history_id_recorded ON part_history (id, recorded_at);
+
+COMMENT ON TABLE part_history IS 'Version history for part';
 
 CREATE TABLE recipe_ref_history (
   history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -348,6 +377,18 @@ ALTER TABLE note
   REFERENCES recipe_ref(id)
   ON DELETE RESTRICT;
 
+ALTER TABLE part
+  ADD CONSTRAINT fk_part_recipe_id
+  FOREIGN KEY (recipe_id)
+  REFERENCES recipe(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE part
+  ADD CONSTRAINT fk_part_ref_id
+  FOREIGN KEY (ref_id)
+  REFERENCES recipe_ref(id)
+  ON DELETE RESTRICT;
+
 ALTER TABLE recipe_commit
   ADD CONSTRAINT fk_recipe_commit_root_id
   FOREIGN KEY (root_id)
@@ -457,6 +498,8 @@ CREATE UNIQUE INDEX uq_cover_entity_ref ON cover USING BTREE (entity_key, ref_id
 CREATE UNIQUE INDEX uq_ingredient_entity_ref ON ingredient USING BTREE (entity_key, ref_id);
 
 CREATE UNIQUE INDEX uq_note_entity_ref ON note USING BTREE (entity_key, ref_id);
+
+CREATE UNIQUE INDEX uq_part_entity_ref ON part USING BTREE (entity_key, ref_id);
 
 CREATE UNIQUE INDEX uq_recipe_commit_root_sequence ON recipe_commit USING BTREE (root_id, "sequence");
 
@@ -651,6 +694,49 @@ CREATE TRIGGER trg_note_capture_history_write
 CREATE TRIGGER trg_note_capture_history_delete
   AFTER DELETE ON note
   FOR EACH ROW EXECUTE FUNCTION note_capture_history();
+
+CREATE OR REPLACE FUNCTION part_capture_history() RETURNS trigger AS $$
+BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
+  IF (TG_OP = 'DELETE') THEN
+    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
+    -- the unique history index holds and the latest history row for a deleted key
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
+    INSERT INTO part_history (id, _version, operation, data)
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
+    RETURN OLD;
+  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
+  INSERT INTO part_history (id, _version, operation, data)
+  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_part_bump_version
+  BEFORE UPDATE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
+
+CREATE TRIGGER trg_part_capture_history_write
+  AFTER INSERT OR UPDATE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
+
+CREATE TRIGGER trg_part_capture_history_delete
+  AFTER DELETE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
 
 CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$
 BEGIN

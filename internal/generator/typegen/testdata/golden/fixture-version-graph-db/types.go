@@ -1676,6 +1676,337 @@ func NoteFromYAMLNonStrict(data []byte) (*Note, error) {
 	return decoded, nil
 }
 
+// Part - A part of the recipe's write-up, nested under another part. Its rank is
+// a string order key, so Arrange places it among its siblings.
+type Part struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Recipe Recipe `json:"recipe"`
+
+	ParentKey *IdentityUUID `json:"parentKey,omitempty"`
+
+	Rank string `json:"rank"`
+
+	Heading string `json:"heading"`
+
+	EntityKey *IdentityUUID `json:"entityKey,omitempty"`
+
+	Ref RecipeRef `json:"ref"`
+
+	DeletedOnRef bool `json:"deletedOnRef"`
+
+	Version int64 `json:"_version"`
+}
+
+// NewPart returns a Part with @default values from the schema applied.
+// Fields without a declared default are left at their Go zero value.
+func NewPart() *Part {
+	return &Part{
+		DeletedOnRef: false,
+	}
+}
+
+// applyDefaults seeds the declared @default values on the receiver. Existing
+// non-zero / wrapper-set fields are preserved so this is safe to call before
+// json.Unmarshal: keys present in the payload overwrite the defaults, while
+// keys absent from the payload retain them.
+func (t *Part) applyDefaults() {
+	if t == nil {
+		return
+	}
+	var zeroDeletedOnRef bool
+	if t.DeletedOnRef == zeroDeletedOnRef {
+		t.DeletedOnRef = false
+	}
+
+}
+
+// MaskSecrets returns a copy of Part with secret fields cleared.
+func (t *Part) MaskSecrets() *Part {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Part{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.ParentKey = t.ParentKey
+
+	masked.Rank = t.Rank
+
+	masked.Heading = t.Heading
+
+	masked.EntityKey = t.EntityKey
+
+	maskedValueRef := t.Ref.MaskSecrets()
+	if maskedValueRef != nil {
+		masked.Ref = *maskedValueRef
+	}
+
+	masked.DeletedOnRef = t.DeletedOnRef
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys Part's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Part) JSONFieldNames() []string {
+	return []string{"id", "recipe", "parentKey", "rank", "heading", "entityKey", "ref", "deletedOnRef", "_version"}
+}
+
+// Validate validates all fields in Part
+func (t *Part) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate parentKey (optional)
+
+	// Validate optional pointer field
+	if t.ParentKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.ParentKey, false); !valid {
+			errors.SetFieldErrors("parentKey", fieldErrs)
+		}
+	}
+
+	// Validate entityKey (optional)
+
+	// Validate optional pointer field
+	if t.EntityKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.EntityKey, false); !valid {
+			errors.SetFieldErrors("entityKey", fieldErrs)
+		}
+	}
+
+	// Validate ref (required nested type)
+
+	if fieldErrs := t.Ref.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ref", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Part to JSON
+func (t *Part) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Part
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals Part from JSON with validation
+func (t *Part) UnmarshalJSON(data []byte) error {
+	// Apply @default values first; standard json decoding preserves these
+	// for any keys absent from the payload while overwriting them when
+	// a value is provided explicitly.
+	t.applyDefaults()
+	type Alias Part
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Part into a map representation.
+func (t *Part) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Part to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Part to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Part from a map using lenient decoding.
+func (t *Part) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Part from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Part from a map and rejects unknown fields.
+func (t *Part) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Part from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Part from JSON and rejects unknown fields.
+func (t *Part) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Part from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Part from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Part from JSON using lenient decoding.
+func (t *Part) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Part from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Part from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Part from YAML and rejects unknown fields.
+func (t *Part) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Part from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Part from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Part from YAML using lenient decoding.
+func (t *Part) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Part from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Part from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// PartFromMap builds Part from a map using lenient decoding.
+func PartFromMap(value map[string]any) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromMapStrict builds Part from a map and rejects unknown fields.
+func PartFromMapStrict(value map[string]any) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromJSON builds Part from JSON and rejects unknown fields.
+func PartFromJSON(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromJSONNonStrict builds Part from JSON using lenient decoding.
+func PartFromJSONNonStrict(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromYAML builds Part from YAML and rejects unknown fields.
+func PartFromYAML(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromYAMLNonStrict builds Part from YAML using lenient decoding.
+func PartFromYAMLNonStrict(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
 type Recipe struct {
 	Id *IdentityUUID `json:"id,omitempty"`

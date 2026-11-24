@@ -153,9 +153,11 @@ func checkGraphMember(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 		}
 	}
 	if cfg.Order != "" {
+		// An order is an integer, or a string key the core compares by its
+		// bytes (D137), which Arrange and OrderKeys make.
 		order := fieldNamed(td, cfg.Order)
-		if order == nil || order.TypeRef.Name != "Generic.Int64" || order.TypeRef.IsArray || order.TypeRef.IsMap {
-			r.errorf(td.Owner, "%s: @graphMember order %q must name a Generic.Int64 field", td.Name, cfg.Order)
+		if order == nil || (order.TypeRef.Name != "Generic.Int64" && order.TypeRef.Name != "string") || order.TypeRef.IsArray || order.TypeRef.IsMap {
+			r.errorf(td.Owner, "%s: @graphMember order %q must name a Generic.Int64 field or a string field", td.Name, cfg.Order)
 		}
 	}
 }

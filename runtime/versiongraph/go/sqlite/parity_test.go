@@ -242,6 +242,10 @@ func TestWriteParity(t *testing.T) {
 	}))(t).Ref
 	dinner = must(i.Commit(ctx, ann, dinner.ID, dinner.Version, engine.CommitOptions{Message: "dinner"}))(t).Ref
 	merged(i.Merge(ctx, ann, dinner.ID, lunch.ID, lunch.Version, nil, engine.CommitOptions{Message: "supper", Tag: true}))
+	// A kind ordered by a string key, as work the change set does not commit.
+	must(i.Save(ctx, ann, dinner.ID, dinner.Version, engine.Edits{
+		"part": {Upsert: rawRows(`{"entity_key":"Intro","rank":"V","heading":"Before you start"}`)},
+	}))(t)
 
 	got := dumpDatabase(t, db)
 	want := string(must(os.ReadFile(filepath.Join(vectorsDir, "typescript.sql")))(t))

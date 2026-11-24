@@ -1,0 +1,17 @@
+{
+  "name": "order_keys_between_keys_of_different_lengths",
+  "op": "order_keys",
+  "input": {
+    "after": "W1x",
+    "before": "Vz",
+    "count": 4
+  },
+  "expect": {
+    "keys": [
+      "Vza",
+      "W0B",
+      "W0l",
+      "W1M"
+    ]
+  }
+}

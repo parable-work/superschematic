@@ -95,6 +95,8 @@ type step struct {
 	SnapshotEvery int                       `json:"snapshotEvery"`
 	Sweep         *sweepOptions             `json:"sweep"`
 	Kind          string                    `json:"kind"`
+	Parent        string                    `json:"parent"`
+	Keys          []string                  `json:"keys"`
 	Statement     statements                `json:"statement"`
 	Args          []sqlArg                  `json:"args"`
 	Expect        expect                    `json:"expect"`
@@ -642,6 +644,11 @@ func (r *runner) run(t *testing.T, st step) {
 		}
 		var result *engine.SaveResult
 		if result, err = eng.Save(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref), edits); err == nil {
+			ref, saved = &result.Ref, result.Saved
+		}
+	case "arrange":
+		var result *engine.SaveResult
+		if result, err = eng.Arrange(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref), st.Kind, st.Parent, st.Keys); err == nil {
 			ref, saved = &result.Ref, result.Saved
 		}
 	case "commit", "seal", "revert":

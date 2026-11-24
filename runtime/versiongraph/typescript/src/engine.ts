@@ -116,7 +116,11 @@ export interface KindEdits {
  */
 export type Edits = Readonly<Record<string, KindEdits>>;
 
-/** A saved ref at its new version and the rows save upserted, as stored, in edit order per kind. */
+/**
+ * A saved ref at its new version and the rows save upserted, as stored, in
+ * edit order per kind. arrange returns one too: the rows it gave a new order
+ * key, in the order wanted.
+ */
 export interface SaveResult {
   ref: Ref;
   saved: Tree;
@@ -279,6 +283,26 @@ function actorID(actor: string): string {
     throw new NoActorError();
   }
   return id("actor", actor);
+}
+
+/**
+ * Makes count order keys that sort strictly between before and after, the
+ * start and the end when absent, null or empty: evenly spread, each as
+ * short as it can be (D137). A row saved with one of them as its order
+ * reads between the rows that hold the bounds. The core makes them, so
+ * every language makes the same keys, and refuses bounds no key lies
+ * between with no_order_key.
+ */
+export function orderKeys(
+  core: VersionGraph,
+  before: string | null | undefined,
+  after: string | null | undefined,
+  count: number,
+): string[] {
+  // Through run, so the keys read the same whatever JSON codec the core's
+  // typed operations were given.
+  const request = JSON.stringify({ before: before === "" ? null : before, after: after === "" ? null : after, count });
+  return (JSON.parse(core.run("order_keys", request)) as { keys: string[] }).keys;
 }
 
 /** A storage call's name: a method of SyncTx, and so of Tx. */
@@ -472,6 +496,30 @@ export class Engine {
    */
   async save(actor: string, ref: string, version: number, edits: Edits): Promise<SaveResult> {
     return this.#transact(this.#ops.save(actor, ref, version, edits));
+  }
+
+  /**
+   * Puts one parent's children of kind in the order keys gives, on a change
+   * set at version (D137). keys are the entity keys of every live child of
+   * parent in the ref's tree, in the order wanted; a parent that is absent,
+   * null or empty is none, the rows of the kind that have no parent. The
+   * longest run of children already in order keeps its order keys, and each
+   * other child takes a new one between its neighbors', written as the
+   * ref's row of it. It returns the ref at its new version and the rows
+   * written, as stored, in the order wanted. The kind's order is a string
+   * key: the core refuses another with order_not_a_key, and a list that is
+   * not exactly the parent's live children with invalid_arrangement. It
+   * refuses a sealed ref, and a primary line with PrimaryMergeOnlyError.
+   */
+  async arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): Promise<SaveResult> {
+    return this.#transact(this.#ops.arrange(actor, ref, version, kind, parent, keys));
   }
 
   /**
@@ -714,6 +762,18 @@ export class SyncEngine {
     return this.#transact(this.#ops.save(actor, ref, version, edits));
   }
 
+  /** Engine's arrange: puts one parent's children of kind in the order keys gives, on a change set at version. */
+  arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): SaveResult {
+    return this.#transact(this.#ops.arrange(actor, ref, version, kind, parent, keys));
+  }
+
   /** Engine's commit: commits a change set at version and moves its head. */
   commit(actor: string, ref: string, version: number, options: CommitOptions = {}): CommitResult {
     return this.#transact(this.#ops.commit(actor, ref, version, options));
@@ -789,11 +849,12 @@ export class SyncEngine {
 
 /**
  * One graph's operations, written once for both drivers. Each operation
- * checks its actor and its ids, and save the kinds its edits name, before
- * any transaction begins, and returns its transaction as steps that yield
- * each storage call; Engine and SyncEngine run the steps in one transaction
- * of their storage. The entity keys of save's deletes and unsets and of a
- * merge's or a rebase's resolutions are checked inside the transaction.
+ * checks its actor and its ids, save the kinds its edits name, and arrange
+ * its kind, its parent and its keys, before any transaction begins, and
+ * returns its transaction as steps that yield each storage call; Engine and
+ * SyncEngine run the steps in one transaction of their storage. The entity
+ * keys of save's deletes and unsets and of a merge's or a rebase's
+ * resolutions are checked inside the transaction.
  */
 class Operations {
   readonly core: VersionGraph;
@@ -889,6 +950,40 @@ class Operations {
           }
         }
       }
+      const moved = yield* tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
+      return { ref: moved, saved };
+    });
+  }
+
+  arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): Body<SaveResult> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    this.#kind(kind);
+    // No parent is the rows of the kind that have none, which the core
+    // reads from an absent member.
+    const parentMember =
+      parent === undefined || parent === null || parent === "" ? "" : `,"parent":${JSON.stringify(id("id", parent))}`;
+    const wanted = JSON.stringify(keys.map((key) => id("entity key", key)));
+    return this.#transaction(function* (tx) {
+      const saved: Tree = {};
+      const r = yield* this.#readDraft(tx, ref, version);
+      const { tree: composed } = yield* this.#compose(tx, r);
+      const arranged = this.#run(
+        "arrange",
+        `{"descriptor":${this.descriptor},"tree":${treeJson(composed)},"kind":${JSON.stringify(kind)}${parentMember},"keys":${wanted}}`,
+      );
+      for (const row of arranged.get("rows") as JsonValue[]) {
+        const stored = yield* this.#writeRow(tx, kind, r, stringifyJson(row), false, actor);
+        (saved[kind] ??= []).push(stored);
+      }
+      // The ref's version moves even when every child was in order already.
       const moved = yield* tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
       return { ref: moved, saved };
     });

@@ -10,7 +10,7 @@ from support import DESCRIPTOR
 import superschematic_versiongraph as vg
 from superschematic_versiongraph import errors
 from superschematic_versiongraph.canonical import CanonicalError
-from superschematic_versiongraph.engine import CommitOptions, Engine, KindEdits, SweepOptions
+from superschematic_versiongraph.engine import CommitOptions, Engine, KindEdits, SweepOptions, order_keys
 from superschematic_versiongraph.exactjson import JsonNumber, dumps, json_equal, loads
 
 # The codes runtime/versiongraph/README.md ("Engine and storage") lists, which
@@ -72,6 +72,28 @@ def test_bad_arguments_are_refused_before_a_transaction() -> None:
         engine.commit("Cook", "not a uuid", 1, CommitOptions())
     with pytest.raises(ValueError, match="unknown kind"):
         engine.save("Cook", "Mix", 1, {"stew": KindEdits()})
+    with pytest.raises(errors.NoActorError):
+        engine.arrange("", "Mix", 1, "part", None, [])
+    with pytest.raises(ValueError, match="unknown kind"):
+        engine.arrange("Cook", "Mix", 1, "stew", None, [])
+    with pytest.raises(CanonicalError, match="engine: id: "):
+        engine.arrange("Cook", "Mix", 1, "part", "not a uuid", [])
+    with pytest.raises(CanonicalError, match="engine: entity key: "):
+        engine.arrange("Cook", "Mix", 1, "part", None, ["Knead", "not a uuid"])
+
+
+def test_order_keys_are_the_cores() -> None:
+    assert order_keys(None, None, 3) == ["F", "V", "k"]
+    assert order_keys("V", "W", 1) == ["VV"]
+    assert order_keys("z", None, 0) == []
+    # An empty bound is none, as the Go engine reads it.
+    assert order_keys("", "", 1) == ["V"]
+    with pytest.raises(vg.VersionGraphError) as refused:
+        order_keys("W", "V", 1)
+    assert errors.error_code(refused.value) == "no_order_key"
+    with pytest.raises(vg.VersionGraphError) as refused:
+        order_keys("a b", None, 1)
+    assert errors.error_code(refused.value) == "invalid_request"
 
 
 def test_rows_travel_as_exact_json() -> None:

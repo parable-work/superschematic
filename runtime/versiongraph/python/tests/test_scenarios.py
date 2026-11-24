@@ -87,6 +87,8 @@ MEMBERS = {
         "snapshotEvery",
         "sweep",
         "kind",
+        "parent",
+        "keys",
         "statement",
         "args",
         "expect",
@@ -827,6 +829,17 @@ class Runner:
             elif op == "save":
                 name = text(step.get("ref"))
                 result = engine.save(actor, self.ref_id(name), self.version(step, name), self.edits(step))
+                ref, saved = result.ref, result.saved
+            elif op == "arrange":
+                name = text(step.get("ref"))
+                result = engine.arrange(
+                    actor,
+                    self.ref_id(name),
+                    self.version(step, name),
+                    text(step.get("kind")),
+                    text(step.get("parent")) or None,
+                    [text(key) for key in step.get("keys") or []],
+                )
                 ref, saved = result.ref, result.saved
             elif op in ("commit", "seal", "revert"):
                 name = text(step.get("ref"))

@@ -96,6 +96,8 @@ struct Step {
     snapshot_every: usize,
     sweep: Option<StepSweep>,
     kind: String,
+    parent: String,
+    keys: Vec<String>,
     #[serde(deserialize_with = "statements")]
     statement: Option<BTreeMap<String, String>>,
     args: Vec<SqlArg>,
@@ -807,6 +809,24 @@ impl Runner {
                     .map(|saved| {
                         out.ref_ = Some(saved.ref_);
                         out.saved = Some(saved.saved);
+                    })
+            }
+            "arrange" => {
+                // An empty parent is none, as the Go runner's is.
+                let parent = (!st.parent.is_empty()).then_some(st.parent.as_str());
+                engine
+                    .arrange(
+                        &actor,
+                        &self.ref_id(&st.ref_),
+                        self.version(st, &st.ref_),
+                        &st.kind,
+                        parent,
+                        &st.keys,
+                    )
+                    .await
+                    .map(|arranged| {
+                        out.ref_ = Some(arranged.ref_);
+                        out.saved = Some(arranged.saved);
                     })
             }
             "commit" | "seal" | "revert" => {

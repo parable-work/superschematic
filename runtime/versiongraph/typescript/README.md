@@ -3,7 +3,7 @@
 `@superschematic/versiongraph` is the version graph for TypeScript: the
 version-graph core (`runtime/versiongraph/rust`) built for
 `wasm32-unknown-unknown`, with typed `compose`, `merge`, `diff`,
-`contentHash` and `validate` over its JSON contract
+`contentHash`, `validate`, `orderKeys` and `arrange` over its JSON contract
 (`runtime/versiongraph/README.md`); the engine, which runs every graph
 operation over a storage adapter; the engine's Postgres and SQLite
 adapters; and the base of the facade tsgen generates per graph (D19 and
@@ -12,10 +12,10 @@ D32 in `docs/DECISIONS.md`).
 | Entry | Holds |
 | --- | --- |
 | `@superschematic/versiongraph` | The core: `init` and `initSync`, the operations, `VersionGraphError` and the contract's types. Runs in the browser, bun and Node, has no dependencies, and drives the module through its C ABI exports (`vg_alloc`, `vg_<op>`, `vg_free`, `vg_dealloc`) with no generated glue. |
-| `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
+| `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, `orderKeys`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
 | `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
-| `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
+| `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, the types it returns, and `orderKeys`. |
 
 ## The core
 
@@ -67,14 +67,28 @@ const main = await engine.createPrimary(actor, root, "main");
 ```
 
 The engine ports the Go engine (`runtime/versiongraph/go/engine`)
-operation for operation: `createPrimary`, `branch`, `save`, `commit`,
-`seal`, `merge`, `rebase`, `revert`, `release`, `released`, `materialize`,
-`compose`, `diff`, `history`, `discard`, `sweep` and `runSweeper`, with the
-walk ceiling, the snapshots, the schema-epoch check and the named errors
-and their stable codes. A canonical row is JSON text, so a number keeps its
-digits; durations are milliseconds; `runSweeper` stops when its
-`AbortSignal` aborts, runs no pass when it has already aborted, and lets a
-pass under way finish.
+operation for operation: `createPrimary`, `branch`, `save`, `arrange`,
+`commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `released`,
+`materialize`, `compose`, `diff`, `history`, `discard`, `sweep` and
+`runSweeper`, with the walk ceiling, the snapshots, the schema-epoch check
+and the named errors and their stable codes. A canonical row is JSON text,
+so a number keeps its digits; durations are milliseconds; `runSweeper`
+stops when its `AbortSignal` aborts, runs no pass when it has already
+aborted, and lets a pass under way finish.
+
+`arrange(actor, ref, version, kind, parent, keys)` puts one parent's
+children of a kind ordered by a string key in the order `keys` gives
+(D137): it keeps the longest run already in order and writes a new order
+key for each other child, as the change set's own rows, and returns what
+`save` returns. A `parent` that is absent, `null` or empty is the rows with
+no parent. `orderKeys(core, before, after, count)` is the Go engine's
+`OrderKeys`: the core's `order_keys` as a list of keys, for the order of a
+row a `save` inserts, an absent, `null` or empty bound being the start or
+the end. It takes a core and no storage. The facade has both, as
+`arrange(ref, version, kind, parent, keys)`, which names the kind as the
+graph's tree does and returns typed rows, and as
+`orderKeys(before, after, count)`, a method and a function of the entry,
+on the core every facade shares.
 
 The operations are written once, as generator functions that yield each
 storage call, and two drivers run them (D32). `Engine` awaits each call

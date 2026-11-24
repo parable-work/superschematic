@@ -1,10 +1,12 @@
 """superschematic_versiongraph: the version-graph core for Python.
 
 The core (runtime/versiongraph/rust) composes, merges, diffs, hashes and
-validates trees of versioned rows. This package calls it natively through a
-PyO3 extension module (``superschematic_versiongraph._native``), with typed
-``compose``, ``merge``, ``diff``, ``content_hash`` and ``validate`` over its
-JSON contract (runtime/versiongraph/README.md) and ``run`` for JSON text.
+validates trees of versioned rows, and makes and assigns the order keys of a
+kind ordered by a string. This package calls it natively through a PyO3
+extension module (``superschematic_versiongraph._native``), with typed
+``compose``, ``merge``, ``diff``, ``content_hash``, ``validate``,
+``order_keys`` and ``arrange`` over its JSON contract
+(runtime/versiongraph/README.md) and ``run`` for JSON text.
 
 Each operation encodes its input as JSON, runs the core, and decodes the
 output document. A refused input raises ``VersionGraphError``, whose ``code``
@@ -17,6 +19,8 @@ from typing import Any, Callable, Optional, Union, cast
 from . import _native
 from .contract import *  # noqa: F401,F403
 from .contract import (
+    ArrangeInput,
+    ArrangeOutput,
     ComposeInput,
     ComposeOutput,
     ContentHashOutput,
@@ -26,6 +30,8 @@ from .contract import (
     MergeInput,
     MergeOutput,
     OperationName,
+    OrderKeysInput,
+    OrderKeysOutput,
     TreeInput,
     ValidateOutput,
 )
@@ -39,6 +45,8 @@ __all__ = [
     "diff",
     "content_hash",
     "validate",
+    "order_keys",
+    "arrange",
     "run",
 ] + _contract_all
 
@@ -103,6 +111,14 @@ class VersionGraph:
         """Duplicate keys, the singleton rule, absent parents, cycles and orders out of range."""
         return cast(ValidateOutput, self._typed("validate", input))
 
+    def order_keys(self, input: OrderKeysInput) -> OrderKeysOutput:
+        """Order keys that sort strictly between two others, evenly spread."""
+        return cast(OrderKeysOutput, self._typed("order_keys", input))
+
+    def arrange(self, input: ArrangeInput) -> ArrangeOutput:
+        """The rows of one parent that need a new order key to read in the order wanted."""
+        return cast(ArrangeOutput, self._typed("arrange", input))
+
     def run(self, operation: OperationName, input: Union[str, bytes]) -> str:
         """Runs one operation on a JSON document and returns the output
         document as text, untouched by ``loads``. Raises VersionGraphError for
@@ -140,4 +156,6 @@ merge = _default.merge
 diff = _default.diff
 content_hash = _default.content_hash
 validate = _default.validate
+order_keys = _default.order_keys
+arrange = _default.arrange
 run = _default.run

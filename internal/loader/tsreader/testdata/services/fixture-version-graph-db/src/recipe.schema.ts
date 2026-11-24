@@ -70,6 +70,19 @@ export abstract class Note {
   body: string;
 }
 
+// A part of the recipe's write-up, nested under another part. Its rank is
+// a string order key, so Arrange places it among its siblings.
+@versioned
+@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank" })
+export abstract class Part {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  parentKey: Nullable<Identity.UUID>;
+  rank: string;
+  heading: string;
+}
+
 // The recipe's cover photo: at most one per ref.
 @versioned
 @graphMember({ graph: Recipe, singleton: true })

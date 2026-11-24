@@ -17,6 +17,7 @@ from .types import (
     Cover,
     Ingredient,
     Note,
+    Part,
     Step,
     Tasting,
     Utensil,
@@ -131,6 +132,39 @@ RECIPE_GRAPH_DESCRIPTOR = """{
         "recipe_id": "uuid",
         "ref_id": "uuid",
         "reply_to": "uuid"
+      }
+    },
+    {
+      "kind": "part",
+      "table": "part",
+      "historyTable": "part_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "root": "recipe_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "parent_key",
+        "kind": "part"
+      },
+      "order": "rank",
+      "excluded": [
+        "recipe_id"
+      ],
+      "history": {
+        "exclude": []
+      },
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "heading": "string",
+        "id": "uuid",
+        "parent_key": "uuid",
+        "rank": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
       }
     },
     {
@@ -270,6 +304,7 @@ class RecipeTree:
     cover: _typing.List[Cover] = _dataclasses.field(default_factory=list)
     ingredient: _typing.List[Ingredient] = _dataclasses.field(default_factory=list)
     note: _typing.List[Note] = _dataclasses.field(default_factory=list)
+    part: _typing.List[Part] = _dataclasses.field(default_factory=list)
     step: _typing.List[Step] = _dataclasses.field(default_factory=list)
     tasting: _typing.List[Tasting] = _dataclasses.field(default_factory=list)
     utensil: _typing.List[Utensil] = _dataclasses.field(default_factory=list)
@@ -286,6 +321,7 @@ class RecipeEdits:
     cover: _facade.TypedKindEdits[Cover] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
     ingredient: _facade.TypedKindEdits[Ingredient] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
     note: _facade.TypedKindEdits[Note] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
+    part: _facade.TypedKindEdits[Part] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
     step: _facade.TypedKindEdits[Step] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
     tasting: _facade.TypedKindEdits[Tasting] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
     utensil: _facade.TypedKindEdits[Utensil] = _dataclasses.field(default_factory=_facade.TypedKindEdits)
@@ -347,6 +383,22 @@ _RECIPE_GRAPH = _facade.FacadeGraph(
                 _facade.Column("_version", "_version"),
             ),
             Note.model_validate_json,
+        ),
+        _facade.FacadeKind(
+            "part",
+            "part",
+            (
+                _facade.Column("id", "id"),
+                _facade.Column("recipe_id", "recipe", relation_key="id"),
+                _facade.Column("parent_key", "parentKey", write=True),
+                _facade.Column("rank", "rank", write=True),
+                _facade.Column("heading", "heading", write=True),
+                _facade.Column("entity_key", "entityKey", write=True),
+                _facade.Column("ref_id", "ref", relation_key="id"),
+                _facade.Column("deleted_on_ref", "deletedOnRef"),
+                _facade.Column("_version", "_version"),
+            ),
+            Part.model_validate_json,
         ),
         _facade.FacadeKind(
             "step",

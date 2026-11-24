@@ -20,6 +20,7 @@ import type {
   Cover,
   Ingredient,
   Note,
+  Part,
   Step,
   Tasting,
   Utensil,
@@ -30,6 +31,7 @@ import {
   parseCoverFromJSON,
   parseIngredientFromJSON,
   parseNoteFromJSON,
+  parsePartFromJSON,
   parseStepFromJSON,
   parseTastingFromJSON,
   parseUtensilFromJSON,
@@ -146,6 +148,39 @@ export const RecipeGraphDescriptor: Descriptor = {
         "recipe_id": "uuid",
         "ref_id": "uuid",
         "reply_to": "uuid"
+      }
+    },
+    {
+      "kind": "part",
+      "table": "part",
+      "historyTable": "part_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "root": "recipe_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "parent_key",
+        "kind": "part"
+      },
+      "order": "rank",
+      "excluded": [
+        "recipe_id"
+      ],
+      "history": {
+        "exclude": []
+      },
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "heading": "string",
+        "id": "uuid",
+        "parent_key": "uuid",
+        "rank": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
       }
     },
     {
@@ -280,6 +315,7 @@ export interface RecipeKinds {
   cover: Cover;
   ingredient: Ingredient;
   note: Note;
+  part: Part;
   step: Step;
   tasting: Tasting;
   utensil: Utensil;
@@ -370,6 +406,21 @@ const recipeGraph: FacadeGraph<RecipeKinds> = {
       ],
       parse: parseNoteFromJSON,
     },
+    part: {
+      kind: "part",
+      columns: [
+        { column: "id", field: "id" },
+        { column: "recipe_id", field: "recipe", relationKey: "id" },
+        { column: "parent_key", field: "parentKey", write: true },
+        { column: "rank", field: "rank", write: true },
+        { column: "heading", field: "heading", write: true },
+        { column: "entity_key", field: "entityKey", write: true },
+        { column: "ref_id", field: "ref", relationKey: "id" },
+        { column: "deleted_on_ref", field: "deletedOnRef" },
+        { column: "_version", field: "_version" },
+      ],
+      parse: parsePartFromJSON,
+    },
     step: {
       kind: "step",
       columns: [
@@ -444,7 +495,7 @@ const recipeGraph: FacadeGraph<RecipeKinds> = {
  * through a ref takes the ref's expected version and fails with
  * VersionConflictError when the ref has moved on.
  */
-export class RecipeGraph extends VersionGraphFacade<RecipeKinds, RecipeEntityKind, RecipePatchOperation> {
+export class RecipeGraph extends VersionGraphFacade<RecipeKinds, RecipeEntityKind, RecipePatchOperation, 'part'> {
   constructor(client: Client, options: FacadeOptions = {}) {
     super(recipeGraph, client, options);
   }

@@ -2,6 +2,7 @@
 export * from './cover';
 export * from './ingredient';
 export * from './note';
+export * from './part';
 export * from './recipe';
 export * from './recipecommit';
 export * from './recipepatch';

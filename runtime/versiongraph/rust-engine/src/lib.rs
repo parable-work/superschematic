@@ -19,6 +19,11 @@
 //! chain, and a read stops at the nearest snapshot. [`Engine::sweep`] and
 //! [`Engine::run_sweeper`] are the graph's maintenance.
 //!
+//! A kind whose order column is a string holds order keys (D137).
+//! [`Engine::arrange`] puts one parent's children in the order wanted and
+//! writes new keys for the fewest rows it can, and [`order_keys`] makes
+//! keys between two others, for a row a save places itself.
+//!
 //! The engine's operations are `async`: each runs in one transaction of its
 //! [`Storage`]. [`Engine::on`] runs them over a storage the caller lends
 //! instead, which may borrow a transaction the caller holds, and
@@ -64,7 +69,7 @@ pub mod sqlite;
 pub mod storage;
 mod sweep;
 
-pub use crate::core::{Change, Conflict, Finding, Resolution, Take, Tree};
+pub use crate::core::{order_keys, Change, Conflict, Finding, Resolution, Take, Tree};
 pub use crate::engine::{
     ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, KindEdits, MergeResult, Options,
     ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY, DEFAULT_WALK_CEILING,

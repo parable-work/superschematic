@@ -179,7 +179,8 @@ const row = (columns: Record<string, unknown>): string => JSON.stringify(columns
  * descriptor whose utensil lacks its name: a primary line, a change set with
  * a utensil, a tagged merge and a release. Then with the fixture's, after
  * the utensil gained its name: a second change set that names it and adds
- * another, and a second tagged merge, which the release does not move to.
+ * another, and a second tagged merge, which the release does not move to;
+ * and, last, a part, whose order is a string key, as work no commit holds.
  */
 export function writeDatabase(client: SqliteClient): void {
   withSeededIDs(() => {
@@ -271,6 +272,10 @@ export function writeDatabase(client: SqliteClient): void {
     }).ref;
     dinner = i.commit(ann, dinner.id, dinner.version, { message: "dinner" }).ref;
     merged(i.merge(ann, dinner.id, lunch.id, lunch.version, [], { message: "supper", tag: true }));
+    // A kind ordered by a string key, as work the change set does not commit.
+    i.save(ann, dinner.id, dinner.version, {
+      part: { upsert: [row({ entity_key: "Intro", rank: "V", heading: "Before you start" })] },
+    });
   });
 }
 

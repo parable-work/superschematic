@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Part, Recipe, RecipeCommit, RecipePatch, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -127,7 +127,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 - **RecipeEntityKind** - The entity kinds of the Recipe version graph.
-  - Values: `Cover`, `Ingredient`, `Note`, `Step`, `Tasting`, `Utensil`
+  - Values: `Cover`, `Ingredient`, `Note`, `Part`, `Step`, `Tasting`, `Utensil`
 
 - **RecipePatchOperation** - What a patch of the Recipe version graph does to one entity.
   - Values: `Add`, `Update`, `Delete`
@@ -138,7 +138,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (12)
+### Types (13)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -146,6 +146,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Ingredient** - An ingredient one step uses.
 
 - **Note** - A cook's note, threaded under another note.
+
+- **Part** - A part of the recipe's write-up, nested under another part. Its rank is
+a string order key, so Arrange places it among its siblings.
 
 - **Recipe** - A recipe: the stable identity its steps and ingredients are versioned under.
 

@@ -82,7 +82,7 @@ the core.
 | `@versionGraph({ name?, schemaEpoch?, snapshotEvery? })` | Marks the root. The root is never overlaid and is in no commit. `name` prefixes the generated types (PascalCase) and tables (snake_case) and defaults to the root's name. `schemaEpoch`, default 0, is recorded on every commit. `snapshotEvery`, default 64, is how many commits past the nearest snapshot on its chain a commit is snapshotted at ([Snapshots](#snapshots)). |
 | `@graphMember({ graph, parent?, order?, singleton? })` | Marks an entity kind of the graph. `graph` is the root class. |
 | `parent: { key, of }` | Containment: the UUID field `key` holds the parent row's entity key, and `of` is a member of the same graph, the member itself included. Deleting a parent removes its descendants. |
-| `order` | A `Generic.Int64` field that orders siblings. |
+| `order` | The field that orders siblings: a `Generic.Int64`, or a `string` that holds an order key ([Order keys](#order-keys)). |
 | `singleton: true` | At most one live row of the kind per ref. |
 | `@conflictUnit(strategy)` | On a member's field: its merge unit. The strategies are below. |
 
@@ -99,7 +99,7 @@ Verification refuses:
   does not declare;
 - a `parent.of` that is not a member of the same graph, a `parent.key`
   that is not a UUID field, and an `order` that is not a `Generic.Int64`
-  field;
+  field or a `string` field;
 - a graph whose generated names collide with a definition of the schema or
   of another graph, and an index whose name collides with one the graph
   generates (`uq_<member>_entity_ref`, `uq_<graph>_ref_root_name`,
@@ -121,6 +121,67 @@ Verification refuses:
 A member has no `deletedAt` because a delete on a ref is a row that holds
 the entity's `(entityKey, ref)` slot. A soft delete would free the slot and
 hide the tombstone from every generated read.
+
+## Order keys
+
+Siblings sort by the member's `order` field and then by entity key. With a
+`Generic.Int64` order, a row placed between two others takes a number
+between theirs, and when none is left every later sibling is renumbered:
+on a change set each renumbered row is an override row, and two change sets
+that both insert near the head change the same rows.
+
+A `string` order holds an order key instead: one or more characters of
+`0-9A-Za-z`, compared by its bytes. Between any two keys there is another,
+so an insert writes one row.
+
+```ts
+@versioned
+@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank" })
+export abstract class Part {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  parentKey: Nullable<Identity.UUID>;
+  rank: string;
+  heading: string;
+}
+```
+
+The core makes the keys, so every language makes the same ones
+([`order_keys`](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#order_keys)),
+and each facade has both ways to use them:
+
+- `OrderKeys(before, after, count)` returns `count` keys that sort strictly
+  between two others, evenly spread, each as short as it can be. An empty
+  bound is the start or the end. Save a new row with one of them:
+  `OrderKeys("", "", 3)` is `F`, `V` and `k`, and `OrderKeys("V", "W", 1)`
+  is `VV`. It reads no database.
+- `Arrange(ref, version, kind, parent, keys)` takes the entity keys of one
+  parent's children in the order wanted. It keeps the longest run that is
+  already in order and writes new keys for the rest alone, as the change
+  set's own rows, so moving one row of forty writes one row. Arranged as
+  they stand, the children get no write. A list that is not exactly the
+  parent's live children is refused (`invalid_arrangement`), and so is a
+  kind ordered by an integer (`order_not_a_key`): save its numbers
+  yourself.
+
+Merge has no rule of its own for order. The field is one atomic unit:
+
+- Two change sets that insert into one gap make the same key. Their rows
+  are different entities, so they merge, both keep the key, and the entity
+  key orders them. Nothing reports it; arrange the parent to space them.
+- A move on one side merges with an edit of another field on the other.
+- Two moves of one row to different keys conflict on the order field, as
+  two edits of any field do.
+
+You may write keys of your own. Two things follow from the byte order: a
+key sorts before every key it begins (`A` before `A0`), and no key lies
+between a key and that key followed by zeros, which `OrderKeys` refuses as
+`no_order_key` and `Arrange` works around by giving the later row a new key
+too. The keys the core makes never end in `0`. A key appended after the
+last one halves what is left of the gap to the end, so a list built only by
+appends gains a character about every six rows; `OrderKeys("", "", n)`
+saved over the whole list spaces it evenly again.
 
 ## Conflict units
 
@@ -164,7 +225,7 @@ root key's.
 
 The core is one Rust crate, `runtime/versiongraph/rust`, with no IO, clock
 or randomness. It holds no per-kind code: a graph descriptor tells it
-which column of each kind's rows plays which role. Its five operations each
+which column of each kind's rows plays which role. Its seven operations each
 take one JSON document and return one:
 
 | Operation | Input | Output |
@@ -173,7 +234,9 @@ take one JSON document and return one:
 | `merge` | `{descriptor, base, ours, theirs, resolutions?}` | `{merged, conflicts, entities}`: a three-way merge per entity, then per conflict unit. |
 | `diff` | `{descriptor, from, to}` | `{changes}`: each entity's `ADD`, `UPDATE` or `DELETE`, with `to`'s row. |
 | `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, less each declared one that is `null`, which hashes as one a row lacks, rows sorted by entity key. |
-| `validate` | `{descriptor, tree}` | `{findings}`: duplicate entity keys, the singleton rule, absent parents, parent cycles, orders outside the integers a JavaScript number holds exactly. |
+| `validate` | `{descriptor, tree}` | `{findings}`: duplicate entity keys, the singleton rule, absent parents, parent cycles, integer orders outside the integers a JavaScript number holds exactly. |
+| `order_keys` | `{before?, after?, count}` | `{keys}`: `count` [order keys](#order-keys) that sort strictly between two others, evenly spread, each as short as it can be. |
+| `arrange` | `{descriptor, tree, kind, parent?, keys}` | `{rows}`: the rows of one parent's children that need a new order key to read in the order `keys` gives. |
 
 A tree is `{"<kind>": [row, ...]}`, and a row is a canonical row: a JSON
 object keyed by column name whose values are the schema runtime's JSON for
@@ -325,8 +388,8 @@ row it reads with it.
 ## The engine and its adapters
 
 The Go engine (package `engine` in `runtime/versiongraph/go`) implements
-every graph operation once: create a primary line, branch, save, commit,
-seal, merge, rebase, revert, release, released, materialize, compose, diff,
+every graph operation once: create a primary line, branch, save, arrange,
+commit, seal, merge, rebase, revert, release, released, materialize, compose, diff,
 history, discard and sweep, with the walk ceiling, the schema-epoch check
 and the named errors. It reads and writes canonical rows only, takes every
 id as a UUID in its canonical form (base62) or hyphenated, and takes an
@@ -572,6 +635,8 @@ released, err := g.Released(ctx, *recipe.Id)                    // the pointer a
 | `CreatePrimary(ctx, root, name)` | Creates a primary line of `root`. |
 | `Branch(ctx, fromRef, name)` | Creates a change set of `fromRef` whose base is `fromRef`'s head commit. |
 | `Save(ctx, ref, version, RecipeEdits)` | On a change set, applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates). Every ref holds its own row of an entity, so the row's id is never the caller's: Save ignores it and the table's default generates it, whether the `@key` is `AutoGenerate<Identity.UUID>` or a plain `Identity.UUID`. `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`, a primary line with `ErrPrimaryMergeOnly`. |
+| `Arrange(ctx, ref, version, kind, parent, keys)` | On a change set, puts one parent's children of `kind` in the order `keys` gives ([Order keys](#order-keys)): the longest run already in order keeps its keys, and each other child's new key is written as the ref's row of it. `parent` is a pointer, nil for the rows with no parent. It returns what `Save` returns, the ref and the rows written, and moves the ref's `_version` also when nothing moved. The core's `invalid_arrangement` and `order_not_a_key` come back as a `*versiongraph.Error` with that `Code`. `ErrRefSealed` on a sealed ref, `ErrPrimaryMergeOnly` on a primary line. |
+| `OrderKeys(before, after, count)` | `count` order keys that sort strictly between `before` and `after`, the start and the end when empty. No transaction and no user. |
 | `Commit(ctx, ref, version, RecipeCommitOptions)` | Composes a change set, checks the tree with `validate`, diffs it against the ref's last commit (or its base), and writes a commit with one patch per changed entity pinning the winning row's `(id, _version)`. Moves the ref's head. `Message` is stored; `Tag` takes the root's next `sequence`, which makes the commit a published version. `ErrNothingToCommit` when nothing changed; an `*InvalidTreeError` (`ErrInvalidTree`) lists what `validate` found; `ErrPrimaryMergeOnly` on a primary line. |
 | `Seal(ctx, ref, version)` | Commits a change set when it has changes and sets `sealedAt`. The ref then refuses writes. `ErrPrimaryMergeOnly` on a primary line. |
 | `Merge(ctx, source, target, targetVersion, resolutions, RecipeCommitOptions)` | Merges the source's head commit into the target against the source's base. Without conflicts it writes the result onto the target and commits in the same transaction, with the options' message and tag. It is the only write a primary line takes. With conflicts left after `resolutions` it returns them as `[]RecipeConflict` (kind, entity key, unit path, the base, ours and theirs values, and each side's author) and writes nothing. A `RecipeResolution` takes a side (`versiongraph.Take`) or gives a value for one conflict's path. |
@@ -1203,6 +1268,10 @@ SQLite ones among them, on the default Python and on 3.9.
   own rows.
 - The core reads whole trees, and `Materialize` walks commits back to the
   nearest snapshot, up to its ceiling.
+- The facades name `Arrange`'s kind as they name a kind elsewhere: Go and
+  Rust by the generated entity kind enum, Python by the descriptor's kind
+  name (`"part"`), and TypeScript by the tree member (`"part"`), whose type
+  lists only the kinds ordered by a string key.
 - A member's `parent.of` names one type; a parent of several types is not
   supported.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit

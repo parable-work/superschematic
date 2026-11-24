@@ -330,6 +330,111 @@ pub struct NoteFilter {
     pub any_of: Vec<NoteFilter>,
 }
 
+/// A row of `Part`.
+///
+/// A part of the recipe's write-up, nested under another part. Its rank is
+/// a string order key, so Arrange places it among its siblings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartRow {
+    pub id: IdentityUUID,
+    #[serde(rename = "recipeId")]
+    pub recipe_id: IdentityUUID,
+    #[serde(default, rename = "parentKey")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(rename = "entityKey")]
+    pub entity_key: IdentityUUID,
+    #[serde(rename = "refId")]
+    pub ref_id: IdentityUUID,
+    /// True when the row deletes the entity on its ref.
+    #[serde(rename = "deletedOnRef")]
+    pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}
+
+/// What a create of a row of `Part` sets; a member left unset takes its
+/// column's default, or the schema's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PartCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(rename = "recipeId")]
+    pub recipe_id: IdentityUUID,
+    #[serde(rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    #[serde(rename = "refId")]
+    pub ref_id: IdentityUUID,
+    /// True when the row deletes the entity on its ref.
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
+}
+
+/// What an update of a row of `Part` sets: each member that is `Some`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PartUpdate {
+    #[serde(rename = "recipeId", skip_serializing_if = "Option::is_none")]
+    pub recipe_id: Option<IdentityUUID>,
+    /// `Some(None)` sets the column NULL.
+    #[serde(rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<Option<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<String>,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    #[serde(rename = "refId", skip_serializing_if = "Option::is_none")]
+    pub ref_id: Option<IdentityUUID>,
+    /// True when the row deletes the entity on its ref.
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
+}
+
+/// The rows of `Part` a read or a write finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PartFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "recipeId", skip_serializing_if = "Option::is_none")]
+    pub recipe_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<orm::Equals<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<orm::Text<String>>,
+    #[serde(rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "refId", skip_serializing_if = "Option::is_none")]
+    pub ref_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<orm::Equals<bool>>,
+    #[serde(rename = "_version", skip_serializing_if = "Option::is_none")]
+    pub version: Option<orm::Ordered<i64>>,
+    /// The rows whose recipe is among the Recipe rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Box<RecipeFilter>>,
+    /// The rows whose ref is among the RecipeRef rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<Box<RecipeRefFilter>>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<PartFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<PartFilter>,
+}
+
 /// A row of `Recipe`.
 ///
 /// A recipe: the stable identity its steps and ingredients are versioned under.
@@ -380,6 +485,9 @@ pub struct RecipeFilter {
     /// The rows some Note row's recipe points at, or those none does.
     #[serde(rename = "referencedByNoteRecipe", skip_serializing_if = "Option::is_none")]
     pub referenced_by_note_recipe: Option<orm::ReferencedBy>,
+    /// The rows some Part row's recipe points at, or those none does.
+    #[serde(rename = "referencedByPartRecipe", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_part_recipe: Option<orm::ReferencedBy>,
     /// The rows some RecipeCommit row's root points at, or those none does.
     #[serde(rename = "referencedByRecipeCommitRoot", skip_serializing_if = "Option::is_none")]
     pub referenced_by_recipe_commit_root: Option<orm::ReferencedBy>,
@@ -744,6 +852,9 @@ pub struct RecipeRefFilter {
     /// The rows some Note row's ref points at, or those none does.
     #[serde(rename = "referencedByNoteRef", skip_serializing_if = "Option::is_none")]
     pub referenced_by_note_ref: Option<orm::ReferencedBy>,
+    /// The rows some Part row's ref points at, or those none does.
+    #[serde(rename = "referencedByPartRef", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_part_ref: Option<orm::ReferencedBy>,
     /// The rows some RecipeCommit row's ref points at, or those none does.
     #[serde(rename = "referencedByRecipeCommitRef", skip_serializing_if = "Option::is_none")]
     pub referenced_by_recipe_commit_ref: Option<orm::ReferencedBy>,
@@ -1946,6 +2057,221 @@ pub const POSTGRES: &str = r#"{
       ]
     },
     {
+      "name": "Part",
+      "table": "part",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "part.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "recipeId",
+          "column": "recipe_id",
+          "field": "recipe",
+          "qualified": "part.recipe_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Recipe",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "parentKey",
+          "column": "parent_key",
+          "field": "parentKey",
+          "qualified": "part.parent_key",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "rank",
+          "column": "rank",
+          "field": "rank",
+          "qualified": "part.rank",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "heading",
+          "column": "heading",
+          "field": "heading",
+          "qualified": "part.heading",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "entityKey",
+          "column": "entity_key",
+          "field": "entityKey",
+          "qualified": "part.entity_key",
+          "uuid": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "refId",
+          "column": "ref_id",
+          "field": "ref",
+          "qualified": "part.ref_id",
+          "uuid": true,
+          "required": true,
+          "relation": "RecipeRef",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "deletedOnRef",
+          "column": "deleted_on_ref",
+          "field": "deletedOnRef",
+          "qualified": "part.deleted_on_ref",
+          "boolean": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "_version",
+          "column": "_version",
+          "field": "_version",
+          "qualified": "part._version",
+          "auto": true,
+          "required": true,
+          "internal": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+        "qualifiedColumns": "\"part\".\"id\", \"part\".\"recipe_id\", \"part\".\"parent_key\", \"part\".\"rank\", \"part\".\"heading\", \"part\".\"entity_key\", \"part\".\"ref_id\", \"part\".\"deleted_on_ref\", \"part\".\"_version\"",
+        "getOne": "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM part%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM part%s%s%s",
+        "count": "SELECT COUNT(*) FROM part%s",
+        "page": "SELECT %s FROM part%s%s LIMIT %d",
+        "pageAfterKey": "part.id %s %s",
+        "pageAfter": "(%s, part.id) %s ((SELECT %s FROM part AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM part AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", part.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM part WHERE part.id = $1)",
+        "insert": "INSERT INTO part (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO part (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE part SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+        "updateMany": "UPDATE part SET %s%s",
+        "updatedAt": "updated_at = $%d",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO part (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM part WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM part WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM part WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "entityKey,ref": {
+          "conflict": "(entity_key, ref_id)",
+          "keep": "entity_key = part.entity_key",
+          "rows": "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE (entity_key, ref_id) IN (%s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = part.id",
+          "rows": "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE (id) IN (%s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "recipe",
+          "target": "Recipe",
+          "probe": "part.recipe_id IN (SELECT recipe.id FROM recipe%s)"
+        },
+        {
+          "field": "ref",
+          "target": "RecipeRef",
+          "probe": "part.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)"
+        }
+      ]
+    },
+    {
       "name": "Recipe",
       "table": "recipe",
       "key": "id",
@@ -2075,6 +2401,10 @@ pub const POSTGRES: &str = r#"{
         {
           "filter": "referencedByNoteRecipe",
           "probe": "SELECT 1 FROM note WHERE note.recipe_id = recipe.id"
+        },
+        {
+          "filter": "referencedByPartRecipe",
+          "probe": "SELECT 1 FROM part WHERE part.recipe_id = recipe.id"
         },
         {
           "filter": "referencedByRecipeCommitRoot",
@@ -2841,6 +3171,10 @@ pub const POSTGRES: &str = r#"{
         {
           "filter": "referencedByNoteRef",
           "probe": "SELECT 1 FROM note WHERE note.ref_id = recipe_ref.id"
+        },
+        {
+          "filter": "referencedByPartRef",
+          "probe": "SELECT 1 FROM part WHERE part.ref_id = recipe_ref.id"
         },
         {
           "filter": "referencedByRecipeCommitRef",
@@ -4158,6 +4492,10 @@ pub mod postgres {
     pub type NoteRepository<'a, C> =
         orm::postgres::Typed<'a, C, NoteRow, NoteCreate, NoteUpdate, NoteFilter, IdentityUUID>;
 
+    /// The repository of `Part` on a Postgres client.
+    pub type PartRepository<'a, C> =
+        orm::postgres::Typed<'a, C, PartRow, PartCreate, PartUpdate, PartFilter, IdentityUUID>;
+
     /// The repository of `Recipe` on a Postgres client.
     pub type RecipeRepository<'a, C> =
         orm::postgres::Typed<'a, C, RecipeRow, RecipeCreate, RecipeUpdate, RecipeFilter, IdentityUUID>;
@@ -4271,6 +4609,11 @@ pub mod postgres {
         /// The repository of `Note`.
         pub fn note(&self) -> Result<NoteRepository<'_, C>, orm::Error> {
             self.0.typed("Note")
+        }
+
+        /// The repository of `Part`.
+        pub fn part(&self) -> Result<PartRepository<'_, C>, orm::Error> {
+            self.0.typed("Part")
         }
 
         /// The repository of `Recipe`.

@@ -127,6 +127,39 @@ const RecipeGraphDescriptor = `{
       }
     },
     {
+      "kind": "part",
+      "table": "part",
+      "historyTable": "part_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "root": "recipe_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "parent_key",
+        "kind": "part"
+      },
+      "order": "rank",
+      "excluded": [
+        "recipe_id"
+      ],
+      "history": {
+        "exclude": []
+      },
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "heading": "string",
+        "id": "uuid",
+        "parent_key": "uuid",
+        "rank": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
+    },
+    {
       "kind": "step",
       "table": "step",
       "historyTable": "step_history",
@@ -294,6 +327,7 @@ type RecipeTree struct {
 	Cover      []*types.Cover
 	Ingredient []*types.Ingredient
 	Note       []*types.Note
+	Part       []*types.Part
 	Step       []*types.Step
 	Tasting    []*types.Tasting
 	Utensil    []*types.Utensil
@@ -311,6 +345,7 @@ type RecipeEdits struct {
 	Cover      GraphEdits[types.Cover]
 	Ingredient GraphEdits[types.Ingredient]
 	Note       GraphEdits[types.Note]
+	Part       GraphEdits[types.Part]
 	Step       GraphEdits[types.Step]
 	Tasting    GraphEdits[types.Tasting]
 	Utensil    GraphEdits[types.Utensil]
@@ -432,6 +467,9 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 		if err := recipeNoteEdits(canonicalEdits, edits.Note); err != nil {
 			return err
 		}
+		if err := recipePartEdits(canonicalEdits, edits.Part); err != nil {
+			return err
+		}
 		if err := recipeStepEdits(canonicalEdits, edits.Step); err != nil {
 			return err
 		}
@@ -457,6 +495,55 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 		return nil, err
 	}
 	return result, nil
+}
+
+// Arrange puts one parent's children of kind in the order keys gives, on a
+// change set at version. keys are the entity keys of every live child of
+// parent in the ref's tree, in the order wanted; a nil parent is none, the
+// rows of the kind that have no parent. The longest run of children already
+// in order keeps its order keys and each other child takes a new one, as
+// the ref's row of it, so a move writes the rows that moved and no others.
+// It returns the ref at its new _version and the rows written. The kind's
+// order is a string key: another is refused with the core's code
+// order_not_a_key, and a list that is not exactly the parent's live
+// children with invalid_arrangement. It refuses a sealed ref, and a primary
+// line with ErrPrimaryMergeOnly.
+func (g *RecipeGraph) Arrange(ctx context.Context, ref types.IdentityUUID, version int64, kind types.RecipeEntityKind, parent *types.IdentityUUID, keys []types.IdentityUUID) (*RecipeSaveResult, error) {
+	result := &RecipeSaveResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		parentKey := ""
+		if parent != nil {
+			parentKey = uuidText(*parent)
+		}
+		wanted := make([]string, len(keys))
+		for i, key := range keys {
+			wanted[i] = uuidText(key)
+		}
+		saved, err := e.Arrange(ctx, actor, uuidText(ref), version, string(kind), parentKey, wanted)
+		if err != nil {
+			return err
+		}
+		tree, err := g.tree(&engine.TreeResult{Tree: saved.Saved})
+		if err != nil {
+			return err
+		}
+		result.Saved = *tree
+		result.Ref, err = g.ref(ctx, tx, saved.Ref.ID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OrderKeys makes count order keys that sort strictly between before and
+// after, the start and the end when empty: evenly spread, each as short as
+// it can be. A row saved with one of them as its order reads between the
+// rows that hold the bounds. The version-graph core makes them, so every
+// language makes the same keys. It reads no database.
+func (g *RecipeGraph) OrderKeys(before, after string, count int) ([]string, error) {
+	return engine.OrderKeys(before, after, count)
 }
 
 // Commit composes a change set at version, diffs it against its last commit
@@ -806,6 +893,13 @@ func (g *RecipeGraph) tree(tree *engine.TreeResult) (*RecipeTree, error) {
 		}
 		result.Note = append(result.Note, row)
 	}
+	for _, raw := range tree.Tree["part"] {
+		row, err := decodePartHistoryData(raw)
+		if err != nil {
+			return nil, err
+		}
+		result.Part = append(result.Part, row)
+	}
 	for _, raw := range tree.Tree["step"] {
 		row, err := decodeStepHistoryData(raw)
 		if err != nil {
@@ -945,6 +1039,46 @@ func recipeNoteRow(v *types.Note) (json.RawMessage, error) {
 	values["body"] = v.Body
 	values["entity_key"] = graphOptional(v.EntityKey)
 	return recipeGraphRuntime.row("note", values)
+}
+
+// recipePartEdits adds the typed part edits of a Save to
+// its canonical edits.
+func recipePartEdits(out engine.Edits, edits GraphEdits[types.Part]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipePartRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["part"] = kind
+	return nil
+}
+
+// recipePartRow is the canonical row of a typed part,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipePartRow(v *types.Part) (json.RawMessage, error) {
+	if v == nil {
+		return nil, fmt.Errorf("version graph: a nil part upsert")
+	}
+	values := map[string]any{}
+	values["parent_key"] = graphOptional(v.ParentKey)
+	values["rank"] = v.Rank
+	values["heading"] = v.Heading
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("part", values)
 }
 
 // recipeStepEdits adds the typed step edits of a Save to

@@ -82,6 +82,12 @@ type Kind struct {
 	Columns map[string]string `json:"columns"`
 }
 
+// OrderIsKey reports whether the kind's siblings are ordered by a string
+// key (D137), which Arrange and OrderKeys make, rather than by an integer.
+func (k Kind) OrderIsKey() bool {
+	return k.Order != "" && k.Columns[k.Order] == "string"
+}
+
 // History is what a kind's history keeps (D32): the retention, exclusions
 // and actor column the sql generator writes its capture trigger and prune
 // function from, computed by the same code (sqlutil.VersionedHistory).

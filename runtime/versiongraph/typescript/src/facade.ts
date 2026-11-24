@@ -17,6 +17,7 @@ import { canonicalRow } from "./canonical.js";
 import type { Descriptor, Finding, Take } from "./contract.js";
 import {
   Engine,
+  orderKeys as coreOrderKeys,
   type Change,
   type CommitOptions,
   type SweepOptions,
@@ -136,7 +137,11 @@ export interface TypedChange<KindName extends string, Operation extends string> 
   row?: string;
 }
 
-/** A saved ref at its new version and the rows save upserted, in edit order per kind. */
+/**
+ * A saved ref at its new version and the rows save upserted, in edit order
+ * per kind. arrange returns one too: the rows it gave a new order key, in
+ * the order wanted.
+ */
 export interface TypedSaveResult<Kinds> {
   ref: Ref;
   saved: TypedTree<Kinds>;
@@ -195,6 +200,22 @@ function core(): Promise<VersionGraph> {
 }
 
 /**
+ * Makes count order keys that sort strictly between before and after, the
+ * start and the end when absent, null or empty: evenly spread, each as
+ * short as it can be (D137). A value saved with one of them as its order
+ * reads between the rows that hold the bounds. The core makes them, so
+ * every language makes the same keys, and refuses bounds no key lies
+ * between with no_order_key. It reads and writes no database.
+ */
+export async function orderKeys(
+  before: string | null | undefined,
+  after: string | null | undefined,
+  count: number,
+): Promise<string[]> {
+  return coreOrderKeys(await core(), before, after, count);
+}
+
+/**
  * A version graph's typed operations over the engine and the Postgres
  * adapter: refs that hold sparse override rows of each member kind, commits
  * that pin the exact row versions a ref sealed, and merges between refs. A
@@ -203,11 +224,15 @@ function core(): Promise<VersionGraph> {
  * names one tagged commit. Every operation runs in one transaction of the
  * client, and every write through a ref takes the ref's expected version
  * and fails with VersionConflictError when the ref has moved on.
+ *
+ * Ordered names the kinds arrange takes, as Kinds names them: the ones
+ * whose order is a string key. Every kind when a facade does not say.
  */
 export class VersionGraphFacade<
   Kinds extends { [K in keyof Kinds]: object },
   KindName extends string = string,
   Operation extends string = Change["operation"],
+  Ordered extends keyof Kinds = keyof Kinds,
 > {
   readonly #graph: FacadeGraph<Kinds>;
   readonly #client: Client;
@@ -290,6 +315,46 @@ export class VersionGraphFacade<
     }
     const saved = await (await this.#run()).save(this.#actor, ref, version, canonical);
     return { ref: saved.ref, saved: this.#tree({ tree: saved.saved, contentHash: "", findings: [] }) };
+  }
+
+  /**
+   * Puts one parent's children of kind in the order keys gives, on a change
+   * set at version (D137). keys are the entity keys of every live child of
+   * parent in the ref's tree, in the order wanted; a parent that is absent,
+   * null or empty is none, the rows of the kind that have no parent. The
+   * longest run of children already in order keeps its order keys, and each
+   * other child takes a new one between its neighbors', written as the
+   * ref's row of it. It returns the ref at its new version and the rows
+   * written, in the order wanted. The kind's order is a string key: another
+   * kind is refused with the code order_not_a_key, and a list that is not
+   * exactly the parent's live children with invalid_arrangement. It refuses
+   * a sealed ref, and a primary line with PrimaryMergeOnlyError.
+   */
+  async arrange(
+    ref: string,
+    version: number,
+    kind: Ordered & string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): Promise<TypedSaveResult<Kinds>> {
+    const member = this.#graph.kinds[kind] as FacadeKind<unknown> | undefined;
+    if (member === undefined) {
+      throw new Error(`version graph: unknown kind ${String(kind)}`);
+    }
+    const arranged = await (await this.#run()).arrange(this.#actor, ref, version, member.kind, parent, keys);
+    return { ref: arranged.ref, saved: this.#tree({ tree: arranged.saved, contentHash: "", findings: [] }) };
+  }
+
+  /**
+   * Makes count order keys that sort strictly between before and after, the
+   * start and the end when absent, null or empty: evenly spread, each as
+   * short as it can be. A value saved with one of them as its order reads
+   * between the rows that hold the bounds, so an insert writes one row.
+   * Bounds no key lies between are refused with the code no_order_key. It
+   * reads and writes no database.
+   */
+  async orderKeys(before: string | null | undefined, after: string | null | undefined, count: number): Promise<string[]> {
+    return orderKeys(before, after, count);
   }
 
   /**

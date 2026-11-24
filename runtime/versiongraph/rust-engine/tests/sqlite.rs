@@ -4,7 +4,8 @@
 //! tables and foreign keys, two graphs in one file, the name function, the
 //! clock, its ids, the write lock a second connection waits on, a dropped
 //! transaction, the caller's transaction, an operation run over a storage
-//! it borrows with no executor, the canonical vectors as a round trip, and
+//! it borrows with no executor, arrange's arguments and a typed arrange
+//! through the facade base, the canonical vectors as a round trip, and
 //! the rusqlite binding: the Rust port of the TypeScript package's
 //! test/sqlite-cases.ts. Then the shared SQLite vectors (testdata/sqlite):
 //! the layout, and a database the TypeScript adapter wrote, read back
@@ -2037,6 +2038,189 @@ fn run_on_runs_an_operation_over_a_storage_it_borrows_with_no_executor() {
         "not ready",
         &ready(std::future::pending::<()>()),
     );
+}
+
+/// The parts of [`a_draft_of_parts`], hyphenated: their entity keys are
+/// `A`, `1` and `2`.
+const DOUGH: &str = "00000000-0000-0000-0000-00000000000a";
+const MIX: &str = "00000000-0000-0000-0000-000000000001";
+const KNEAD: &str = "00000000-0000-0000-0000-000000000002";
+
+/// A change set that holds a part, the dough, and its two children, Mix
+/// before Knead, at the version its save left it; the engine, which has no
+/// storage of its own; and the storage it borrows.
+fn a_draft_of_parts() -> (Engine, SqliteStorage<Rusqlite>, Ref) {
+    use superschematic_versiongraph_engine::ready;
+
+    let client = Rusqlite::new(memory());
+    let adapter =
+        Arc::new(sqlite::Adapter::new(&descriptor(), options()).expect("the fixture's adapter"));
+    ready(adapter.create_tables(&client))
+        .expect("one poll")
+        .expect("create the layout");
+    let storage = ready(adapter.storage(client))
+        .expect("one poll")
+        .expect("bind the client");
+    let engine = Engine::unbound(&descriptor(), Options::default()).expect("the engine");
+    let main = engine
+        .run_on(&storage, |e| e.create_primary(COOK, BREAD, "main"))
+        .expect("create the primary line");
+    let draft = engine
+        .run_on(&storage, |e| e.branch(COOK, &main.id, "draft"))
+        .expect("branch");
+    let parts = upserts(&[(
+        "part",
+        vec![
+            json!({"entity_key": "A", "parent_key": null, "rank": "V", "heading": "The dough"}),
+            json!({"entity_key": "1", "parent_key": "A", "rank": "F", "heading": "Mix"}),
+            json!({"entity_key": "2", "parent_key": "A", "rank": "V", "heading": "Knead"}),
+        ],
+    )]);
+    let saved = engine
+        .run_on(&storage, |e| e.save(COOK, &draft.id, draft.version, &parts))
+        .expect("save");
+    (engine, storage, saved.ref_)
+}
+
+/// Arrange takes each id hyphenated or canonical, as every operation does,
+/// and runs through `run_on` with no executor. No parent is `None`: the rows
+/// that have none. It refuses what it cannot read before it begins a
+/// transaction: an unknown kind, and a parent or a key that is not a UUID,
+/// an empty parent among them.
+#[test]
+fn arrange_takes_hyphenated_ids_and_refuses_what_it_cannot_read_before_it_begins() {
+    use superschematic_versiongraph_engine::ready;
+
+    let (engine, storage, draft) = a_draft_of_parts();
+    let keys = [KNEAD.to_owned(), MIX.to_owned()];
+    let arranged = engine
+        .run_on(&storage, |e| {
+            e.arrange(COOK, &draft.id, draft.version, "part", Some(DOUGH), &keys)
+        })
+        .expect("arrange");
+    assert_eq!(arranged.ref_.version, draft.version + 1);
+    let written = &arranged.saved["part"];
+    assert_eq!(written.len(), 1, "one of two rows moves: {written:?}");
+    assert_eq!(written[0]["parent_key"], "A", "{written:?}");
+    let tree = engine
+        .run_on(&storage, |e| e.compose(&draft.id))
+        .expect("compose");
+    let children: Vec<&str> = tree.tree["part"]
+        .iter()
+        .filter(|row| row["parent_key"] == "A")
+        .map(|row| row["entity_key"].as_str().expect("an entity key"))
+        .collect();
+    assert_eq!(children, ["2", "1"], "{:?}", tree.tree);
+
+    // The rows with no parent, in the order they have: nothing to write,
+    // and the ref's version still moves.
+    let roots = ["A".to_owned()];
+    let unmoved = engine
+        .run_on(&storage, |e| {
+            e.arrange(COOK, &draft.id, arranged.ref_.version, "part", None, &roots)
+        })
+        .expect("arrange the rows with no parent");
+    assert!(unmoved.saved.is_empty(), "{:?}", unmoved.saved);
+    assert_eq!(unmoved.ref_.version, arranged.ref_.version + 1);
+
+    // The engine has no storage of its own, so an operation that reaches
+    // its transaction fails for that, and one refused before it does not.
+    let version = unmoved.ref_.version;
+    let own = |kind: &'static str, parent: Option<&'static str>, keys: Vec<String>| {
+        ready(engine.arrange(COOK, &draft.id, version, kind, parent, &keys)).expect("one poll")
+    };
+    refused(
+        "an unknown kind",
+        "unknown kind",
+        &own("garnish", None, Vec::new()),
+    );
+    refused(
+        "an empty parent",
+        "parent",
+        &own("part", Some(""), keys.to_vec()),
+    );
+    refused(
+        "a parent that is not a UUID",
+        "parent",
+        &own("part", Some("the dough"), keys.to_vec()),
+    );
+    refused(
+        "a key that is not a UUID",
+        "entity key",
+        &own("part", Some(DOUGH), vec!["the mix".to_owned()]),
+    );
+    refused(
+        "an arrangement the engine can read",
+        "no storage of its own",
+        &own("part", Some(DOUGH), keys.to_vec()),
+    );
+}
+
+/// A generated facade's arrange needs nothing of the facade base but what
+/// it has: the kind, the parent and each key reach the engine through
+/// `text`, and each row written comes back through `value`. The key the
+/// row took is one `order_keys` makes for the place it moved to.
+#[test]
+fn a_typed_arrange_reaches_the_engine_through_the_facade_base() {
+    use serde::Serialize;
+    use superschematic_versiongraph_engine::facade::{self, Column};
+    use superschematic_versiongraph_engine::order_keys;
+
+    #[derive(Serialize)]
+    enum Kind {
+        #[serde(rename = "part")]
+        Part,
+    }
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Part {
+        #[serde(rename = "entityKey")]
+        entity_key: String,
+        rank: String,
+        heading: String,
+    }
+    const READS: &[Column] = &[
+        Column::field("entity_key", "entityKey"),
+        Column::field("rank", "rank"),
+        Column::field("heading", "heading"),
+    ];
+    let id = |value: &String| facade::text("id", value);
+
+    let (engine, storage, draft) = a_draft_of_parts();
+    // Mix holds F and Knead V. Knead goes first.
+    let (parent, wanted) = (Some(DOUGH.to_owned()), [KNEAD.to_owned(), MIX.to_owned()]);
+    let kind = facade::text("entity kind", &Kind::Part).expect("a kind");
+    let parent = parent.as_ref().map(id).transpose().expect("a parent");
+    let keys: Vec<String> = wanted
+        .iter()
+        .map(id)
+        .collect::<Result<_, _>>()
+        .expect("keys");
+    let arranged = engine
+        .run_on(&storage, |e| {
+            e.arrange(
+                COOK,
+                &draft.id,
+                draft.version,
+                &kind,
+                parent.as_deref(),
+                &keys,
+            )
+        })
+        .expect("arrange");
+    let written: Vec<Part> = arranged.saved["part"]
+        .iter()
+        .map(|row| facade::value("part", row, READS))
+        .collect::<Result<_, _>>()
+        .expect("typed rows");
+    assert_eq!(written.len(), 1, "one of two rows moves: {written:?}");
+    let moved = &written[0];
+    let made = match moved.entity_key.as_str() {
+        "2" => order_keys(None, Some("F"), 1),
+        "1" => order_keys(Some("V"), None, 1),
+        other => panic!("arrange wrote {other:?}, neither child"),
+    }
+    .expect("an order key");
+    assert_eq!(vec![moved.rank.clone()], made, "{moved:?}");
 }
 
 #[tokio::test]

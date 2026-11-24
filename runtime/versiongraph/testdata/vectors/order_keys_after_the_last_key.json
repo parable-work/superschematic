@@ -1,0 +1,13 @@
+{
+  "name": "order_keys_after_the_last_key",
+  "op": "order_keys",
+  "input": {
+    "before": "z",
+    "count": 1
+  },
+  "expect": {
+    "keys": [
+      "zV"
+    ]
+  }
+}

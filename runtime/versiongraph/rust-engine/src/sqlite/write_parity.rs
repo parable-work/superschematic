@@ -161,7 +161,8 @@ const SECOND_TASTING: &str = concat!(
 /// and a draft that saves and is discarded. In graph menu, first under a
 /// descriptor whose utensil lacks its name, a primary line, a change set, a
 /// tagged merge and a release; then under the fixture's, a second change set
-/// and a second tagged merge.
+/// and a second tagged merge, and, last, a part, whose order is a string
+/// key, as work no commit holds.
 async fn write_database(client: &Arc<Rusqlite>) {
     let descriptor = testdata("fixture/recipe.json");
     let mut d: Value = serde_json::from_str(&descriptor).expect("the descriptor");
@@ -248,6 +249,14 @@ async fn write_database(client: &Arc<Rusqlite>) {
         .await
         .expect("merge"),
     );
+    // A kind ordered by a string key, as work the change set does not commit.
+    let intro = edits(vec![(
+        "part",
+        upsert(&[r#"{"entity_key":"Intro","rank":"V","heading":"Before you start"}"#]),
+    )]);
+    i.save(ANN, &dinner.id, dinner.version, &intro)
+        .await
+        .expect("save");
 }
 
 /// Recipe's primary line, and its first change set: a row of every kind,

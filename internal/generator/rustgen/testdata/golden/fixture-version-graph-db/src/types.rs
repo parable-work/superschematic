@@ -125,6 +125,51 @@ impl Default for Note {
     }
 }
 
+fn default_part_deleted_on_ref() -> bool {
+    false
+}
+
+/// A part of the recipe's write-up, nested under another part. Its rank is
+/// a string order key, so Arrange places it among its siblings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Part {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    #[serde(default, rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(default, rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    /// The ref this row overrides the entity on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<RecipeRef>,
+    /// True when the row deletes the entity on its ref.
+    #[serde(default = "default_part_deleted_on_ref", rename = "deletedOnRef")]
+    pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}
+
+impl Default for Part {
+    fn default() -> Self {
+        Self {
+            id: None,
+            recipe: None,
+            parent_key: None,
+            rank: Default::default(),
+            heading: Default::default(),
+            entity_key: None,
+            r#ref: None,
+            deleted_on_ref: default_part_deleted_on_ref(),
+            version: Default::default(),
+        }
+    }
+}
+
 /// A recipe: the stable identity its steps and ingredients are versioned under.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recipe {

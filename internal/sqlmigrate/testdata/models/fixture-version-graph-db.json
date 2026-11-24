@@ -26,6 +26,11 @@
       "origin": "Note"
     },
     {
+      "definition": "CREATE OR REPLACE FUNCTION part_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO part_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO part_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "part_capture_history",
+      "origin": "Part"
+    },
+    {
       "definition": "CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its deleted_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO recipe_ref_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'deleted_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.deleted_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO recipe_ref_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
       "name": "recipe_ref_capture_history",
       "origin": "RecipeRef"
@@ -80,6 +85,14 @@
             "reply_to"
           ],
           "table": "note"
+        },
+        {
+          "content": [
+            "heading",
+            "parent_key",
+            "rank"
+          ],
+          "table": "part"
         },
         {
           "content": [
@@ -589,6 +602,164 @@
         {
           "default": "gen_random_uuid()",
           "name": "id",
+          "origin": "Part.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Part.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "parent_key",
+          "nullable": true,
+          "origin": "Part.parentKey",
+          "type": "UUID"
+        },
+        {
+          "name": "rank",
+          "origin": "Part.rank",
+          "type": "TEXT"
+        },
+        {
+          "name": "heading",
+          "origin": "Part.heading",
+          "type": "TEXT"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Part.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Part.ref",
+          "type": "UUID"
+        },
+        {
+          "default": "false",
+          "name": "deleted_on_ref",
+          "origin": "Part.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A part of the recipe's write-up, nested under another part. Its rank is\na string order key, so Arrange places it among its siblings.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_part_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_part_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "part_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_part_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "part",
+      "origin": "Part",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "part_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for part",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_part_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_part_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "part_history",
+      "origin": "Part",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "part_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
           "origin": "Recipe.id",
           "type": "UUID"
         },
@@ -743,6 +914,7 @@
             "cover",
             "ingredient",
             "note",
+            "part",
             "step",
             "tasting",
             "utensil"
@@ -1211,6 +1383,7 @@
             "cover",
             "ingredient",
             "note",
+            "part",
             "step",
             "tasting",
             "utensil"
@@ -1912,6 +2085,24 @@
       "name": "trg_note_capture_history_write",
       "origin": "Note",
       "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_part_bump_version\n  BEFORE UPDATE ON part\n  FOR EACH ROW EXECUTE FUNCTION part_capture_history()",
+      "name": "trg_part_bump_version",
+      "origin": "Part",
+      "table": "part"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_part_capture_history_delete\n  AFTER DELETE ON part\n  FOR EACH ROW EXECUTE FUNCTION part_capture_history()",
+      "name": "trg_part_capture_history_delete",
+      "origin": "Part",
+      "table": "part"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_part_capture_history_write\n  AFTER INSERT OR UPDATE ON part\n  FOR EACH ROW EXECUTE FUNCTION part_capture_history()",
+      "name": "trg_part_capture_history_write",
+      "origin": "Part",
+      "table": "part"
     },
     {
       "definition": "CREATE TRIGGER trg_recipe_ref_bump_version\n  BEFORE UPDATE ON recipe_ref\n  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history()",

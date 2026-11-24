@@ -1,0 +1,15 @@
+{
+  "name": "order_keys_between_two_keys",
+  "op": "order_keys",
+  "input": {
+    "after": "k",
+    "before": "F",
+    "count": 2
+  },
+  "expect": {
+    "keys": [
+      "P",
+      "Z"
+    ]
+  }
+}

@@ -68,6 +68,7 @@ func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped.Cover = &CoverRepository{tx: tx, txDB: db}
 	wrapped.Ingredient = &IngredientRepository{tx: tx, txDB: db}
 	wrapped.Note = &NoteRepository{tx: tx, txDB: db}
+	wrapped.Part = &PartRepository{tx: tx, txDB: db}
 	wrapped.Recipe = &RecipeRepository{tx: tx, txDB: db}
 	wrapped.RecipeCommit = &RecipeCommitRepository{tx: tx, txDB: db}
 	wrapped.RecipePatch = &RecipePatchRepository{tx: tx, txDB: db}

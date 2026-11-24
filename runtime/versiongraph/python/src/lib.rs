@@ -2,9 +2,10 @@
 //! built by maturin as the extension module `superschematic_versiongraph._native`.
 //!
 //! The module holds one function, `run(operation, input)`: an operation's
-//! contract name (`compose`, `merge`, `diff`, `content_hash`, `validate`) and
-//! its JSON input as bytes in, `(ok, output)` out. `output` is the
-//! operation's output document when `ok` is true, and the core's
+//! contract name (`compose`, `merge`, `diff`, `content_hash`, `validate`,
+//! `order_keys`, `arrange`) and its JSON input as bytes in, `(ok, output)`
+//! out. `output` is the operation's output document when `ok` is true, and
+//! the core's
 //! `{"error":{"code","message"}}` document when it is false, as the C ABI
 //! returns them. The Python package raises `VersionGraphError` from the
 //! error document and types the operations. The core runs with the GIL

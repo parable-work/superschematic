@@ -223,6 +223,55 @@ func (g *{{ .Name }}Graph) Save(ctx context.Context, ref {{ .UUIDGoType }}, vers
 	return result, nil
 }
 
+// Arrange puts one parent's children of kind in the order keys gives, on a
+// change set at version. keys are the entity keys of every live child of
+// parent in the ref's tree, in the order wanted; a nil parent is none, the
+// rows of the kind that have no parent. The longest run of children already
+// in order keeps its order keys and each other child takes a new one, as
+// the ref's row of it, so a move writes the rows that moved and no others.
+// It returns the ref at its new _version and the rows written. The kind's
+// order is a string key: another is refused with the core's code
+// order_not_a_key, and a list that is not exactly the parent's live
+// children with invalid_arrangement. It refuses a sealed ref, and a primary
+// line with ErrPrimaryMergeOnly.
+func (g *{{ .Name }}Graph) Arrange(ctx context.Context, ref {{ .UUIDGoType }}, version int64, kind types.{{ .Name }}EntityKind, parent *{{ .UUIDGoType }}, keys []{{ .UUIDGoType }}) (*{{ .Name }}SaveResult, error) {
+	result := &{{ .Name }}SaveResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		parentKey := ""
+		if parent != nil {
+			parentKey = uuidText(*parent)
+		}
+		wanted := make([]string, len(keys))
+		for i, key := range keys {
+			wanted[i] = uuidText(key)
+		}
+		saved, err := e.Arrange(ctx, actor, uuidText(ref), version, string(kind), parentKey, wanted)
+		if err != nil {
+			return err
+		}
+		tree, err := g.tree(&engine.TreeResult{Tree: saved.Saved})
+		if err != nil {
+			return err
+		}
+		result.Saved = *tree
+		result.Ref, err = g.ref(ctx, tx, saved.Ref.ID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OrderKeys makes count order keys that sort strictly between before and
+// after, the start and the end when empty: evenly spread, each as short as
+// it can be. A row saved with one of them as its order reads between the
+// rows that hold the bounds. The version-graph core makes them, so every
+// language makes the same keys. It reads no database.
+func (g *{{ .Name }}Graph) OrderKeys(before, after string, count int) ([]string, error) {
+	return engine.OrderKeys(before, after, count)
+}
+
 // Commit composes a change set at version, diffs it against its last commit
 // (or its base), writes a commit with a patch per changed entity and moves
 // the ref's head. It returns ErrNothingToCommit when nothing changed, an

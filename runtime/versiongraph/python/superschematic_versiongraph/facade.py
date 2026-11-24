@@ -39,6 +39,7 @@ from .engine import (
     SweepOptions,
     SweepReport,
     TreeResult,
+    order_keys,
 )
 from . import errors as _errors
 from .errors import *  # noqa: F401,F403
@@ -70,6 +71,7 @@ __all__ = [
     "DEFAULT_DISCARD_GRACE",
     "DEFAULT_SNAPSHOT_EVERY",
     "DEFAULT_WALK_CEILING",
+    "order_keys",
     "psycopg_client",
 ]
 __all__ += _errors.__all__
@@ -229,6 +231,32 @@ class VersionGraphFacade(Generic[TreeT, EditsT]):
                 canonical[kind.kind] = KindEdits(upsert, list(kind_edits.delete), list(kind_edits.unset))
         saved = self._engine.save(self._actor, ref, version, canonical)
         return TypedSaveResult(saved.ref, self._tree(TreeResult(saved.saved, "", [])))
+
+    def arrange(
+        self, ref: str, version: int, kind: str, parent: Optional[str], keys: Sequence[str]
+    ) -> TypedSaveResult[TreeT]:
+        """Puts one parent's children of kind, named as the descriptor names
+        it, in the order keys gives, on a change set at version. keys are the
+        entity keys of every live child of parent in the ref's tree, in the
+        order wanted; a parent of None is none: the rows of the kind that
+        have no parent. The longest run of children already in order keeps
+        its order keys, and each other child takes a new one between its
+        neighbors', written as the ref's override of it. It returns the ref
+        at its new version and the rows written, in the order wanted. The
+        kind's order is a string key: the core refuses another with
+        order_not_a_key, and a list that is not exactly the parent's live
+        children with invalid_arrangement. It refuses a sealed ref, and a
+        primary line with PrimaryMergeOnlyError."""
+        saved = self._engine.arrange(self._actor, ref, version, kind, parent, keys)
+        return TypedSaveResult(saved.ref, self._tree(TreeResult(saved.saved, "", [])))
+
+    @staticmethod
+    def order_keys(before: Optional[str], after: Optional[str], count: int) -> List[str]:
+        """Makes count order keys that sort strictly between before and
+        after, the start and the end when None: evenly spread, each as short
+        as it can be. A row saved with one of them as its order reads between
+        the rows that hold the bounds. It reads no ref and writes nothing."""
+        return order_keys(before, after, count)
 
     def commit(self, ref: str, version: int, options: CommitOptions = CommitOptions()) -> CommitResult:
         """Composes a change set at version, diffs it against its last commit

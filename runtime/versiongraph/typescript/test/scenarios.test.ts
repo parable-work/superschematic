@@ -104,6 +104,8 @@ const members = {
     "snapshotEvery",
     "sweep",
     "kind",
+    "parent",
+    "keys",
     "statement",
     "args",
     "expect",
@@ -408,6 +410,7 @@ const formatCases: [string, string, string, string][] = [
   ["postgres", "a null root", formatScenario("[null]", createPrimaryStep), "roots lists null, not a name"],
   ["postgres", "no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
   ["postgres", "an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
+  ["postgres", "an arrange step's parent and keys", formatScenario(`["Bread"]`, `{"op": "arrange", "ref": "main", "kind": "part", "parent": "Dough", "keys": ["Mix", "Knead"]}`), ""],
   ["postgres", "an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],
 ];
 
@@ -854,6 +857,20 @@ class Runner {
         }
         case "save": {
           const result = await engine.save(actor, this.refID(str(step.get("ref"))), this.version(step, str(step.get("ref"))), this.edits(step));
+          ref = result.ref;
+          saved = result.saved;
+          break;
+        }
+        case "arrange": {
+          // A step without a parent arranges the rows that have none.
+          const result = await engine.arrange(
+            actor,
+            this.refID(str(step.get("ref"))),
+            this.version(step, str(step.get("ref"))),
+            str(step.get("kind")),
+            str(step.get("parent")),
+            ((step.get("keys") as JsonValue[] | undefined) ?? []).map((key) => str(key)),
+          );
           ref = result.ref;
           saved = result.saved;
           break;

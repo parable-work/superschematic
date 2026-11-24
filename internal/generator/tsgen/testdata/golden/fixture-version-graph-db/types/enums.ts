@@ -7,6 +7,7 @@ export enum RecipeEntityKind {
   Cover = "cover",
   Ingredient = "ingredient",
   Note = "note",
+  Part = "part",
   Step = "step",
   Tasting = "tasting",
   Utensil = "utensil",

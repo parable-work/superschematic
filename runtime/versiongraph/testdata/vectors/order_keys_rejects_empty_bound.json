@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_rejects_empty_bound",
+  "op": "order_keys",
+  "input": {
+    "after": "",
+    "count": 1
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: after must be an order key, one or more characters of 0-9A-Za-z"
+    }
+  }
+}

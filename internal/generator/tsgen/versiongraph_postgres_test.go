@@ -154,7 +154,7 @@ import pg from "PG_MODULE";
 import { pgPool } from "@superschematic/versiongraph/postgres";
 import { NotTaggedError, NoParentError } from "@superschematic/versiongraph/facade";
 import { RecipeGraph, RecipeGraphDescriptor, RecipeGraphSnapshotEvery } from "./versiongraph";
-import { RecipeEntityKind, RecipePatchOperation, Verdict, type Step, type Tasting } from "./types";
+import { RecipeEntityKind, RecipePatchOperation, Verdict, type Part, type Step, type Tasting } from "./types";
 
 const dsn = process.env.SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL!;
 // A database of its own: the graph's sweep lock is an advisory lock, which
@@ -237,6 +237,36 @@ test("the facade keeps every class", async () => {
     expect(typeof got.entityKey).toBe("string");
     expect(got._version).toBe(1);
   }
+});
+
+// A kind ordered by a string key (D137): parts saved under the keys
+// orderKeys makes, and one moved with arrange, which writes that row alone.
+test("the facade arranges a kind ordered by a string key", async () => {
+  const g = new RecipeGraph(pgPool(pool), { actor });
+  const root = await recipe();
+  const main = await g.createPrimary(root, "main");
+  const draft = await g.branch(main.id, "parts");
+  const keys = await g.orderKeys(null, null, 3);
+  expect(keys).toEqual(["F", "V", "k"]);
+  expect(await g.orderKeys("V", "W", 1)).toEqual(["VV"]);
+  await expect(g.orderKeys("V", "V", 1)).rejects.toMatchObject({ code: "no_order_key" });
+  const part = (heading: string, rank: string) => ({ heading, rank }) as unknown as Part;
+  const saved = await g.save(draft.id, draft.version, {
+    part: { upsert: [part("Mix", keys[0]!), part("Knead", keys[1]!), part("Bake", keys[2]!)] },
+  });
+  const [mix, knead, bake] = saved.saved.part.map((p) => p.entityKey!);
+  const arranged = await g.arrange(draft.id, saved.ref.version, "part", null, [bake!, mix!, knead!]);
+  expect(arranged.saved.part.map((p) => [p.heading, p.rank])).toEqual([["Bake", "7"]]);
+  expect(arranged.ref.version).toBe(saved.ref.version + 1);
+  expect((await g.compose(draft.id)).part.map((p) => p.heading)).toEqual(["Bake", "Mix", "Knead"]);
+  await expect(g.arrange(draft.id, arranged.ref.version, "part", null, [bake!, mix!])).rejects.toMatchObject({
+    code: "invalid_arrangement",
+  });
+  // The facade's type names the kinds arrange takes; past it, the core refuses.
+  await expect(g.arrange(draft.id, arranged.ref.version, "step" as "part", null, [])).rejects.toMatchObject({
+    code: "order_not_a_key",
+  });
+  await expect(g.arrange(main.id, main.version, "part", null, [])).rejects.toMatchObject({ code: "primary_merge_only" });
 });
 
 // The operations D19 adds, through the typed facade: a merge's message and

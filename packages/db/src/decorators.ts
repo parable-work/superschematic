@@ -557,7 +557,7 @@ export interface GraphMemberOptions {
   /** The graph's root: the @versionGraph type. */
   readonly graph: SchemaClass;
   readonly parent?: GraphParent;
-  /** An Int64 field that orders siblings. */
+  /** The field that orders siblings: a Generic.Int64, or a string that holds an order key. */
   readonly order?: string;
   /** At most one live row of the kind per ref. */
   readonly singleton?: boolean;

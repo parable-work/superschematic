@@ -105,12 +105,12 @@ tokio-postgres = "0.7.18"
 	if err != nil {
 		t.Fatalf("the generated facade's tests: %v\n%s", err, out)
 	}
-	for _, test := range []string{"facade_keeps_every_class", "facade_merges_releases_rebases_and_sweeps"} {
+	for _, test := range []string{"facade_keeps_every_class", "facade_arranges_a_kind_ordered_by_a_string_key", "facade_merges_releases_rebases_and_sweeps"} {
 		if !strings.Contains(string(out), "test "+test+" ... ok") {
 			t.Fatalf("the generated crate did not run %s:\n%s", test, out)
 		}
 	}
-	t.Logf("the generated crate ran facade_keeps_every_class and facade_merges_releases_rebases_and_sweeps against Postgres")
+	t.Logf("the generated crate ran its three facade tests against Postgres")
 }
 
 // versionGraphFacadeTest is the generated crate's tests/facade.rs; CRATE is
@@ -260,6 +260,70 @@ async fn facade_keeps_every_class() {
         assert!(got.get("entityKey").is_some_and(Value::is_string), "{what} tasting has no generated entity key: {got:?}");
         assert!(got.get("id").is_some_and(Value::is_string), "{what} tasting has no row id: {got:?}");
     }
+}
+
+fn part(heading: &str, rank: &str) -> Part {
+    Part {
+        id: None,
+        recipe: None,
+        parent_key: None,
+        rank: rank.to_owned(),
+        heading: heading.to_owned(),
+        entity_key: None,
+        r#ref: None,
+        deleted_on_ref: false,
+        version: 0,
+    }
+}
+
+/// A kind ordered by a string key (D137): parts saved under the keys
+/// order_keys makes, and one moved with arrange, which writes that row
+/// alone.
+#[tokio::test]
+async fn facade_arranges_a_kind_ordered_by_a_string_key() {
+    let (graph, _sql, root, _database) = graph("arrange").await;
+    let main = graph.create_primary(&cook(), &root, "main").await.expect("create_primary");
+    let draft = graph.branch(&cook(), &uuid(&main.id), "parts").await.expect("branch");
+    let keys = RecipeGraph::order_keys(None, None, 3).expect("order keys");
+    assert_eq!(keys, ["F", "V", "k"]);
+    assert_eq!(RecipeGraph::order_keys(Some("V"), Some("W"), 1).expect("a key between neighbors"), ["VV"]);
+    let none = RecipeGraph::order_keys(Some("V"), Some("V"), 1).expect_err("no key between a key and itself");
+    assert_eq!(none.code(), Some("no_order_key"), "{none}");
+    let edits = RecipeEdits {
+        part: RecipeKindEdits {
+            upsert: vec![part("Mix", &keys[0]), part("Knead", &keys[1]), part("Bake", &keys[2])],
+            ..RecipeKindEdits::default()
+        },
+        ..RecipeEdits::default()
+    };
+    let saved = graph.save(&cook(), &uuid(&draft.id), draft.version, &edits).await.expect("save parts");
+    let key = |i: usize| saved.saved.part[i].entity_key.expect("a key");
+    let (mix, knead, bake) = (key(0), key(1), key(2));
+    let arranged = graph
+        .arrange(&cook(), &uuid(&draft.id), saved.ref_.version, &RecipeEntityKind::Part, None, &[bake, mix, knead])
+        .await
+        .expect("arrange");
+    let wrote: Vec<(&str, &str)> = arranged.saved.part.iter().map(|p| (p.heading.as_str(), p.rank.as_str())).collect();
+    assert_eq!(wrote, [("Bake", "7")]);
+    assert_eq!(arranged.ref_.version, saved.ref_.version + 1);
+    let tree = graph.compose(&uuid(&draft.id)).await.expect("compose");
+    let headings: Vec<&str> = tree.part.iter().map(|p| p.heading.as_str()).collect();
+    assert_eq!(headings, ["Bake", "Mix", "Knead"]);
+    let lacking = graph
+        .arrange(&cook(), &uuid(&draft.id), arranged.ref_.version, &RecipeEntityKind::Part, None, &[bake, mix])
+        .await
+        .expect_err("a list that lacks a child");
+    assert_eq!(lacking.code(), Some("invalid_arrangement"), "{lacking}");
+    let integer = graph
+        .arrange(&cook(), &uuid(&draft.id), arranged.ref_.version, &RecipeEntityKind::Step, None, &[])
+        .await
+        .expect_err("a kind ordered by an integer");
+    assert_eq!(integer.code(), Some("order_not_a_key"), "{integer}");
+    let primary = graph
+        .arrange(&cook(), &uuid(&main.id), main.version, &RecipeEntityKind::Part, None, &[])
+        .await
+        .expect_err("a primary line");
+    assert_eq!(primary.code(), Some("primary_merge_only"), "{primary}");
 }
 
 fn step(position: i64, instruction: &str, entity_key: Option<IdentityUUID>) -> Step {

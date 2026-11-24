@@ -236,6 +236,38 @@ impl {{$g.Name}}Graph {
         })
     }
 
+    /// Puts one parent's children of `kind` in the order `keys` gives, on a
+    /// change set at `version`. `keys` are the entity keys of every live
+    /// child of `parent` in the ref's tree, in the order wanted; `None` is
+    /// no parent, the rows of the kind that have none. The longest run of
+    /// children already in order keeps its order keys and each other child
+    /// takes a new one, as the ref's row of it, so a move writes the rows
+    /// that moved and no others. It returns the ref at its new version and
+    /// the rows written. The kind's order is a string key: another is
+    /// refused with the core's code `order_not_a_key`, and a list that is
+    /// not exactly the parent's live children with `invalid_arrangement`.
+    /// It refuses a sealed ref, and a primary line with
+    /// `primary_merge_only`.
+    pub async fn arrange(&self, actor: &{{$g.KeyType}}, ref_: &{{$g.KeyType}}, version: i64, kind: &{{$g.KindEnum}}, parent: Option<&{{$g.KeyType}}>, keys: &[{{$g.KeyType}}]) -> Result<{{$g.Name}}SaveResult, engine::Error> {
+        let kind = facade::text("entity kind", kind)?;
+        let parent = parent.map(id).transpose()?;
+        let keys = keys.iter().map(id).collect::<Result<Vec<_>, _>>()?;
+        let saved = self.engine.arrange(&id(actor)?, &id(ref_)?, version, &kind, parent.as_deref(), &keys).await?;
+        Ok({{$g.Name}}SaveResult {
+            ref_: saved.ref_,
+            saved: tree(saved.saved, String::new(), Vec::new())?,
+        })
+    }
+
+    /// Makes `count` order keys that sort strictly between `before` and
+    /// `after`, the start and the end when `None`: evenly spread, each as
+    /// short as it can be. A row saved with one of them as its order reads
+    /// between the rows that hold the bounds. The version-graph core makes
+    /// them, so every language makes the same keys. It reads no database.
+    pub fn order_keys(before: Option<&str>, after: Option<&str>, count: usize) -> Result<Vec<String>, engine::Error> {
+        engine::order_keys(before, after, count)
+    }
+
     /// Composes a change set at `version`, diffs it against its last commit
     /// (or its base), writes a commit with a patch per changed entity and
     /// moves the ref's head. It fails with `nothing_to_commit` when nothing

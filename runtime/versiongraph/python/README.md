@@ -3,8 +3,9 @@
 `superschematic-versiongraph` (module `superschematic_versiongraph`) is the
 version graph for Python (D17 and D19 in `docs/DECISIONS.md`): the core
 (`runtime/versiongraph/rust`) as a PyO3 extension module built with
-maturin, with typed `compose`, `merge`, `diff`, `content_hash` and
-`validate` over its JSON contract (`runtime/versiongraph/README.md`); the
+maturin, with typed `compose`, `merge`, `diff`, `content_hash`, `validate`,
+`order_keys` and `arrange` over its JSON contract
+(`runtime/versiongraph/README.md`); the
 engine, which runs every graph operation over a storage adapter; its
 Postgres adapter and its SQLite adapter (D32); and the base of the typed
 facade pygen generates per graph. It runs on CPython 3.9 and newer; one abi3 wheel per platform serves
@@ -15,14 +16,14 @@ them all.
 | `src/lib.rs` | The crate `superschematic-versiongraph-python`: the extension module `superschematic_versiongraph._native`, whose `run(operation, input)` takes the JSON input as bytes and returns `(ok, output)` with the core's output or error document. It calls the core natively, with the GIL released. PyO3 is its dependency, not the core's. |
 | `superschematic_versiongraph/__init__.py` | `VersionGraph`, the module-level operations, `run` and `VersionGraphError`. |
 | `superschematic_versiongraph/contract.py` | The contract's types, as `TypedDict`s and `Literal`s, every member named as the contract names it. |
-| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes. |
+| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, arrange, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes; and `order_keys`, the Go engine's `OrderKeys`. |
 | `superschematic_versiongraph/storage.py` | The storage protocol the engine runs over (`Storage`, `Tx`) and the values it takes and returns. |
 | `superschematic_versiongraph/errors.py` | The named errors, each with its stable `code`, and `error_code`. |
 | `superschematic_versiongraph/canonical.py` | The canonical row rules, ported from the Go module's package `canonical`. |
 | `superschematic_versiongraph/exactjson.py` | The JSON reader and writer rows travel through, which keep every number's digits. |
 | `superschematic_versiongraph/postgres.py` | `PostgresAdapter`, which builds its statements from the descriptor at run time, its `Client` protocol, and `psycopg_client`, the psycopg 3 binding. |
 | `superschematic_versiongraph/sqlite.py` | `SqliteAdapter`, which holds every graph in one fixed layout of tables, `sqlite_layout`, its `Client` protocol, `is_unique_violation`, and `sqlite_client`, the binding over the standard library's `sqlite3`. |
-| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
+| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends: the engine's operations with typed trees and edits, `arrange` and `order_keys` among them, and the types it returns. |
 | `tests/` | Every core vector through the package, the binding's own tests, every scenario and canonical vector through the engine and each adapter, and the adapters', the sweeper's and the facade's own tests. |
 
 ## Use the core
@@ -35,6 +36,8 @@ tree, findings = result["tree"], result["findings"]
 merged = vg.merge({"descriptor": descriptor, "base": base, "ours": ours, "theirs": theirs})
 changes = vg.diff({"descriptor": descriptor, "from": base, "to": tree})["changes"]
 content_hash = vg.content_hash({"descriptor": descriptor, "tree": tree})["contentHash"]
+keys = vg.order_keys({"after": "V", "count": 2})["keys"]  # ["A", "K"], two keys below "V"
+moved = vg.arrange({"descriptor": descriptor, "tree": tree, "kind": "part", "parent": parent, "keys": wanted})["rows"]
 
 try:
     vg.validate({"descriptor": descriptor, "tree": {"recipe_step": []}})
@@ -80,6 +83,17 @@ committed = engine.commit(actor, draft.id, saved.ref.version)
   text, so a wide integer or numeric keeps its digits.
 - The named errors are exceptions with the stable `code` every language's
   engine shares; `error_code(err)` returns it, or the core's code.
+- A kind whose order is a string key (D137) is put in order by
+  `engine.arrange(actor, ref, version, kind, parent, keys)`: `keys` are the
+  entity keys of every live child of `parent` (`None` for the rows with no
+  parent) in the order wanted. It writes a new order key for each child
+  outside the longest run already in order, as the ref's own row, and
+  returns what `save` returns. The core's refusals keep their codes:
+  `invalid_arrangement` for a list that is not the parent's live children,
+  `order_not_a_key` for a kind ordered by an integer or by nothing.
+  `order_keys(before, after, count)`, a function of the module, makes the
+  keys a save places new rows with: `count` keys strictly between two
+  others, `None` for the start or the end.
 - `run_sweeper(interval, options, on_pass, stop)` runs a sweep now and then
   every `interval` (a `timedelta`) until the `threading.Event` `stop` is
   set, and returns. A pass under way finishes first.
@@ -177,7 +191,8 @@ loss. It also checks every vector's input and output against the types
 in `contract.py` and fails when a member or literal there appears in no
 vector. `tests/test_binding.py` checks the errors, that many calls do not
 grow the process, and that the core runs with the GIL released.
-`tests/test_engine.py` checks the engine's rules that need no database,
+`tests/test_engine.py` checks the engine's rules that need no database
+and that `order_keys` makes the core's keys,
 and `tests/test_scenarios.py` reads every scenario file and checks the
 scenario format's rules without one. The SQLite tests need no database
 server and run everywhere the others do, on Python 3.9 too:
@@ -205,8 +220,8 @@ checks each rendering against Postgres. `tests/test_adapter.py`,
 sweeper's and the facade's own rules: a ref lock another transaction waits
 for, the version fences, the sweep lock, a prune that keeps pinned images,
 the psycopg client's savepoint and pool, a pass skipped while the lock is
-held, an idle draft written during a pass, and a relation written as its
-target's key.
+held, an idle draft written during a pass, a relation written as its
+target's key, and a parent's children arranged through the facade.
 
 The reference page is "Version graphs" in the docs site
 (`docs/src/content/docs/reference/version-graphs.md`).

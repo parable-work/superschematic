@@ -245,4 +245,63 @@ impl Core {
         )?;
         decode(Op::Validate, out["findings"].take())
     }
+
+    /// The rows of one parent's children of `kind` that need a new order
+    /// key to read in the order `keys` gives, each as the engine writes it.
+    pub fn arrange(
+        &self,
+        tree: &Tree,
+        kind: &str,
+        parent: Option<&str>,
+        keys: &[String],
+    ) -> Result<Vec<Value>, Error> {
+        let mut out = run(
+            Op::Arrange,
+            &json!({
+                "descriptor": self.descriptor,
+                "tree": tree_json(tree),
+                "kind": kind,
+                "parent": parent,
+                "keys": keys,
+            }),
+        )?;
+        decode(Op::Arrange, out["rows"].take())
+    }
+}
+
+/// `count` order keys that sort strictly between `before` and `after`, the
+/// start and the end when absent: evenly spread, each as short as it can be
+/// (D137). The core makes them, so every language makes the same keys.
+pub fn order_keys(
+    before: Option<&str>,
+    after: Option<&str>,
+    count: usize,
+) -> Result<Vec<String>, Error> {
+    let mut out = run(
+        Op::OrderKeys,
+        &json!({"before": before, "after": after, "count": count}),
+    )?;
+    decode(Op::OrderKeys, out["keys"].take())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keys are the core's, as its vectors hold them: between the start
+    /// and the end, past the last key, and between two neighbors. A refusal
+    /// keeps the core's code.
+    #[test]
+    fn order_keys_are_the_cores() {
+        assert_eq!(order_keys(None, None, 2).expect("keys"), ["K", "f"]);
+        assert_eq!(order_keys(Some("z"), None, 1).expect("keys"), ["zV"]);
+        assert_eq!(order_keys(Some("V"), Some("W"), 1).expect("keys"), ["VV"]);
+        assert!(order_keys(Some("V"), Some("W"), 0)
+            .expect("keys")
+            .is_empty());
+        match order_keys(Some("W"), Some("V"), 1) {
+            Err(error) => assert_eq!(error.code(), Some("no_order_key"), "{error}"),
+            Ok(keys) => panic!("keys below their lower bound: {keys:?}"),
+        }
+    }
 }

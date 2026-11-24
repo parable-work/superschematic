@@ -337,14 +337,22 @@ func TestVersionGraphDeclarations(t *testing.T) {
 			want:   `Ingredient: @graphMember parent.key "quantity" must be a UUID field`,
 		},
 		{
-			name:   "an order field that is not Int64",
-			mutate: func(s *ir.Schema) { s.Types["Step"].Fields[2].TypeRef.Name = "string" },
-			want:   `Step: @graphMember order "position" must name a Generic.Int64 field`,
+			name:   "an order field that is not Int64 or a string",
+			mutate: func(s *ir.Schema) { s.Types["Step"].Fields[2].TypeRef.Name = "number" },
+			want:   `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
+		},
+		{
+			name:   "an order field that is a list of strings",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields[2].TypeRef.Name = "string"
+				s.Types["Step"].Fields[2].TypeRef.IsArray = true
+			},
+			want: `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
 		},
 		{
 			name:   "an order that names no field",
 			mutate: func(s *ir.Schema) { s.Types["Step"].GraphMember.Order = "rank" },
-			want:   `Step: @graphMember order "rank" must name a Generic.Int64 field`,
+			want:   `Step: @graphMember order "rank" must name a Generic.Int64 field or a string field`,
 		},
 
 		// Conflict units.

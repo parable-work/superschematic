@@ -247,6 +247,9 @@ pub struct Kind {
     pub author: Option<String>,
     pub parent: Option<Parent>,
     pub order: Option<String>,
+    /// Whether the order column holds string keys (its class is `string`)
+    /// rather than integers. False without an order column.
+    pub order_is_key: bool,
     pub singleton: bool,
     units: BTreeMap<String, Unit>,
     excluded: BTreeSet<String>,
@@ -465,6 +468,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
         author: raw.author,
         parent,
         order: raw.order,
+        order_is_key: false,
         singleton: raw.singleton,
         units: raw.units,
         excluded,
@@ -499,21 +503,28 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
             )));
         }
     }
-    let class_rules = [
-        ("tombstone", Some(&kind.tombstone), Element::Boolean),
-        ("order", kind.order.as_ref(), Element::Integer),
-    ];
-    for (role, column, element) in class_rules {
-        let Some(column) = column else {
-            continue;
-        };
+    let tombstone = kind.columns[&kind.tombstone];
+    if tombstone != ValueClass::single(Element::Boolean) {
+        return Err(Error::descriptor(format!(
+            "descriptor: kind {:?} tombstone column {:?} is {}, not {}",
+            kind.name,
+            kind.tombstone,
+            tombstone.name(),
+            ValueClass::single(Element::Boolean).name()
+        )));
+    }
+    // An order is an integer, or a string key (D137).
+    if let Some(column) = &kind.order {
         let class = kind.columns[column];
-        if class != ValueClass::single(element) {
+        if class == ValueClass::single(Element::String) {
+            kind.order_is_key = true;
+        } else if class != ValueClass::single(Element::Integer) {
             return Err(Error::descriptor(format!(
-                "descriptor: kind {:?} {role} column {column:?} is {}, not {}",
+                "descriptor: kind {:?} order column {column:?} is {}, not {} or {}",
                 kind.name,
                 class.name(),
-                ValueClass::single(element).name()
+                ValueClass::single(Element::Integer).name(),
+                ValueClass::single(Element::String).name()
             )));
         }
     }

@@ -14,6 +14,7 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_cover.go` -- Cover repository
 - `repository_ingredient.go` -- Ingredient repository
 - `repository_note.go` -- Note repository
+- `repository_part.go` -- Part repository
 - `repository_recipe.go` -- Recipe repository
 - `repository_recipe_commit.go` -- RecipeCommit repository
 - `repository_recipe_patch.go` -- RecipePatch repository
