@@ -21,7 +21,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
+
+	"github.com/parable-work/superschematic/runtime/http/go/clientversion"
 
 	api "example.com/schemas/api/fixture-files-api"
 	types "example.com/schemas/types/go/fixture-files-api"
@@ -103,11 +106,20 @@ func (s *statements) PreviewStatement(_ context.Context, accountID types.Identit
 
 func serve(t *testing.T) (*httptest.Server, *statements) {
 	t.Helper()
+	return serveWith(t, clientversion.Minimums{})
+}
+
+// serveWith serves the API with the oldest version of each client it
+// serves (D143).
+func serveWith(t *testing.T, minimums clientversion.Minimums) (*httptest.Server, *statements) {
+	t.Helper()
 	impl := &statements{lines: map[types.IdentityUUID][]string{}, lastName: map[types.IdentityUUID]string{}, last: map[types.IdentityUUID][]byte{}}
 	router := chi.NewRouter()
+	router.Use(chimiddleware.RequestID)
 	if err := api.RegisterRoutes(router, api.Config{
-		Logger:          zap.NewNop(),
-		Implementations: api.Implementations{Statements: impl},
+		Logger:            zap.NewNop(),
+		MinClientVersions: minimums,
+		Implementations:   api.Implementations{Statements: impl},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +342,59 @@ func TestPreview(t *testing.T) {
 	resp, raw = send(t, server, http.MethodGet, path, nil, "")
 	if resp.StatusCode != http.StatusInternalServerError || resp.Header.Get("Content-Type") != "application/problem+json" || resp.Header.Get("Etag") != "" {
 		t.Errorf("unlisted media type: %d %v %s", resp.StatusCode, resp.Header, raw)
+	}
+}
+
+// TestClientVersions: routes registered with minimum client versions
+// answer a client under its minimum 426 with the problem client_too_old,
+// its request id and the three details, before the route runs; a client
+// at its minimum, a client the list does not name, a version that is no
+// semantic version and a request that names no client are served, and so
+// is the OpenAPI document, which is no route of the API (D143). The
+// TypeScript router answers the same
+// (internal/generator/tsrestgen/testdata/files_runtime.test.ts).
+func TestClientVersions(t *testing.T) {
+	minimums, err := clientversion.Parse("cli=0.5.0,desktop=2.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, impl := serveWith(t, minimums)
+	imports := func(client string) (*http.Response, []byte) {
+		body, contentType := multipartBody(t, `{"accountId":"`+account+`"}`, part{"statement", "march.csv", "text/csv", "date,amount\n"})
+		headers := []string{"X-Request-Id", "req-1"}
+		if client != "" {
+			headers = append(headers, "X-Client-Version", client)
+		}
+		return send(t, server, http.MethodPost, "/api/statements", body, contentType, headers...)
+	}
+
+	resp, raw := imports("cli/0.4.9")
+	if resp.StatusCode != http.StatusUpgradeRequired || resp.Header.Get("Content-Type") != "application/problem+json" || impl.calls != 0 {
+		t.Fatalf("an old client: %d %s, %d calls", resp.StatusCode, raw, impl.calls)
+	}
+	want := map[string]any{
+		"type": "about:blank", "title": "Upgrade Required", "status": float64(426), "code": "client_too_old", "requestId": "req-1",
+		"detail":  "cli 0.4.9 is older than 0.5.0, the oldest version of cli this API serves. Upgrade cli.",
+		"details": map[string]any{"client": "cli", "version": "0.4.9", "minimum": "0.5.0"},
+	}
+	if got := decode(t, raw); !reflect.DeepEqual(got, want) {
+		t.Errorf("problem = %v, want %v", got, want)
+	}
+
+	for _, client := range []string{"cli/0.5.0", "desktop/3.0.0-beta.1", "mobile/0.0.1", "cli/next", ""} {
+		if resp, raw := imports(client); resp.StatusCode != http.StatusOK {
+			t.Errorf("client %q: %d %s", client, resp.StatusCode, raw)
+		}
+	}
+	if impl.calls != 5 {
+		t.Errorf("the implementation ran %d times, want 5", impl.calls)
+	}
+	// A download is a route as any other, and the document is none.
+	if resp, _ := send(t, server, http.MethodGet, "/api/statements/"+account+"/export", nil, "", "X-Client-Version", "desktop/2.0.9"); resp.StatusCode != http.StatusUpgradeRequired {
+		t.Errorf("an old client's download: %d", resp.StatusCode)
+	}
+	if resp, _ := send(t, server, http.MethodGet, "/api/openapi.json", nil, "", "X-Client-Version", "desktop/2.0.9"); resp.StatusCode != http.StatusOK {
+		t.Errorf("the OpenAPI document for an old client: %d", resp.StatusCode)
 	}
 }
 

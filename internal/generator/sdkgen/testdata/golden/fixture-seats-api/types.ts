@@ -21,6 +21,14 @@ export interface SDKConfig {
   /** The calling service's credential, sent on every request (D37) */
   serviceCredential?: ServiceCredentialConfig;
 
+  /**
+   * The client this SDK runs in (D143): every call then sends
+   * `X-Client-Version: <name>/<version>`, and an API that lists the client
+   * answers a version under its minimum with a ClientTooOldError. Without
+   * it no such header is sent.
+   */
+  client?: ClientIdentity;
+
   /** Encryption configuration (used for encrypted endpoints) */
   encryption?: EncryptionConfig;
 
@@ -41,6 +49,19 @@ export interface SDKConfig {
 
   /** Optional transport. Defaults to globalThis.fetch. */
   fetch?: FetchLike;
+}
+
+/**
+ * The application an SDK runs in, as it names itself to the API (D143):
+ * a command-line client, a desktop app. `name` is letters, digits, `.`,
+ * `_` and `-`, starting with a letter or a digit, 64 characters at most.
+ * `version` is the application's own version, a semantic version such as
+ * `0.5.0` for the API to compare it; any other version is sent and never
+ * refused.
+ */
+export interface ClientIdentity {
+  name: string;
+  version: string;
 }
 
 /**
@@ -367,6 +388,31 @@ export class RateLimitError extends ApiError {
 
     // Set prototype explicitly for proper instanceof checks
     Object.setPrototypeOf(this, RateLimitError.prototype);
+  }
+}
+
+/**
+ * Client Too Old Error (426 client_too_old, D143): the API serves this
+ * client from `minimum` on, and the SDK's `client` option named an older
+ * version. The application should tell its user to upgrade.
+ */
+export class ClientTooOldError extends ApiError {
+  /** The client's name, as the SDK sent it. */
+  public readonly client: string;
+  /** The version the SDK sent. */
+  public readonly version: string;
+  /** The oldest version of the client the API serves. */
+  public readonly minimum: string;
+
+  constructor(message: string, details: { client?: unknown; version?: unknown; minimum?: unknown } | undefined, response?: any, requestId?: string) {
+    super(message, 426, response, undefined, requestId);
+    this.name = 'ClientTooOldError';
+    this.client = typeof details?.client === 'string' ? details.client : '';
+    this.version = typeof details?.version === 'string' ? details.version : '';
+    this.minimum = typeof details?.minimum === 'string' ? details.minimum : '';
+
+    // Set prototype explicitly for proper instanceof checks
+    Object.setPrototypeOf(this, ClientTooOldError.prototype);
   }
 }
 

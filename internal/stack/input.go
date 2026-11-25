@@ -111,6 +111,12 @@ type Service struct {
 	// binds its identity config field (ir.IdentityConfigField).
 	Identity bool
 
+	// ClientVersions reports that an API service's config says
+	// clientVersions (D143): each server that serves it has the optional
+	// config field ir.MinClientVersionsSetting, which an environment's env
+	// may set.
+	ClientVersions bool
+
 	// Operations are an API service's operations, each with what admits a
 	// caller to it (docs/stack-model.md, section 9.3): every calls edge to
 	// the API must reach one its caller may invoke. OperationsOf reads them

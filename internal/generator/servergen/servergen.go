@@ -521,6 +521,11 @@ type API struct {
 	MemoryStores   []MemoryStoreUse
 	RateLimitStore *MemoryStore
 
+	// ClientVersions is true for an API whose config says clientVersions
+	// (D143): its routes take the minimums its EnvConfig read from
+	// MIN_CLIENT_VERSIONS.
+	ClientVersions bool
+
 	// Engine is the engine Deps holds, of the API's engine database (D58),
 	// nil without one; MountsEngine is true for the API whose router
 	// mounts its routes, the first on the database, on a server.
@@ -983,6 +988,8 @@ func Plan(in Input) (*Server, error) {
 				api.RateLimitStore = h
 			}
 		}
+		// A job or a worker serves no request, so it turns no client away.
+		api.ClientVersions = o.HasEnvConfig() && o.EnvConfig.ClientVersions && !s.Background()
 	}
 	if err := s.planEngines(in, apis, taken); err != nil {
 		return nil, err

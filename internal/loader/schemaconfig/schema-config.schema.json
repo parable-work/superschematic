@@ -262,6 +262,10 @@
           },
           "type": "array"
         },
+        "clientVersions": {
+          "description": "Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as \"cli=0.5.0,desktop=2.1.0\", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.",
+          "type": "boolean"
+        },
         "dependencies": {
           "items": {
             "$ref": "#/definitions/ServiceDependencyRef"

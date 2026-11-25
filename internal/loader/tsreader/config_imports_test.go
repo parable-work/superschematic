@@ -170,3 +170,26 @@ export default defineConfig({ name: "probe-web", kind: SchemaKind.Site, site: `+
 		})
 	}
 }
+
+// TestReadClientVersions: an API config's clientVersions (D143) is read
+// from the TypeScript form, true alone turning it on.
+func TestReadClientVersions(t *testing.T) {
+	for value, want := range map[string]bool{"true": true, "false": false} {
+		dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.API, clientVersions: `+value+`, outputs: {} });
+`)
+		cfg, err := ReadServiceConfig(dir, nil)
+		if err != nil {
+			t.Fatalf("ReadServiceConfig: %v", err)
+		}
+		if cfg.ClientVersions != want || cfg.NewSchema().ClientVersions != want {
+			t.Errorf("clientVersions: %s reads as %t", value, cfg.ClientVersions)
+		}
+	}
+	dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.API, outputs: {} });
+`)
+	if cfg, err := ReadServiceConfig(dir, nil); err != nil || cfg.ClientVersions {
+		t.Errorf("a config without clientVersions: %+v, %v", cfg, err)
+	}
+}

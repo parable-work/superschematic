@@ -166,6 +166,9 @@ func run(logger *zap.Logger) error {
 {{- if .RateLimitStore }}
 		RateLimitStore: {{ .RateLimitStore.Var }},
 {{- end }}
+{{- if .ClientVersions }}
+		MinClientVersions: {{ .Var }}Config.MinClientVersions,
+{{- end }}
 		Logger:          {{ .Var }}Logger,
 		Implementations: {{ .Var }}Implementations,
 	})

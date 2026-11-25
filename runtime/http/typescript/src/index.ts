@@ -196,6 +196,17 @@ export {
 } from './download.js';
 export type { DownloadRequest, FileDownload } from './download.js';
 export {
+  CLIENT_TOO_OLD,
+  CLIENT_VERSION_HEADER,
+  MIN_CLIENT_VERSIONS_SETTING,
+  clientTooOld,
+  clientTooOldProblem,
+  compareVersions,
+  loadMinClientVersions,
+  parseMinClientVersions,
+} from './client-version.js';
+export type { ClientTooOld, MinClientVersions } from './client-version.js';
+export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
   CREDENTIAL_SOURCES,

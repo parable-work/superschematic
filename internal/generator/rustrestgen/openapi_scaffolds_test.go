@@ -117,6 +117,7 @@ use http::request::Parts;
 use serde_json::Value;
 use tower::ServiceExt;
 use API_CRATE::{build_router, build_router_with, Implementations, RouterOptions};
+use RUNTIME_CRATE::client_version::Minimums;
 use RUNTIME_CRATE::{ApiError, Authenticator, Principal};
 
 struct Tenants;
@@ -189,5 +190,61 @@ async fn the_router_serves_the_openapi_document_and_its_page() {
     };
     let (status, _, _) = get(build_router_with(implementations(), off), "/api/openapi.json").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// A router built with minimum client versions answers a client under its
+// minimum 426 with the problem client_too_old before the route runs, and
+// serves a client at its minimum, a client the list does not name and a
+// request that names none, and the OpenAPI document, which is no route of
+// the API (D143). The Go and TypeScript routers answer the same.
+#[tokio::test]
+async fn a_router_with_minimum_client_versions_turns_away_an_older_client() {
+    let options = RouterOptions {
+        min_client_versions: Minimums::parse("cli=0.5.0,desktop=2.1.0").unwrap(),
+        ..RouterOptions::default()
+    };
+    let call = |path: &'static str, client: Option<&'static str>| {
+        let router = build_router_with(implementations(), options.clone());
+        async move {
+            let mut request = Request::get(path).header("x-request-id", "req-1");
+            if let Some(client) = client {
+                request = request.header("x-client-version", client);
+            }
+            let response = router.oneshot(request.body(Body::empty()).unwrap()).await.unwrap();
+            let status = response.status();
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            (status, String::from_utf8(body.to_vec()).unwrap())
+        }
+    };
+
+    let (status, body) = call("/api/tenants/abc?includeArchived=true", Some("cli/0.4.9")).await;
+    assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{body}");
+    let problem: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        problem,
+        serde_json::json!({
+            "type": "about:blank",
+            "title": "Upgrade Required",
+            "status": 426,
+            "detail": "cli 0.4.9 is older than 0.5.0, the oldest version of cli this API serves. Upgrade cli.",
+            "code": "client_too_old",
+            "requestId": "req-1",
+            "details": {"client": "cli", "version": "0.4.9", "minimum": "0.5.0"},
+        })
+    );
+
+    for client in [Some("cli/0.5.0"), Some("desktop/3.0.0-beta.1"), Some("mobile/0.0.1"), Some("cli/next"), None] {
+        // The scaffold answers 501: the route ran.
+        let (status, body) = call("/api/tenants/abc?includeArchived=true", client).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{client:?}: {body}");
+    }
+    let (status, _) = call("/api/openapi.json", Some("desktop/2.0.9")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A router built without minimums serves every client.
+    let router = build_router(implementations());
+    let request = Request::get("/api/tenants/abc?includeArchived=true").header("x-client-version", "cli/0.0.1");
+    let response = router.oneshot(request.body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 `

@@ -33,7 +33,7 @@ func WriteRustConfig(output *ConfigOutput, outputDir string) error {
 		return fmt.Errorf("failed to generate Rust config loader: %w", err)
 	}
 
-	if output.TypeName == "" && len(output.Derived) == 0 && output.ListedCallersField == "" {
+	if output.TypeName == "" && len(output.Derived) == 0 && output.ListedCallersField == "" && !output.ClientVersions {
 		return nil
 	}
 	if err := WriteValuesSchema(output, outputDir); err != nil {
@@ -360,6 +360,15 @@ func rustEnvConfigOf(output *ConfigOutput) *rustEnvConfig {
 			Type: "identity::Config",
 			Read: fmt.Sprintf("load_identity(%q)", output.IdentityField),
 			Doc:  wrapRustDoc(fmt.Sprintf("The identity runtime's config (D50), parsed from the JSON in %s: the runtime's defaults when it is unset or empty.", output.IdentityField)),
+		})
+	}
+	if output.ClientVersions {
+		rootItems["client_version"] = true
+		env.Fields = append(env.Fields, rustEnvField{
+			Name: toRustFieldName(ir.MinClientVersionsSetting),
+			Type: "client_version::Minimums",
+			Read: "client_version::Minimums::from_env().map_err(|err| vec![err.to_string()])",
+			Doc:  wrapRustDoc(fmt.Sprintf("The oldest version of each client the API serves (D143), read from %s, a list such as cli=0.5.0,desktop=2.1.0. Unset, it lists none and every client is served.", ir.MinClientVersionsSetting)),
 		})
 	}
 	for _, use := range []struct {

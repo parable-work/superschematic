@@ -56,6 +56,26 @@ func (e *AuthorizationError) Unwrap() error {
 	return unwrapAPIError(e.APIError)
 }
 
+// ClientTooOldError is a 426 with the problem client_too_old (D143): the
+// API serves this client from Minimum on, and SDKConfig.Client named an
+// older version. The application should tell its user to upgrade.
+type ClientTooOldError struct {
+	*APIError
+	// Client and Version are what the SDK sent.
+	Client  string
+	Version string
+	// Minimum is the oldest version of the client the API serves.
+	Minimum string
+}
+
+// Unwrap lets errors.As find the *APIError of a 426.
+func (e *ClientTooOldError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return unwrapAPIError(e.APIError)
+}
+
 // RateLimitError represents an HTTP 429 response.
 type RateLimitError struct {
 	*APIError

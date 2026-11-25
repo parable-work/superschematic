@@ -671,7 +671,7 @@ func (r run) generateTypeScriptAPI() error {
 		}
 	}
 
-	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "") {
+	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "" && !envOutput.ClientVersions) {
 		return nil
 	}
 	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {

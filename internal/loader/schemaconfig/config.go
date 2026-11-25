@@ -100,6 +100,13 @@ type SchemaConfig struct {
 	// MemoryStores lists it.
 	RateLimitStore *ServiceDependency `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
 
+	// ClientVersions has an API turn away a client too old to speak to it
+	// (D143): its EnvConfig gains the optional setting MIN_CLIENT_VERSIONS,
+	// and its server answers a request whose X-Client-Version names a
+	// listed client at a lower version 426. It is valid on an API config
+	// only.
+	ClientVersions bool `json:"clientVersions,omitempty" yaml:"clientVersions,omitempty"`
+
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
@@ -236,6 +243,9 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	}
 	if err := validateMemoryStores(cfg); err != nil {
 		return nil, err
+	}
+	if cfg.ClientVersions && cfg.Kind != ir.SchemaKindAPI {
+		return nil, fmt.Errorf("schema config for %s sets clientVersions, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
@@ -386,6 +396,7 @@ func (c *SchemaConfig) NewSchema() *ir.Schema {
 	if c.RateLimitStore != nil {
 		schema.RateLimitStore = &ir.ServiceRef{Name: c.RateLimitStore.Name, Kind: c.RateLimitStore.Kind}
 	}
+	schema.ClientVersions = c.ClientVersions
 	return schema
 }
 

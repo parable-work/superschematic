@@ -24,6 +24,15 @@ Its entry points:
   (below), a token-bucket rate limiter with a pluggable store, and what a
   generated server reads at startup: the stack's derived config fields
   and a JSON-lines logger (below).
+  `parseMinClientVersions` reads `MIN_CLIENT_VERSIONS`, the oldest
+  version of each client an API serves (D143), and `loadMinClientVersions`
+  reads it from the environment as a generated `EnvConfig` does;
+  `clientTooOld` decides a request by its `X-Client-Version`,
+  `<name>/<version>`, comparing as semantic versions (`compareVersions`),
+  and a route mounted with `minClientVersions` in its options answers a
+  listed client under its minimum 426 with the problem `client_too_old`
+  before any other step, as the Go and Rust runtimes do
+  (`runtime/http/testdata/client_version_parity.json`).
   `readPage` reads a `@paginated` operation's `cursor` and `limit` (D60)
   with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
   `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust

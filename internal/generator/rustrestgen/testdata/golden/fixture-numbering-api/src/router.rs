@@ -70,6 +70,10 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/ticket/{id}/reference/assign-number", route);
     router
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::new(options.min_client_versions.clone()),
+            superschematic_http_runtime::client_version::require_client_version,
+        ))
         .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-numbering-api", &options))
 }

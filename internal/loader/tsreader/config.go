@@ -273,6 +273,9 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 	if public, ok := obj["public"].(bool); ok {
 		cfg.Public = public
 	}
+	if clientVersions, ok := obj["clientVersions"].(bool); ok {
+		cfg.ClientVersions = clientVersions
+	}
 	if authDB, ok := obj["authDb"].(serviceHandle); ok {
 		cfg.AuthDB = authDB.name
 		cfg.AuthDBKind = ir.SchemaKind(authDB.kind)

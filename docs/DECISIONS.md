@@ -1551,22 +1551,6 @@ checks and the race between two uploads of one file itself.
 Build: the three runtimes' bucket clients, the Bucket kind's config, the
 servers' `Deps`, fake-gcs-server in the tests, and the buckets guide.
 
-## D143. An API names the oldest version of each client it serves (new)
-
-An application with a command-line client or an installed app has to turn
-away a copy too old to speak to it. Nothing in a generated SDK says which
-client it is in, and nothing in a server asks.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A generated SDK's client takes `client: { name, version }` and sends `X-Client-Version: <name>/<version>` on every call. Without the option it sends no such header. | The SDK package's own version, which is not the application's |
-| An API service's config may say `clientVersions: true`. Its `EnvConfig` then gains an optional setting, `MIN_CLIENT_VERSIONS`, a list such as `cli=0.5.0,desktop=2.1.0`, so an environment raises a minimum with no build. | A minimum in the schema, which a build and a deploy stand between |
-| A request whose header names a listed client at a lower version is answered 426 with the problem `client_too_old` and `{ client, version, minimum }`. Versions compare as semantic versions. A request with no header, a client that is not listed, or a version that does not parse, passes: a browser sends none. | Refusing a request without the header, which locks out every other caller |
-| Each SDK raises a typed error for it, so a client can tell its user to upgrade. | |
-
-Build: the service config, `envgen`, the three HTTP runtimes, the four
-SDK generators and the client SDKs guide.
-
 ## D144. A deployable's image takes system packages, and a project may extend the generated image (D30 amended)
 
 A generated Dockerfile is written whole and never edited. A workload that

@@ -12,6 +12,7 @@ cap, and a preview that answers inline with its validators, sandboxed, and
 */
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
+import { parseMinClientVersions } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 
 const apiDir = process.env.API_DIR;
@@ -19,14 +20,14 @@ const sdkDir = process.env.SDK_DIR;
 if (!apiDir || !sdkDir) throw new Error('API_DIR and SDK_DIR are required');
 const { buildRouter, operationSpecs } = await import(`${apiDir}/router.ts`);
 const { imported, previews, statements } = await import(`${apiDir}/files_implementation.ts`);
-const { FixtureFilesApiSDK, ApiError } = await import(`${sdkDir}/index.ts`);
+const { FixtureFilesApiSDK, ApiError, ClientTooOldError } = await import(`${sdkDir}/index.ts`);
 
 const BASE = 'http://api.example.com';
 const ACCOUNT = '1VgEh72lXvTXkH';
 
-function serve() {
+function serve(options: Record<string, unknown> = {}) {
   const app = new Hono();
-  app.route('/', buildRouter({ statements }));
+  app.route('/', buildRouter({ statements }, options));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
   return app;
@@ -198,6 +199,44 @@ describe('generated fixture-files-api router and SDK', () => {
     expect(await sdk.statements.importStatementRaw(form(1000))).toMatchObject({ accountId: ACCOUNT, filename: 'march.csv' });
     const refused = await refusal(sdk.statements.importStatementRaw(form(1001)));
     expect([refused.status, refused.body.code, refused.body.detail]).toEqual([400, 'bad_request', 'Request body is not multipart/form-data']);
+  });
+
+  test('a router with minimum client versions turns away an SDK whose client is older, with a typed error (D143)', async () => {
+    // The Go router answers the same (internal/generator/apigen/testdata/files_routes_test.go, TestClientVersions).
+    const versioned = serve({ minClientVersions: parseMinClientVersions('cli=0.5.0,desktop=2.1.0') });
+    const seen: (string | null)[] = [];
+    const sdkOf = (client?: { name: string; version: string }) =>
+      new FixtureFilesApiSDK({
+        baseUrl: BASE,
+        client,
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+          seen.push(new Headers(init?.headers).get('x-client-version'));
+          return versioned.request(String(input), init);
+        },
+      });
+    const before = imported.size;
+    let refused: unknown;
+    try {
+      await sdkOf({ name: 'cli', version: '0.4.9' }).statements.importStatement({ accountId: '1VgEh72lXvTXkM' }, { statement: statementFile('date,amount\n') });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(ClientTooOldError);
+    expect(refused).toBeInstanceOf(ApiError);
+    const tooOld = refused as { client: string; version: string; minimum: string; statusCode: number; code: string; response: Record<string, unknown> };
+    expect([tooOld.client, tooOld.version, tooOld.minimum, tooOld.statusCode, tooOld.code]).toEqual(['cli', '0.4.9', '0.5.0', 426, 'client_too_old']);
+    expect(tooOld.response).toMatchObject({ title: 'Upgrade Required', details: { client: 'cli', version: '0.4.9', minimum: '0.5.0' } });
+    // The route never ran.
+    expect(imported.size).toBe(before);
+
+    // At its minimum, another client, and a caller that names none.
+    for (const client of [{ name: 'cli', version: '0.5.0' }, { name: 'desktop', version: '3.0.0-beta.1' }, { name: 'mobile', version: '0.0.1' }, undefined]) {
+      const result = await sdkOf(client).statements.importStatement({ accountId: '1VgEh72lXvTXkM' }, { statement: statementFile('date,amount\n') });
+      expect(result).toMatchObject({ accountId: '1VgEh72lXvTXkM' });
+    }
+    expect(seen).toEqual(['cli/0.4.9', 'cli/0.5.0', 'desktop/3.0.0-beta.1', 'mobile/0.0.1', null]);
+    // A download is a route as any other.
+    expect((await versioned.request(`/api/statements/1VgEh72lXvTXkM/export`, { headers: { 'X-Client-Version': 'desktop/2.0.9' } })).status).toBe(426);
   });
 
   test('caps the whole request at its @bodyLimit, and a download refusal is a problem', async () => {

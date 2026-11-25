@@ -497,6 +497,12 @@ type TypeScriptAPI struct {
 	MemoryStores   []TypeScriptMemoryStoreUse
 	RateLimitStore *TypeScriptMemoryStore
 
+	// MinClientVersions is the expression of its config that holds the
+	// oldest version of each client it serves, which its router options
+	// carry (D143); empty for an API whose config does not say
+	// clientVersions.
+	MinClientVersions string
+
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
 	Secrets []string
@@ -903,6 +909,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
+		if a.Config != nil && a.Config.ClientVersions && api.Config != "" && !background {
+			// A job or a worker serves no request, so it turns no client
+			// away (D143).
+			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
+		}
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
 			// ask with the secret the API's config holds (D93).
@@ -1174,6 +1185,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	if a.MCPConfirmationKey != "" {
 		// Its MCP endpoint signs confirmations with the secret (D93).
 		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
+	}
+	if a.MinClientVersions != "" {
+		// Its routes turn away a client under its minimum (D143).
+		out = append(out, "minClientVersions: "+a.MinClientVersions)
 	}
 	if a.Behaviors {
 		// Its behavior operations (D103) and its table operations (D106)

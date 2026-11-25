@@ -284,13 +284,28 @@ func (r *resolver) bindConfig() {
 	}
 }
 
+// clientVersionsDeclaring names what declares ir.MinClientVersionsSetting,
+// for a message: no `@envVars` type does.
+const clientVersionsDeclaring = "the setting of an API whose config says clientVersions"
+
 // collectFields gathers a server's config fields from the `@envVars` types
 // of the APIs it serves. One field declared by one type is one field
-// however many served configs include it.
+// however many served configs include it. An API whose config says
+// clientVersions adds the optional ir.MinClientVersionsSetting (D143).
 func (r *resolver) collectFields(d *deployable) {
 	d.fields = map[string]*field{}
 	for _, served := range d.res.Services {
 		svc := r.services[served.Name]
+		if svc.ClientVersions {
+			// One optional field however many served APIs say
+			// clientVersions: a client is the application's (D143).
+			name := ir.MinClientVersionsSetting
+			if prev, ok := d.fields[name]; !ok {
+				d.fields[name] = &field{name: name, declaring: clientVersionsDeclaring, service: svc.Name}
+			} else if prev.declaring != clientVersionsDeclaring {
+				r.fail(CodeFieldCollision, "server %s: config field %s is declared by %s (service %s) and is %s (service %s)", d.res.Name, name, prev.declaring, prev.service, clientVersionsDeclaring, svc.Name)
+			}
+		}
 		if svc.Config == nil {
 			continue
 		}

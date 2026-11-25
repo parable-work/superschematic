@@ -57,6 +57,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 			return stack.Service{}, err
 		}
 		svc.Config = config
+		svc.ClientVersions = schema.ClientVersions
 		svc.Operations = stack.OperationsOf(schema)
 		for _, job := range schema.Jobs {
 			if job != nil {

@@ -395,6 +395,10 @@ export type SchemaConfig = {
    */
   readonly rateLimitStore?: ServiceHandle<"MemoryStore">;
   /**
+   * Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as "cli=0.5.0,desktop=2.1.0", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.
+   */
+  readonly clientVersions?: boolean;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -447,6 +451,10 @@ export type SchemaConfigDocument = {
    * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
    */
   readonly rateLimitStore?: ServiceDependencyRef;
+  /**
+   * Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as "cli=0.5.0,desktop=2.1.0", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.
+   */
+  readonly clientVersions?: boolean;
   /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */

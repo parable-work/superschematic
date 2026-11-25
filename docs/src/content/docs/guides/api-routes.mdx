@@ -859,6 +859,15 @@ to `RateLimitKeys` in `@superschematic/api` by declaration merging. Its
 routes count in the same store. The TypeScript and Rust routers refuse
 such a key; they read only the core's principal.
 
+### A client too old for the API
+
+An API whose config says `clientVersions: true` answers a request whose
+`X-Client-Version` names a client under its minimum with 426 and the
+problem `client_too_old`, before any other step of the route, the rate
+limit included. The minimums are the setting `MIN_CLIENT_VERSIONS`, and a
+generated SDK sends the header when its caller names its client
+([Client SDKs](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+
 ## Webhooks
 
 `@webhook` marks an operation a third party calls, not your clients.

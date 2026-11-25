@@ -468,3 +468,26 @@ site:
 		t.Fatalf("ReadFile of a dev server with a script: %v", err)
 	}
 }
+
+// TestClientVersionsIsAnAPIsAlone: clientVersions (D143) is read from a
+// data-form config into the schema, and refused on a service that is no
+// API, which serves no request.
+func TestClientVersionsIsAnAPIsAlone(t *testing.T) {
+	cfg, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-api\nkind: API\nclientVersions: true\noutputs: {}\n"), coreKinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !cfg.ClientVersions || !cfg.NewSchema().ClientVersions {
+		t.Errorf("clientVersions: true reads as %+v", cfg)
+	}
+	if cfg, err := ReadFile(writeConfig(t, "schema.config.json", `{"name": "shop-api", "kind": "API", "outputs": {}}`), coreKinds); err != nil || cfg.ClientVersions || cfg.NewSchema().ClientVersions {
+		t.Errorf("a config without clientVersions: %+v, %v", cfg, err)
+	}
+	_, err = ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-db\nkind: DB\nclientVersions: true\noutputs: {}\n"), coreKinds)
+	if err == nil || !strings.Contains(err.Error(), "schema config for shop-db sets clientVersions, which only an API service may set (this service is kind DB)") {
+		t.Errorf("clientVersions on a DB service: %v", err)
+	}
+	if _, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-api\nkind: API\nclientVersions: yes please\noutputs: {}\n"), coreKinds); err == nil {
+		t.Error("clientVersions that is no boolean was read")
+	}
+}

@@ -6,6 +6,7 @@ import {
   AuthenticationError,
   AuthorizationError,
   RateLimitError,
+  ClientTooOldError,
   LocalStorageTokenStorage,
   ConsoleLogger,
 } from './types';
@@ -102,8 +103,32 @@ const FIRST_ATTEMPT: RequestAttempt = {
 /**
  * HTTP Client with authentication and error handling
  */
+/**
+ * The X-Client-Version header of a client (D143), `<name>/<version>`, or
+ * undefined for none. A name or a version the header cannot carry throws,
+ * so a typo is found where the SDK is built.
+ */
+export function clientVersionHeader(client: { name: string; version: string } | undefined): string | undefined {
+  if (client === undefined) {
+    return undefined;
+  }
+  if (typeof client.name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(client.name)) {
+    throw new Error(
+      `SDK config: client.name ${JSON.stringify(client.name)} must start with a letter or a digit and hold letters, digits, '.', '_' and '-', 64 characters at most`
+    );
+  }
+  if (typeof client.version !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}$/.test(client.version)) {
+    throw new Error(
+      `SDK config: client.version ${JSON.stringify(client.version)} must start with a letter or a digit and hold letters, digits, '.', '+', '_' and '-', 128 characters at most`
+    );
+  }
+  return `${client.name}/${client.version}`;
+}
+
 export class HttpClient {
   private readonly fetchImpl: FetchLike;
+  /** The X-Client-Version every call sends (D143), undefined without config.client. */
+  private readonly clientVersion: string | undefined;
   private config: SDKConfig;
   private logger: Logger;
   private publicEncryptionKey: PayloadEncryptionKey | null;
@@ -112,6 +137,7 @@ export class HttpClient {
 
   constructor(config: SDKConfig) {
     this.config = config;
+    this.clientVersion = clientVersionHeader(config.client);
     this.logger = new ConsoleLogger(config.debug || false);
     this.publicEncryptionKey = config.encryption?.publicEncryptionKey || null;
     const defaultFetch =
@@ -313,6 +339,7 @@ export class HttpClient {
       headers: {
         Accept: 'application/json',
         ...(options.headers || {}),
+        ...(this.clientVersion !== undefined ? { 'X-Client-Version': this.clientVersion } : {}),
       },
       data: options.data,
       params: options.params as Record<string, any> | undefined,
@@ -510,6 +537,15 @@ export class HttpClient {
           throw new RateLimitError(
             rawBody?.detail || rawBody?.error || 'Rate limit exceeded',
             Number.isNaN(retryAfter as number) ? null : retryAfter,
+            rawBody,
+            requestId
+          );
+        }
+
+        if (response.status === 426 && this.problemCode(rawBody) === 'client_too_old') {
+          throw new ClientTooOldError(
+            rawBody?.detail || 'This client is too old for the API',
+            rawBody?.details,
             rawBody,
             requestId
           );

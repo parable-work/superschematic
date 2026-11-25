@@ -32,6 +32,9 @@ type HTTPClient struct {
 	httpClient *http.Client
 	config     SDKConfig
 	baseURL    string
+	// clientVersion is the X-Client-Version every call sends (D143), empty
+	// without config.Client.
+	clientVersion string
 
 	tokenMu sync.RWMutex
 	token   string
@@ -126,12 +129,39 @@ func NewHTTPClient(config SDKConfig) (*HTTPClient, error) {
 		httpClient.Transport = config.Transport
 	}
 
+	clientVersion, err := clientVersionHeader(config.Client)
+	if err != nil {
+		return nil, err
+	}
+
 	return &HTTPClient{
-		httpClient: httpClient,
-		config:     config,
-		baseURL:    baseURL,
-		token:      token,
+		httpClient:    httpClient,
+		config:        config,
+		baseURL:       baseURL,
+		clientVersion: clientVersion,
+		token:         token,
 	}, nil
+}
+
+var (
+	clientNamePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	clientVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}$`)
+)
+
+// clientVersionHeader is the X-Client-Version header of a client (D143),
+// `<name>/<version>`, or "" for none. A name or a version the header
+// cannot carry is an error, so a typo is found where the SDK is built.
+func clientVersionHeader(client *ClientIdentity) (string, error) {
+	if client == nil {
+		return "", nil
+	}
+	if !clientNamePattern.MatchString(client.Name) {
+		return "", fmt.Errorf("SDKConfig: Client.Name %q must start with a letter or a digit and hold letters, digits, '.', '_' and '-', 64 characters at most", client.Name)
+	}
+	if !clientVersionPattern.MatchString(client.Version) {
+		return "", fmt.Errorf("SDKConfig: Client.Version %q must start with a letter or a digit and hold letters, digits, '.', '+', '_' and '-', 128 characters at most", client.Version)
+	}
+	return client.Name + "/" + client.Version, nil
 }
 
 func (c *HTTPClient) SetPublicEncryptionKey(key *PublicEncryptionKey) {
@@ -274,6 +304,9 @@ func (c *HTTPClient) do(
 		}
 		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("Accept", "application/json")
+		if c.clientVersion != "" {
+			req.Header.Set("X-Client-Version", c.clientVersion)
+		}
 
 		if err := c.applyAuth(ctx, req); err != nil {
 			return 0, nil, nil, err
@@ -777,6 +810,14 @@ func decodeError(statusCode int, body []byte, headers http.Header) error {
 		Details:         details,
 		RequestID:       strings.TrimSpace(headers.Get("X-Request-ID")),
 		ResponseHeaders: cloneHeaders(headers),
+	}
+
+	if statusCode == http.StatusUpgradeRequired && code == "client_too_old" {
+		detail := func(key string) string {
+			text, _ := details[key].(string)
+			return text
+		}
+		return &ClientTooOldError{APIError: apiErr, Client: detail("client"), Version: detail("version"), Minimum: detail("minimum")}
 	}
 
 	switch statusCode {

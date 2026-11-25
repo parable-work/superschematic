@@ -22,6 +22,7 @@ import {
 } from './problem.js';
 import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type PrincipalRateLimitStore, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
+import { CLIENT_VERSION_HEADER, clientTooOld, clientTooOldProblem, type MinClientVersions } from './client-version.js';
 import { downloadResponse } from './download.js';
 import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
 
@@ -127,6 +128,14 @@ export interface RouterRuntimeOptions {
    * route without one throws.
    */
   principalRateLimitStore?: PrincipalRateLimitStore;
+  /**
+   * The oldest version of each client the API serves (D143): a request
+   * whose X-Client-Version names a listed client at a lower version is
+   * answered 426 client_too_old, before any other step. Absent serves
+   * every client. A generated EnvConfig reads it from MIN_CLIENT_VERSIONS
+   * for an API whose config says clientVersions.
+   */
+  minClientVersions?: MinClientVersions;
 }
 
 export interface MountOptions {
@@ -602,6 +611,16 @@ async function runRoute<E extends Env>(
       await next();
     };
   const middleware: MiddlewareHandler[] = [];
+  const { minClientVersions } = options;
+  if (minClientVersions) {
+    // Reads one header, so it runs before the verifier takes its copy of
+    // the request (D143).
+    middleware.push(async (current, next) => {
+      const refusal = clientTooOld(minClientVersions, current.req.header(CLIENT_VERSION_HEADER));
+      if (refusal) return problemResponse(clientTooOldProblem(refusal), requestIdOf(current.req.raw.headers));
+      await next();
+    });
+  }
   if (steps.webhookVerifier) middleware.push(webhookMiddleware(steps.webhookVerifier));
   const { rateLimitPerMinute } = steps;
   const perPrincipal = spec.rateLimitKey === 'principal';
