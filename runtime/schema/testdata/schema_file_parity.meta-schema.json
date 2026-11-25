@@ -4888,6 +4888,10 @@
           "default": "",
           "type": "string"
         },
+        "revealPermission": {
+          "default": "",
+          "type": "string"
+        },
         "runtime": {
           "default": false,
           "type": "boolean"
