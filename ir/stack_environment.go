@@ -124,6 +124,12 @@ type ResolvedDeployable struct {
 	// (D64). Empty for every other kind.
 	Artifact Artifact `json:"artifact,omitempty"`
 
+	// Image is what the stack adds to the deployable's image (D144): the
+	// packages its final stage installs and the Dockerfile that extends
+	// it. Nil when the stack names none. It is the same in every
+	// environment, since one image serves them all.
+	Image *ResolvedImage `json:"image,omitempty"`
+
 	// Job is what a job runs and when; nil for every other kind.
 	Job *ResolvedJob `json:"job,omitempty"`
 
@@ -146,6 +152,18 @@ type ResolvedDeployable struct {
 	// App is the app an API declares and whether it runs; nil for every
 	// other kind (D78).
 	App *ResolvedApp `json:"app,omitempty"`
+
+	// Wakes are the workers in drain mode whose queues a server, a job, a
+	// worker or an app may enqueue to (D145), sorted by worker: each
+	// drains a queue of a database the deployable connects to, so an
+	// enqueue of its may leave that worker a message while nothing of it
+	// runs.
+	Wakes []ResolvedWake `json:"wakes,omitempty"`
+
+	// WokenBy are, on a worker in drain mode, the deployables that hold it
+	// among their Wakes, sorted by name: its platform gives each the right
+	// to start it.
+	WokenBy []ResolvedWaker `json:"wokenBy,omitempty"`
 
 	// Exposed is true for a server or an app reachable from outside the
 	// environment, and for every site.
@@ -180,6 +198,17 @@ type ResolvedDeployable struct {
 	// Bindings bind every config field of a server or a job, sorted by
 	// field. An optional field with no value and no default has none.
 	Bindings []*Binding `json:"bindings,omitempty"`
+}
+
+// ResolvedImage is what a stack adds to one deployable's image (D144).
+type ResolvedImage struct {
+	// Packages are the Debian packages the image's final stage installs,
+	// sorted, each once.
+	Packages []string `json:"packages,omitempty"`
+
+	// Extend is the Dockerfile that extends the generated image, a
+	// slash-separated path relative to the repository root, or empty.
+	Extend string `json:"extend,omitempty"`
 }
 
 // HasImage reports whether a deploy builds, pins and records an image for
@@ -305,6 +334,48 @@ type ResolvedWorker struct {
 	// GraceSeconds is how long a stopping instance lets its running
 	// handlers finish before it gives their messages back.
 	GraceSeconds int `json:"graceSeconds"`
+
+	// Mode is WorkerModeDrain for a worker that runs as a job, which
+	// empties its queue and exits (D145), and empty for one whose
+	// instances keep running. IdleSeconds is then how long it waits with no
+	// message ready or held before it exits, and Instances how many of it
+	// may run at once.
+	Mode        string `json:"mode,omitempty"`
+	IdleSeconds int    `json:"idleSeconds,omitempty"`
+}
+
+// Drains reports whether the worker runs in drain mode (D145).
+func (w *ResolvedWorker) Drains() bool {
+	return w != nil && w.Mode == WorkerModeDrain
+}
+
+// ResolvedWaker is one deployable whose enqueue may start a worker in
+// drain mode (D145), and the platform it runs on, by which the worker's
+// platform knows whether it can name the deployable's identity.
+type ResolvedWaker struct {
+	Deployable string `json:"deployable"`
+	Platform   string `json:"platform"`
+}
+
+// ResolvedWake is one worker in drain mode that a deployable's enqueue may
+// start (D145): the worker's deployable, and the queue it drains, by its
+// `@queue` class, which keys the wake in QueueWakesVariable. Whether an
+// environment's platform provides a wake is the platform's to say: one
+// that does gives the deployable the wake and the right to use it.
+type ResolvedWake struct {
+	// Worker is the worker's deployable, and Queue the `@queue` class
+	// whose messages it handles, of Database, a DB service the deployable
+	// connects to.
+	Worker   string `json:"worker"`
+	Queue    string `json:"queue"`
+	Database string `json:"database"`
+
+	// Platform is the worker's platform, and ResourceName the name that
+	// platform gave it, a string or a value with parameter references: a
+	// platform's lowering sees its own deployable alone, so the wake
+	// carries what names the worker's job.
+	Platform     string `json:"platform"`
+	ResourceName any    `json:"resourceName,omitempty"`
 }
 
 // ResolvedRunner is what an engine's runner runs over (D58): the engine

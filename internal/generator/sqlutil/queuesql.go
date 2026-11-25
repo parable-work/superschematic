@@ -2,6 +2,7 @@ package sqlutil
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -35,6 +36,22 @@ type QueueStatements struct {
 	// ` DEFAULT VALUES` when it sets none, then Conflict, and runs it in
 	// its own transaction.
 	Insert string
+
+	// DueIn is the value an enqueue gives due_at for a message that is due
+	// later (D80, amended): the database's clock plus the seconds of its
+	// one parameter, $1 (?1 on SQLite), which may hold a fraction. The
+	// clock is the statement's, not its transaction's: on Postgres
+	// clock_timestamp(), since now() is when the transaction began, and an
+	// enqueue late in a long transaction would be due early; SQLite's
+	// 'now' is the statement's already. An
+	// enqueue with a delay writes due_at first, with this value, and
+	// numbers the columns its message sets from $2; one with none leaves
+	// due_at to its column's default, the database's clock, so the message
+	// is due at once. A queue that replaces the ready message of a key
+	// takes the new message's due_at with its other columns (Conflict), so
+	// a delayed enqueue moves when the ready message is due, and an
+	// enqueue with no delay makes it due at once.
+	DueIn string
 
 	// Conflict ends an enqueue on a queue that keeps one ready message
 	// per key (D80), after a space: what the enqueue does when a ready
@@ -91,6 +108,23 @@ type QueueStatements struct {
 	// while it deletes a whole batch.
 	Prune string
 
+	// Slot, on Postgres alone, takes slot $1 of the queue's drain locks
+	// (D145), a session advisory lock named for the queue's table, and
+	// returns whether it took it. A worker in drain mode takes one of as
+	// many slots as may run at once as it starts, on a connection it keeps
+	// while it runs, and exits when none is free; closing the connection
+	// gives the slot back. SQLite has none: a worker there takes no slot.
+	Slot string
+
+	// NextDue, on Postgres alone, reads how many seconds remain, by the
+	// database's clock, until the first ready message that is not due yet
+	// falls due, or NULL when no ready message waits for a later time
+	// (D145). A worker in drain mode that found its queue idle reads it
+	// before it exits, and waits for a message due within its horizon
+	// instead: a delayed message (D80) or a retry after its backoff, which
+	// would otherwise wait for the next tick. SQLite has none.
+	NextDue string
+
 	// Due, on SQLite alone, reads whether a message is due or claimed past
 	// its claim's expiry, a row or none, with no parameter: a claim runs it
 	// first and takes the write lock only when it finds one, so an idle
@@ -110,9 +144,9 @@ const queueBackoffDoublings = 40
 // QuoteIdentifier quotes it; whether it keeps a done message for a
 // retention, as every queue does unless its retention is zero, where one
 // that does not deletes a message as it completes it; and its key, the
-// quoted column of the field that keys a message (QueueKeyColumn), with
-// what an enqueue does on a key a ready message holds and whether claims
-// hold one message per key at a time (D80).
+// quoted columns of the fields that key a message, one or several
+// (QueueKeyColumns), with what an enqueue does on a key a ready message
+// holds and whether claims hold one message per key at a time (D80).
 //
 // InOrder, on a queue that serializes its keys, keeps each key's line in
 // the order its messages were written, by when each was created and then
@@ -125,7 +159,7 @@ type QueueSpec struct {
 	Table       string
 	Columns     []string
 	KeepDone    bool
-	Key         string
+	Keys        []string
 	OnDuplicate string
 	Serialize   bool
 	InOrder     bool
@@ -137,7 +171,7 @@ type QueueSpec struct {
 func QueueSpecOf(td *ir.TypeDef, table string, columns []string, keepDone bool) QueueSpec {
 	spec := QueueSpec{Table: table, Columns: columns, KeepDone: keepDone}
 	if td != nil && td.Queue != nil {
-		spec.Key = QueueKeyColumn(td)
+		spec.Keys = QueueKeyColumns(td)
 		spec.OnDuplicate = td.Queue.OnDuplicate
 		spec.Serialize = td.Queue.Serialize
 		spec.InOrder = td.BehaviorQueue != nil && (td.BehaviorQueue.Kind == ir.BehaviorQueueChanges || td.BehaviorQueue.Kind == ir.BehaviorQueueEvents)
@@ -145,53 +179,76 @@ func QueueSpecOf(td *ir.TypeDef, table string, columns []string, keepDone bool) 
 	return spec
 }
 
-// QueueKeyColumn is the quoted column of the key of the queue td
-// declares, or "" for a queue without one.
-func QueueKeyColumn(td *ir.TypeDef) string {
-	name := QueueKeyColumnName(td)
-	if name == "" {
-		return ""
+// QueueKeyColumns are the quoted columns of the key of the queue td
+// declares, in the order the key names its fields, or none for a queue
+// without one.
+func QueueKeyColumns(td *ir.TypeDef) []string {
+	names := QueueKeyColumnNames(td)
+	if len(names) == 0 {
+		return nil
 	}
-	return QuoteIdentifier(name)
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = QuoteIdentifier(name)
+	}
+	return quoted
 }
 
-// QueueKeyColumnName is the column of the key of the queue td declares,
-// unquoted: the column of the message's field the key names, as
-// ColumnName names every column (D79), or "" for a queue without a key.
-func QueueKeyColumnName(td *ir.TypeDef) string {
-	if td == nil || td.Queue == nil || td.Queue.Key == "" {
-		return ""
+// QueueKeyColumnNames are the columns of the key of the queue td declares,
+// unquoted: the column of each field of the message the key names, as
+// ColumnName names every column (D79), or none for a queue without a key.
+func QueueKeyColumnNames(td *ir.TypeDef) []string {
+	if td == nil || td.Queue == nil {
+		return nil
 	}
-	for _, f := range td.Fields {
-		if f != nil && f.Name == td.Queue.Key {
-			return ColumnName(f)
+	var names []string
+	for _, key := range td.Queue.KeyFields() {
+		// A key that names no field, which verification refuses, is the
+		// column a field of that name would have.
+		name := ColumnName(&ir.FieldDef{Name: key})
+		for _, f := range td.Fields {
+			if f != nil && f.Name == key {
+				name = ColumnName(f)
+			}
 		}
+		names = append(names, name)
 	}
-	// A key that names no field, which verification refuses.
-	return ColumnName(&ir.FieldDef{Name: td.Queue.Key})
+	return names
 }
 
 // Dedupes reports whether the queue keeps one ready message per key.
 func (s QueueSpec) Dedupes() bool {
-	return s.Key != "" && (s.OnDuplicate == ir.QueueOnDuplicateReplace || s.OnDuplicate == ir.QueueOnDuplicateSkip)
+	return len(s.Keys) > 0 && (s.OnDuplicate == ir.QueueOnDuplicateReplace || s.OnDuplicate == ir.QueueOnDuplicateSkip)
 }
 
 // Serializes reports whether the queue's claims hold one message per key.
 func (s QueueSpec) Serializes() bool {
-	return s.Key != "" && s.Serialize
+	return len(s.Keys) > 0 && s.Serialize
+}
+
+// QueueKeyEquals is the condition that the rows a and b, two aliases or
+// tables, hold one key: each of the key's quoted columns, keys, is equal
+// in both, joined with AND. A key is of required fields, so no column of
+// it is NULL and equality compares every key.
+func QueueKeyEquals(a, b string, keys []string) string {
+	conds := make([]string, len(keys))
+	for i, key := range keys {
+		conds[i] = a + "." + key + " = " + b + "." + key
+	}
+	return strings.Join(conds, " AND ")
 }
 
 // queueConflict is a dedupe queue's Conflict, with now the dialect's clock.
 // The conflict target names the partial unique index of the queue's ready
 // messages by key, which sqlgen writes.
 func queueConflict(s QueueSpec, now string) string {
-	target := fmt.Sprintf("ON CONFLICT (%s) WHERE state = '%s'", s.Key, ir.QueueStateReady)
+	target := fmt.Sprintf("ON CONFLICT (%s) WHERE state = '%s'", strings.Join(s.Keys, ", "), ir.QueueStateReady)
 	if s.OnDuplicate == ir.QueueOnDuplicateSkip {
 		return target + " DO NOTHING"
 	}
 	var set []string
 	for _, c := range s.Columns {
-		if c != s.Key {
+		if !slices.Contains(s.Keys, c) {
 			set = append(set, c+" = excluded."+c)
 		}
 	}
@@ -202,7 +259,7 @@ func queueConflict(s QueueSpec, now string) string {
 // queuePending is true of a message of the table whose key a ready message
 // holds: in a statement that changes it, the ready message is another one.
 func queuePending(s QueueSpec) string {
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM %[1]s AS p WHERE p.%[2]s = %[1]s.%[2]s AND p.state = '%[3]s')", s.Table, s.Key, ir.QueueStateReady)
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM %s AS p WHERE %s AND p.state = '%s')", s.Table, QueueKeyEquals("p", s.Table, s.Keys), ir.QueueStateReady)
 }
 
 // queueDue is the condition on a message m of the table that a claim
@@ -224,7 +281,7 @@ func queueDue(s QueueSpec, m, now string) string {
 	}
 	return lines(
 		"("+due+")",
-		fmt.Sprintf("    AND NOT EXISTS (SELECT 1 FROM %s AS o WHERE o.%s = m.%s AND o.id <> m.id", s.Table, s.Key, s.Key),
+		fmt.Sprintf("    AND NOT EXISTS (SELECT 1 FROM %s AS o WHERE %s AND o.id <> m.id", s.Table, QueueKeyEquals("o", "m", s.Keys)),
 		fmt.Sprintf("      AND (o.state = '%[1]s' OR (m.state = '%[2]s' AND o.state = '%[2]s' AND (o.%[3]s, o.id) < (m.%[3]s, m.id))))", ir.QueueStateClaimed, ir.QueueStateReady, order),
 	)
 }
@@ -268,6 +325,10 @@ func PostgresQueueStatements(spec QueueSpec) QueueStatements {
 	}
 	s := QueueStatements{
 		Insert: "INSERT INTO " + table,
+		DueIn:  "clock_timestamp() + make_interval(secs => $1)",
+		Slot:   fmt.Sprintf("SELECT pg_try_advisory_lock(hashtext(%s), $1::int)", QuoteLiteral(QueueDrainLock(spec.Table))),
+		NextDue: fmt.Sprintf("SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM %s WHERE state = '%s' AND due_at > clock_timestamp()",
+			table, ir.QueueStateReady),
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),
 			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()",
@@ -435,6 +496,9 @@ func sqliteQueueStatements(spec QueueSpec, c sqliteClock) QueueStatements {
 	}
 	s := QueueStatements{
 		Insert: "INSERT INTO " + table,
+		// An enqueue goes by the database's clock, whatever a drain's
+		// statements go by.
+		DueIn: sqliteIn("?1"),
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),
 			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = "+c.now(2),
@@ -525,7 +589,7 @@ func sqliteQueueStatements(spec QueueSpec, c sqliteClock) QueueStatements {
 // Conflict only for a queue that has one, and Due only where the dialect
 // has one.
 func (s QueueStatements) All() []NamedStatement {
-	all := []NamedStatement{{"insert", s.Insert}}
+	all := []NamedStatement{{"insert", s.Insert}, {"dueIn", s.DueIn}}
 	if s.Conflict != "" {
 		all = append(all, NamedStatement{"conflict", s.Conflict})
 	}
@@ -533,10 +597,23 @@ func (s QueueStatements) All() []NamedStatement {
 		NamedStatement{"expire", s.Expire}, NamedStatement{"claim", s.Claim}, NamedStatement{"complete", s.Complete},
 		NamedStatement{"fail", s.Fail}, NamedStatement{"extend", s.Extend}, NamedStatement{"release", s.Release}, NamedStatement{"prune", s.Prune},
 	)
+	if s.Slot != "" {
+		all = append(all, NamedStatement{"slot", s.Slot})
+	}
+	if s.NextDue != "" {
+		all = append(all, NamedStatement{"nextDue", s.NextDue})
+	}
 	if s.Due != "" {
 		all = append(all, NamedStatement{"due", s.Due})
 	}
 	return all
+}
+
+// QueueDrainLock is the name of the advisory locks the workers that drain
+// the queue of a table take (QueueStatements.Slot, D145): the first key of
+// each lock is its hash, and the second the slot.
+func QueueDrainLock(table string) string {
+	return "superschematic.drain." + table
 }
 
 // NamedStatement is one of a queue's statements with its name, lower case.

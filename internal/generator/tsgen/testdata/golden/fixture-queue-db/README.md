@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, IdentityUUID, TemporalDateTime, Priority, Address, Order, OrderChanged, OrderLine, OrderPlaced, Ping, Product, StockChecked, SyncRequested,  } from '@schemas/fixture-queue-db-types/types';
+import type { GenericInt64, IdentityUUID, TemporalDateTime, Priority, Address, Order, OrderChanged, OrderLine, OrderPlaced, Ping, Product, StockChecked, StockMoved, SyncRequested,  } from '@schemas/fixture-queue-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-queue-db-types';
@@ -107,7 +107,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (9)
+### Types (10)
 
 
 - **Address** - Where an order ships, kept as JSON wherever it is stored.
@@ -129,6 +129,11 @@ deleted one, once it names a product.
 
 - **StockChecked** - Sent when a stock count is asked for: one waits per SKU, and a later ask
 while it waits adds nothing.
+
+- **StockMoved** - Sent when stock moves within a warehouse: one waits per warehouse and SKU
+together, the two fields its key names (D80). A later move of that SKU
+there replaces the one that waits, the same SKU in another warehouse
+waits beside it, and a worker holds one claim per warehouse and SKU.
 
 - **SyncRequested** - Sent when an account's records are to be synced: every request is kept,
 and the worker syncs one account at a time.

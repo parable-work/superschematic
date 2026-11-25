@@ -85,7 +85,10 @@ func shop() *ir.Stack {
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
-					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30)}},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30), "cors": []any{map[string]any{
+						"origins": []any{"https://staging.acme.dev"}, "methods": []any{"GET", "PUT"},
+						"headers": []any{"content-type"}, "exposeHeaders": []any{"etag"}, "maxAge": "1h",
+					}}}},
 				},
 			},
 			{

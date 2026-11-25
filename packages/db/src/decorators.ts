@@ -360,10 +360,11 @@ export type QueueOptions = {
   /** How long a done message stays before a worker removes it, a duration of whole seconds (`"168h"`); `"0s"` removes it when it is done; a week unless set. Dead messages stay. */
   readonly retain?: string;
   /**
-   * The message's field that keys it, a required scalar or enum field. It takes effect with `onDuplicate`
-   * `"replace"` or `"skip"`, and with `serialize`.
+   * The message's field that keys it, a required scalar or enum field, or a list of two or more such fields
+   * (`["warehouse", "sku"]`), which key it together: two messages share a key when they agree on every one. It
+   * takes effect with `onDuplicate` `"replace"` or `"skip"`, and with `serialize`.
    */
-  readonly key?: string;
+  readonly key?: string | readonly [string, string, ...string[]];
   /**
    * What an enqueue does when a ready message holds its key: `"append"` adds another, as a queue without a key
    * does; `"replace"` overwrites the ready one with the new message, due at once with no attempts; `"skip"`

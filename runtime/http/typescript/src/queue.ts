@@ -3,6 +3,7 @@ import {
   canonicalUUID,
   ClaimLostError,
   conflictOf,
+  delayOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
@@ -10,14 +11,18 @@ import {
   messageUUID,
   parseDuration,
   unset,
+  type EnqueueOptions,
   type PostgresQueue,
   type QueueClaim,
   type QueueDefinition,
   type QueueField,
 } from './queue-core.js';
+import { wakeAfterEnqueue } from './queue-wake.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
-export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, setProcessQueueWaker, WAKE_INTERVAL_MS } from './queue-wake.js';
+export type { QueueWake, QueueWakeHost, QueueWaker } from './queue-wake.js';
+export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 
 /*
 The queue client of a TypeScript API (D53, section 8.8 of
@@ -74,15 +79,46 @@ export interface QueueQueryable {
 }
 
 /**
+ * What a queue's claims need of a pg Pool: its queries, and, for a worker
+ * in drain mode, a connection of its own to hold its slot's lock on (D145),
+ * which a Pool's connect gives. connect is typed loosely so that every pg
+ * Pool, and a test's stand-in with a query alone, is one; slot checks what
+ * it resolves to.
+ */
+export interface QueuePool extends QueueQueryable {
+  connect?(): Promise<unknown>;
+}
+
+/** A connection a pool gave: release(true) ends it, and with it the session and its locks. */
+interface QueueSession extends QueueQueryable {
+  release(destroy?: boolean): void;
+}
+
+/**
  * Writes message into queue in the transaction client runs, the caller's:
  * the message is due once the transaction commits, and never if it rolls
  * back. Each member the message sets writes its column, a JSON column its
  * JSON text; one it leaves unset takes the column's default, and an enum
  * with a schema default writes that default, as the Go ORM writes them.
+ * With options.delaySeconds the message is due that long after the
+ * database's clock, and no worker claims it before (D80).
  */
-export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<M>, message: M): Promise<void> {
+export async function enqueue<M>(
+  client: QueueQueryable,
+  queue: QueueDefinition<M>,
+  message: M,
+  options?: EnqueueOptions,
+): Promise<void> {
+  const delay = delayOf(queue.table, queue.statements, options);
   const columns: string[] = [];
+  const placeholders: string[] = [];
   const values: unknown[] = [];
+  if (delay > 0) {
+    // due_at goes first: the statement numbers the delay's seconds $1.
+    columns.push('due_at');
+    placeholders.push(queue.statements.dueIn ?? '');
+    values.push(delay);
+  }
   const members = message as unknown as Readonly<Record<string, unknown>>;
   for (const field of queue.fields) {
     const value = members[field.name];
@@ -90,6 +126,7 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
       if (field.default === undefined) continue;
       columns.push(field.column);
       values.push(field.default);
+      placeholders.push(`$${values.length}`);
       continue;
     }
     columns.push(field.column);
@@ -98,16 +135,21 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
     } catch (error) {
       throw new Error(`enqueue on ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
     }
+    placeholders.push(`$${values.length}`);
   }
   const text =
     columns.length === 0
       ? `${queue.statements.insert} DEFAULT VALUES`
-      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})${conflictOf(queue.statements)}`;
+      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})${conflictOf(queue.statements)}`;
   try {
     await client.query({ text, values });
   } catch (error) {
     throw new Error(`enqueue on ${queue.table}: ${errorMessage(error)}`, { cause: error });
   }
+  // Where the queue's worker runs in drain mode and its platform gives a
+  // wake, the enqueue starts it (D145): sent once the statement has run,
+  // awaited by nothing, and never a failure of the enqueue.
+  wakeAfterEnqueue(queue.name);
 }
 
 /** What a member a message sets writes to its column: its JSON text, a location's point, a duration's interval, or itself. */
@@ -142,7 +184,7 @@ async function onceMoreOnKeyHeld<T>(query: () => Promise<T>): Promise<T> {
 }
 
 /** The claims of queue over pool, for a worker. */
-export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>): PostgresQueue<M> {
+export function postgresQueue<M>(pool: QueuePool, queue: QueueDefinition<M>): PostgresQueue<M> {
   const update = async (what: string, statement: string, id: string, token: string, extra: unknown[] = []): Promise<void> => {
     let result: { rowCount: number | null };
     try {
@@ -202,6 +244,52 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
         return rowCount ?? 0;
       } catch (error) {
         throw new Error(`prune ${queue.table}: ${errorMessage(error)}`, { cause: error });
+      }
+    },
+    async slot(slots) {
+      const statement = queue.statements.slot;
+      if (statement === undefined) {
+        throw new Error(`take a slot of ${queue.table}: the queue's definition holds no slot statement; build its DB service again to write one`);
+      }
+      const none = `take a slot of ${queue.table}: the queue's client gives no connection of its own to hold the slot's lock on; give postgresQueue a pool`;
+      if (pool.connect === undefined) throw new Error(none);
+      // The lock is the session's, so the slot keeps one connection, and
+      // giving it back ends that connection: a worker that dies gives its
+      // slot back as its connection ends.
+      const connected = (await pool.connect()) as Partial<QueueSession> | null | undefined;
+      if (typeof connected?.query !== 'function' || typeof connected.release !== 'function') throw new Error(none);
+      const session = connected as QueueSession;
+      try {
+        for (let slot = 1; slot <= slots; slot++) {
+          const { rows } = await session.query({ text: statement, values: [slot], rowMode: 'array' });
+          const held = (rows[0] as unknown[] | undefined)?.[0];
+          if (held === true || held === 't') {
+            return () => {
+              session.release(true);
+              return Promise.resolve();
+            };
+          }
+        }
+      } catch (error) {
+        session.release(true);
+        throw new Error(`take a slot of ${queue.table}: ${errorMessage(error)}`, { cause: error });
+      }
+      session.release();
+      return undefined;
+    },
+    async nextDue() {
+      // A definition written before the statement reads no due time, so a
+      // worker in drain mode stops once idle, as it did.
+      const statement = queue.statements.nextDue;
+      if (statement === undefined) return undefined;
+      try {
+        const { rows } = await pool.query({ text: statement, values: [], rowMode: 'array' });
+        const seconds = (rows[0] as unknown[] | undefined)?.[0];
+        if (seconds === null || seconds === undefined) return undefined;
+        const n = Number(seconds);
+        return Number.isFinite(n) ? n : undefined;
+      } catch (error) {
+        throw new Error(`read when the next message of ${queue.table} is due: ${errorMessage(error)}`, { cause: error });
       }
     },
   };

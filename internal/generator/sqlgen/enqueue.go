@@ -64,10 +64,11 @@ type EnqueueTrigger struct {
 	Backfill bool
 	// SourceKey is the table's quoted primary key column.
 	SourceKey string
-	// ReplaceKey is the index in Columns of the message's key on a queue
-	// that replaces the ready message of a key, -1 when the message
-	// leaves the key to its column's default, and -2 for any other queue.
-	ReplaceKey int
+	// ReplaceKeys are, on a queue that replaces the ready message of a
+	// key, the index in Columns of each column of the message's key, in
+	// the key's order, -1 for one the message leaves to its column's
+	// default; nil for any other queue.
+	ReplaceKeys []int
 }
 
 // EnqueueWhen is one condition of an EnqueueTrigger on the row's quoted
@@ -187,11 +188,15 @@ func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queu
 	spec := sqlutil.QueueSpecOf(queueDef, queue.QuotedName, columns, true)
 	t.Conflict = sqlutil.PostgresQueueStatements(spec).Conflict
 	t.SQLiteConflict = sqlutil.SQLiteQueueStatements(spec).Conflict
-	t.Backfill, t.SourceKey, t.ReplaceKey = def.Backfill, source.PrimaryKey, -2
-	if q := queueDef.Queue; q.Key != "" && q.OnDuplicate == ir.QueueOnDuplicateReplace {
-		t.ReplaceKey = -1
-		if key := queueColumnOf(queue, queueDef.Name, q.Key); key != nil {
-			t.ReplaceKey = slices.Index(t.Columns, key.QuotedName)
+	t.Backfill, t.SourceKey, t.ReplaceKeys = def.Backfill, source.PrimaryKey, nil
+	if q := queueDef.Queue; q.HasKey() && q.OnDuplicate == ir.QueueOnDuplicateReplace {
+		t.ReplaceKeys = []int{}
+		for _, field := range q.KeyFields() {
+			at := -1
+			if key := queueColumnOf(queue, queueDef.Name, field); key != nil {
+				at = slices.Index(t.Columns, key.QuotedName)
+			}
+			t.ReplaceKeys = append(t.ReplaceKeys, at)
 		}
 	}
 	return t, nil
@@ -241,14 +246,24 @@ func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes
 	}
 	selectList := strings.Join(values, ", ")
 	order := ""
+	// The values the trigger gives the message's key, of the key's
+	// columns it sets, and whether one of them is the table's own key.
+	var keyed []string
+	own := false
+	for _, at := range t.ReplaceKeys {
+		if at >= 0 {
+			keyed = append(keyed, values[at])
+			own = own || values[at] == row+"."+quote(t.SourceKey)
+		}
+	}
 	switch {
-	case !distinct || t.ReplaceKey == -2:
-	case t.ReplaceKey >= 0 && values[t.ReplaceKey] == row+"."+quote(t.SourceKey):
-		// The table's key is the message's: each row is its own key.
-	case t.ReplaceKey == -1:
+	case !distinct || t.ReplaceKeys == nil:
+	case own:
+		// The table's key is of the message's: each row is its own key.
+	case len(keyed) == 0:
 		order = "\nORDER BY " + row + "." + quote(t.SourceKey) + "\nLIMIT 1"
 	default:
-		key := values[t.ReplaceKey]
+		key := strings.Join(keyed, ", ")
 		selectList = "DISTINCT ON (" + key + ") " + selectList
 		order = "\nORDER BY " + key + ", " + row + "." + quote(t.SourceKey)
 	}

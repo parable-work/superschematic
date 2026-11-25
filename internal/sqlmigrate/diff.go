@@ -3,6 +3,7 @@ package sqlmigrate
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -699,7 +700,7 @@ func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) 
 		}
 		d.add(c)
 		switch {
-		case idx.Unique && tt.Queue != nil && len(idx.Columns) == 1 && idx.Columns[0] == tt.Queue.Key:
+		case idx.Unique && tt.Queue != nil && slices.Equal(idx.Columns, tt.Queue.Columns()):
 			queueKeyHazards(c, tt, idx)
 		case idx.Unique:
 			what := uniqueWhat(tt, idx.Columns)
@@ -741,15 +742,15 @@ func queueKeyHazards(c *change, tt *Table, idx *Index) {
 			kept = "the earliest enqueued, which skip keeps"
 		}
 		c.addHazard(HazardDestructive, "", fmt.Sprintf(
-			"The step marks done every ready message of %s but one per %s, %s: the others do not run.", origin, q.Key, kept))
+			"The step marks done every ready message of %s but one per %s, %s: the others do not run.", origin, q.describe(), kept))
 		c.addHazard(HazardCompat, "", fmt.Sprintf(
-			"Servers built from the previous version enqueue %s without ON CONFLICT: once the index is built, such an enqueue of a message whose %s a ready message holds fails, and the write that enqueued it with it.", origin, q.Key))
+			"Servers built from the previous version enqueue %s without ON CONFLICT: once the index is built, such an enqueue of a message whose %s a ready message holds fails, and the write that enqueued it with it.", origin, q.describe()))
 		c.addHazard(HazardDataDependent, "", fmt.Sprintf(
-			"Building the index fails when such a server enqueues a duplicate %s between the step's two statements; run the plan again.", q.Key))
+			"Building the index fails when such a server enqueues a duplicate %s between the step's two statements; run the plan again.", q.describe()))
 		return
 	}
 	c.addHazard(HazardDataDependent, "", fmt.Sprintf(
-		"Building the index fails while two claims hold one %s of %s: let them finish or expire, and run the plan again.", q.Key, origin))
+		"Building the index fails while two claims hold one %s of %s: let them finish or expire, and run the plan again.", q.describe(), origin))
 }
 
 // dedupeSQL marks done the ready messages of a queue's table but one per
@@ -761,10 +762,14 @@ func dedupeSQL(table string, q *QueueKey, now string, quote func(string) string)
 		order = "created_at, id"
 	}
 	ready := fmt.Sprintf("state = '%s'", ir.QueueStateReady)
+	partition := make([]string, 0, len(q.Columns()))
+	for _, column := range q.Columns() {
+		partition = append(partition, quote(column))
+	}
 	return "UPDATE " + quote(table) + " SET state = '" + ir.QueueStateDone + "', updated_at = " + now + ",\n" +
 		"  last_error = 'another ready message of its key was kept when the queue began to keep one per key'\n" +
 		"WHERE " + ready + " AND id NOT IN (\n" +
-		"  SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY " + quote(q.Key) + " ORDER BY " + order + ") AS n FROM " + quote(table) + " WHERE " + ready + ") AS kept WHERE n = 1\n" +
+		"  SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY " + strings.Join(partition, ", ") + " ORDER BY " + order + ") AS n FROM " + quote(table) + " WHERE " + ready + ") AS kept WHERE n = 1\n" +
 		")"
 }
 

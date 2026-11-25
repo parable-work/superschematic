@@ -1314,6 +1314,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
 		deps.Rules = apigen.DeclaresTableBehaviors(schema)
+		deps.Queues = len(schema.Queues()) > 0
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)

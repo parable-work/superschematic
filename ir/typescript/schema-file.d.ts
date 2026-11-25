@@ -107,6 +107,12 @@ export interface DatabaseDecl {
   hosts: ServiceRef[];
 }
 
+export interface DeployableImage {
+  extend?: string;
+  of: DeployableRef;
+  packages?: string[];
+}
+
 export interface DeployableRef {
   app?: string;
   deployable?: string;
@@ -121,8 +127,10 @@ export interface DeployableSettings {
   concurrency?: number;
   enabled?: boolean;
   env?: { [key: string]: EnvValue };
+  idle?: string;
   instances?: number;
   maxInstances?: number;
+  mode?: string;
   of: DeployableRef;
   onDeploy?: boolean;
   platform?: string;
@@ -639,6 +647,7 @@ export interface QueryPage {
 export interface QueueDef {
   backoff?: string;
   key?: string;
+  keys?: string[];
   lease?: string;
   maxBackoff?: string;
   onDuplicate?: string;
@@ -752,6 +761,7 @@ export interface SourceRef {
 export interface StackDecl {
   deploy?: ServiceRef[];
   expose?: DeployableRef[];
+  images?: DeployableImage[];
   origins?: Origin[];
 }
 

@@ -5,7 +5,7 @@ import type { SqlDatabase, SqlExecResult, SqlMeta, SqlPreparedStatement, SqlResu
 // file a sqlite-first database is under stack dev, and the statement that
 // enqueues a message in a batch.
 export { ClaimLostError } from './queue-core.js';
-export type { Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export type { EnqueueOptions, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
 
 /*

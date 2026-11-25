@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -117,6 +118,68 @@ func TestQueueOfReadsKeyOnDuplicateAndSerialize(t *testing.T) {
 	var argErr *ArgError
 	if err == nil || !errors.As(err, &argErr) || !strings.Contains(err.Error(), "serialize a boolean") {
 		t.Errorf("queueOf with serialize \"yes\" = %v, want an ArgError naming serialize", err)
+	}
+}
+
+// TestQueueKeyOverSeveralFields (D80, amended): @queue's key is a field's
+// name or a list of them. A list of two or more is a key over those
+// fields, in the order it names them, and a list of one is that field's
+// key, as its name alone is. A key that is no name or list of names, an
+// empty list, a field named twice, and a declaration that sets both forms
+// are refused, and a key over several fields takes effect, as one field's
+// does, only with onDuplicate replace or skip, or with serialize.
+func TestQueueKeyOverSeveralFields(t *testing.T) {
+	td := &ir.TypeDef{Name: "StockMoved", Fields: []*ir.FieldDef{{Name: "warehouse"}, {Name: "sku"}}}
+	def, err := queueOf(td, []any{map[string]any{"key": []any{"warehouse", "sku"}, "onDuplicate": "replace", "serialize": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Key != "" || !slices.Equal(def.Keys, []string{"warehouse", "sku"}) || !slices.Equal(def.KeyFields(), []string{"warehouse", "sku"}) {
+		t.Errorf("queueOf of a key over two fields = %+v", def)
+	}
+	if !def.HasKey() || !def.Dedupes() || !def.Serializes() {
+		t.Errorf("a queue keyed by two fields, which replaces and serializes: HasKey %t, Dedupes %t, Serializes %t", def.HasKey(), def.Dedupes(), def.Serializes())
+	}
+	one, err := queueOf(td, []any{map[string]any{"key": []any{"sku"}, "onDuplicate": "skip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Key != "sku" || one.Keys != nil || !slices.Equal(one.KeyFields(), []string{"sku"}) {
+		t.Errorf("queueOf of a list of one field = %+v, want that field's key", one)
+	}
+	if fields := (&ir.QueueDef{}).KeyFields(); len(fields) != 0 || (&ir.QueueDef{}).HasKey() {
+		t.Errorf("a queue with no key has key fields %v", fields)
+	}
+	for name, c := range map[string]struct {
+		key  any
+		want string
+	}{
+		"a number":           {float64(1), "@queue key is 1; it is a field's name, or a list of them"},
+		"a list of a number": {[]any{"sku", float64(1)}, "it is a field's name, or a list of them"},
+		"an empty list":      {[]any{}, "@queue key is an empty list"},
+		"a field twice":      {[]any{"sku", "sku"}, "the key names the field sku twice"},
+		"an empty name":      {[]any{"sku", ""}, "the key names an empty field"},
+	} {
+		_, err := queueOf(td, []any{map[string]any{"key": c.key, "onDuplicate": "replace"}})
+		var argErr *ArgError
+		if err == nil || !errors.As(err, &argErr) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: queueOf = %v, want an ArgError saying %q", name, err, c.want)
+		}
+	}
+	for name, c := range map[string]struct {
+		def  ir.QueueDef
+		want string
+	}{
+		"both forms":              {ir.QueueDef{Key: "sku", Keys: []string{"warehouse", "sku"}, Serialize: true}, `key is "sku" and keys are warehouse, sku`},
+		"keys of one field":       {ir.QueueDef{Keys: []string{"sku"}, Serialize: true}, `keys names one field, sku; a key of one field is key: "sku"`},
+		"a key that does nothing": {ir.QueueDef{Keys: []string{"warehouse", "sku"}}, `key "warehouse", "sku" takes effect with onDuplicate "replace" or "skip", or with serialize`},
+	} {
+		if err := CheckQueue(&c.def); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: CheckQueue = %v, want one saying %q", name, err, c.want)
+		}
+	}
+	if err := CheckQueue(&ir.QueueDef{Keys: []string{"warehouse", "sku"}, OnDuplicate: "skip"}); err != nil {
+		t.Errorf("CheckQueue of a key over two fields that skips = %v", err)
 	}
 }
 

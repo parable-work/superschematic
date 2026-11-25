@@ -52,6 +52,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** The due time of a message enqueued with a delay: the database's clock plus the seconds of its parameter, $1. */
+  readonly dueIn?: string;
   /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
   readonly conflict?: string;
   readonly expire: string;
@@ -61,6 +63,10 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs, and returns whether it took it. */
+  readonly slot?: string;
+  /** On Postgres alone: the seconds until the first ready message that is not due yet falls due, or NULL when none waits. */
+  readonly nextDue?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -114,6 +120,7 @@ export const problemChangeQueue: QueueDefinition<ProblemChange> = {
   ],
   statements: {
     insert: `INSERT INTO problem_change_queue`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE problem_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -149,6 +156,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.problem_change_queue'), $1::int)`,
+    nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM problem_change_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
   },
 };
 
@@ -176,6 +185,7 @@ export const problemDeadlineQueue: QueueDefinition<ProblemDeadline> = {
   ],
   statements: {
     insert: `INSERT INTO problem_deadline_queue`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE problem_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -209,6 +219,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.problem_deadline_queue'), $1::int)`,
+    nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM problem_deadline_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
   },
 };
 
@@ -236,6 +248,7 @@ export const problemEventQueue: QueueDefinition<ProblemEvent> = {
   ],
   statements: {
     insert: `INSERT INTO problem_event_queue`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE problem_event_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -271,5 +284,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.problem_event_queue'), $1::int)`,
+    nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM problem_event_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
   },
 };

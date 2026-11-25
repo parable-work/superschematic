@@ -11,10 +11,12 @@ import {
   parsePoint,
   pointText,
   postgresQueue,
+  setProcessQueueWaker,
   type QueueDefinition,
   type QueueQueryConfig,
   type QueueStatements,
 } from './queue';
+import { runWorker, type WorkerQueue } from './worker';
 
 /** The variable that names a Postgres the queue's database tests run against; they are skipped without it. */
 const databaseVariable = 'SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL';
@@ -47,6 +49,7 @@ function statements(table: string, columns: string[]): QueueStatements {
   const claimed = `WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`;
   return {
     insert: `INSERT INTO ${table}`,
+    dueIn: 'clock_timestamp() + make_interval(secs => $1)',
     expire: `UPDATE ${table} SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -77,6 +80,7 @@ RETURNING state`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.${table}'), $1::int)`,
   };
 }
 
@@ -117,6 +121,116 @@ function recorder(...results: { rows: unknown[]; rowCount: number | null }[]) {
     },
   };
 }
+
+describe('an enqueue wakes its queue (D145)', () => {
+  test("it tells the process's waker its queue once its statement has run, and not when the statement fails", async () => {
+    const woken: string[] = [];
+    setProcessQueueWaker({
+      enqueued: async queue => {
+        woken.push(queue);
+      },
+    });
+    try {
+      const client = recorder({ rows: [], rowCount: 1 });
+      await enqueue(client, definition(), { orderId: 'o-1', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+      expect(client.queries).toHaveLength(1);
+      expect(woken).toEqual(['OrderPlaced']);
+      const broken = {
+        query: async () => {
+          throw new Error('the database is down');
+        },
+      };
+      await expect(enqueue(broken, definition(), { orderId: 'o-2', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } })).rejects.toThrow(
+        'the database is down'
+      );
+      expect(woken).toEqual(['OrderPlaced']);
+      // A waker that throws fails no enqueue.
+      setProcessQueueWaker({
+        enqueued: () => {
+          throw new Error('the waker broke');
+        },
+      });
+      await enqueue(recorder({ rows: [], rowCount: 1 }), definition(), { orderId: 'o-3', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+    } finally {
+      setProcessQueueWaker(undefined);
+    }
+  });
+});
+
+describe("a queue's slots (D145)", () => {
+  /** A pool whose connections answer the slot statement from the slots taken, and record how each was released. */
+  function slotPool(taken: Set<number>) {
+    const released: (boolean | undefined)[] = [];
+    const asked: unknown[][] = [];
+    return {
+      released,
+      asked,
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => ({
+        query: async (config: QueueQueryConfig) => {
+          asked.push(config.values);
+          const slot = config.values[0] as number;
+          if (taken.has(slot)) return { rows: [[false]], rowCount: 1 };
+          taken.add(slot);
+          return { rows: [[true]], rowCount: 1 };
+        },
+        release: (destroy?: boolean) => void released.push(destroy),
+      }),
+    };
+  }
+
+  test('slot takes the first free of its slots on a connection of its own, which giving it back ends', async () => {
+    const taken = new Set<number>([1]);
+    const pool = slotPool(taken);
+    const give = await postgresQueue(pool, definition()).slot(3);
+    expect(give).toBeDefined();
+    expect(pool.asked).toEqual([[1], [2]]);
+    expect(pool.released).toEqual([]);
+    await give?.();
+    // The connection is destroyed, so the session and its lock end.
+    expect(pool.released).toEqual([true]);
+  });
+
+  test('with every slot taken it resolves to undefined and gives its connection back', async () => {
+    const pool = slotPool(new Set([1, 2]));
+    expect(await postgresQueue(pool, definition()).slot(2)).toBeUndefined();
+    expect(pool.asked).toEqual([[1], [2]]);
+    expect(pool.released).toEqual([undefined]);
+  });
+
+  test('it refuses a client that is no pool, and a definition written before slots', async () => {
+    await expect(postgresQueue(recorder(), definition()).slot(1)).rejects.toThrow('gives no connection of its own');
+    // A pg Client's connect resolves to no connection of its own.
+    const client = { ...recorder(), connect: async () => undefined };
+    await expect(postgresQueue(client, definition()).slot(1)).rejects.toThrow('gives no connection of its own');
+    const { slot: _slot, ...before } = definition().statements;
+    await expect(postgresQueue(slotPool(new Set()), { ...definition(), statements: before }).slot(1)).rejects.toThrow('holds no slot statement');
+  });
+
+  test.skipIf(dsn === '')('on Postgres, two pools take different slots of one queue, a third finds none, and a slot given back is free', async () => {
+    const table = `slot_probe_${Date.now()}_queue`;
+    const pools = [1, 2, 3].map(() => new pg.Pool({ connectionString: dsn, max: 2 }));
+    try {
+      const queues = pools.map(pool => postgresQueue(pool, definition(table)));
+      const first = await queues[0]!.slot(2);
+      const second = await queues[1]!.slot(2);
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      expect(await queues[2]!.slot(2)).toBeUndefined();
+      // Another queue's slots are its own.
+      const other = await postgresQueue(pools[2]!, definition(`${table}_other`)).slot(1);
+      expect(other).toBeDefined();
+      await other?.();
+      await first?.();
+      const again = await queues[2]!.slot(2);
+      expect(again).toBeDefined();
+      await again?.();
+      await second?.();
+    } finally {
+      await Promise.all(pools.map(pool => pool.end()));
+    }
+  });
+});
 
 describe('parseArray', () => {
   test('reads a one-dimensional array literal, quoted elements and NULL included', () => {
@@ -227,6 +341,39 @@ describe('enqueue', () => {
     const ping: QueueDefinition<{ sentAt?: Date }> = { ...definition(), fields: [{ name: 'sentAt', column: 'sent_at' }], statements: statements('ping_queue', ['sent_at']) };
     await enqueue(client, ping, {});
     expect(client.queries[0]?.text).toBe('INSERT INTO ping_queue DEFAULT VALUES');
+  });
+
+  test('a delay writes due_at first, as the database clock plus its seconds, and numbers the columns after it (D80)', async () => {
+    const client = recorder();
+    await enqueue(client, definition(), { orderId: 'o-1', quantity: 3, shipTo: { line1: '1 Main St', city: 'Springfield' }, tags: [], note: null }, { delaySeconds: 90.5 });
+    expect(client.queries).toEqual([
+      {
+        text: 'INSERT INTO order_placed_queue (due_at, order_id, priority, quantity, ship_to, tags) VALUES (clock_timestamp() + make_interval(secs => $1), $2, $3, $4, $5, $6)',
+        values: [90.5, 'o-1', 'low', 3, '{"line1":"1 Main St","city":"Springfield"}', []],
+      },
+    ]);
+    // A message that sets no column still writes when it is due.
+    const ping: QueueDefinition<{ sentAt?: Date }> = { ...definition(), fields: [{ name: 'sentAt', column: 'sent_at' }], statements: statements('ping_queue', ['sent_at']) };
+    await enqueue(client, ping, {}, { delaySeconds: 5 });
+    expect(client.queries[1]).toEqual({ text: 'INSERT INTO ping_queue (due_at) VALUES (clock_timestamp() + make_interval(secs => $1))', values: [5] });
+    // No delay, and a delay of zero, are an enqueue as it always was: due_at takes its column's default.
+    await enqueue(client, ping, {}, { delaySeconds: 0 });
+    await enqueue(client, ping, {}, {});
+    expect(client.queries.slice(2).map(q => q.text)).toEqual(['INSERT INTO ping_queue DEFAULT VALUES', 'INSERT INTO ping_queue DEFAULT VALUES']);
+  });
+
+  test('a delay that is negative or no number is refused before anything is written, as is one a definition cannot write', async () => {
+    const client = recorder();
+    for (const delaySeconds of [-1, Number.NaN, Number.POSITIVE_INFINITY, '5' as unknown as number]) {
+      await expect(enqueue(client, definition(), { orderId: 'o-1', quantity: 1 } as OrderPlaced, { delaySeconds })).rejects.toThrow(
+        /enqueue on order_placed_queue: delaySeconds is .*; it is a number of seconds, zero or more/,
+      );
+    }
+    const { dueIn: _, ...before } = definition().statements;
+    await expect(enqueue(client, { ...definition(), statements: before }, { orderId: 'o-1', quantity: 1 } as OrderPlaced, { delaySeconds: 5 })).rejects.toThrow(
+      "enqueue on order_placed_queue: the queue's definition holds no dueIn statement, so it cannot delay a message",
+    );
+    expect(client.queries).toEqual([]);
   });
 
   test('names the table when the database refuses the message', async () => {
@@ -495,6 +642,151 @@ describe.skipIf(dsn === '')('on Postgres', () => {
         ['743h0m0s', '-48h0m0s'],
         ['743h0m0s', '-48h0m0s'],
       ]);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test('a worker in drain mode drains a real queue while it holds its slot, a second start finds the slot taken and stops, and the first stops once the queue is idle (D145)', async () => {
+    const schema = `queue_runtime_drain_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const options = `-c search_path=${schema},public`;
+    const pool = new pg.Pool({ connectionString: dsn, max: 4, options });
+    const other = new pg.Pool({ connectionString: dsn, max: 2, options });
+    try {
+      // The slot is named for the table, so the table's name is the test's own.
+      const table = `drained_${Date.now()}_queue`;
+      await pool.query(createTable(table));
+      const def = definition(table);
+      const orders = ['6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b91', '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b92', '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b93'];
+      for (const orderId of orders) {
+        await enqueue(pool, def, { orderId, quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+      }
+      const handled: string[] = [];
+      /** The queue a generated worker entrypoint builds over postgresQueue's claims, whose handler waits for hold. */
+      const workerQueue = (from: pg.Pool, hold: Promise<void>): WorkerQueue => {
+        const queue = postgresQueue(from, def);
+        return {
+          name: queue.name,
+          leaseSeconds: queue.leaseSeconds,
+          claim: async (n, leaseSeconds) =>
+            (await queue.claim(n, leaseSeconds)).map(claim => ({
+              id: claim.id,
+              token: claim.token,
+              attempt: claim.attempt,
+              handle: async () => {
+                await hold;
+                handled.push(claim.message.orderId);
+              },
+            })),
+          extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
+          complete: (id, token) => queue.complete(id, token),
+          fail: (id, token, cause) => queue.fail(id, token, cause),
+          release: (id, token) => queue.release(id, token),
+          prune: limit => queue.prune(limit),
+          slot: slots => queue.slot(slots),
+        };
+      };
+      const count = async (state: string): Promise<number> => {
+        const { rows } = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE state = $1`, [state]);
+        return rows[0]?.n ?? 0;
+      };
+      const until = async (what: string, cond: () => Promise<boolean>): Promise<void> => {
+        const deadline = Date.now() + 10_000;
+        while (!(await cond())) {
+          if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+      };
+      const never = new AbortController().signal;
+      let letGo: () => void = () => {};
+      const hold = new Promise<void>(resolve => {
+        letGo = resolve;
+      });
+      const first = runWorker(workerQueue(pool, hold), { signal: never, concurrency: 3, idleMs: 20, drain: { idleMs: 300, slots: 1 } });
+      await until("the first worker's claims", async () => (await count('claimed')) === 3);
+
+      // A second start of the worker, as an overlapping wake makes, finds the
+      // one slot taken: it stops at once, whatever its idle time.
+      const began = Date.now();
+      await runWorker(workerQueue(other, Promise.resolve()), { signal: never, idleMs: 20, drain: { idleMs: 60_000, slots: 1 } });
+      expect(Date.now() - began).toBeLessThan(10_000);
+      expect(handled).toEqual([]);
+
+      letGo();
+      await first;
+      expect([...handled].sort()).toEqual(orders);
+      expect(await count('done')).toBe(3);
+      expect(await count('ready')).toBe(0);
+
+      // The first gave its slot back as it stopped: a later start takes it.
+      let give: (() => Promise<void>) | undefined;
+      await until('the slot to be free', async () => (give = await postgresQueue(other, def).slot(1)) !== undefined);
+      await give?.();
+    } finally {
+      await pool.end();
+      await other.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test('nextDue reads the seconds until the first ready message that waits falls due, and none for one due already or a queue that is empty (D145)', async () => {
+    const schema = `queue_next_due_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(createTable('order_placed_queue'));
+      const table = 'order_placed_queue';
+      const def = { ...definition(), statements: { ...definition().statements, nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ${table} WHERE state = 'ready' AND due_at > clock_timestamp()` } };
+      const queue = postgresQueue(pool, def);
+      expect(await queue.nextDue()).toBeUndefined();
+      const message = { orderId: '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b9d', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } };
+      await enqueue(pool, def, message);
+      expect(await queue.nextDue()).toBeUndefined();
+      await enqueue(pool, def, message, { delaySeconds: 90 });
+      await enqueue(pool, def, message, { delaySeconds: 30 });
+      const seconds = await queue.nextDue();
+      expect(seconds).toBeGreaterThan(25);
+      expect(seconds).toBeLessThanOrEqual(30);
+      // A definition written before the statement reads none.
+      const { nextDue: _, ...before } = def.statements;
+      expect(await postgresQueue(pool, { ...def, statements: before }).nextDue()).toBeUndefined();
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test("a delayed enqueue late in a long transaction is due its delay after the statement, not after the transaction's start (D80)", async () => {
+    const schema = `queue_due_in_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(createTable('order_placed_queue'));
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // The transaction has run for a second and a half when it enqueues
+        // with a delay of two seconds: the message is due three and a half
+        // seconds after the transaction began, not two.
+        await client.query('SELECT pg_sleep(1.5)');
+        await enqueue(client, definition(), { orderId: '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b9d', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } }, { delaySeconds: 2 });
+        const { rows } = await client.query<{ late: boolean }>(`SELECT due_at >= now() + interval '3 seconds' AS late FROM order_placed_queue`);
+        expect(rows).toEqual([{ late: true }]);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
     } finally {
       await pool.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);

@@ -443,6 +443,12 @@ export abstract class Preview extends Staging {}
   serves shop-api under `/api/shop-api` on shop-web's address, as `stack
   dev`'s proxy serves it, and `apis` left out serves every API the site
   calls.
+- **`images`** list what the stack adds to the image of a deployable
+  that runs code (D144, section 8.2): `{ of: ShopApi, packages:
+  ["chromium"] }`, or `{ of: ShopOrders, worker: "PrintInvoices", extend:
+  "docker/invoices/Dockerfile" }`. `of` names the deployable as a settings
+  element does, each once. The stack holds them, not an environment,
+  since one image serves every environment.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
@@ -1736,7 +1742,8 @@ The target sets defaults that `settings` can override:
   (`cpuAlwaysAllocated`);
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
-  it was written (D54);
+  it was written (D54), and no CORS rules, unless `cors` names some
+  (D148);
 - a memory store on one `SHARED_CORE_NANO` node (`nodeType`) with one
   replica (`replicas`, 0 to 5) (D75);
 - logs to Cloud Logging, and no trace export unless the environment's
@@ -2044,6 +2051,62 @@ the workspace's lockfile, which the project commits too, on `rust` at the
 release `tools.env` pins, and runs the binary on distroless `cc` as a
 non-root user (section 8.6).
 
+**What a stack adds to an image (D144).** A generated Dockerfile is
+written whole and never edited, so a workload that needs a program beside
+its runtime, a headless browser, a PDF tool or fonts, asks for it in the
+stack: `@stack`'s `images` name, per deployable that runs code, `packages`
+and `extend`.
+
+- **Where it is declared.** In `@stack`, beside `expose` and `origins`,
+  as a list of `{ of, packages?, extend? }`, the deployable named as a
+  settings element names one. An image serves every environment, so no
+  environment's settings hold it: a setting per environment would make an
+  image per environment. A default server has no class to hang a key on,
+  and a job or a worker is named only beside its API's handle, so the
+  list is the one place that names every deployable once.
+- **`packages`** are Debian package names, with no version, option or
+  shell word (`registry.CheckDeployableImage`). The final stage installs
+  them with `apt-get install --no-install-recommends`, sorted, and removes
+  the package lists. A TypeScript image's final stage is Bun's image, a
+  Debian one, and installs them before it leaves root. A Go or Rust
+  image's is distroless `cc`, which has no `apt-get`, so with packages it
+  starts instead from `debian:trixie-slim`, the release its build stage
+  links the binary against and distroless `cc` is built from, installs
+  beside them what distroless held, the CA certificates, OpenSSL and the
+  time zones, and runs the binary as a user it makes with distroless's
+  name and id, `nonroot`, 65532, in that user's home, `/home/nonroot`,
+  which distroless's `nonroot` image starts in too, so a program that
+  writes to its working directory may. Not taken: an arbitrary `RUN` line,
+  which is a Dockerfile by another name.
+- **`extend`** is the path of a Dockerfile the project owns, relative to
+  the repository root. A deploy builds the generated image, then builds
+  this file with the build argument `BASE` set to it
+  (`registry.ImageBaseArg`), and deploys the result. Its context is the
+  generated image's: the generated ignore file takes in the extending
+  Dockerfile and, unless that is the context's root, the directory that
+  holds it, so the file copies what lies beside it. The stack's build
+  refuses a path that names no file. It is the escape hatch, and
+  `packages` come first.
+- **The seam.** A `registry.BuildRequest` names the extending Dockerfile
+  in `Extend`, and the target's `ImageBuilder` runs both builds and
+  returns the second image. The gcp target runs them as two steps of one
+  Cloud Build: the generated Dockerfile, tagged for the build's own daemon
+  alone, then the extending one, which is the image the build pushes.
+- **Identity.** An image's identity is its build context's digest (section
+  11.2). The generated Dockerfile holds the packages, and the context
+  always holds the extending Dockerfile, whatever the ignore file says, so
+  a change to either builds the image again. A context `stack prepare`
+  wrote records the extending Dockerfile's path beside the generated
+  one's.
+- **Resolution.** Every environment's `environment.json` records the
+  additions on the deployable (`image`). A deployable whose platform
+  builds no image, a bundle on Cloudflare Workers or an environment's one
+  binary, is refused as unrealizable when the stack adds to its image:
+  ignoring the setting would deploy the workload without what it asked
+  for. `stack dev` runs each deployable as a process on the host and
+  installs nothing; as it starts it prints once what the stack adds to
+  each image.
+
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
 the scalar library allows; the archives superscalar's own release
 pipeline publishes, which it builds with its own Rust release and for
@@ -2078,7 +2141,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | Stack concept | local |
 | --- | --- |
 | database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another, or from `pgvector/pgvector:0.8.7-pg16` when a DB service of the stack has a vector column (D84); it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
-| bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
+| bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem, and answers a browser's preflight from any origin, allowing the request headers of the `storageCorsHeaders` value beside its own (D148). A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | memoryStore | one Valkey container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`, on `local.valkey`, from `valkey/valkey:8.0.2-alpine`, the engine version `gcp.memorystore` pins, unless the `memoryStoreImage` value names another. It runs `valkey-server --save "" --appendonly no`, so it keeps nothing, with no TLS and no password, publishes its port on 127.0.0.1 only, and is ready once `valkey-cli ping` answers inside it. Every memoryStore deployable of the environment lowers to the same node, since each store's names start with its own name (D75) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
@@ -3343,7 +3406,11 @@ export abstract class FulfilOrders {}
 - **Enqueue.** The DB's Go ORM writes `queues.go` with a typed
   `Enqueue<Queue>(ctx, tx, msg)` per queue, which takes the caller's
   `TxInterface`: the message commits with the writes that caused it, or
-  not at all. Each field reaches its column as a table's does through a
+  not at all. `Enqueue<Queue>In(ctx, tx, msg, delay)` writes one that is
+  due `delay` after the database's clock, which no worker claims before
+  (D80); the TypeScript `enqueue` takes `{ delaySeconds }` and the Rust
+  `enqueue_in` a `Duration` for the same, and all three write `due_at`
+  with the statements' `dueIn`. Each field reaches its column as a table's does through a
   repository's `CreateOne`, and an optional field that is unset, or a
   required list that is nil, takes its column's default. A location
   (`Geo.Location`) goes to its `POINT` column as a `pgtype.Point`, x the
@@ -3502,7 +3569,70 @@ export abstract class FulfilOrders {}
   runs one instance unless its settings say otherwise. Resolution records
   what runs on the deployable (`ir.ResolvedWorker`): its API and class,
   its queue and the database that holds it, the instances, the
-  concurrency and the grace.
+  concurrency and the grace, and for a worker in drain mode its mode and
+  its idle time.
+- **Drain mode.** A worker's settings take `mode`: `pool`, the default,
+  whose instances keep running, or `drain` (D145). A worker in drain mode
+  runs as a job: its entrypoint claims as a pool's instance does and exits
+  0 once no message was ready or held for `idle`, thirty seconds unless
+  the settings say (`ir.DefaultWorkerIdleSeconds`), and none falls due
+  within its horizon, five minutes, so a queue that is empty runs
+  nothing. `instances` is then how many of it may run at once,
+  and `maxInstances` beside it is refused, as is `idle` on a pool's
+  worker, and drain mode on a behavior worker, whose queues triggers and
+  the clock fill. The core names no provider. It gives a platform three
+  things to build on:
+  - the worker's mode in its run, and three variables its entrypoint
+    reads (`ir.WorkerModeVariable`, `ir.WorkerIdleSecondsVariable`,
+    `ir.WorkerSlotsVariable`): `WORKER_MODE=drain`, the idle time in
+    seconds, and how many may run at once. With no `WORKER_MODE`, or
+    `pool`, the entrypoint polls until it is stopped, so one image runs
+    in either mode;
+  - the wakes. Nothing of a drain worker runs while its queue is empty,
+    so an enqueue has to start it. The resolver cannot see which code
+    enqueues, so each deployable that runs an API's code, a server, a
+    job, a worker or an app, with a sql edge to the queue's database,
+    but the worker itself, holds the worker among its `Wakes`
+    (`ir.ResolvedWake`: the worker, its queue's class, its platform and
+    the name that platform gave it), and the worker holds each of them
+    in `WokenBy`. A platform that can start the worker gives each such
+    deployable `QUEUE_WAKES` (`ir.QueueWakesVariable`), a JSON object
+    that maps a queue's class to the list of its wakes, each an
+    `ir.QueueWake`: a URL to `POST` an empty JSON object to, and where
+    the bearer token comes from, a URL to `GET` with headers that answers
+    `{ access_token, expires_in }`. A worker another target runs, or a
+    platform with no wake, leaves the variable out;
+  - the slots. `sqlutil.PostgresQueueStatements` writes one more
+    statement, `slot`, `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.<table>'), $1::int)`,
+    which the Go ORM's `<Queue>Queue.Slot(ctx, slots)` and the TypeScript
+    `postgresQueue(...).slot(slots)` run for slot 1, 2 and on, on a
+    connection of the worker's own that it keeps while it runs: the first
+    lock it takes is its slot, and none is every slot taken. The lock is
+    the session's, so giving the slot back closes the connection, and a
+    worker that dies gives it back as its connection ends. SQLite has no
+    such lock, and a worker there takes no slot. And one more, `nextDue`,
+    `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8`
+    over the ready messages due later, which the Go ORM's
+    `<Queue>Queue.NextDue(ctx)` and the TypeScript
+    `postgresQueue(...).nextDue()` run: the seconds until the first
+    message that waits falls due, or none.
+
+  The queue clients send the wake. The Go ORM's `queues.go` has
+  `OnEnqueue(func(queue string))`, which every `Enqueue<Queue>` calls with
+  the queue's class once its statement has run; a Go entrypoint whose
+  database declares a queue builds a `wake.Notifier`
+  (`runtime/http/go/wake`) from `QUEUE_WAKES` and gives the ORM its
+  `Enqueued`. The TypeScript `enqueue` calls `wakeAfterEnqueue`
+  (`queue-wake.ts`), which reads `QUEUE_WAKES` once per process. Both
+  send a queue's wakes at most once in five seconds per process, in the
+  background, hold a token until a minute before it ends, and log a wake
+  that failed as a warning, `the wake of a queue's worker failed: its
+  tick finds the message`: a wake is sent after the statement, not after
+  the commit, is awaited by nothing and fails no enqueue. The Rust queue
+  client sends none yet. Because a wake is a hint, a platform that
+  provides one also starts the worker on a schedule, its tick, which
+  finds a message a trigger enqueued, a retry or a delayed message (D80)
+  that falls due later, and a message whose wake was lost.
 - **Entrypoint.** The `server` generator writes a Go module per worker at
   `<output-root>/server/<stack>/<worker>/`, from the templates a server's
   and a job's share, with its image as theirs (section 8.2), the binary at
@@ -3528,7 +3658,24 @@ export abstract class FulfilOrders {}
     once is gone, so they need no coordination;
   - on SIGTERM or SIGINT claims no more, lets the running methods finish
     within the grace, then cancels them, releases their messages and
-    exits 0.
+    exits 0;
+  - in drain mode (`worker.DrainFromEnv`, `worker.Options.Drain`) takes a
+    slot of its queue before its first claim, through the queue's `Slot`,
+    and returns at once when none is free; then runs the same loop, which
+    ends, with `drained: no message was ready or held`, once a claim
+    found nothing, no method runs and none has run or returned for the
+    idle time, and the queue's `NextDue` reads no message due within the
+    horizon (`worker.DrainHorizon`, five minutes). One due within it, a
+    delayed message or a retry, the loop waits for, logging `idle, and
+    waiting for a message due soon`, and claims again; one due later it
+    logs and leaves to the tick. It stops its prune, gives the slot back
+    and exits 0. Once every claim has failed for the idle time, the loop
+    stops too, `worker.Run` returns an error that names the queue and the
+    last failure, and the process gives its slot back and exits 1, so a
+    task whose database is down does not hold its slot until its day's
+    limit; a pool's worker retries until it is stopped, as before. A
+    behavior worker's claim loops share one idle clock (`worker.RunAll`),
+    so they stop together.
 
   A TypeScript worker's package (section 8.6) does the same on Bun: its
   `main.ts` loads the API's `EnvConfig` with `loadBackgroundEnvConfig()`
@@ -3537,7 +3684,9 @@ export abstract class FulfilOrders {}
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
   `workerConcurrency` reads from `WORKER_CONCURRENCY`, and prunes as Go's
-  does through `postgresQueue`'s `prune`. Each method gets a signal that
+  does through `postgresQueue`'s `prune`, and drains as Go's does, with
+  the drain `workerDrain` reads from `WORKER_MODE`, `WORKER_IDLE_SECONDS`
+  and `WORKER_SLOTS` and the slot `postgresQueue`'s `slot` takes. Each method gets a signal that
   aborts when the grace is over. JavaScript cannot stop a
   method that ignores it: its message is released all the same, and its
   outcome, when it comes, is logged and changes nothing, since the process
@@ -3597,7 +3746,34 @@ export abstract class FulfilOrders {}
   always allocated, so `cpu` takes one or more. Bootstrap needs no new API
   or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
   `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
-  reads them.
+  reads them. A worker in drain mode (D145), in Go or TypeScript, is no
+  worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
+  as the pool would be, of one task with no retries and a day to run,
+  with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`, the
+  last its `instances`. Its tick is a Cloud Scheduler job, `<worker>.tick`,
+  named as the worker is, that runs the job in UTC every `tick`, a
+  setting of `gcp.cloudrunworker`, five minutes unless set, as the
+  worker's own account, which holds `roles/run.invoker` on the job
+  (`<worker>.tick-invoker`), as a scheduled job's account does. A tick is
+  minutes that divide an hour, or an hour, since Cloud Scheduler takes a
+  cron schedule and the tick bounds how late a retry or a delayed message
+  runs that falls due past the worker's horizon; a longer one is
+  refused. For each deployable in the worker's
+  `WokenBy` that runs on Cloud Run, the worker lowers
+  `<worker>.woken-by.<deployable>`, `roles/run.invoker` on the job for
+  that deployable's account, and that deployable's container takes
+  `QUEUE_WAKES`, whose wake is the Cloud Run Admin API's
+  `jobs/<name>:run` and whose token is its metadata server's. The grant
+  is the worker's node because the job rolls out in the worker's wave,
+  which may be after a waker's, and the wake names the job by its
+  resource name, not by its node's output, so a server the worker calls
+  does not wait for the worker. A waker that rolls out first sends wakes
+  the job refuses until the worker's wave, which the tick covers. A drain
+  worker the environment turns off keeps its job and has no tick and no
+  grant. A Rust worker in drain mode is refused, since its entrypoint
+  does not exit when idle yet. `deployer`'s `roles/run.admin` and
+  `roles/cloudscheduler.admin` manage all of it, as they manage a
+  scheduled job's.
 - **Dead messages.** A dead message stays in the table, with its last
   error, for an operator: `superschematic stack queue dead|retry|drop
   <environment> <db>.<Queue>` (section 11.1) lists the dead messages,
@@ -3814,17 +3990,36 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   checks, an RSA key in Go and TypeScript and an HMAC key in Rust:
   fake-gcs-server takes a PUT at an object's path only when it carries a
   V4 signature's parameters, and checks no signature.
+- **CORS (D148).** A page's upload to a signed URL, or its `fetch` of
+  one, is a cross-origin request, which the bucket must answer. A
+  bucket's settings in an environment take `cors`, a list of
+  `{ origins, methods, headers?, exposeHeaders?, maxAge? }`, in one shape
+  on every platform that keeps a bucket: the core holds its JSON Schema
+  (`registry.BucketCORSSchema`), which each platform puts in its settings
+  schema, and reads the checked rules (`registry.BucketCORS`), which each
+  platform writes in its provider's shape. An origin is a scheme and a
+  host, or `*` alone; `maxAge` is a duration of whole seconds, a day at
+  most. A rule that admits `PUT` from `*` is refused: the bucket is
+  private and a page writes through a URL an API signed, so the rule
+  names the origins of the pages that upload.
 - **Local.** `stack dev` runs fake-gcs-server in a container beside
   Postgres, one per environment, with a bucket per Bucket service
   (section 8.3). The container keeps its objects between runs, and
-  `--remove-data` removes them with it.
+  `--remove-data` removes them with it. The emulator answers a preflight
+  for every bucket alike, from any origin, so a local site's page uploads
+  with no setting, and the local bucket platform takes none. The request
+  headers it allows beside its own are the environment's
+  `storageCorsHeaders` value, which reaches it as `-cors-headers`.
 - **gcp.** A bucket is a `gcp:storage/bucket:Bucket`, pinned at
   pulumi-gcp 9.37.1, on the `gcp.storage` platform, with uniform
   bucket-level access and public access prevention enforced. Its name is
   `<project>-<stack>-<bucket>` (`acme-staging-shop-shop-media`), since
   bucket names are global, at most 63 characters, and holds no `google`,
   which Cloud Storage refuses. Its settings are `versioning`, off unless
-  set, and `deleteAfterDays`, a lifecycle rule's age. The connectors from
+  set, `deleteAfterDays`, a lifecycle rule's age, and `cors`, which
+  becomes the bucket's `cors`: a rule's `headers` and `exposeHeaders`
+  are the one `responseHeaders` list Cloud Storage keeps, and its
+  `maxAge` is `maxAgeSeconds` (D148). The connectors from
   a Cloud Run service, job and worker pool, in Go, TypeScript or Rust,
   grant the workload's account
   `roles/storage.objectUser` on the bucket and
@@ -5703,7 +5898,7 @@ declare module "@superschematic/stack" {
       job: { cpuMs?: number; logs?: boolean; telemetry?: boolean };
       worker: { logs?: boolean; cpuMs?: number; telemetry?: boolean; drainSeconds?: number };
       site: {};
-      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp" };
+      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp"; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string }[] };
     };
   }
 }
@@ -5727,7 +5922,7 @@ app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 | queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
-| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
+| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written, and `cors` an `r2BucketCors` (`<bucket>.cors`) with a rule per element, `cors-1`, `cors-2` (D148). Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
 | bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<env>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_<jurisdiction>_<bucket>`, `default` for a bucket in no jurisdiction: the bucket's objects alone. The value is `{name, binding, r2: {account, jurisdiction?, accessKeyId: <token id>, token: <token value, secret>}}`. |
 | site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
@@ -6405,14 +6600,16 @@ is flagged secret, so it reaches the Worker as a `secret_text` binding.
 `buckets-never-public` refuses an `r2ManagedDomain` or an `r2CustomDomain`
 on a Bucket service's bucket, whether it names the bucket by the node's
 output or by its name. A browser's PUT to a signed URL needs the
-bucket's CORS; that gap is shared with gcp and lands for both later.
+bucket's CORS, which the bucket's `cors` setting gives it, as on gcp
+(D148, section 8.9).
 
 The `cloudflare.r2` platform (D64, amended):
 - **Settings** are `locationHint`, the region R2 places the bucket in
   when it creates it, `storageClass`, `Standard` or `InfrequentAccess`
-  for new objects, `deleteAfterDays`, as gcp's, and `jurisdiction`, `eu`
+  for new objects, `deleteAfterDays`, as gcp's, `cors`, as gcp's (D148),
+  and `jurisdiction`, `eu`
   or `fedramp`, where R2 keeps the bucket's data (D64, amended): the
-  bucket and its lifecycle name it, the edge's token names the bucket's
+  bucket, its lifecycle and its CORS rules name it, the edge's token names the bucket's
   objects under it, and the R2 credential names it (`<FIELD>_R2_JURISDICTION`),
   so the runtime signs URLs for the jurisdiction's S3 host,
   `<account>.<jurisdiction>.r2.cloudflarestorage.com`. A jurisdiction beside
@@ -6664,10 +6861,10 @@ records no `workersSubdomain` is refused until bootstrap records it.
 
 The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
-`r2BucketLifecycle` and `accountToken`, written by `go run ./internal/tools/providerschemas` in
+`r2BucketLifecycle`, `r2BucketCors` (D148) and `accountToken`, written by `go run ./internal/tools/providerschemas` in
 `extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph
 and the bucket edges' tokens; each platform pins its own types as it
-comes, and the R2 platform has pinned `r2Bucket` and `r2BucketLifecycle`.
+comes, and the R2 platform has pinned `r2Bucket`, `r2BucketLifecycle` and `r2BucketCors`.
 pulumi-cloudflare's bridge
 metadata lists a single nested attribute's list fields with no element,
 which `pintool` reads, so the token's `condition.requestIp.ins` pins as

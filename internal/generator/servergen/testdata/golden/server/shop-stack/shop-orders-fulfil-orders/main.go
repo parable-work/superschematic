@@ -17,7 +17,11 @@
 // messages past their retention. On SIGTERM or SIGINT it claims no more, lets
 // the running methods finish for 8s, cancels the rest and gives their
 // messages back, and exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it takes
+// one of WORKER_SLOTS locks named for its queue as it starts, exiting 0 at
+// once when none is free, and exits 0 once no message was ready or held for
+// WORKER_IDLE_SECONDS.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] go template (section 8.5): example.com/schemas/implementation/shop-orders
@@ -35,6 +39,7 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
 	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
+	"github.com/parable-work/superschematic/runtime/http/go/wake"
 	"github.com/parable-work/superschematic/runtime/http/go/worker"
 	"go.uber.org/zap"
 
@@ -81,6 +86,14 @@ func run(logger *zap.Logger) error {
 
 	// One pool per database, shared by every API on it. A pool connects when
 	// it is first used, so the worker starts while its database is not up yet.
+	// The wakes of the workers in drain mode, which the environment holds
+	// where their platform gives one (QUEUE_WAKES, D145): an enqueue sends
+	// its queue's, at most once in five seconds, and waits for none.
+	wakes, err := wake.FromEnv(logger)
+	if err != nil {
+		return err
+	}
+	defer wakes.Wait()
 	shopDbPool, err := connect(ctx, "SHOP_DB_DATABASE", shopOrdersConfig.ShopDbDatabase)
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
@@ -90,6 +103,7 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
 	}
+	shopdborm.OnEnqueue(wakes.Enqueued)
 
 	// One client per API called, shared by every API that calls it.
 	shopApiClient, err := newShopApiClient(shopOrdersConfig.ShopApiService)
@@ -130,6 +144,12 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return err
 	}
+	// In drain mode, which the platform sets (WORKER_MODE), the worker
+	// takes a slot of its queue and exits once the queue is empty (D145).
+	drain, err := worker.DrainFromEnv()
+	if err != nil {
+		return err
+	}
 	queue := shopDb.OrderPlacedQueue()
 	logger.Info("worker started", zap.String("api", "shop-orders"), zap.String("class", "FulfilOrders"),
 		zap.String("queue", "OrderPlaced"), zap.Int("concurrency", concurrency))
@@ -159,7 +179,9 @@ func run(logger *zap.Logger) error {
 		Fail:     queue.Fail,
 		Release:  queue.Release,
 		Prune:    queue.Prune,
-	}, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})
+		Slot:     queue.Slot,
+		NextDue:  queue.NextDue,
+	}, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})
 }
 
 // connect builds the pool of the database field named field, which the

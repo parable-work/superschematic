@@ -13,7 +13,8 @@ declare module "../src/index" {
       server: { minInstances?: number };
       database: { tier?: string; highAvailability?: boolean };
       job: { cpu?: string };
-      bucket: { versioning?: boolean };
+      // A list of objects, as `stack init` writes a bucket's cors (D148).
+      bucket: { versioning?: boolean; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; maxAge?: string }[] };
       worker: { memory?: string };
       runner: { memory?: string };
       memoryStore: { nodeType?: string };
@@ -83,8 +84,9 @@ export abstract class Data {}
     // A declared deployable's class takes either kind's settings.
     { of: Backend, minInstances: 2, env: { ANY_FIELD: "x" } },
     { of: Data, tier: "small" },
-    // A bucket takes the target's bucket settings.
-    { of: ShopMedia, versioning: true },
+    // A bucket takes the target's bucket settings, a list of rules among
+    // them (D148).
+    { of: ShopMedia, versioning: true, cors: [{ origins: ["https://shop.acme.dev"], methods: ["GET", "PUT"], headers: ["content-type"], maxAge: "1h" }] },
     // A memory store takes the target's memoryStore settings.
     { of: ShopCache, nodeType: "SHARED_CORE_NANO" },
     // A platform outside the target takes its own settings, which the
@@ -173,6 +175,20 @@ export abstract class EnvOnDatabase {}
   settings: [{ of: ShopMedia, minInstances: 1 }],
 })
 export abstract class ServerSettingOnBucket {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a CORS rule's method is one a bucket answers
+  settings: [{ of: ShopMedia, cors: [{ origins: ["https://shop.acme.dev"], methods: ["PATCH"] }] }],
+})
+export abstract class CorsMethodOnBucket {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a CORS rule names its methods
+  settings: [{ of: ShopMedia, cors: [{ origins: ["https://shop.acme.dev"] }] }],
+})
+export abstract class CorsRuleWithNoMethods {}
 
 @environment({
   target: "fake",
@@ -414,6 +430,37 @@ export abstract class WorkerSettings {}
 })
 export abstract class LocalWorker {}
 
+// A worker's element takes its mode and, in drain mode, its idle time
+// (D145), on every target.
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "drain", idle: "1m", instances: 2 }],
+})
+export abstract class DrainWorker {}
+
+@environment({
+  target: "local",
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "pool" }],
+})
+export abstract class LocalPoolWorker {}
+
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  // @ts-expect-error a worker's mode is "pool" or "drain"
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "burst" }],
+})
+export abstract class UnknownWorkerMode {}
+
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  // @ts-expect-error an idle time is a duration's text
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "drain", idle: 30 }],
+})
+export abstract class IdleAsANumber {}
+
 // A deriver's element names its API's handle and the deriver's class; it
 // turns the deriver on or off, runs one instance or none, sets how many
 // answers it runs at a time, and takes an env of its API's config (D74).
@@ -595,3 +642,63 @@ export abstract class InstancesOnApp {}
   settings: [{ of: ShopDb, app: "Backoffice" }],
 })
 export abstract class AppOfDb {}
+
+// What the stack adds to its deployables' images (D144): a server by its
+// API's handle or its declared class, and a job, a worker, a deriver, an
+// app or an engine's runner beside a handle, as a settings element names
+// one, with packages, a Dockerfile to extend with, or both.
+@stack({
+  deploy: [ShopApi, ShopOrders, ShopCart, ShopFulfilment, ShopSupport, ShopStock],
+  images: [
+    { of: ShopApi, packages: ["chromium", "fonts-liberation"] },
+    { of: Backend, extend: "docker/backend.Dockerfile" },
+    { of: ShopCart, job: "SendDigest", packages: ["poppler-utils"], extend: "docker/digest/Dockerfile" },
+    { of: ShopFulfilment, worker: "FulfilOrders", packages: ["tini"] },
+    { of: ShopSupport, deriver: "TriageTickets", packages: ["tini"] },
+    { of: ShopStock, app: "Backoffice", packages: ["tini"] },
+    { of: ShopDb, runner: true, packages: ["tini"] },
+  ],
+})
+export abstract class ImageShop {}
+
+@stack({
+  deploy: [ShopCart],
+  // @ts-expect-error a job the API does not declare
+  images: [{ of: ShopCart, job: "PrintLabels", packages: ["tini"] }],
+})
+export abstract class ImageOfAnUnknownJob {}
+
+@stack({
+  deploy: [ShopFulfilment],
+  // @ts-expect-error a worker the API does not declare
+  images: [{ of: ShopFulfilment, worker: "PrintLabels", packages: ["tini"] }],
+})
+export abstract class ImageOfAnUnknownWorker {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error a bucket runs no image
+  images: [{ of: ShopMedia, packages: ["tini"] }],
+})
+export abstract class ImageOfABucket {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error a database runs no image; its engine's runner does, named with runner: true
+  images: [{ of: ShopDb, packages: ["tini"] }],
+})
+export abstract class ImageOfADatabase {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error an image takes packages and extend, and no command to run
+  images: [{ of: ShopApi, run: "apt-get install -y chromium" }],
+})
+export abstract class ImageWithARunLine {}
+
+@stack({
+  deploy: [ShopApi],
+  // @ts-expect-error packages are names
+  images: [{ of: ShopApi, packages: [1] }],
+})
+export abstract class ImageWithANumber {}
