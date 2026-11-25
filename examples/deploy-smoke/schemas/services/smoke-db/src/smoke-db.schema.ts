@@ -1,6 +1,6 @@
 import { Contact, Embedding, Finance, Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, User as UserTrait, UserRole, index, key, queue, seedRoles, unique } from "@superschematic/db";
+import { AutoGenerate, Reactions, Schedules, Timers, User as UserTrait, UserRole, Workflow, index, key, queue, seedRoles, unique } from "@superschematic/db";
 
 // The user model (D50), which the API signs its users in with.
 export abstract class User implements UserTrait<{ login: "email"; name: "name" }> {
@@ -38,4 +38,46 @@ export abstract class LineItem {
   amount: Finance.SignedMoney;
   embedding: Validate<Embedding.Vector, { dimensions: 3 }>;
   drainedAt: Nullable<Temporal.DateTime>;
+}
+
+// The behaviors a behavior worker runs on Workers (D151), each on a table
+// of its own, each of which smoke-api runs a @behaviorWorker of.
+
+// A follow-up falls due five seconds after it is made: a Timers deadline,
+// which the behavior worker fires, moves it to due. On Cloudflare the
+// create wakes the worker's Workflow, so it moves within seconds of its
+// time, not at the next Cron firing.
+export abstract class FollowUp implements Timers<FollowUp, {
+  deadlines: { due: { start: { create: true }; afterMs: 5000; then: { transition: "due" } } };
+  permission: "smoke.write";
+}> {
+  @key id: AutoGenerate<Identity.UUID>;
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+  status: Workflow<{ states: ["open", "due"]; transitions: [{ from: "open"; to: "due" }] }>;
+}
+
+// A check-in takes a wake-up five seconds on (Schedules): its run is an
+// event the behavior worker hands to smoke-api's handler, which records
+// when it ran.
+export abstract class CheckIn implements Schedules<CheckIn, {
+  max: 2;
+  minMs: 1000;
+  kinds: ["after"];
+  outcomes: ["told"];
+  permission: "smoke.write";
+}> {
+  @key id: AutoGenerate<Identity.UUID>;
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+  ranAt: Nullable<Temporal.DateTime>;
+}
+
+// An alert is raised when its level changes to high (Reactions): the
+// table's trigger writes the change, and the behavior worker runs the rule
+// that hears it, whoever wrote the row.
+export abstract class Alert implements Reactions<Alert, {
+  rules: [{ when: { changes: { field: "level"; to: "high" } }; then: { transition: "raised" } }];
+}> {
+  @key id: AutoGenerate<Identity.UUID>;
+  level: Validate<string, { minLength: 1; maxLength: 20 }>;
+  status: Workflow<{ states: ["quiet", "raised"]; transitions: [{ from: "quiet"; to: "raised" }] }>;
 }
