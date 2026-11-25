@@ -145,10 +145,21 @@ func routeSteps(t *testing.T, dir string) map[string][]string {
 	return steps
 }
 
+// providerStepsOnly reports whether every step is one of the provider's
+// first and after-decrypt markers: the route has a list only for them.
+func providerStepsOnly(steps []string) bool {
+	for _, step := range steps {
+		if step != "firstStep" && step != "afterDecryptStep" {
+			return false
+		}
+	}
+	return len(steps) > 0
+}
+
 // TestRouteMiddlewaresFirstRunsBeforeEveryOtherStep: the provider's first
 // snippet is the first middleware of each route it writes for, before the
 // rate limit and body limit, and a route with no other middleware gets a
-// list for it.
+// list for the provider's steps.
 func TestRouteMiddlewaresFirstRunsBeforeEveryOtherStep(t *testing.T) {
 	output, dir := writeFixtureAPI(t)
 	steps := routeSteps(t, dir)
@@ -172,7 +183,7 @@ func TestRouteMiddlewaresFirstRunsBeforeEveryOtherStep(t *testing.T) {
 		}
 		if hasFirst {
 			checked++
-			if len(got) == 1 {
+			if providerStepsOnly(got) {
 				alone++
 			}
 		}
@@ -181,6 +192,48 @@ func TestRouteMiddlewaresFirstRunsBeforeEveryOtherStep(t *testing.T) {
 		t.Fatal("no route carries the first snippet")
 	}
 	if alone == 0 {
-		t.Error("no route has the first snippet alone, so the test does not show that it opens a list")
+		t.Error("no route has the provider's steps alone, so the test does not show that they open a list")
+	}
+}
+
+// TestRouteMiddlewaresAfterDecryptRunsBetweenDecryptorAndTimeout: the
+// provider's after-decrypt snippet comes after every other step of a route
+// but the timeout, so it reads the request the handler reads.
+func TestRouteMiddlewaresAfterDecryptRunsBetweenDecryptorAndTimeout(t *testing.T) {
+	output, dir := writeFixtureAPI(t)
+	steps := routeSteps(t, dir)
+	decrypted, timed := 0, 0
+	for _, ep := range output.Endpoints {
+		got, mounted := steps[ep.Method+" "+ep.RoutePath]
+		if !mounted || ep.ManualRouteRegistration || !ep.RequiresAuth {
+			continue
+		}
+		at := -1
+		for i, step := range got {
+			if step == "afterDecryptStep" {
+				at = i
+			}
+		}
+		if at < 0 {
+			t.Errorf("%s %s: no afterDecryptStep in %v", ep.Method, ep.RoutePath, got)
+			continue
+		}
+		for i, step := range got {
+			switch {
+			case step == "runtimemiddleware.Timeout" && i != at+1:
+				t.Errorf("%s %s: the timeout does not follow afterDecryptStep: %v", ep.Method, ep.RoutePath, got)
+			case step != "runtimemiddleware.Timeout" && i > at:
+				t.Errorf("%s %s: %s runs after afterDecryptStep: %v", ep.Method, ep.RoutePath, step, got)
+			}
+			if step == "runtimemiddleware.DecryptPayloadMiddleware" {
+				decrypted++
+			}
+			if step == "runtimemiddleware.Timeout" {
+				timed++
+			}
+		}
+	}
+	if decrypted == 0 || timed == 0 {
+		t.Errorf("the fixture checks %d decrypted and %d timed routes; want at least one of each", decrypted, timed)
 	}
 }

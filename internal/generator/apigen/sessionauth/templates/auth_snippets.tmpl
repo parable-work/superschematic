@@ -138,6 +138,8 @@ var (
 				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
 {{- end }}
 
+{{ define "routeMiddlewaresAfterDecrypt" }}{{ end }}
+
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 

@@ -28,6 +28,12 @@
 				permissionStep({{ len .RequiredPerms }}),
 {{- end }}
 
+{{ define "routeMiddlewaresAfterDecrypt" }}
+{{- if .RequiresAuth }}
+				afterDecryptStep("{{ .HandlerName }}"),
+{{- end }}
+{{- end }}
+
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 {{ define "callerImports" }}{{ end }}
