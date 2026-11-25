@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyCheckoutRepositoryInterface is the reads of CheckoutRepositoryInterface (D150).
+type ReadOnlyCheckoutRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CheckoutGetOptions) (*types.Checkout, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Checkout, error)
+	FindOne(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) (*types.Checkout, error)
+	FindMany(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) ([]*types.Checkout, int, error)
+	FindPage(ctx context.Context, filter *CheckoutFilter, opts *CheckoutPageOptions) (*CheckoutPage, error)
+}
+
 // CheckoutRepositoryInterface defines the contract for Checkout data access.
 type CheckoutRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CheckoutGetOptions) (*types.Checkout, error)
@@ -26,6 +35,15 @@ type CheckoutRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *CheckoutFilter) (int, error)
 	Holds() CheckoutHoldsOperations
 	Status() CheckoutStatusOperations
+}
+
+// ReadOnlyInventoryRepositoryInterface is the reads of InventoryRepositoryInterface (D150).
+type ReadOnlyInventoryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *InventoryGetOptions) (*types.Inventory, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Inventory, error)
+	FindOne(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) (*types.Inventory, error)
+	FindMany(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) ([]*types.Inventory, int, error)
+	FindPage(ctx context.Context, filter *InventoryFilter, opts *InventoryPageOptions) (*InventoryPage, error)
 }
 
 // InventoryRepositoryInterface defines the contract for Inventory data access.
@@ -44,16 +62,40 @@ type InventoryRepositoryInterface interface {
 	Stock() InventoryStockOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetCheckoutRepository() CheckoutRepositoryInterface
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
 	GetInventoryRepository() InventoryRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -62,7 +104,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCheckoutRepository() CheckoutRepositoryInterface
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
 	GetInventoryRepository() InventoryRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -100,6 +144,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -112,6 +162,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -162,7 +217,15 @@ func (db *NoOpDatabase) GetCheckoutRepository() CheckoutRepositoryInterface {
 	return db.Checkout
 }
 
+func (db *NoOpDatabase) GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface {
+	return db.Checkout
+}
+
 func (tx *NoOpTx) GetCheckoutRepository() CheckoutRepositoryInterface {
+	return tx.Checkout
+}
+
+func (tx *NoOpTx) GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface {
 	return tx.Checkout
 }
 
@@ -254,7 +317,15 @@ func (db *NoOpDatabase) GetInventoryRepository() InventoryRepositoryInterface {
 	return db.Inventory
 }
 
+func (db *NoOpDatabase) GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface {
+	return db.Inventory
+}
+
 func (tx *NoOpTx) GetInventoryRepository() InventoryRepositoryInterface {
+	return tx.Inventory
+}
+
+func (tx *NoOpTx) GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface {
 	return tx.Inventory
 }
 
@@ -364,12 +435,20 @@ func (noOpInventoryStockOperations) ListStockMovements(_ context.Context, _ type
 }
 
 var (
-	_ DatabaseInterface            = (*Database)(nil)
-	_ DatabaseInterface            = (*NoOpDatabase)(nil)
-	_ TxInterface                  = (*Tx)(nil)
-	_ TxInterface                  = (*NoOpTx)(nil)
-	_ CheckoutRepositoryInterface  = (*CheckoutRepository)(nil)
-	_ CheckoutRepositoryInterface  = (*NoOpCheckoutRepository)(nil)
-	_ InventoryRepositoryInterface = (*InventoryRepository)(nil)
-	_ InventoryRepositoryInterface = (*NoOpInventoryRepository)(nil)
+	_ DatabaseInterface                    = (*Database)(nil)
+	_ DatabaseInterface                    = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface            = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface            = (*NoOpDatabase)(nil)
+	_ TxInterface                          = (*Tx)(nil)
+	_ TxInterface                          = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                  = (*Tx)(nil)
+	_ ReadOnlyTxInterface                  = (*NoOpTx)(nil)
+	_ CheckoutRepositoryInterface          = (*CheckoutRepository)(nil)
+	_ CheckoutRepositoryInterface          = (*NoOpCheckoutRepository)(nil)
+	_ ReadOnlyCheckoutRepositoryInterface  = (*CheckoutRepository)(nil)
+	_ ReadOnlyCheckoutRepositoryInterface  = (*NoOpCheckoutRepository)(nil)
+	_ InventoryRepositoryInterface         = (*InventoryRepository)(nil)
+	_ InventoryRepositoryInterface         = (*NoOpInventoryRepository)(nil)
+	_ ReadOnlyInventoryRepositoryInterface = (*InventoryRepository)(nil)
+	_ ReadOnlyInventoryRepositoryInterface = (*NoOpInventoryRepository)(nil)
 )

@@ -11,6 +11,15 @@ import (
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
 )
 
+// ReadOnlyProjectRepositoryInterface is the reads of ProjectRepositoryInterface (D150).
+type ReadOnlyProjectRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProjectGetOptions) (*types.Project, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Project, error)
+	FindOne(ctx context.Context, filter *ProjectFilter, opts *ProjectFindOptions) (*types.Project, error)
+	FindMany(ctx context.Context, filter *ProjectFilter, opts *ProjectFindOptions) ([]*types.Project, int, error)
+	FindPage(ctx context.Context, filter *ProjectFilter, opts *ProjectPageOptions) (*ProjectPage, error)
+}
+
 // ProjectRepositoryInterface defines the contract for Project data access.
 type ProjectRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProjectGetOptions) (*types.Project, error)
@@ -29,6 +38,15 @@ type ProjectRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *ProjectFilter) (int, error)
 	Status() ProjectStatusOperations
 	RunChange(ctx context.Context, change types.ProjectChange, claim *rules.Claim) (*rules.ChangeRun, error)
+}
+
+// ReadOnlyTaskRepositoryInterface is the reads of TaskRepositoryInterface (D150).
+type ReadOnlyTaskRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TaskGetOptions) (*types.Task, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Task, error)
+	FindOne(ctx context.Context, filter *TaskFilter, opts *TaskFindOptions) (*types.Task, error)
+	FindMany(ctx context.Context, filter *TaskFilter, opts *TaskFindOptions) ([]*types.Task, int, error)
+	FindPage(ctx context.Context, filter *TaskFilter, opts *TaskPageOptions) (*TaskPage, error)
 }
 
 // TaskRepositoryInterface defines the contract for Task data access.
@@ -51,16 +69,40 @@ type TaskRepositoryInterface interface {
 	RunChange(ctx context.Context, change types.TaskChange, claim *rules.Claim) (*rules.ChangeRun, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface
+	GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface
+	GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetProjectRepository() ProjectRepositoryInterface
+	GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface
 	GetTaskRepository() TaskRepositoryInterface
+	GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -69,7 +111,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetProjectRepository() ProjectRepositoryInterface
+	GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface
 	GetTaskRepository() TaskRepositoryInterface
+	GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -107,6 +151,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -119,6 +169,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -169,7 +224,15 @@ func (db *NoOpDatabase) GetProjectRepository() ProjectRepositoryInterface {
 	return db.Project
 }
 
+func (db *NoOpDatabase) GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface {
+	return db.Project
+}
+
 func (tx *NoOpTx) GetProjectRepository() ProjectRepositoryInterface {
+	return tx.Project
+}
+
+func (tx *NoOpTx) GetProjectReadOnlyRepository() ReadOnlyProjectRepositoryInterface {
 	return tx.Project
 }
 
@@ -264,7 +327,15 @@ func (db *NoOpDatabase) GetTaskRepository() TaskRepositoryInterface {
 	return db.Task
 }
 
+func (db *NoOpDatabase) GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface {
+	return db.Task
+}
+
 func (tx *NoOpTx) GetTaskRepository() TaskRepositoryInterface {
+	return tx.Task
+}
+
+func (tx *NoOpTx) GetTaskReadOnlyRepository() ReadOnlyTaskRepositoryInterface {
 	return tx.Task
 }
 
@@ -356,12 +427,20 @@ func (noOpTaskStatusOperations) Transition(_ context.Context, _ types.IdentityUU
 }
 
 var (
-	_ DatabaseInterface          = (*Database)(nil)
-	_ DatabaseInterface          = (*NoOpDatabase)(nil)
-	_ TxInterface                = (*Tx)(nil)
-	_ TxInterface                = (*NoOpTx)(nil)
-	_ ProjectRepositoryInterface = (*ProjectRepository)(nil)
-	_ ProjectRepositoryInterface = (*NoOpProjectRepository)(nil)
-	_ TaskRepositoryInterface    = (*TaskRepository)(nil)
-	_ TaskRepositoryInterface    = (*NoOpTaskRepository)(nil)
+	_ DatabaseInterface                  = (*Database)(nil)
+	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface          = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface          = (*NoOpDatabase)(nil)
+	_ TxInterface                        = (*Tx)(nil)
+	_ TxInterface                        = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                = (*Tx)(nil)
+	_ ReadOnlyTxInterface                = (*NoOpTx)(nil)
+	_ ProjectRepositoryInterface         = (*ProjectRepository)(nil)
+	_ ProjectRepositoryInterface         = (*NoOpProjectRepository)(nil)
+	_ ReadOnlyProjectRepositoryInterface = (*ProjectRepository)(nil)
+	_ ReadOnlyProjectRepositoryInterface = (*NoOpProjectRepository)(nil)
+	_ TaskRepositoryInterface            = (*TaskRepository)(nil)
+	_ TaskRepositoryInterface            = (*NoOpTaskRepository)(nil)
+	_ ReadOnlyTaskRepositoryInterface    = (*TaskRepository)(nil)
+	_ ReadOnlyTaskRepositoryInterface    = (*NoOpTaskRepository)(nil)
 )

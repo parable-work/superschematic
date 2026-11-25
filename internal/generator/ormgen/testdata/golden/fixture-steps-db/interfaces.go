@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyBatchRepositoryInterface is the reads of BatchRepositoryInterface (D150).
+type ReadOnlyBatchRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BatchGetOptions) (*types.Batch, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Batch, error)
+	FindOne(ctx context.Context, filter *BatchFilter, opts *BatchFindOptions) (*types.Batch, error)
+	FindMany(ctx context.Context, filter *BatchFilter, opts *BatchFindOptions) ([]*types.Batch, int, error)
+	FindPage(ctx context.Context, filter *BatchFilter, opts *BatchPageOptions) (*BatchPage, error)
+}
+
 // BatchRepositoryInterface defines the contract for Batch data access.
 type BatchRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *BatchGetOptions) (*types.Batch, error)
@@ -29,6 +38,15 @@ type BatchRepositoryInterface interface {
 	Status() BatchStatusOperations
 }
 
+// ReadOnlyStepRepositoryInterface is the reads of StepRepositoryInterface (D150).
+type ReadOnlyStepRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Step, error)
+	FindOne(ctx context.Context, filter *StepFilter, opts *StepFindOptions) (*types.Step, error)
+	FindMany(ctx context.Context, filter *StepFilter, opts *StepFindOptions) ([]*types.Step, int, error)
+	FindPage(ctx context.Context, filter *StepFilter, opts *StepPageOptions) (*StepPage, error)
+}
+
 // StepRepositoryInterface defines the contract for Step data access.
 type StepRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
@@ -46,16 +64,40 @@ type StepRepositoryInterface interface {
 	Status() StepStatusOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetBatchRepository() BatchRepositoryInterface
+	GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -64,7 +106,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetBatchRepository() BatchRepositoryInterface
+	GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -102,6 +146,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -114,6 +164,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -164,7 +219,15 @@ func (db *NoOpDatabase) GetBatchRepository() BatchRepositoryInterface {
 	return db.Batch
 }
 
+func (db *NoOpDatabase) GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface {
+	return db.Batch
+}
+
 func (tx *NoOpTx) GetBatchRepository() BatchRepositoryInterface {
+	return tx.Batch
+}
+
+func (tx *NoOpTx) GetBatchReadOnlyRepository() ReadOnlyBatchRepositoryInterface {
 	return tx.Batch
 }
 
@@ -253,7 +316,15 @@ func (db *NoOpDatabase) GetStepRepository() StepRepositoryInterface {
 	return db.Step
 }
 
+func (db *NoOpDatabase) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
+	return db.Step
+}
+
 func (tx *NoOpTx) GetStepRepository() StepRepositoryInterface {
+	return tx.Step
+}
+
+func (tx *NoOpTx) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
 	return tx.Step
 }
 
@@ -347,12 +418,20 @@ func (noOpStepStatusOperations) Transition(_ context.Context, _ types.IdentityUU
 }
 
 var (
-	_ DatabaseInterface        = (*Database)(nil)
-	_ DatabaseInterface        = (*NoOpDatabase)(nil)
-	_ TxInterface              = (*Tx)(nil)
-	_ TxInterface              = (*NoOpTx)(nil)
-	_ BatchRepositoryInterface = (*BatchRepository)(nil)
-	_ BatchRepositoryInterface = (*NoOpBatchRepository)(nil)
-	_ StepRepositoryInterface  = (*StepRepository)(nil)
-	_ StepRepositoryInterface  = (*NoOpStepRepository)(nil)
+	_ DatabaseInterface                = (*Database)(nil)
+	_ DatabaseInterface                = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface        = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface        = (*NoOpDatabase)(nil)
+	_ TxInterface                      = (*Tx)(nil)
+	_ TxInterface                      = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface              = (*Tx)(nil)
+	_ ReadOnlyTxInterface              = (*NoOpTx)(nil)
+	_ BatchRepositoryInterface         = (*BatchRepository)(nil)
+	_ BatchRepositoryInterface         = (*NoOpBatchRepository)(nil)
+	_ ReadOnlyBatchRepositoryInterface = (*BatchRepository)(nil)
+	_ ReadOnlyBatchRepositoryInterface = (*NoOpBatchRepository)(nil)
+	_ StepRepositoryInterface          = (*StepRepository)(nil)
+	_ StepRepositoryInterface          = (*NoOpStepRepository)(nil)
+	_ ReadOnlyStepRepositoryInterface  = (*StepRepository)(nil)
+	_ ReadOnlyStepRepositoryInterface  = (*NoOpStepRepository)(nil)
 )

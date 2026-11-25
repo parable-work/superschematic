@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyTenantRepositoryInterface is the reads of TenantRepositoryInterface (D150).
+type ReadOnlyTenantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantGetOptions) (*types.Tenant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tenant, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tenant, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantHistoryOptions) ([]types.HistoryRecord[*types.Tenant], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tenant, error)
+	FindOne(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) (*types.Tenant, error)
+	FindMany(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) ([]*types.Tenant, int, error)
+	FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error)
+}
+
 // TenantRepositoryInterface defines the contract for Tenant data access.
 type TenantRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantGetOptions) (*types.Tenant, error)
@@ -32,6 +44,19 @@ type TenantRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *TenantFilter) (int, error)
+}
+
+// ReadOnlyTenantUserRepositoryInterface is the reads of TenantUserRepositoryInterface (D150).
+type ReadOnlyTenantUserRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantUserGetOptions) (*types.TenantUser, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.TenantUser, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.TenantUser, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.TenantUser, error)
+	ListAsOfByTenantID(ctx context.Context, tenantID types.IdentityUUID, ts time.Time, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
+	FindOne(ctx context.Context, filter *TenantUserFilter, opts *TenantUserFindOptions) (*types.TenantUser, error)
+	FindMany(ctx context.Context, filter *TenantUserFilter, opts *TenantUserFindOptions) ([]*types.TenantUser, int, error)
+	FindPage(ctx context.Context, filter *TenantUserFilter, opts *TenantUserPageOptions) (*TenantUserPage, error)
 }
 
 // TenantUserRepositoryInterface defines the contract for TenantUser data access.
@@ -59,16 +84,40 @@ type TenantUserRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface
+	GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface
+	GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetTenantRepository() TenantRepositoryInterface
+	GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface
 	GetTenantUserRepository() TenantUserRepositoryInterface
+	GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -77,7 +126,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetTenantRepository() TenantRepositoryInterface
+	GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface
 	GetTenantUserRepository() TenantUserRepositoryInterface
+	GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -115,6 +166,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -127,6 +184,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -177,7 +239,15 @@ func (db *NoOpDatabase) GetTenantRepository() TenantRepositoryInterface {
 	return db.Tenant
 }
 
+func (db *NoOpDatabase) GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface {
+	return db.Tenant
+}
+
 func (tx *NoOpTx) GetTenantRepository() TenantRepositoryInterface {
+	return tx.Tenant
+}
+
+func (tx *NoOpTx) GetTenantReadOnlyRepository() ReadOnlyTenantRepositoryInterface {
 	return tx.Tenant
 }
 
@@ -271,7 +341,15 @@ func (db *NoOpDatabase) GetTenantUserRepository() TenantUserRepositoryInterface 
 	return db.TenantUser
 }
 
+func (db *NoOpDatabase) GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface {
+	return db.TenantUser
+}
+
 func (tx *NoOpTx) GetTenantUserRepository() TenantUserRepositoryInterface {
+	return tx.TenantUser
+}
+
+func (tx *NoOpTx) GetTenantUserReadOnlyRepository() ReadOnlyTenantUserRepositoryInterface {
 	return tx.TenantUser
 }
 
@@ -370,12 +448,20 @@ func (r *NoOpTenantUserRepository) HardDeleteOne(_ context.Context, _ types.Iden
 }
 
 var (
-	_ DatabaseInterface             = (*Database)(nil)
-	_ DatabaseInterface             = (*NoOpDatabase)(nil)
-	_ TxInterface                   = (*Tx)(nil)
-	_ TxInterface                   = (*NoOpTx)(nil)
-	_ TenantRepositoryInterface     = (*TenantRepository)(nil)
-	_ TenantRepositoryInterface     = (*NoOpTenantRepository)(nil)
-	_ TenantUserRepositoryInterface = (*TenantUserRepository)(nil)
-	_ TenantUserRepositoryInterface = (*NoOpTenantUserRepository)(nil)
+	_ DatabaseInterface                     = (*Database)(nil)
+	_ DatabaseInterface                     = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface             = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface             = (*NoOpDatabase)(nil)
+	_ TxInterface                           = (*Tx)(nil)
+	_ TxInterface                           = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                   = (*Tx)(nil)
+	_ ReadOnlyTxInterface                   = (*NoOpTx)(nil)
+	_ TenantRepositoryInterface             = (*TenantRepository)(nil)
+	_ TenantRepositoryInterface             = (*NoOpTenantRepository)(nil)
+	_ ReadOnlyTenantRepositoryInterface     = (*TenantRepository)(nil)
+	_ ReadOnlyTenantRepositoryInterface     = (*NoOpTenantRepository)(nil)
+	_ TenantUserRepositoryInterface         = (*TenantUserRepository)(nil)
+	_ TenantUserRepositoryInterface         = (*NoOpTenantUserRepository)(nil)
+	_ ReadOnlyTenantUserRepositoryInterface = (*TenantUserRepository)(nil)
+	_ ReadOnlyTenantUserRepositoryInterface = (*NoOpTenantUserRepository)(nil)
 )

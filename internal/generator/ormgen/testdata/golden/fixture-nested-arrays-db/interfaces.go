@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyBoardRepositoryInterface is the reads of BoardRepositoryInterface (D150).
+type ReadOnlyBoardRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BoardGetOptions) (*types.Board, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Board, error)
+	FindOne(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) (*types.Board, error)
+	FindMany(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, int, error)
+	FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error)
+}
+
 // BoardRepositoryInterface defines the contract for Board data access.
 type BoardRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *BoardGetOptions) (*types.Board, error)
@@ -28,15 +37,36 @@ type BoardRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *BoardFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetBoardRepository() BoardRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -45,6 +75,7 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetBoardRepository() BoardRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -78,6 +109,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -90,6 +127,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -140,7 +182,15 @@ func (db *NoOpDatabase) GetBoardRepository() BoardRepositoryInterface {
 	return db.Board
 }
 
+func (db *NoOpDatabase) GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface {
+	return db.Board
+}
+
 func (tx *NoOpTx) GetBoardRepository() BoardRepositoryInterface {
+	return tx.Board
+}
+
+func (tx *NoOpTx) GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface {
 	return tx.Board
 }
 
@@ -211,10 +261,16 @@ func (r *NoOpBoardRepository) DeleteMany(_ context.Context, _ *BoardFilter) (int
 }
 
 var (
-	_ DatabaseInterface        = (*Database)(nil)
-	_ DatabaseInterface        = (*NoOpDatabase)(nil)
-	_ TxInterface              = (*Tx)(nil)
-	_ TxInterface              = (*NoOpTx)(nil)
-	_ BoardRepositoryInterface = (*BoardRepository)(nil)
-	_ BoardRepositoryInterface = (*NoOpBoardRepository)(nil)
+	_ DatabaseInterface                = (*Database)(nil)
+	_ DatabaseInterface                = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface        = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface        = (*NoOpDatabase)(nil)
+	_ TxInterface                      = (*Tx)(nil)
+	_ TxInterface                      = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface              = (*Tx)(nil)
+	_ ReadOnlyTxInterface              = (*NoOpTx)(nil)
+	_ BoardRepositoryInterface         = (*BoardRepository)(nil)
+	_ BoardRepositoryInterface         = (*NoOpBoardRepository)(nil)
+	_ ReadOnlyBoardRepositoryInterface = (*BoardRepository)(nil)
+	_ ReadOnlyBoardRepositoryInterface = (*NoOpBoardRepository)(nil)
 )

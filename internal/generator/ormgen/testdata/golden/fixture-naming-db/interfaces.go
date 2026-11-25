@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyCategoryRepositoryInterface is the reads of CategoryRepositoryInterface (D150).
+type ReadOnlyCategoryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CategoryGetOptions) (*types.Category, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Category, error)
+	FindOne(ctx context.Context, filter *CategoryFilter, opts *CategoryFindOptions) (*types.Category, error)
+	FindMany(ctx context.Context, filter *CategoryFilter, opts *CategoryFindOptions) ([]*types.Category, int, error)
+	FindPage(ctx context.Context, filter *CategoryFilter, opts *CategoryPageOptions) (*CategoryPage, error)
+}
+
 // CategoryRepositoryInterface defines the contract for Category data access.
 type CategoryRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CategoryGetOptions) (*types.Category, error)
@@ -27,6 +36,15 @@ type CategoryRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *CategoryFilter, update *CategoryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *CategoryFilter) (int, error)
+}
+
+// ReadOnlyLineItemRepositoryInterface is the reads of LineItemRepositoryInterface (D150).
+type ReadOnlyLineItemRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LineItemGetOptions) (*types.LineItem, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LineItem, error)
+	FindOne(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) (*types.LineItem, error)
+	FindMany(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) ([]*types.LineItem, int, error)
+	FindPage(ctx context.Context, filter *LineItemFilter, opts *LineItemPageOptions) (*LineItemPage, error)
 }
 
 // LineItemRepositoryInterface defines the contract for LineItem data access.
@@ -46,6 +64,18 @@ type LineItemRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *LineItemFilter) (int, error)
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
+}
+
+// ReadOnlyNoteRepositoryInterface is the reads of NoteRepositoryInterface (D150).
+type ReadOnlyNoteRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
+	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
+	FindMany(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, int, error)
+	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
 }
 
 // NoteRepositoryInterface defines the contract for Note data access.
@@ -71,17 +101,44 @@ type NoteRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *NoteFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetCategoryRepository() CategoryRepositoryInterface
+	GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface
 	GetLineItemRepository() LineItemRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -90,8 +147,11 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCategoryRepository() CategoryRepositoryInterface
+	GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface
 	GetLineItemRepository() LineItemRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -133,6 +193,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -145,6 +211,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -195,7 +266,15 @@ func (db *NoOpDatabase) GetCategoryRepository() CategoryRepositoryInterface {
 	return db.Category
 }
 
+func (db *NoOpDatabase) GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface {
+	return db.Category
+}
+
 func (tx *NoOpTx) GetCategoryRepository() CategoryRepositoryInterface {
+	return tx.Category
+}
+
+func (tx *NoOpTx) GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface {
 	return tx.Category
 }
 
@@ -269,7 +348,15 @@ func (db *NoOpDatabase) GetLineItemRepository() LineItemRepositoryInterface {
 	return db.LineItem
 }
 
+func (db *NoOpDatabase) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
+	return db.LineItem
+}
+
 func (tx *NoOpTx) GetLineItemRepository() LineItemRepositoryInterface {
+	return tx.LineItem
+}
+
+func (tx *NoOpTx) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
 	return tx.LineItem
 }
 
@@ -347,7 +434,15 @@ func (db *NoOpDatabase) GetNoteRepository() NoteRepositoryInterface {
 	return db.Note
 }
 
+func (db *NoOpDatabase) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
+	return db.Note
+}
+
 func (tx *NoOpTx) GetNoteRepository() NoteRepositoryInterface {
+	return tx.Note
+}
+
+func (tx *NoOpTx) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
 	return tx.Note
 }
 
@@ -438,14 +533,24 @@ func (r *NoOpNoteRepository) DeleteMany(_ context.Context, _ *NoteFilter) (int, 
 }
 
 var (
-	_ DatabaseInterface           = (*Database)(nil)
-	_ DatabaseInterface           = (*NoOpDatabase)(nil)
-	_ TxInterface                 = (*Tx)(nil)
-	_ TxInterface                 = (*NoOpTx)(nil)
-	_ CategoryRepositoryInterface = (*CategoryRepository)(nil)
-	_ CategoryRepositoryInterface = (*NoOpCategoryRepository)(nil)
-	_ LineItemRepositoryInterface = (*LineItemRepository)(nil)
-	_ LineItemRepositoryInterface = (*NoOpLineItemRepository)(nil)
-	_ NoteRepositoryInterface     = (*NoteRepository)(nil)
-	_ NoteRepositoryInterface     = (*NoOpNoteRepository)(nil)
+	_ DatabaseInterface                   = (*Database)(nil)
+	_ DatabaseInterface                   = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface           = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface           = (*NoOpDatabase)(nil)
+	_ TxInterface                         = (*Tx)(nil)
+	_ TxInterface                         = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                 = (*Tx)(nil)
+	_ ReadOnlyTxInterface                 = (*NoOpTx)(nil)
+	_ CategoryRepositoryInterface         = (*CategoryRepository)(nil)
+	_ CategoryRepositoryInterface         = (*NoOpCategoryRepository)(nil)
+	_ ReadOnlyCategoryRepositoryInterface = (*CategoryRepository)(nil)
+	_ ReadOnlyCategoryRepositoryInterface = (*NoOpCategoryRepository)(nil)
+	_ LineItemRepositoryInterface         = (*LineItemRepository)(nil)
+	_ LineItemRepositoryInterface         = (*NoOpLineItemRepository)(nil)
+	_ ReadOnlyLineItemRepositoryInterface = (*LineItemRepository)(nil)
+	_ ReadOnlyLineItemRepositoryInterface = (*NoOpLineItemRepository)(nil)
+	_ NoteRepositoryInterface             = (*NoteRepository)(nil)
+	_ NoteRepositoryInterface             = (*NoOpNoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface     = (*NoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface     = (*NoOpNoteRepository)(nil)
 )

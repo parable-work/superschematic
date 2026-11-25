@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyArticleRepositoryInterface is the reads of ArticleRepositoryInterface (D150).
+type ReadOnlyArticleRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ArticleGetOptions) (*types.Article, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Article, error)
+	FindOne(ctx context.Context, filter *ArticleFilter, opts *ArticleFindOptions) (*types.Article, error)
+	FindMany(ctx context.Context, filter *ArticleFilter, opts *ArticleFindOptions) ([]*types.Article, int, error)
+	FindPage(ctx context.Context, filter *ArticleFilter, opts *ArticlePageOptions) (*ArticlePage, error)
+}
+
 // ArticleRepositoryInterface defines the contract for Article data access.
 type ArticleRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ArticleGetOptions) (*types.Article, error)
@@ -24,6 +33,15 @@ type ArticleRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *ArticleFilter) (int, error)
 	Derived() ArticleDerivedOperations
+}
+
+// ReadOnlyTicketRepositoryInterface is the reads of TicketRepositoryInterface (D150).
+type ReadOnlyTicketRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TicketGetOptions) (*types.Ticket, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error)
+	FindOne(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) (*types.Ticket, error)
+	FindMany(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) ([]*types.Ticket, int, error)
+	FindPage(ctx context.Context, filter *TicketFilter, opts *TicketPageOptions) (*TicketPage, error)
 }
 
 // TicketRepositoryInterface defines the contract for Ticket data access.
@@ -44,16 +62,40 @@ type TicketRepositoryInterface interface {
 	Status() TicketStatusOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetArticleRepository() ArticleRepositoryInterface
+	GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -62,7 +104,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetArticleRepository() ArticleRepositoryInterface
+	GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -100,6 +144,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -112,6 +162,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -162,7 +217,15 @@ func (db *NoOpDatabase) GetArticleRepository() ArticleRepositoryInterface {
 	return db.Article
 }
 
+func (db *NoOpDatabase) GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface {
+	return db.Article
+}
+
 func (tx *NoOpTx) GetArticleRepository() ArticleRepositoryInterface {
+	return tx.Article
+}
+
+func (tx *NoOpTx) GetArticleReadOnlyRepository() ReadOnlyArticleRepositoryInterface {
 	return tx.Article
 }
 
@@ -255,7 +318,15 @@ func (db *NoOpDatabase) GetTicketRepository() TicketRepositoryInterface {
 	return db.Ticket
 }
 
+func (db *NoOpDatabase) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return db.Ticket
+}
+
 func (tx *NoOpTx) GetTicketRepository() TicketRepositoryInterface {
+	return tx.Ticket
+}
+
+func (tx *NoOpTx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
 	return tx.Ticket
 }
 
@@ -378,12 +449,20 @@ func (noOpTicketStatusOperations) Transition(_ context.Context, _ types.Identity
 }
 
 var (
-	_ DatabaseInterface          = (*Database)(nil)
-	_ DatabaseInterface          = (*NoOpDatabase)(nil)
-	_ TxInterface                = (*Tx)(nil)
-	_ TxInterface                = (*NoOpTx)(nil)
-	_ ArticleRepositoryInterface = (*ArticleRepository)(nil)
-	_ ArticleRepositoryInterface = (*NoOpArticleRepository)(nil)
-	_ TicketRepositoryInterface  = (*TicketRepository)(nil)
-	_ TicketRepositoryInterface  = (*NoOpTicketRepository)(nil)
+	_ DatabaseInterface                  = (*Database)(nil)
+	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface          = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface          = (*NoOpDatabase)(nil)
+	_ TxInterface                        = (*Tx)(nil)
+	_ TxInterface                        = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                = (*Tx)(nil)
+	_ ReadOnlyTxInterface                = (*NoOpTx)(nil)
+	_ ArticleRepositoryInterface         = (*ArticleRepository)(nil)
+	_ ArticleRepositoryInterface         = (*NoOpArticleRepository)(nil)
+	_ ReadOnlyArticleRepositoryInterface = (*ArticleRepository)(nil)
+	_ ReadOnlyArticleRepositoryInterface = (*NoOpArticleRepository)(nil)
+	_ TicketRepositoryInterface          = (*TicketRepository)(nil)
+	_ TicketRepositoryInterface          = (*NoOpTicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface  = (*TicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface  = (*NoOpTicketRepository)(nil)
 )

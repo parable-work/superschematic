@@ -160,8 +160,18 @@ func (db *Database) GetAccountRepository() AccountRepositoryInterface {
 	return db.Account
 }
 
+// GetAccountReadOnlyRepository returns the Account repository's reads.
+func (db *Database) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
+	return db.Account
+}
+
 // GetCategoryRepository returns the Category repository interface.
 func (db *Database) GetCategoryRepository() CategoryRepositoryInterface {
+	return db.Category
+}
+
+// GetCategoryReadOnlyRepository returns the Category repository's reads.
+func (db *Database) GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface {
 	return db.Category
 }
 
@@ -170,8 +180,18 @@ func (db *Database) GetLineItemRepository() LineItemRepositoryInterface {
 	return db.LineItem
 }
 
+// GetLineItemReadOnlyRepository returns the LineItem repository's reads.
+func (db *Database) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
+	return db.LineItem
+}
+
 // GetTransferGroupRepository returns the TransferGroup repository interface.
 func (db *Database) GetTransferGroupRepository() TransferGroupRepositoryInterface {
+	return db.TransferGroup
+}
+
+// GetTransferGroupReadOnlyRepository returns the TransferGroup repository's reads.
+func (db *Database) GetTransferGroupReadOnlyRepository() ReadOnlyTransferGroupRepositoryInterface {
 	return db.TransferGroup
 }
 
@@ -180,8 +200,18 @@ func (tx *Tx) GetAccountRepository() AccountRepositoryInterface {
 	return tx.Account
 }
 
+// GetAccountReadOnlyRepository returns the Account transaction repository's reads.
+func (tx *Tx) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
+	return tx.Account
+}
+
 // GetCategoryRepository returns the Category transaction repository interface.
 func (tx *Tx) GetCategoryRepository() CategoryRepositoryInterface {
+	return tx.Category
+}
+
+// GetCategoryReadOnlyRepository returns the Category transaction repository's reads.
+func (tx *Tx) GetCategoryReadOnlyRepository() ReadOnlyCategoryRepositoryInterface {
 	return tx.Category
 }
 
@@ -190,8 +220,18 @@ func (tx *Tx) GetLineItemRepository() LineItemRepositoryInterface {
 	return tx.LineItem
 }
 
+// GetLineItemReadOnlyRepository returns the LineItem transaction repository's reads.
+func (tx *Tx) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
+	return tx.LineItem
+}
+
 // GetTransferGroupRepository returns the TransferGroup transaction repository interface.
 func (tx *Tx) GetTransferGroupRepository() TransferGroupRepositoryInterface {
+	return tx.TransferGroup
+}
+
+// GetTransferGroupReadOnlyRepository returns the TransferGroup transaction repository's reads.
+func (tx *Tx) GetTransferGroupReadOnlyRepository() ReadOnlyTransferGroupRepositoryInterface {
 	return tx.TransferGroup
 }
 
@@ -230,6 +270,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

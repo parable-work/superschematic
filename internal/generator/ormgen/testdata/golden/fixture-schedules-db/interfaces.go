@@ -11,6 +11,15 @@ import (
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
 )
 
+// ReadOnlyProblemRepositoryInterface is the reads of ProblemRepositoryInterface (D150).
+type ReadOnlyProblemRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProblemGetOptions) (*types.Problem, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Problem, error)
+	FindOne(ctx context.Context, filter *ProblemFilter, opts *ProblemFindOptions) (*types.Problem, error)
+	FindMany(ctx context.Context, filter *ProblemFilter, opts *ProblemFindOptions) ([]*types.Problem, int, error)
+	FindPage(ctx context.Context, filter *ProblemFilter, opts *ProblemPageOptions) (*ProblemPage, error)
+}
+
 // ProblemRepositoryInterface defines the contract for Problem data access.
 type ProblemRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProblemGetOptions) (*types.Problem, error)
@@ -31,15 +40,36 @@ type ProblemRepositoryInterface interface {
 	RunEvent(ctx context.Context, event types.ProblemEvent, claim *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetProblemRepository() ProblemRepositoryInterface
+	GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -48,6 +78,7 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetProblemRepository() ProblemRepositoryInterface
+	GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -81,6 +112,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -93,6 +130,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -143,7 +185,15 @@ func (db *NoOpDatabase) GetProblemRepository() ProblemRepositoryInterface {
 	return db.Problem
 }
 
+func (db *NoOpDatabase) GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface {
+	return db.Problem
+}
+
 func (tx *NoOpTx) GetProblemRepository() ProblemRepositoryInterface {
+	return tx.Problem
+}
+
+func (tx *NoOpTx) GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface {
 	return tx.Problem
 }
 
@@ -272,10 +322,16 @@ func (noOpProblemStatusOperations) Transition(_ context.Context, _ types.Identit
 }
 
 var (
-	_ DatabaseInterface          = (*Database)(nil)
-	_ DatabaseInterface          = (*NoOpDatabase)(nil)
-	_ TxInterface                = (*Tx)(nil)
-	_ TxInterface                = (*NoOpTx)(nil)
-	_ ProblemRepositoryInterface = (*ProblemRepository)(nil)
-	_ ProblemRepositoryInterface = (*NoOpProblemRepository)(nil)
+	_ DatabaseInterface                  = (*Database)(nil)
+	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface          = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface          = (*NoOpDatabase)(nil)
+	_ TxInterface                        = (*Tx)(nil)
+	_ TxInterface                        = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                = (*Tx)(nil)
+	_ ReadOnlyTxInterface                = (*NoOpTx)(nil)
+	_ ProblemRepositoryInterface         = (*ProblemRepository)(nil)
+	_ ProblemRepositoryInterface         = (*NoOpProblemRepository)(nil)
+	_ ReadOnlyProblemRepositoryInterface = (*ProblemRepository)(nil)
+	_ ReadOnlyProblemRepositoryInterface = (*NoOpProblemRepository)(nil)
 )

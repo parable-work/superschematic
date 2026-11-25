@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyBankAccountRepositoryInterface is the reads of BankAccountRepositoryInterface (D150).
+type ReadOnlyBankAccountRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BankAccountGetOptions) (*types.BankAccount, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.BankAccount, error)
+	FindOne(ctx context.Context, filter *BankAccountFilter, opts *BankAccountFindOptions) (*types.BankAccount, error)
+	FindMany(ctx context.Context, filter *BankAccountFilter, opts *BankAccountFindOptions) ([]*types.BankAccount, int, error)
+	FindPage(ctx context.Context, filter *BankAccountFilter, opts *BankAccountPageOptions) (*BankAccountPage, error)
+}
+
 // BankAccountRepositoryInterface defines the contract for BankAccount data access.
 type BankAccountRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *BankAccountGetOptions) (*types.BankAccount, error)
@@ -26,6 +35,15 @@ type BankAccountRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *BankAccountFilter, update *BankAccountUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *BankAccountFilter) (int, error)
+}
+
+// ReadOnlyLineItemRepositoryInterface is the reads of LineItemRepositoryInterface (D150).
+type ReadOnlyLineItemRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LineItemGetOptions) (*types.LineItem, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LineItem, error)
+	FindOne(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) (*types.LineItem, error)
+	FindMany(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) ([]*types.LineItem, int, error)
+	FindPage(ctx context.Context, filter *LineItemFilter, opts *LineItemPageOptions) (*LineItemPage, error)
 }
 
 // LineItemRepositoryInterface defines the contract for LineItem data access.
@@ -47,16 +65,40 @@ type LineItemRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetBankAccountRepository() BankAccountRepositoryInterface
+	GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface
 	GetLineItemRepository() LineItemRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -65,7 +107,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetBankAccountRepository() BankAccountRepositoryInterface
+	GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface
 	GetLineItemRepository() LineItemRepositoryInterface
+	GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -103,6 +147,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -115,6 +165,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -165,7 +220,15 @@ func (db *NoOpDatabase) GetBankAccountRepository() BankAccountRepositoryInterfac
 	return db.BankAccount
 }
 
+func (db *NoOpDatabase) GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface {
+	return db.BankAccount
+}
+
 func (tx *NoOpTx) GetBankAccountRepository() BankAccountRepositoryInterface {
+	return tx.BankAccount
+}
+
+func (tx *NoOpTx) GetBankAccountReadOnlyRepository() ReadOnlyBankAccountRepositoryInterface {
 	return tx.BankAccount
 }
 
@@ -239,7 +302,15 @@ func (db *NoOpDatabase) GetLineItemRepository() LineItemRepositoryInterface {
 	return db.LineItem
 }
 
+func (db *NoOpDatabase) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
+	return db.LineItem
+}
+
 func (tx *NoOpTx) GetLineItemRepository() LineItemRepositoryInterface {
+	return tx.LineItem
+}
+
+func (tx *NoOpTx) GetLineItemReadOnlyRepository() ReadOnlyLineItemRepositoryInterface {
 	return tx.LineItem
 }
 
@@ -314,12 +385,20 @@ func (r *NoOpLineItemRepository) HardDeleteOne(_ context.Context, _ types.Identi
 }
 
 var (
-	_ DatabaseInterface              = (*Database)(nil)
-	_ DatabaseInterface              = (*NoOpDatabase)(nil)
-	_ TxInterface                    = (*Tx)(nil)
-	_ TxInterface                    = (*NoOpTx)(nil)
-	_ BankAccountRepositoryInterface = (*BankAccountRepository)(nil)
-	_ BankAccountRepositoryInterface = (*NoOpBankAccountRepository)(nil)
-	_ LineItemRepositoryInterface    = (*LineItemRepository)(nil)
-	_ LineItemRepositoryInterface    = (*NoOpLineItemRepository)(nil)
+	_ DatabaseInterface                      = (*Database)(nil)
+	_ DatabaseInterface                      = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface              = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface              = (*NoOpDatabase)(nil)
+	_ TxInterface                            = (*Tx)(nil)
+	_ TxInterface                            = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                    = (*Tx)(nil)
+	_ ReadOnlyTxInterface                    = (*NoOpTx)(nil)
+	_ BankAccountRepositoryInterface         = (*BankAccountRepository)(nil)
+	_ BankAccountRepositoryInterface         = (*NoOpBankAccountRepository)(nil)
+	_ ReadOnlyBankAccountRepositoryInterface = (*BankAccountRepository)(nil)
+	_ ReadOnlyBankAccountRepositoryInterface = (*NoOpBankAccountRepository)(nil)
+	_ LineItemRepositoryInterface            = (*LineItemRepository)(nil)
+	_ LineItemRepositoryInterface            = (*NoOpLineItemRepository)(nil)
+	_ ReadOnlyLineItemRepositoryInterface    = (*LineItemRepository)(nil)
+	_ ReadOnlyLineItemRepositoryInterface    = (*NoOpLineItemRepository)(nil)
 )

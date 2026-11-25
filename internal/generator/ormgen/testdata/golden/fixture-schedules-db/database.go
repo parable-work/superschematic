@@ -142,8 +142,18 @@ func (db *Database) GetProblemRepository() ProblemRepositoryInterface {
 	return db.Problem
 }
 
+// GetProblemReadOnlyRepository returns the Problem repository's reads.
+func (db *Database) GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface {
+	return db.Problem
+}
+
 // GetProblemRepository returns the Problem transaction repository interface.
 func (tx *Tx) GetProblemRepository() ProblemRepositoryInterface {
+	return tx.Problem
+}
+
+// GetProblemReadOnlyRepository returns the Problem transaction repository's reads.
+func (tx *Tx) GetProblemReadOnlyRepository() ReadOnlyProblemRepositoryInterface {
 	return tx.Problem
 }
 
@@ -178,6 +188,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

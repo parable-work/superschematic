@@ -150,8 +150,18 @@ func (db *Database) GetCustomerRepository() CustomerRepositoryInterface {
 	return db.Customer
 }
 
+// GetCustomerReadOnlyRepository returns the Customer repository's reads.
+func (db *Database) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
+	return db.Customer
+}
+
 // GetInvoiceRepository returns the Invoice repository interface.
 func (db *Database) GetInvoiceRepository() InvoiceRepositoryInterface {
+	return db.Invoice
+}
+
+// GetInvoiceReadOnlyRepository returns the Invoice repository's reads.
+func (db *Database) GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface {
 	return db.Invoice
 }
 
@@ -160,8 +170,18 @@ func (db *Database) GetTicketRepository() TicketRepositoryInterface {
 	return db.Ticket
 }
 
+// GetTicketReadOnlyRepository returns the Ticket repository's reads.
+func (db *Database) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return db.Ticket
+}
+
 // GetCustomerRepository returns the Customer transaction repository interface.
 func (tx *Tx) GetCustomerRepository() CustomerRepositoryInterface {
+	return tx.Customer
+}
+
+// GetCustomerReadOnlyRepository returns the Customer transaction repository's reads.
+func (tx *Tx) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
 	return tx.Customer
 }
 
@@ -170,8 +190,18 @@ func (tx *Tx) GetInvoiceRepository() InvoiceRepositoryInterface {
 	return tx.Invoice
 }
 
+// GetInvoiceReadOnlyRepository returns the Invoice transaction repository's reads.
+func (tx *Tx) GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface {
+	return tx.Invoice
+}
+
 // GetTicketRepository returns the Ticket transaction repository interface.
 func (tx *Tx) GetTicketRepository() TicketRepositoryInterface {
+	return tx.Ticket
+}
+
+// GetTicketReadOnlyRepository returns the Ticket transaction repository's reads.
+func (tx *Tx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
 	return tx.Ticket
 }
 
@@ -208,6 +238,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

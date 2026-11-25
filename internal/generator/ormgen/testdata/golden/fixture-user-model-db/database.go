@@ -162,8 +162,18 @@ func (db *Database) GetRoleRepository() RoleRepositoryInterface {
 	return db.Role
 }
 
+// GetRoleReadOnlyRepository returns the Role repository's reads.
+func (db *Database) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
+	return db.Role
+}
+
 // GetSessionRepository returns the Session repository interface.
 func (db *Database) GetSessionRepository() SessionRepositoryInterface {
+	return db.Session
+}
+
+// GetSessionReadOnlyRepository returns the Session repository's reads.
+func (db *Database) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
 	return db.Session
 }
 
@@ -172,8 +182,18 @@ func (db *Database) GetUserRepository() UserRepositoryInterface {
 	return db.User
 }
 
+// GetUserReadOnlyRepository returns the User repository's reads.
+func (db *Database) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
+	return db.User
+}
+
 // GetUserApiKeyRepository returns the UserApiKey repository interface.
 func (db *Database) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return db.UserApiKey
+}
+
+// GetUserApiKeyReadOnlyRepository returns the UserApiKey repository's reads.
+func (db *Database) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
 	return db.UserApiKey
 }
 
@@ -182,8 +202,18 @@ func (db *Database) GetUserCredentialRepository() UserCredentialRepositoryInterf
 	return db.UserCredential
 }
 
+// GetUserCredentialReadOnlyRepository returns the UserCredential repository's reads.
+func (db *Database) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
+	return db.UserCredential
+}
+
 // GetUserRoleGrantRepository returns the UserRoleGrant repository interface.
 func (db *Database) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return db.UserRoleGrant
+}
+
+// GetUserRoleGrantReadOnlyRepository returns the UserRoleGrant repository's reads.
+func (db *Database) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
 	return db.UserRoleGrant
 }
 
@@ -192,8 +222,18 @@ func (tx *Tx) GetRoleRepository() RoleRepositoryInterface {
 	return tx.Role
 }
 
+// GetRoleReadOnlyRepository returns the Role transaction repository's reads.
+func (tx *Tx) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
+	return tx.Role
+}
+
 // GetSessionRepository returns the Session transaction repository interface.
 func (tx *Tx) GetSessionRepository() SessionRepositoryInterface {
+	return tx.Session
+}
+
+// GetSessionReadOnlyRepository returns the Session transaction repository's reads.
+func (tx *Tx) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
 	return tx.Session
 }
 
@@ -202,8 +242,18 @@ func (tx *Tx) GetUserRepository() UserRepositoryInterface {
 	return tx.User
 }
 
+// GetUserReadOnlyRepository returns the User transaction repository's reads.
+func (tx *Tx) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
+	return tx.User
+}
+
 // GetUserApiKeyRepository returns the UserApiKey transaction repository interface.
 func (tx *Tx) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return tx.UserApiKey
+}
+
+// GetUserApiKeyReadOnlyRepository returns the UserApiKey transaction repository's reads.
+func (tx *Tx) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
 	return tx.UserApiKey
 }
 
@@ -212,8 +262,18 @@ func (tx *Tx) GetUserCredentialRepository() UserCredentialRepositoryInterface {
 	return tx.UserCredential
 }
 
+// GetUserCredentialReadOnlyRepository returns the UserCredential transaction repository's reads.
+func (tx *Tx) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
+	return tx.UserCredential
+}
+
 // GetUserRoleGrantRepository returns the UserRoleGrant transaction repository interface.
 func (tx *Tx) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return tx.UserRoleGrant
+}
+
+// GetUserRoleGrantReadOnlyRepository returns the UserRoleGrant transaction repository's reads.
+func (tx *Tx) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
 	return tx.UserRoleGrant
 }
 
@@ -253,6 +313,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

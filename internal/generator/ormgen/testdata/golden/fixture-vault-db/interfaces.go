@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyApiCredentialRepositoryInterface is the reads of ApiCredentialRepositoryInterface (D150).
+type ReadOnlyApiCredentialRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ApiCredentialGetOptions) (*types.ApiCredential, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.ApiCredential, error)
+	FindOne(ctx context.Context, filter *ApiCredentialFilter, opts *ApiCredentialFindOptions) (*types.ApiCredential, error)
+	FindMany(ctx context.Context, filter *ApiCredentialFilter, opts *ApiCredentialFindOptions) ([]*types.ApiCredential, int, error)
+	FindPage(ctx context.Context, filter *ApiCredentialFilter, opts *ApiCredentialPageOptions) (*ApiCredentialPage, error)
+}
+
 // ApiCredentialRepositoryInterface defines the contract for ApiCredential data access.
 type ApiCredentialRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ApiCredentialGetOptions) (*types.ApiCredential, error)
@@ -27,6 +36,15 @@ type ApiCredentialRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *ApiCredentialFilter) (int, error)
 	Reencrypt(ctx context.Context, batch int) (int, error)
+}
+
+// ReadOnlyPlaidItemRepositoryInterface is the reads of PlaidItemRepositoryInterface (D150).
+type ReadOnlyPlaidItemRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *PlaidItemGetOptions) (*types.PlaidItem, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.PlaidItem, error)
+	FindOne(ctx context.Context, filter *PlaidItemFilter, opts *PlaidItemFindOptions) (*types.PlaidItem, error)
+	FindMany(ctx context.Context, filter *PlaidItemFilter, opts *PlaidItemFindOptions) ([]*types.PlaidItem, int, error)
+	FindPage(ctx context.Context, filter *PlaidItemFilter, opts *PlaidItemPageOptions) (*PlaidItemPage, error)
 }
 
 // PlaidItemRepositoryInterface defines the contract for PlaidItem data access.
@@ -49,16 +67,40 @@ type PlaidItemRepositoryInterface interface {
 	Reencrypt(ctx context.Context, batch int) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface
+	GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface
+	GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetApiCredentialRepository() ApiCredentialRepositoryInterface
+	GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface
 	GetPlaidItemRepository() PlaidItemRepositoryInterface
+	GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -67,7 +109,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetApiCredentialRepository() ApiCredentialRepositoryInterface
+	GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface
 	GetPlaidItemRepository() PlaidItemRepositoryInterface
+	GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -105,6 +149,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -117,6 +167,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -167,7 +222,15 @@ func (db *NoOpDatabase) GetApiCredentialRepository() ApiCredentialRepositoryInte
 	return db.ApiCredential
 }
 
+func (db *NoOpDatabase) GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface {
+	return db.ApiCredential
+}
+
 func (tx *NoOpTx) GetApiCredentialRepository() ApiCredentialRepositoryInterface {
+	return tx.ApiCredential
+}
+
+func (tx *NoOpTx) GetApiCredentialReadOnlyRepository() ReadOnlyApiCredentialRepositoryInterface {
 	return tx.ApiCredential
 }
 
@@ -245,7 +308,15 @@ func (db *NoOpDatabase) GetPlaidItemRepository() PlaidItemRepositoryInterface {
 	return db.PlaidItem
 }
 
+func (db *NoOpDatabase) GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface {
+	return db.PlaidItem
+}
+
 func (tx *NoOpTx) GetPlaidItemRepository() PlaidItemRepositoryInterface {
+	return tx.PlaidItem
+}
+
+func (tx *NoOpTx) GetPlaidItemReadOnlyRepository() ReadOnlyPlaidItemRepositoryInterface {
 	return tx.PlaidItem
 }
 
@@ -324,12 +395,20 @@ func (r *NoOpPlaidItemRepository) Reencrypt(_ context.Context, _ int) (int, erro
 }
 
 var (
-	_ DatabaseInterface                = (*Database)(nil)
-	_ DatabaseInterface                = (*NoOpDatabase)(nil)
-	_ TxInterface                      = (*Tx)(nil)
-	_ TxInterface                      = (*NoOpTx)(nil)
-	_ ApiCredentialRepositoryInterface = (*ApiCredentialRepository)(nil)
-	_ ApiCredentialRepositoryInterface = (*NoOpApiCredentialRepository)(nil)
-	_ PlaidItemRepositoryInterface     = (*PlaidItemRepository)(nil)
-	_ PlaidItemRepositoryInterface     = (*NoOpPlaidItemRepository)(nil)
+	_ DatabaseInterface                        = (*Database)(nil)
+	_ DatabaseInterface                        = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                = (*NoOpDatabase)(nil)
+	_ TxInterface                              = (*Tx)(nil)
+	_ TxInterface                              = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                      = (*Tx)(nil)
+	_ ReadOnlyTxInterface                      = (*NoOpTx)(nil)
+	_ ApiCredentialRepositoryInterface         = (*ApiCredentialRepository)(nil)
+	_ ApiCredentialRepositoryInterface         = (*NoOpApiCredentialRepository)(nil)
+	_ ReadOnlyApiCredentialRepositoryInterface = (*ApiCredentialRepository)(nil)
+	_ ReadOnlyApiCredentialRepositoryInterface = (*NoOpApiCredentialRepository)(nil)
+	_ PlaidItemRepositoryInterface             = (*PlaidItemRepository)(nil)
+	_ PlaidItemRepositoryInterface             = (*NoOpPlaidItemRepository)(nil)
+	_ ReadOnlyPlaidItemRepositoryInterface     = (*PlaidItemRepository)(nil)
+	_ ReadOnlyPlaidItemRepositoryInterface     = (*NoOpPlaidItemRepository)(nil)
 )

@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyShelfRepositoryInterface is the reads of ShelfRepositoryInterface (D150).
+type ReadOnlyShelfRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ShelfGetOptions) (*types.Shelf, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Shelf, error)
+	FindOne(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) (*types.Shelf, error)
+	FindMany(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) ([]*types.Shelf, int, error)
+	FindPage(ctx context.Context, filter *ShelfFilter, opts *ShelfPageOptions) (*ShelfPage, error)
+}
+
 // ShelfRepositoryInterface defines the contract for Shelf data access.
 type ShelfRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ShelfGetOptions) (*types.Shelf, error)
@@ -29,6 +38,15 @@ type ShelfRepositoryInterface interface {
 	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *ShelfFilter) (int, error)
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
+}
+
+// ReadOnlyStockRepositoryInterface is the reads of StockRepositoryInterface (D150).
+type ReadOnlyStockRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *StockGetOptions) (*types.Stock, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Stock, error)
+	FindOne(ctx context.Context, filter *StockFilter, opts *StockFindOptions) (*types.Stock, error)
+	FindMany(ctx context.Context, filter *StockFilter, opts *StockFindOptions) ([]*types.Stock, int, error)
+	FindPage(ctx context.Context, filter *StockFilter, opts *StockPageOptions) (*StockPage, error)
 }
 
 // StockRepositoryInterface defines the contract for Stock data access.
@@ -51,16 +69,40 @@ type StockRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *StockFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface
+	GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface
+	GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetShelfRepository() ShelfRepositoryInterface
+	GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface
 	GetStockRepository() StockRepositoryInterface
+	GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -69,7 +111,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetShelfRepository() ShelfRepositoryInterface
+	GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface
 	GetStockRepository() StockRepositoryInterface
+	GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -107,6 +151,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -119,6 +169,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -169,7 +224,15 @@ func (db *NoOpDatabase) GetShelfRepository() ShelfRepositoryInterface {
 	return db.Shelf
 }
 
+func (db *NoOpDatabase) GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface {
+	return db.Shelf
+}
+
 func (tx *NoOpTx) GetShelfRepository() ShelfRepositoryInterface {
+	return tx.Shelf
+}
+
+func (tx *NoOpTx) GetShelfReadOnlyRepository() ReadOnlyShelfRepositoryInterface {
 	return tx.Shelf
 }
 
@@ -255,7 +318,15 @@ func (db *NoOpDatabase) GetStockRepository() StockRepositoryInterface {
 	return db.Stock
 }
 
+func (db *NoOpDatabase) GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface {
+	return db.Stock
+}
+
 func (tx *NoOpTx) GetStockRepository() StockRepositoryInterface {
+	return tx.Stock
+}
+
+func (tx *NoOpTx) GetStockReadOnlyRepository() ReadOnlyStockRepositoryInterface {
 	return tx.Stock
 }
 
@@ -334,12 +405,20 @@ func (r *NoOpStockRepository) DeleteMany(_ context.Context, _ *StockFilter) (int
 }
 
 var (
-	_ DatabaseInterface        = (*Database)(nil)
-	_ DatabaseInterface        = (*NoOpDatabase)(nil)
-	_ TxInterface              = (*Tx)(nil)
-	_ TxInterface              = (*NoOpTx)(nil)
-	_ ShelfRepositoryInterface = (*ShelfRepository)(nil)
-	_ ShelfRepositoryInterface = (*NoOpShelfRepository)(nil)
-	_ StockRepositoryInterface = (*StockRepository)(nil)
-	_ StockRepositoryInterface = (*NoOpStockRepository)(nil)
+	_ DatabaseInterface                = (*Database)(nil)
+	_ DatabaseInterface                = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface        = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface        = (*NoOpDatabase)(nil)
+	_ TxInterface                      = (*Tx)(nil)
+	_ TxInterface                      = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface              = (*Tx)(nil)
+	_ ReadOnlyTxInterface              = (*NoOpTx)(nil)
+	_ ShelfRepositoryInterface         = (*ShelfRepository)(nil)
+	_ ShelfRepositoryInterface         = (*NoOpShelfRepository)(nil)
+	_ ReadOnlyShelfRepositoryInterface = (*ShelfRepository)(nil)
+	_ ReadOnlyShelfRepositoryInterface = (*NoOpShelfRepository)(nil)
+	_ StockRepositoryInterface         = (*StockRepository)(nil)
+	_ StockRepositoryInterface         = (*NoOpStockRepository)(nil)
+	_ ReadOnlyStockRepositoryInterface = (*StockRepository)(nil)
+	_ ReadOnlyStockRepositoryInterface = (*NoOpStockRepository)(nil)
 )

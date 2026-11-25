@@ -166,8 +166,18 @@ func (db *Database) GetChunkRepository() ChunkRepositoryInterface {
 	return db.Chunk
 }
 
+// GetChunkReadOnlyRepository returns the Chunk repository's reads.
+func (db *Database) GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface {
+	return db.Chunk
+}
+
 // GetLedgerLineRepository returns the LedgerLine repository interface.
 func (db *Database) GetLedgerLineRepository() LedgerLineRepositoryInterface {
+	return db.LedgerLine
+}
+
+// GetLedgerLineReadOnlyRepository returns the LedgerLine repository's reads.
+func (db *Database) GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface {
 	return db.LedgerLine
 }
 
@@ -176,8 +186,18 @@ func (db *Database) GetPassageRepository() PassageRepositoryInterface {
 	return db.Passage
 }
 
+// GetPassageReadOnlyRepository returns the Passage repository's reads.
+func (db *Database) GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface {
+	return db.Passage
+}
+
 // GetTextEmbeddingRepository returns the TextEmbedding repository interface.
 func (db *Database) GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface {
+	return db.TextEmbedding
+}
+
+// GetTextEmbeddingReadOnlyRepository returns the TextEmbedding repository's reads.
+func (db *Database) GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface {
 	return db.TextEmbedding
 }
 
@@ -186,8 +206,18 @@ func (tx *Tx) GetChunkRepository() ChunkRepositoryInterface {
 	return tx.Chunk
 }
 
+// GetChunkReadOnlyRepository returns the Chunk transaction repository's reads.
+func (tx *Tx) GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface {
+	return tx.Chunk
+}
+
 // GetLedgerLineRepository returns the LedgerLine transaction repository interface.
 func (tx *Tx) GetLedgerLineRepository() LedgerLineRepositoryInterface {
+	return tx.LedgerLine
+}
+
+// GetLedgerLineReadOnlyRepository returns the LedgerLine transaction repository's reads.
+func (tx *Tx) GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface {
 	return tx.LedgerLine
 }
 
@@ -196,8 +226,18 @@ func (tx *Tx) GetPassageRepository() PassageRepositoryInterface {
 	return tx.Passage
 }
 
+// GetPassageReadOnlyRepository returns the Passage transaction repository's reads.
+func (tx *Tx) GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface {
+	return tx.Passage
+}
+
 // GetTextEmbeddingRepository returns the TextEmbedding transaction repository interface.
 func (tx *Tx) GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface {
+	return tx.TextEmbedding
+}
+
+// GetTextEmbeddingReadOnlyRepository returns the TextEmbedding transaction repository's reads.
+func (tx *Tx) GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface {
 	return tx.TextEmbedding
 }
 
@@ -235,6 +275,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

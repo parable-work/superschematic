@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyCoverRepositoryInterface is the reads of CoverRepositoryInterface (D150).
+type ReadOnlyCoverRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CoverGetOptions) (*types.Cover, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Cover, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Cover, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Cover, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
+	FindOne(ctx context.Context, filter *CoverFilter, opts *CoverFindOptions) (*types.Cover, error)
+	FindMany(ctx context.Context, filter *CoverFilter, opts *CoverFindOptions) ([]*types.Cover, int, error)
+	FindPage(ctx context.Context, filter *CoverFilter, opts *CoverPageOptions) (*CoverPage, error)
+}
+
 // CoverRepositoryInterface defines the contract for Cover data access.
 type CoverRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CoverGetOptions) (*types.Cover, error)
@@ -34,6 +48,20 @@ type CoverRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *CoverFilter) (int, error)
+}
+
+// ReadOnlyIngredientRepositoryInterface is the reads of IngredientRepositoryInterface (D150).
+type ReadOnlyIngredientRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *IngredientGetOptions) (*types.Ingredient, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ingredient, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Ingredient, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Ingredient, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
+	FindOne(ctx context.Context, filter *IngredientFilter, opts *IngredientFindOptions) (*types.Ingredient, error)
+	FindMany(ctx context.Context, filter *IngredientFilter, opts *IngredientFindOptions) ([]*types.Ingredient, int, error)
+	FindPage(ctx context.Context, filter *IngredientFilter, opts *IngredientPageOptions) (*IngredientPage, error)
 }
 
 // IngredientRepositoryInterface defines the contract for Ingredient data access.
@@ -63,6 +91,20 @@ type IngredientRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *IngredientFilter) (int, error)
 }
 
+// ReadOnlyNoteRepositoryInterface is the reads of NoteRepositoryInterface (D150).
+type ReadOnlyNoteRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
+	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
+	FindMany(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, int, error)
+	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
+}
+
 // NoteRepositoryInterface defines the contract for Note data access.
 type NoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
@@ -88,6 +130,15 @@ type NoteRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *NoteFilter) (int, error)
 }
 
+// ReadOnlyRecipeRepositoryInterface is the reads of RecipeRepositoryInterface (D150).
+type ReadOnlyRecipeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeGetOptions) (*types.Recipe, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Recipe, error)
+	FindOne(ctx context.Context, filter *RecipeFilter, opts *RecipeFindOptions) (*types.Recipe, error)
+	FindMany(ctx context.Context, filter *RecipeFilter, opts *RecipeFindOptions) ([]*types.Recipe, int, error)
+	FindPage(ctx context.Context, filter *RecipeFilter, opts *RecipePageOptions) (*RecipePage, error)
+}
+
 // RecipeRepositoryInterface defines the contract for Recipe data access.
 type RecipeRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeGetOptions) (*types.Recipe, error)
@@ -104,6 +155,15 @@ type RecipeRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *RecipeFilter, update *RecipeUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *RecipeFilter) (int, error)
+}
+
+// ReadOnlyRecipeCommitRepositoryInterface is the reads of RecipeCommitRepositoryInterface (D150).
+type ReadOnlyRecipeCommitRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeCommitGetOptions) (*types.RecipeCommit, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeCommit, error)
+	FindOne(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitFindOptions) (*types.RecipeCommit, error)
+	FindMany(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitFindOptions) ([]*types.RecipeCommit, int, error)
+	FindPage(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitPageOptions) (*RecipeCommitPage, error)
 }
 
 // RecipeCommitRepositoryInterface defines the contract for RecipeCommit data access.
@@ -124,6 +184,15 @@ type RecipeCommitRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *RecipeCommitFilter) (int, error)
 }
 
+// ReadOnlyRecipePatchRepositoryInterface is the reads of RecipePatchRepositoryInterface (D150).
+type ReadOnlyRecipePatchRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipePatchGetOptions) (*types.RecipePatch, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipePatch, error)
+	FindOne(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchFindOptions) (*types.RecipePatch, error)
+	FindMany(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchFindOptions) ([]*types.RecipePatch, int, error)
+	FindPage(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchPageOptions) (*RecipePatchPage, error)
+}
+
 // RecipePatchRepositoryInterface defines the contract for RecipePatch data access.
 type RecipePatchRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipePatchGetOptions) (*types.RecipePatch, error)
@@ -140,6 +209,22 @@ type RecipePatchRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *RecipePatchFilter, update *RecipePatchUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *RecipePatchFilter) (int, error)
+}
+
+// ReadOnlyRecipeRefRepositoryInterface is the reads of RecipeRefRepositoryInterface (D150).
+type ReadOnlyRecipeRefRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeRefGetOptions) (*types.RecipeRef, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRef, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRef, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRef, error)
+	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
+	ListAsOfByParentRefID(ctx context.Context, parentRefID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
+	ListAsOfByBaseCommitID(ctx context.Context, baseCommitID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
+	ListAsOfByHeadCommitID(ctx context.Context, headCommitID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
+	FindOne(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) (*types.RecipeRef, error)
+	FindMany(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) ([]*types.RecipeRef, int, error)
+	FindPage(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefPageOptions) (*RecipeRefPage, error)
 }
 
 // RecipeRefRepositoryInterface defines the contract for RecipeRef data access.
@@ -170,6 +255,20 @@ type RecipeRefRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyRecipeReleaseRepositoryInterface is the reads of RecipeReleaseRepositoryInterface (D150).
+type ReadOnlyRecipeReleaseRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseGetOptions) (*types.RecipeRelease, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRelease, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRelease, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRelease, error)
+	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	ListAsOfByCommitID(ctx context.Context, commitID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	FindOne(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) (*types.RecipeRelease, error)
+	FindMany(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) ([]*types.RecipeRelease, int, error)
+	FindPage(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleasePageOptions) (*RecipeReleasePage, error)
+}
+
 // RecipeReleaseRepositoryInterface defines the contract for RecipeRelease data access.
 type RecipeReleaseRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseGetOptions) (*types.RecipeRelease, error)
@@ -195,6 +294,15 @@ type RecipeReleaseRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *RecipeReleaseFilter) (int, error)
 }
 
+// ReadOnlyRecipeSnapshotEntryRepositoryInterface is the reads of RecipeSnapshotEntryRepositoryInterface (D150).
+type ReadOnlyRecipeSnapshotEntryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeSnapshotEntryGetOptions) (*types.RecipeSnapshotEntry, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error)
+	FindOne(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) (*types.RecipeSnapshotEntry, error)
+	FindMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error)
+	FindPage(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryPageOptions) (*RecipeSnapshotEntryPage, error)
+}
+
 // RecipeSnapshotEntryRepositoryInterface defines the contract for RecipeSnapshotEntry data access.
 type RecipeSnapshotEntryRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeSnapshotEntryGetOptions) (*types.RecipeSnapshotEntry, error)
@@ -211,6 +319,20 @@ type RecipeSnapshotEntryRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, update *RecipeSnapshotEntryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *RecipeSnapshotEntryFilter) (int, error)
+}
+
+// ReadOnlyStepRepositoryInterface is the reads of StepRepositoryInterface (D150).
+type ReadOnlyStepRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Step, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Step, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Step, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
+	FindOne(ctx context.Context, filter *StepFilter, opts *StepFindOptions) (*types.Step, error)
+	FindMany(ctx context.Context, filter *StepFilter, opts *StepFindOptions) ([]*types.Step, int, error)
+	FindPage(ctx context.Context, filter *StepFilter, opts *StepPageOptions) (*StepPage, error)
 }
 
 // StepRepositoryInterface defines the contract for Step data access.
@@ -240,6 +362,20 @@ type StepRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *StepFilter) (int, error)
 }
 
+// ReadOnlyTastingRepositoryInterface is the reads of TastingRepositoryInterface (D150).
+type ReadOnlyTastingRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TastingGetOptions) (*types.Tasting, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tasting, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tasting, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tasting, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	FindOne(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) (*types.Tasting, error)
+	FindMany(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) ([]*types.Tasting, int, error)
+	FindPage(ctx context.Context, filter *TastingFilter, opts *TastingPageOptions) (*TastingPage, error)
+}
+
 // TastingRepositoryInterface defines the contract for Tasting data access.
 type TastingRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TastingGetOptions) (*types.Tasting, error)
@@ -263,6 +399,20 @@ type TastingRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *TastingFilter) (int, error)
+}
+
+// ReadOnlyUtensilRepositoryInterface is the reads of UtensilRepositoryInterface (D150).
+type ReadOnlyUtensilRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UtensilGetOptions) (*types.Utensil, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Utensil, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Utensil, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Utensil, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	FindOne(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) (*types.Utensil, error)
+	FindMany(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) ([]*types.Utensil, int, error)
+	FindPage(ctx context.Context, filter *UtensilFilter, opts *UtensilPageOptions) (*UtensilPage, error)
 }
 
 // UtensilRepositoryInterface defines the contract for Utensil data access.
@@ -290,26 +440,80 @@ type UtensilRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *UtensilFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface
+	GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface
+	GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface
+	GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface
+	GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface
+	GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface
+	GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
+	GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface
+	GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface
+	GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface
+	GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface
+	GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface
+	GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface
+	GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface
+	GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
+	GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface
+	GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetCoverRepository() CoverRepositoryInterface
+	GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface
 	GetIngredientRepository() IngredientRepositoryInterface
+	GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 	GetRecipeRepository() RecipeRepositoryInterface
+	GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
+	GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
+	GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
+	GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface
 	GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface
+	GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface
 	GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface
+	GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
 	GetTastingRepository() TastingRepositoryInterface
+	GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
+	GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -318,17 +522,29 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCoverRepository() CoverRepositoryInterface
+	GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface
 	GetIngredientRepository() IngredientRepositoryInterface
+	GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 	GetRecipeRepository() RecipeRepositoryInterface
+	GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
+	GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
+	GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
+	GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface
 	GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface
+	GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface
 	GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface
+	GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface
 	GetTastingRepository() TastingRepositoryInterface
+	GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
+	GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -406,6 +622,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -418,6 +640,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -468,7 +695,15 @@ func (db *NoOpDatabase) GetCoverRepository() CoverRepositoryInterface {
 	return db.Cover
 }
 
+func (db *NoOpDatabase) GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface {
+	return db.Cover
+}
+
 func (tx *NoOpTx) GetCoverRepository() CoverRepositoryInterface {
+	return tx.Cover
+}
+
+func (tx *NoOpTx) GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface {
 	return tx.Cover
 }
 
@@ -570,7 +805,15 @@ func (db *NoOpDatabase) GetIngredientRepository() IngredientRepositoryInterface 
 	return db.Ingredient
 }
 
+func (db *NoOpDatabase) GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface {
+	return db.Ingredient
+}
+
 func (tx *NoOpTx) GetIngredientRepository() IngredientRepositoryInterface {
+	return tx.Ingredient
+}
+
+func (tx *NoOpTx) GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface {
 	return tx.Ingredient
 }
 
@@ -680,7 +923,15 @@ func (db *NoOpDatabase) GetNoteRepository() NoteRepositoryInterface {
 	return db.Note
 }
 
+func (db *NoOpDatabase) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
+	return db.Note
+}
+
 func (tx *NoOpTx) GetNoteRepository() NoteRepositoryInterface {
+	return tx.Note
+}
+
+func (tx *NoOpTx) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
 	return tx.Note
 }
 
@@ -782,7 +1033,15 @@ func (db *NoOpDatabase) GetRecipeRepository() RecipeRepositoryInterface {
 	return db.Recipe
 }
 
+func (db *NoOpDatabase) GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface {
+	return db.Recipe
+}
+
 func (tx *NoOpTx) GetRecipeRepository() RecipeRepositoryInterface {
+	return tx.Recipe
+}
+
+func (tx *NoOpTx) GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface {
 	return tx.Recipe
 }
 
@@ -856,7 +1115,15 @@ func (db *NoOpDatabase) GetRecipeCommitRepository() RecipeCommitRepositoryInterf
 	return db.RecipeCommit
 }
 
+func (db *NoOpDatabase) GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface {
+	return db.RecipeCommit
+}
+
 func (tx *NoOpTx) GetRecipeCommitRepository() RecipeCommitRepositoryInterface {
+	return tx.RecipeCommit
+}
+
+func (tx *NoOpTx) GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface {
 	return tx.RecipeCommit
 }
 
@@ -930,7 +1197,15 @@ func (db *NoOpDatabase) GetRecipePatchRepository() RecipePatchRepositoryInterfac
 	return db.RecipePatch
 }
 
+func (db *NoOpDatabase) GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface {
+	return db.RecipePatch
+}
+
 func (tx *NoOpTx) GetRecipePatchRepository() RecipePatchRepositoryInterface {
+	return tx.RecipePatch
+}
+
+func (tx *NoOpTx) GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface {
 	return tx.RecipePatch
 }
 
@@ -1004,7 +1279,15 @@ func (db *NoOpDatabase) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return db.RecipeRef
 }
 
+func (db *NoOpDatabase) GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface {
+	return db.RecipeRef
+}
+
 func (tx *NoOpTx) GetRecipeRefRepository() RecipeRefRepositoryInterface {
+	return tx.RecipeRef
+}
+
+func (tx *NoOpTx) GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface {
 	return tx.RecipeRef
 }
 
@@ -1118,7 +1401,15 @@ func (db *NoOpDatabase) GetRecipeReleaseRepository() RecipeReleaseRepositoryInte
 	return db.RecipeRelease
 }
 
+func (db *NoOpDatabase) GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface {
+	return db.RecipeRelease
+}
+
 func (tx *NoOpTx) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return tx.RecipeRelease
+}
+
+func (tx *NoOpTx) GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface {
 	return tx.RecipeRelease
 }
 
@@ -1220,7 +1511,15 @@ func (db *NoOpDatabase) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRe
 	return db.RecipeSnapshotEntry
 }
 
+func (db *NoOpDatabase) GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface {
+	return db.RecipeSnapshotEntry
+}
+
 func (tx *NoOpTx) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return tx.RecipeSnapshotEntry
+}
+
+func (tx *NoOpTx) GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface {
 	return tx.RecipeSnapshotEntry
 }
 
@@ -1294,7 +1593,15 @@ func (db *NoOpDatabase) GetStepRepository() StepRepositoryInterface {
 	return db.Step
 }
 
+func (db *NoOpDatabase) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
+	return db.Step
+}
+
 func (tx *NoOpTx) GetStepRepository() StepRepositoryInterface {
+	return tx.Step
+}
+
+func (tx *NoOpTx) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
 	return tx.Step
 }
 
@@ -1404,7 +1711,15 @@ func (db *NoOpDatabase) GetTastingRepository() TastingRepositoryInterface {
 	return db.Tasting
 }
 
+func (db *NoOpDatabase) GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface {
+	return db.Tasting
+}
+
 func (tx *NoOpTx) GetTastingRepository() TastingRepositoryInterface {
+	return tx.Tasting
+}
+
+func (tx *NoOpTx) GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface {
 	return tx.Tasting
 }
 
@@ -1506,7 +1821,15 @@ func (db *NoOpDatabase) GetUtensilRepository() UtensilRepositoryInterface {
 	return db.Utensil
 }
 
+func (db *NoOpDatabase) GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface {
+	return db.Utensil
+}
+
 func (tx *NoOpTx) GetUtensilRepository() UtensilRepositoryInterface {
+	return tx.Utensil
+}
+
+func (tx *NoOpTx) GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface {
 	return tx.Utensil
 }
 
@@ -1605,32 +1928,60 @@ func (r *NoOpUtensilRepository) DeleteMany(_ context.Context, _ *UtensilFilter) 
 }
 
 var (
-	_ DatabaseInterface                      = (*Database)(nil)
-	_ DatabaseInterface                      = (*NoOpDatabase)(nil)
-	_ TxInterface                            = (*Tx)(nil)
-	_ TxInterface                            = (*NoOpTx)(nil)
-	_ CoverRepositoryInterface               = (*CoverRepository)(nil)
-	_ CoverRepositoryInterface               = (*NoOpCoverRepository)(nil)
-	_ IngredientRepositoryInterface          = (*IngredientRepository)(nil)
-	_ IngredientRepositoryInterface          = (*NoOpIngredientRepository)(nil)
-	_ NoteRepositoryInterface                = (*NoteRepository)(nil)
-	_ NoteRepositoryInterface                = (*NoOpNoteRepository)(nil)
-	_ RecipeRepositoryInterface              = (*RecipeRepository)(nil)
-	_ RecipeRepositoryInterface              = (*NoOpRecipeRepository)(nil)
-	_ RecipeCommitRepositoryInterface        = (*RecipeCommitRepository)(nil)
-	_ RecipeCommitRepositoryInterface        = (*NoOpRecipeCommitRepository)(nil)
-	_ RecipePatchRepositoryInterface         = (*RecipePatchRepository)(nil)
-	_ RecipePatchRepositoryInterface         = (*NoOpRecipePatchRepository)(nil)
-	_ RecipeRefRepositoryInterface           = (*RecipeRefRepository)(nil)
-	_ RecipeRefRepositoryInterface           = (*NoOpRecipeRefRepository)(nil)
-	_ RecipeReleaseRepositoryInterface       = (*RecipeReleaseRepository)(nil)
-	_ RecipeReleaseRepositoryInterface       = (*NoOpRecipeReleaseRepository)(nil)
-	_ RecipeSnapshotEntryRepositoryInterface = (*RecipeSnapshotEntryRepository)(nil)
-	_ RecipeSnapshotEntryRepositoryInterface = (*NoOpRecipeSnapshotEntryRepository)(nil)
-	_ StepRepositoryInterface                = (*StepRepository)(nil)
-	_ StepRepositoryInterface                = (*NoOpStepRepository)(nil)
-	_ TastingRepositoryInterface             = (*TastingRepository)(nil)
-	_ TastingRepositoryInterface             = (*NoOpTastingRepository)(nil)
-	_ UtensilRepositoryInterface             = (*UtensilRepository)(nil)
-	_ UtensilRepositoryInterface             = (*NoOpUtensilRepository)(nil)
+	_ DatabaseInterface                              = (*Database)(nil)
+	_ DatabaseInterface                              = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                      = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                      = (*NoOpDatabase)(nil)
+	_ TxInterface                                    = (*Tx)(nil)
+	_ TxInterface                                    = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                            = (*Tx)(nil)
+	_ ReadOnlyTxInterface                            = (*NoOpTx)(nil)
+	_ CoverRepositoryInterface                       = (*CoverRepository)(nil)
+	_ CoverRepositoryInterface                       = (*NoOpCoverRepository)(nil)
+	_ ReadOnlyCoverRepositoryInterface               = (*CoverRepository)(nil)
+	_ ReadOnlyCoverRepositoryInterface               = (*NoOpCoverRepository)(nil)
+	_ IngredientRepositoryInterface                  = (*IngredientRepository)(nil)
+	_ IngredientRepositoryInterface                  = (*NoOpIngredientRepository)(nil)
+	_ ReadOnlyIngredientRepositoryInterface          = (*IngredientRepository)(nil)
+	_ ReadOnlyIngredientRepositoryInterface          = (*NoOpIngredientRepository)(nil)
+	_ NoteRepositoryInterface                        = (*NoteRepository)(nil)
+	_ NoteRepositoryInterface                        = (*NoOpNoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface                = (*NoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface                = (*NoOpNoteRepository)(nil)
+	_ RecipeRepositoryInterface                      = (*RecipeRepository)(nil)
+	_ RecipeRepositoryInterface                      = (*NoOpRecipeRepository)(nil)
+	_ ReadOnlyRecipeRepositoryInterface              = (*RecipeRepository)(nil)
+	_ ReadOnlyRecipeRepositoryInterface              = (*NoOpRecipeRepository)(nil)
+	_ RecipeCommitRepositoryInterface                = (*RecipeCommitRepository)(nil)
+	_ RecipeCommitRepositoryInterface                = (*NoOpRecipeCommitRepository)(nil)
+	_ ReadOnlyRecipeCommitRepositoryInterface        = (*RecipeCommitRepository)(nil)
+	_ ReadOnlyRecipeCommitRepositoryInterface        = (*NoOpRecipeCommitRepository)(nil)
+	_ RecipePatchRepositoryInterface                 = (*RecipePatchRepository)(nil)
+	_ RecipePatchRepositoryInterface                 = (*NoOpRecipePatchRepository)(nil)
+	_ ReadOnlyRecipePatchRepositoryInterface         = (*RecipePatchRepository)(nil)
+	_ ReadOnlyRecipePatchRepositoryInterface         = (*NoOpRecipePatchRepository)(nil)
+	_ RecipeRefRepositoryInterface                   = (*RecipeRefRepository)(nil)
+	_ RecipeRefRepositoryInterface                   = (*NoOpRecipeRefRepository)(nil)
+	_ ReadOnlyRecipeRefRepositoryInterface           = (*RecipeRefRepository)(nil)
+	_ ReadOnlyRecipeRefRepositoryInterface           = (*NoOpRecipeRefRepository)(nil)
+	_ RecipeReleaseRepositoryInterface               = (*RecipeReleaseRepository)(nil)
+	_ RecipeReleaseRepositoryInterface               = (*NoOpRecipeReleaseRepository)(nil)
+	_ ReadOnlyRecipeReleaseRepositoryInterface       = (*RecipeReleaseRepository)(nil)
+	_ ReadOnlyRecipeReleaseRepositoryInterface       = (*NoOpRecipeReleaseRepository)(nil)
+	_ RecipeSnapshotEntryRepositoryInterface         = (*RecipeSnapshotEntryRepository)(nil)
+	_ RecipeSnapshotEntryRepositoryInterface         = (*NoOpRecipeSnapshotEntryRepository)(nil)
+	_ ReadOnlyRecipeSnapshotEntryRepositoryInterface = (*RecipeSnapshotEntryRepository)(nil)
+	_ ReadOnlyRecipeSnapshotEntryRepositoryInterface = (*NoOpRecipeSnapshotEntryRepository)(nil)
+	_ StepRepositoryInterface                        = (*StepRepository)(nil)
+	_ StepRepositoryInterface                        = (*NoOpStepRepository)(nil)
+	_ ReadOnlyStepRepositoryInterface                = (*StepRepository)(nil)
+	_ ReadOnlyStepRepositoryInterface                = (*NoOpStepRepository)(nil)
+	_ TastingRepositoryInterface                     = (*TastingRepository)(nil)
+	_ TastingRepositoryInterface                     = (*NoOpTastingRepository)(nil)
+	_ ReadOnlyTastingRepositoryInterface             = (*TastingRepository)(nil)
+	_ ReadOnlyTastingRepositoryInterface             = (*NoOpTastingRepository)(nil)
+	_ UtensilRepositoryInterface                     = (*UtensilRepository)(nil)
+	_ UtensilRepositoryInterface                     = (*NoOpUtensilRepository)(nil)
+	_ ReadOnlyUtensilRepositoryInterface             = (*UtensilRepository)(nil)
+	_ ReadOnlyUtensilRepositoryInterface             = (*NoOpUtensilRepository)(nil)
 )

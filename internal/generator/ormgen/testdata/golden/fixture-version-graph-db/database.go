@@ -193,8 +193,18 @@ func (db *Database) GetCoverRepository() CoverRepositoryInterface {
 	return db.Cover
 }
 
+// GetCoverReadOnlyRepository returns the Cover repository's reads.
+func (db *Database) GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface {
+	return db.Cover
+}
+
 // GetIngredientRepository returns the Ingredient repository interface.
 func (db *Database) GetIngredientRepository() IngredientRepositoryInterface {
+	return db.Ingredient
+}
+
+// GetIngredientReadOnlyRepository returns the Ingredient repository's reads.
+func (db *Database) GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface {
 	return db.Ingredient
 }
 
@@ -203,8 +213,18 @@ func (db *Database) GetNoteRepository() NoteRepositoryInterface {
 	return db.Note
 }
 
+// GetNoteReadOnlyRepository returns the Note repository's reads.
+func (db *Database) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
+	return db.Note
+}
+
 // GetRecipeRepository returns the Recipe repository interface.
 func (db *Database) GetRecipeRepository() RecipeRepositoryInterface {
+	return db.Recipe
+}
+
+// GetRecipeReadOnlyRepository returns the Recipe repository's reads.
+func (db *Database) GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface {
 	return db.Recipe
 }
 
@@ -213,8 +233,18 @@ func (db *Database) GetRecipeCommitRepository() RecipeCommitRepositoryInterface 
 	return db.RecipeCommit
 }
 
+// GetRecipeCommitReadOnlyRepository returns the RecipeCommit repository's reads.
+func (db *Database) GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface {
+	return db.RecipeCommit
+}
+
 // GetRecipePatchRepository returns the RecipePatch repository interface.
 func (db *Database) GetRecipePatchRepository() RecipePatchRepositoryInterface {
+	return db.RecipePatch
+}
+
+// GetRecipePatchReadOnlyRepository returns the RecipePatch repository's reads.
+func (db *Database) GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface {
 	return db.RecipePatch
 }
 
@@ -223,8 +253,18 @@ func (db *Database) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return db.RecipeRef
 }
 
+// GetRecipeRefReadOnlyRepository returns the RecipeRef repository's reads.
+func (db *Database) GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface {
+	return db.RecipeRef
+}
+
 // GetRecipeReleaseRepository returns the RecipeRelease repository interface.
 func (db *Database) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return db.RecipeRelease
+}
+
+// GetRecipeReleaseReadOnlyRepository returns the RecipeRelease repository's reads.
+func (db *Database) GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface {
 	return db.RecipeRelease
 }
 
@@ -233,8 +273,18 @@ func (db *Database) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryReposi
 	return db.RecipeSnapshotEntry
 }
 
+// GetRecipeSnapshotEntryReadOnlyRepository returns the RecipeSnapshotEntry repository's reads.
+func (db *Database) GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface {
+	return db.RecipeSnapshotEntry
+}
+
 // GetStepRepository returns the Step repository interface.
 func (db *Database) GetStepRepository() StepRepositoryInterface {
+	return db.Step
+}
+
+// GetStepReadOnlyRepository returns the Step repository's reads.
+func (db *Database) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
 	return db.Step
 }
 
@@ -243,8 +293,18 @@ func (db *Database) GetTastingRepository() TastingRepositoryInterface {
 	return db.Tasting
 }
 
+// GetTastingReadOnlyRepository returns the Tasting repository's reads.
+func (db *Database) GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface {
+	return db.Tasting
+}
+
 // GetUtensilRepository returns the Utensil repository interface.
 func (db *Database) GetUtensilRepository() UtensilRepositoryInterface {
+	return db.Utensil
+}
+
+// GetUtensilReadOnlyRepository returns the Utensil repository's reads.
+func (db *Database) GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface {
 	return db.Utensil
 }
 
@@ -253,8 +313,18 @@ func (tx *Tx) GetCoverRepository() CoverRepositoryInterface {
 	return tx.Cover
 }
 
+// GetCoverReadOnlyRepository returns the Cover transaction repository's reads.
+func (tx *Tx) GetCoverReadOnlyRepository() ReadOnlyCoverRepositoryInterface {
+	return tx.Cover
+}
+
 // GetIngredientRepository returns the Ingredient transaction repository interface.
 func (tx *Tx) GetIngredientRepository() IngredientRepositoryInterface {
+	return tx.Ingredient
+}
+
+// GetIngredientReadOnlyRepository returns the Ingredient transaction repository's reads.
+func (tx *Tx) GetIngredientReadOnlyRepository() ReadOnlyIngredientRepositoryInterface {
 	return tx.Ingredient
 }
 
@@ -263,8 +333,18 @@ func (tx *Tx) GetNoteRepository() NoteRepositoryInterface {
 	return tx.Note
 }
 
+// GetNoteReadOnlyRepository returns the Note transaction repository's reads.
+func (tx *Tx) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
+	return tx.Note
+}
+
 // GetRecipeRepository returns the Recipe transaction repository interface.
 func (tx *Tx) GetRecipeRepository() RecipeRepositoryInterface {
+	return tx.Recipe
+}
+
+// GetRecipeReadOnlyRepository returns the Recipe transaction repository's reads.
+func (tx *Tx) GetRecipeReadOnlyRepository() ReadOnlyRecipeRepositoryInterface {
 	return tx.Recipe
 }
 
@@ -273,8 +353,18 @@ func (tx *Tx) GetRecipeCommitRepository() RecipeCommitRepositoryInterface {
 	return tx.RecipeCommit
 }
 
+// GetRecipeCommitReadOnlyRepository returns the RecipeCommit transaction repository's reads.
+func (tx *Tx) GetRecipeCommitReadOnlyRepository() ReadOnlyRecipeCommitRepositoryInterface {
+	return tx.RecipeCommit
+}
+
 // GetRecipePatchRepository returns the RecipePatch transaction repository interface.
 func (tx *Tx) GetRecipePatchRepository() RecipePatchRepositoryInterface {
+	return tx.RecipePatch
+}
+
+// GetRecipePatchReadOnlyRepository returns the RecipePatch transaction repository's reads.
+func (tx *Tx) GetRecipePatchReadOnlyRepository() ReadOnlyRecipePatchRepositoryInterface {
 	return tx.RecipePatch
 }
 
@@ -283,8 +373,18 @@ func (tx *Tx) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return tx.RecipeRef
 }
 
+// GetRecipeRefReadOnlyRepository returns the RecipeRef transaction repository's reads.
+func (tx *Tx) GetRecipeRefReadOnlyRepository() ReadOnlyRecipeRefRepositoryInterface {
+	return tx.RecipeRef
+}
+
 // GetRecipeReleaseRepository returns the RecipeRelease transaction repository interface.
 func (tx *Tx) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return tx.RecipeRelease
+}
+
+// GetRecipeReleaseReadOnlyRepository returns the RecipeRelease transaction repository's reads.
+func (tx *Tx) GetRecipeReleaseReadOnlyRepository() ReadOnlyRecipeReleaseRepositoryInterface {
 	return tx.RecipeRelease
 }
 
@@ -293,8 +393,18 @@ func (tx *Tx) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryIn
 	return tx.RecipeSnapshotEntry
 }
 
+// GetRecipeSnapshotEntryReadOnlyRepository returns the RecipeSnapshotEntry transaction repository's reads.
+func (tx *Tx) GetRecipeSnapshotEntryReadOnlyRepository() ReadOnlyRecipeSnapshotEntryRepositoryInterface {
+	return tx.RecipeSnapshotEntry
+}
+
 // GetStepRepository returns the Step transaction repository interface.
 func (tx *Tx) GetStepRepository() StepRepositoryInterface {
+	return tx.Step
+}
+
+// GetStepReadOnlyRepository returns the Step transaction repository's reads.
+func (tx *Tx) GetStepReadOnlyRepository() ReadOnlyStepRepositoryInterface {
 	return tx.Step
 }
 
@@ -303,8 +413,18 @@ func (tx *Tx) GetTastingRepository() TastingRepositoryInterface {
 	return tx.Tasting
 }
 
+// GetTastingReadOnlyRepository returns the Tasting transaction repository's reads.
+func (tx *Tx) GetTastingReadOnlyRepository() ReadOnlyTastingRepositoryInterface {
+	return tx.Tasting
+}
+
 // GetUtensilRepository returns the Utensil transaction repository interface.
 func (tx *Tx) GetUtensilRepository() UtensilRepositoryInterface {
+	return tx.Utensil
+}
+
+// GetUtensilReadOnlyRepository returns the Utensil transaction repository's reads.
+func (tx *Tx) GetUtensilReadOnlyRepository() ReadOnlyUtensilRepositoryInterface {
 	return tx.Utensil
 }
 
@@ -350,6 +470,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

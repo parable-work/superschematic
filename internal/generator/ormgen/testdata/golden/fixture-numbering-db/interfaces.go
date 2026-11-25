@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyCustomerRepositoryInterface is the reads of CustomerRepositoryInterface (D150).
+type ReadOnlyCustomerRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerGetOptions) (*types.Customer, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Customer, error)
+	FindOne(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) (*types.Customer, error)
+	FindMany(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) ([]*types.Customer, int, error)
+	FindPage(ctx context.Context, filter *CustomerFilter, opts *CustomerPageOptions) (*CustomerPage, error)
+}
+
 // CustomerRepositoryInterface defines the contract for Customer data access.
 type CustomerRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerGetOptions) (*types.Customer, error)
@@ -29,6 +38,15 @@ type CustomerRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *CustomerFilter) (int, error)
 }
 
+// ReadOnlyInvoiceRepositoryInterface is the reads of InvoiceRepositoryInterface (D150).
+type ReadOnlyInvoiceRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *InvoiceGetOptions) (*types.Invoice, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Invoice, error)
+	FindOne(ctx context.Context, filter *InvoiceFilter, opts *InvoiceFindOptions) (*types.Invoice, error)
+	FindMany(ctx context.Context, filter *InvoiceFilter, opts *InvoiceFindOptions) ([]*types.Invoice, int, error)
+	FindPage(ctx context.Context, filter *InvoiceFilter, opts *InvoicePageOptions) (*InvoicePage, error)
+}
+
 // InvoiceRepositoryInterface defines the contract for Invoice data access.
 type InvoiceRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *InvoiceGetOptions) (*types.Invoice, error)
@@ -43,6 +61,15 @@ type InvoiceRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *InvoiceFilter) (int, error)
 	Number() InvoiceNumberOperations
+}
+
+// ReadOnlyTicketRepositoryInterface is the reads of TicketRepositoryInterface (D150).
+type ReadOnlyTicketRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TicketGetOptions) (*types.Ticket, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error)
+	FindOne(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) (*types.Ticket, error)
+	FindMany(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) ([]*types.Ticket, int, error)
+	FindPage(ctx context.Context, filter *TicketFilter, opts *TicketPageOptions) (*TicketPage, error)
 }
 
 // TicketRepositoryInterface defines the contract for Ticket data access.
@@ -62,17 +89,44 @@ type TicketRepositoryInterface interface {
 	Reference() TicketReferenceOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
+	GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
+	GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetCustomerRepository() CustomerRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
 	GetInvoiceRepository() InvoiceRepositoryInterface
+	GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -81,8 +135,11 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCustomerRepository() CustomerRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
 	GetInvoiceRepository() InvoiceRepositoryInterface
+	GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -124,6 +181,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -136,6 +199,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -186,7 +254,15 @@ func (db *NoOpDatabase) GetCustomerRepository() CustomerRepositoryInterface {
 	return db.Customer
 }
 
+func (db *NoOpDatabase) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
+	return db.Customer
+}
+
 func (tx *NoOpTx) GetCustomerRepository() CustomerRepositoryInterface {
+	return tx.Customer
+}
+
+func (tx *NoOpTx) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
 	return tx.Customer
 }
 
@@ -260,7 +336,15 @@ func (db *NoOpDatabase) GetInvoiceRepository() InvoiceRepositoryInterface {
 	return db.Invoice
 }
 
+func (db *NoOpDatabase) GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface {
+	return db.Invoice
+}
+
 func (tx *NoOpTx) GetInvoiceRepository() InvoiceRepositoryInterface {
+	return tx.Invoice
+}
+
+func (tx *NoOpTx) GetInvoiceReadOnlyRepository() ReadOnlyInvoiceRepositoryInterface {
 	return tx.Invoice
 }
 
@@ -333,7 +417,15 @@ func (db *NoOpDatabase) GetTicketRepository() TicketRepositoryInterface {
 	return db.Ticket
 }
 
+func (db *NoOpDatabase) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return db.Ticket
+}
+
 func (tx *NoOpTx) GetTicketRepository() TicketRepositoryInterface {
+	return tx.Ticket
+}
+
+func (tx *NoOpTx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
 	return tx.Ticket
 }
 
@@ -417,14 +509,24 @@ func (noOpTicketReferenceOperations) AssignNumber(_ context.Context, _ types.Ide
 }
 
 var (
-	_ DatabaseInterface           = (*Database)(nil)
-	_ DatabaseInterface           = (*NoOpDatabase)(nil)
-	_ TxInterface                 = (*Tx)(nil)
-	_ TxInterface                 = (*NoOpTx)(nil)
-	_ CustomerRepositoryInterface = (*CustomerRepository)(nil)
-	_ CustomerRepositoryInterface = (*NoOpCustomerRepository)(nil)
-	_ InvoiceRepositoryInterface  = (*InvoiceRepository)(nil)
-	_ InvoiceRepositoryInterface  = (*NoOpInvoiceRepository)(nil)
-	_ TicketRepositoryInterface   = (*TicketRepository)(nil)
-	_ TicketRepositoryInterface   = (*NoOpTicketRepository)(nil)
+	_ DatabaseInterface                   = (*Database)(nil)
+	_ DatabaseInterface                   = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface           = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface           = (*NoOpDatabase)(nil)
+	_ TxInterface                         = (*Tx)(nil)
+	_ TxInterface                         = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                 = (*Tx)(nil)
+	_ ReadOnlyTxInterface                 = (*NoOpTx)(nil)
+	_ CustomerRepositoryInterface         = (*CustomerRepository)(nil)
+	_ CustomerRepositoryInterface         = (*NoOpCustomerRepository)(nil)
+	_ ReadOnlyCustomerRepositoryInterface = (*CustomerRepository)(nil)
+	_ ReadOnlyCustomerRepositoryInterface = (*NoOpCustomerRepository)(nil)
+	_ InvoiceRepositoryInterface          = (*InvoiceRepository)(nil)
+	_ InvoiceRepositoryInterface          = (*NoOpInvoiceRepository)(nil)
+	_ ReadOnlyInvoiceRepositoryInterface  = (*InvoiceRepository)(nil)
+	_ ReadOnlyInvoiceRepositoryInterface  = (*NoOpInvoiceRepository)(nil)
+	_ TicketRepositoryInterface           = (*TicketRepository)(nil)
+	_ TicketRepositoryInterface           = (*NoOpTicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface   = (*TicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface   = (*NoOpTicketRepository)(nil)
 )

@@ -154,8 +154,18 @@ func (db *Database) GetAccountRepository() AccountRepositoryInterface {
 	return db.Account
 }
 
+// GetAccountReadOnlyRepository returns the Account repository's reads.
+func (db *Database) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
+	return db.Account
+}
+
 // GetJobRepository returns the Job repository interface.
 func (db *Database) GetJobRepository() JobRepositoryInterface {
+	return db.Job
+}
+
+// GetJobReadOnlyRepository returns the Job repository's reads.
+func (db *Database) GetJobReadOnlyRepository() ReadOnlyJobRepositoryInterface {
 	return db.Job
 }
 
@@ -164,8 +174,18 @@ func (db *Database) GetSessionRepository() SessionRepositoryInterface {
 	return db.Session
 }
 
+// GetSessionReadOnlyRepository returns the Session repository's reads.
+func (db *Database) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
+	return db.Session
+}
+
 // GetWorkspaceRepository returns the Workspace repository interface.
 func (db *Database) GetWorkspaceRepository() WorkspaceRepositoryInterface {
+	return db.Workspace
+}
+
+// GetWorkspaceReadOnlyRepository returns the Workspace repository's reads.
+func (db *Database) GetWorkspaceReadOnlyRepository() ReadOnlyWorkspaceRepositoryInterface {
 	return db.Workspace
 }
 
@@ -174,8 +194,18 @@ func (tx *Tx) GetAccountRepository() AccountRepositoryInterface {
 	return tx.Account
 }
 
+// GetAccountReadOnlyRepository returns the Account transaction repository's reads.
+func (tx *Tx) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
+	return tx.Account
+}
+
 // GetJobRepository returns the Job transaction repository interface.
 func (tx *Tx) GetJobRepository() JobRepositoryInterface {
+	return tx.Job
+}
+
+// GetJobReadOnlyRepository returns the Job transaction repository's reads.
+func (tx *Tx) GetJobReadOnlyRepository() ReadOnlyJobRepositoryInterface {
 	return tx.Job
 }
 
@@ -184,8 +214,18 @@ func (tx *Tx) GetSessionRepository() SessionRepositoryInterface {
 	return tx.Session
 }
 
+// GetSessionReadOnlyRepository returns the Session transaction repository's reads.
+func (tx *Tx) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
+	return tx.Session
+}
+
 // GetWorkspaceRepository returns the Workspace transaction repository interface.
 func (tx *Tx) GetWorkspaceRepository() WorkspaceRepositoryInterface {
+	return tx.Workspace
+}
+
+// GetWorkspaceReadOnlyRepository returns the Workspace transaction repository's reads.
+func (tx *Tx) GetWorkspaceReadOnlyRepository() ReadOnlyWorkspaceRepositoryInterface {
 	return tx.Workspace
 }
 
@@ -223,6 +263,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	}
 
 	return nil
+}
+
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
 }
 
 // Exec runs raw SQL within the open transaction. Prefer generated repository

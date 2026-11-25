@@ -10,6 +10,16 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyChunkRepositoryInterface is the reads of ChunkRepositoryInterface (D150).
+type ReadOnlyChunkRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ChunkGetOptions) (*types.Chunk, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Chunk, error)
+	FindOne(ctx context.Context, filter *ChunkFilter, opts *ChunkFindOptions) (*types.Chunk, error)
+	FindMany(ctx context.Context, filter *ChunkFilter, opts *ChunkFindOptions) ([]*types.Chunk, int, error)
+	FindPage(ctx context.Context, filter *ChunkFilter, opts *ChunkPageOptions) (*ChunkPage, error)
+	Nearest(ctx context.Context, field ChunkVectorField, vector types.EmbeddingVector, opts *ChunkNearestOptions) ([]ChunkNeighbour, error)
+}
+
 // ChunkRepositoryInterface defines the contract for Chunk data access.
 type ChunkRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ChunkGetOptions) (*types.Chunk, error)
@@ -31,6 +41,15 @@ type ChunkRepositoryInterface interface {
 	Nearest(ctx context.Context, field ChunkVectorField, vector types.EmbeddingVector, opts *ChunkNearestOptions) ([]ChunkNeighbour, error)
 }
 
+// ReadOnlyLedgerLineRepositoryInterface is the reads of LedgerLineRepositoryInterface (D150).
+type ReadOnlyLedgerLineRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LedgerLineGetOptions) (*types.LedgerLine, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LedgerLine, error)
+	FindOne(ctx context.Context, filter *LedgerLineFilter, opts *LedgerLineFindOptions) (*types.LedgerLine, error)
+	FindMany(ctx context.Context, filter *LedgerLineFilter, opts *LedgerLineFindOptions) ([]*types.LedgerLine, int, error)
+	FindPage(ctx context.Context, filter *LedgerLineFilter, opts *LedgerLinePageOptions) (*LedgerLinePage, error)
+}
+
 // LedgerLineRepositoryInterface defines the contract for LedgerLine data access.
 type LedgerLineRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *LedgerLineGetOptions) (*types.LedgerLine, error)
@@ -47,6 +66,16 @@ type LedgerLineRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *LedgerLineFilter, update *LedgerLineUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *LedgerLineFilter) (int, error)
+}
+
+// ReadOnlyPassageRepositoryInterface is the reads of PassageRepositoryInterface (D150).
+type ReadOnlyPassageRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *PassageGetOptions) (*types.Passage, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Passage, error)
+	FindOne(ctx context.Context, filter *PassageFilter, opts *PassageFindOptions) (*types.Passage, error)
+	FindMany(ctx context.Context, filter *PassageFilter, opts *PassageFindOptions) ([]*types.Passage, int, error)
+	FindPage(ctx context.Context, filter *PassageFilter, opts *PassagePageOptions) (*PassagePage, error)
+	Nearest(ctx context.Context, field PassageVectorField, vector types.EmbeddingVector, opts *PassageNearestOptions) ([]PassageNeighbour, error)
 }
 
 // PassageRepositoryInterface defines the contract for Passage data access.
@@ -69,6 +98,16 @@ type PassageRepositoryInterface interface {
 	Nearest(ctx context.Context, field PassageVectorField, vector types.EmbeddingVector, opts *PassageNearestOptions) ([]PassageNeighbour, error)
 }
 
+// ReadOnlyTextEmbeddingRepositoryInterface is the reads of TextEmbeddingRepositoryInterface (D150).
+type ReadOnlyTextEmbeddingRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TextEmbeddingGetOptions) (*types.TextEmbedding, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.TextEmbedding, error)
+	FindOne(ctx context.Context, filter *TextEmbeddingFilter, opts *TextEmbeddingFindOptions) (*types.TextEmbedding, error)
+	FindMany(ctx context.Context, filter *TextEmbeddingFilter, opts *TextEmbeddingFindOptions) ([]*types.TextEmbedding, int, error)
+	FindPage(ctx context.Context, filter *TextEmbeddingFilter, opts *TextEmbeddingPageOptions) (*TextEmbeddingPage, error)
+	Nearest(ctx context.Context, field TextEmbeddingVectorField, vector types.EmbeddingVector, opts *TextEmbeddingNearestOptions) ([]TextEmbeddingNeighbour, error)
+}
+
 // TextEmbeddingRepositoryInterface defines the contract for TextEmbedding data access.
 type TextEmbeddingRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TextEmbeddingGetOptions) (*types.TextEmbedding, error)
@@ -88,18 +127,48 @@ type TextEmbeddingRepositoryInterface interface {
 	Nearest(ctx context.Context, field TextEmbeddingVectorField, vector types.EmbeddingVector, opts *TextEmbeddingNearestOptions) ([]TextEmbeddingNeighbour, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface
+	GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface
+	GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface
+	GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface
+	GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface
+	GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface
+	GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
 	HasReadReplica() bool
 	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetChunkRepository() ChunkRepositoryInterface
+	GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface
 	GetLedgerLineRepository() LedgerLineRepositoryInterface
+	GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface
 	GetPassageRepository() PassageRepositoryInterface
+	GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface
 	GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface
+	GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -108,9 +177,13 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetChunkRepository() ChunkRepositoryInterface
+	GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface
 	GetLedgerLineRepository() LedgerLineRepositoryInterface
+	GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface
 	GetPassageRepository() PassageRepositoryInterface
+	GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface
 	GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface
+	GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -156,6 +229,12 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
@@ -168,6 +247,11 @@ func (db *NoOpDatabase) HasReadReplica() bool {
 
 // ReadReplica returns the no-op database itself.
 func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
 	return db
 }
 
@@ -218,7 +302,15 @@ func (db *NoOpDatabase) GetChunkRepository() ChunkRepositoryInterface {
 	return db.Chunk
 }
 
+func (db *NoOpDatabase) GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface {
+	return db.Chunk
+}
+
 func (tx *NoOpTx) GetChunkRepository() ChunkRepositoryInterface {
+	return tx.Chunk
+}
+
+func (tx *NoOpTx) GetChunkReadOnlyRepository() ReadOnlyChunkRepositoryInterface {
 	return tx.Chunk
 }
 
@@ -304,7 +396,15 @@ func (db *NoOpDatabase) GetLedgerLineRepository() LedgerLineRepositoryInterface 
 	return db.LedgerLine
 }
 
+func (db *NoOpDatabase) GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface {
+	return db.LedgerLine
+}
+
 func (tx *NoOpTx) GetLedgerLineRepository() LedgerLineRepositoryInterface {
+	return tx.LedgerLine
+}
+
+func (tx *NoOpTx) GetLedgerLineReadOnlyRepository() ReadOnlyLedgerLineRepositoryInterface {
 	return tx.LedgerLine
 }
 
@@ -378,7 +478,15 @@ func (db *NoOpDatabase) GetPassageRepository() PassageRepositoryInterface {
 	return db.Passage
 }
 
+func (db *NoOpDatabase) GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface {
+	return db.Passage
+}
+
 func (tx *NoOpTx) GetPassageRepository() PassageRepositoryInterface {
+	return tx.Passage
+}
+
+func (tx *NoOpTx) GetPassageReadOnlyRepository() ReadOnlyPassageRepositoryInterface {
 	return tx.Passage
 }
 
@@ -460,7 +568,15 @@ func (db *NoOpDatabase) GetTextEmbeddingRepository() TextEmbeddingRepositoryInte
 	return db.TextEmbedding
 }
 
+func (db *NoOpDatabase) GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface {
+	return db.TextEmbedding
+}
+
 func (tx *NoOpTx) GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface {
+	return tx.TextEmbedding
+}
+
+func (tx *NoOpTx) GetTextEmbeddingReadOnlyRepository() ReadOnlyTextEmbeddingRepositoryInterface {
 	return tx.TextEmbedding
 }
 
@@ -535,16 +651,28 @@ func (r *NoOpTextEmbeddingRepository) Nearest(_ context.Context, _ TextEmbedding
 }
 
 var (
-	_ DatabaseInterface                = (*Database)(nil)
-	_ DatabaseInterface                = (*NoOpDatabase)(nil)
-	_ TxInterface                      = (*Tx)(nil)
-	_ TxInterface                      = (*NoOpTx)(nil)
-	_ ChunkRepositoryInterface         = (*ChunkRepository)(nil)
-	_ ChunkRepositoryInterface         = (*NoOpChunkRepository)(nil)
-	_ LedgerLineRepositoryInterface    = (*LedgerLineRepository)(nil)
-	_ LedgerLineRepositoryInterface    = (*NoOpLedgerLineRepository)(nil)
-	_ PassageRepositoryInterface       = (*PassageRepository)(nil)
-	_ PassageRepositoryInterface       = (*NoOpPassageRepository)(nil)
-	_ TextEmbeddingRepositoryInterface = (*TextEmbeddingRepository)(nil)
-	_ TextEmbeddingRepositoryInterface = (*NoOpTextEmbeddingRepository)(nil)
+	_ DatabaseInterface                        = (*Database)(nil)
+	_ DatabaseInterface                        = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                = (*NoOpDatabase)(nil)
+	_ TxInterface                              = (*Tx)(nil)
+	_ TxInterface                              = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                      = (*Tx)(nil)
+	_ ReadOnlyTxInterface                      = (*NoOpTx)(nil)
+	_ ChunkRepositoryInterface                 = (*ChunkRepository)(nil)
+	_ ChunkRepositoryInterface                 = (*NoOpChunkRepository)(nil)
+	_ ReadOnlyChunkRepositoryInterface         = (*ChunkRepository)(nil)
+	_ ReadOnlyChunkRepositoryInterface         = (*NoOpChunkRepository)(nil)
+	_ LedgerLineRepositoryInterface            = (*LedgerLineRepository)(nil)
+	_ LedgerLineRepositoryInterface            = (*NoOpLedgerLineRepository)(nil)
+	_ ReadOnlyLedgerLineRepositoryInterface    = (*LedgerLineRepository)(nil)
+	_ ReadOnlyLedgerLineRepositoryInterface    = (*NoOpLedgerLineRepository)(nil)
+	_ PassageRepositoryInterface               = (*PassageRepository)(nil)
+	_ PassageRepositoryInterface               = (*NoOpPassageRepository)(nil)
+	_ ReadOnlyPassageRepositoryInterface       = (*PassageRepository)(nil)
+	_ ReadOnlyPassageRepositoryInterface       = (*NoOpPassageRepository)(nil)
+	_ TextEmbeddingRepositoryInterface         = (*TextEmbeddingRepository)(nil)
+	_ TextEmbeddingRepositoryInterface         = (*NoOpTextEmbeddingRepository)(nil)
+	_ ReadOnlyTextEmbeddingRepositoryInterface = (*TextEmbeddingRepository)(nil)
+	_ ReadOnlyTextEmbeddingRepositoryInterface = (*NoOpTextEmbeddingRepository)(nil)
 )
