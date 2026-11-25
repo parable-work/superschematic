@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
+	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
@@ -671,6 +672,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// tables' fields join the schema before the pass, so it reads them as
 	// the table's own.
 	if added := access.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// References and attachments (D154): the sub-tables of a @references
+	// or an @attachments table, and the fields of the queues they name,
+	// join the schema before the pass, so it reads them as its own.
+	if added := rowrefs.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

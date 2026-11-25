@@ -171,6 +171,25 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
+	// References' and attachments' triggers (D154): a target's clear and a
+	// file's release, each function and the statement trigger that runs it.
+	for _, c := range out.ReferencesClears {
+		m.Functions = append(m.Functions, &Function{Name: c.FunctionName, Definition: c.FunctionSQL(), Origin: c.Origin})
+		trigger, err := modelTrigger(c.Trigger(), c.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+	for _, r := range out.AttachmentsReleases {
+		m.Functions = append(m.Functions, &Function{Name: r.FunctionName, Definition: r.FunctionSQL(), Origin: r.Origin})
+		trigger, err := modelTrigger(r.Trigger(), r.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
 		// A view without a pool is created beside the tables (D90), in a

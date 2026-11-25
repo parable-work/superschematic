@@ -176,6 +176,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// access log (core_access.go, D156).
 	specs = append(specs, accessDecorators()...)
 
+	// A table's references to rows of any table, and the files it holds in
+	// a bucket (core_rowrefs.go, D154).
+	specs = append(specs, rowFeatureDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
