@@ -6998,6 +6998,13 @@
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
+        "providerSlots": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
         "query": {
           "$ref": "#/$defs/QueryDef"
         },

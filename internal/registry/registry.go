@@ -57,6 +57,9 @@ type Registry struct {
 	// rateLimitKeys are the principal @rateLimit keys extensions name
 	// (D131), in registration order.
 	rateLimitKeys []RateLimitKey
+	// runtimeFeatures are the features that need a runtime provider
+	// (D159), in registration order.
+	runtimeFeatures []RuntimeFeature
 	// toolInvocation is the policy RegisterToolInvocationPolicy installed;
 	// nil means ToolInvocationPolicy returns the core's.
 	toolInvocation *ToolInvocationPolicy
