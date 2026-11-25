@@ -246,7 +246,8 @@ func LoggedValidationErrors(w http.ResponseWriter, r *http.Request, errors valid
 // LoggedInputRefusal logs and writes the 400 of a refused input body, the
 // problem every generated server sends: code bad_request, the refusal's
 // detail, and for a body the input type refuses details {location: "body",
-// reason} and the field errors in errors.
+// reason} and the field errors in errors. A refusal that names its input
+// type (bodyargs.StrictType) names it in details.type too.
 func LoggedInputRefusal(w http.ResponseWriter, r *http.Request, refusal *bodyargs.InputRefusal) {
 	logger := requestctx.LoggerFromContext(r.Context())
 	logger.Warn("http input refusal",
@@ -266,7 +267,11 @@ func LoggedInputRefusal(w http.ResponseWriter, r *http.Request, refusal *bodyarg
 		},
 	}
 	if refusal.Reason != "" {
-		d.Details = map[string]string{"location": "body", "reason": refusal.Reason}
+		details := map[string]string{"location": "body", "reason": refusal.Reason}
+		if refusal.Type != "" {
+			details["type"] = refusal.Type
+		}
+		d.Details = details
 	}
 	if refusal.Errors.HasErrors() {
 		d.Errors = refusal.Errors
