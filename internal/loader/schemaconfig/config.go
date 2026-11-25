@@ -100,6 +100,24 @@ type SchemaConfig struct {
 	// MemoryStores lists it.
 	RateLimitStore *ServiceDependency `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
 
+	// ClientVersions has an API turn away a client too old to speak to it
+	// (D143): its EnvConfig gains the optional setting MIN_CLIENT_VERSIONS,
+	// and its server answers a request whose X-Client-Version names a
+	// listed client at a lower version 426. It is valid on an API config
+	// only.
+	ClientVersions bool `json:"clientVersions,omitempty" yaml:"clientVersions,omitempty"`
+
+	// ContentAddressed has a Bucket service name its objects by their
+	// content (D142): an API that lists it holds a content bucket in its
+	// Deps, which puts a body under the SHA-256 of its bytes if no object
+	// has that name. It is valid on a Bucket config only.
+	ContentAddressed bool `json:"contentAddressed,omitempty" yaml:"contentAddressed,omitempty"`
+
+	// MaxBytes is the largest object a content-addressed bucket puts, in
+	// bytes; 0 is ir.DefaultContentMaxBytes. It is valid only beside
+	// ContentAddressed.
+	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
+
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
@@ -237,6 +255,9 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	if err := validateMemoryStores(cfg); err != nil {
 		return nil, err
 	}
+	if cfg.ClientVersions && cfg.Kind != ir.SchemaKindAPI {
+		return nil, fmt.Errorf("schema config for %s sets clientVersions, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
 	}
@@ -268,8 +289,9 @@ func validateCalls(cfg *SchemaConfig) error {
 
 // validateBuckets checks buckets, an API config's list of Bucket services,
 // each named once (D54), and a Bucket service's own config: its name and
-// kind are all it has, since it names no other service and generates
-// nothing.
+// kind, and whether it names its objects by their content, with the
+// largest it puts (D142), are all it has, since it names no other service
+// and generates nothing.
 func validateBuckets(cfg *SchemaConfig) error {
 	if cfg.Kind == ir.SchemaKindBucket {
 		switch {
@@ -280,6 +302,14 @@ func validateBuckets(cfg *SchemaConfig) error {
 		case len(cfg.Outputs) > 0:
 			return fmt.Errorf("schema config for %s sets outputs; a %s service generates nothing, so its outputs are {}", cfg.Name, ir.SchemaKindBucket)
 		}
+	}
+	switch {
+	case cfg.ContentAddressed && cfg.Kind != ir.SchemaKindBucket:
+		return fmt.Errorf("schema config for %s sets contentAddressed, which only a %s service may set (this service is kind %s)", cfg.Name, ir.SchemaKindBucket, cfg.Kind)
+	case cfg.MaxBytes != 0 && !cfg.ContentAddressed:
+		return fmt.Errorf("schema config for %s sets maxBytes without contentAddressed; maxBytes is the largest object a content-addressed %s puts", cfg.Name, ir.SchemaKindBucket)
+	case cfg.MaxBytes < 0:
+		return fmt.Errorf("schema config for %s sets maxBytes to %d; it is a whole number of bytes above 0", cfg.Name, cfg.MaxBytes)
 	}
 	if len(cfg.Buckets) > 0 && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets buckets, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
@@ -352,6 +382,15 @@ func validateMemoryStores(cfg *SchemaConfig) error {
 	return nil
 }
 
+// ContentMaxBytes is the largest object a content-addressed bucket puts:
+// its maxBytes, or ir.DefaultContentMaxBytes when it names none.
+func (c *SchemaConfig) ContentMaxBytes() int64 {
+	if c.MaxBytes > 0 {
+		return c.MaxBytes
+	}
+	return ir.DefaultContentMaxBytes
+}
+
 // UsedMemoryStores are the MemoryStore services the config's API uses:
 // its memoryStores in order, then its rateLimitStore when the list leaves
 // it out (D75).
@@ -386,6 +425,7 @@ func (c *SchemaConfig) NewSchema() *ir.Schema {
 	if c.RateLimitStore != nil {
 		schema.RateLimitStore = &ir.ServiceRef{Name: c.RateLimitStore.Name, Kind: c.RateLimitStore.Kind}
 	}
+	schema.ClientVersions = c.ClientVersions
 	return schema
 }
 

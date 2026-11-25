@@ -36,7 +36,7 @@ func TestHandlerLeavesTheIdentityRuntimeItsTrustedOrigins(t *testing.T) {
 	}{
 		{"the site's preflight", "OPTIONS", "/api/auth/login", site, "POST", http.StatusNoContent, map[string]string{
 			"Access-Control-Allow-Origin": site, "Access-Control-Allow-Credentials": "true",
-			"Access-Control-Allow-Methods": "GET, POST", "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type",
+			"Access-Control-Allow-Methods": "GET, POST", "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version",
 		}},
 		{"the trusted origin's preflight", "OPTIONS", "/api/auth/login", trusted, "POST", http.StatusNoContent, map[string]string{
 			"Access-Control-Allow-Origin": trusted, "Access-Control-Allow-Credentials": "true",
@@ -44,6 +44,7 @@ func TestHandlerLeavesTheIdentityRuntimeItsTrustedOrigins(t *testing.T) {
 		}},
 		{"the site's request", "GET", "/api/products", site, "", http.StatusOK, map[string]string{
 			"Access-Control-Allow-Origin": site, "Access-Control-Allow-Credentials": "true",
+			"Access-Control-Expose-Headers": "Idempotent-Replay, Retry-After",
 		}},
 		{"the trusted origin's request", "GET", "/api/products", trusted, "", http.StatusOK, map[string]string{
 			"Access-Control-Allow-Origin": trusted, "Access-Control-Allow-Credentials": "true",

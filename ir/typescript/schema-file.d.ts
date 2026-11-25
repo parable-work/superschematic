@@ -270,6 +270,7 @@ export interface FieldDef {
   httpBinaryStream?: HTTPBinaryStreamDef;
   httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   icon?: string;
+  idempotent?: IdempotentConfig;
   inheritedFrom?: string;
   internalMetadata?: boolean;
   jsonField?: boolean;
@@ -333,8 +334,16 @@ export interface FieldDisplay {
 }
 
 export interface FileDownloadDef {
+  cacheControl?: string;
   contentType: string;
+  contentTypes?: string[];
+  disposition?: string;
   filename?: string;
+  sandbox?: FileDownloadSandbox;
+}
+
+export interface FileDownloadSandbox {
+  allow?: string[];
 }
 
 export interface FileUploadConfig {
@@ -375,6 +384,14 @@ export interface GraphParent {
 export interface HTTPBinaryStreamDef {
   contentType: string;
   responseHeaders?: string[];
+}
+
+export interface IdempotencyKeysTrait {
+}
+
+export interface IdempotentConfig {
+  required?: boolean;
+  ttlSeconds?: number;
 }
 
 export interface IdentityFirstUser {
@@ -837,6 +854,7 @@ export interface TypeDef {
   fences?: Fence[];
   fields?: FieldDef[];
   graphMember?: GraphMemberConfig;
+  idempotencyKeys?: IdempotencyKeysTrait;
   implements?: TraitRef[];
   indexes?: IndexDef[];
   isTrait?: boolean;

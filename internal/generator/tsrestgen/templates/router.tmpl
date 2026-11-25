@@ -126,6 +126,9 @@ import {
   type RouterRuntimeOptions,
 } from '{{ .RuntimePackage }}/hono';
 import { {{ if .MCP }}DEFAULT_OPENAPI_VERSION, {{ end }}mountOpenAPI, type OpenAPIOptions } from '{{ .RuntimePackage }}/openapi';
+{{- if .IdempotencyTable }}
+import type { IdempotencyTable } from '{{ .RuntimePackage }}';
+{{- end }}
 {{- if .MCP }}
 import { {{ if .Identity }}MCP_PATH, {{ end }}mountMcp, type McpOptions } from '{{ .RuntimePackage }}/mcp';
 {{- end }}
@@ -182,6 +185,16 @@ export type OperationName =
   | '{{ .Key }}'
 {{- else }} never
 {{- end }};
+{{- if .IdempotencyTable }}
+
+/**
+ * The table of the API's database that keeps the keys of its @idempotent
+ * operations, and its columns (D140): what the entrypoint builds
+ * RouterOptions.idempotencyStore over (postgresIdempotencyStore,
+ * sqliteIdempotencyStore).
+ */
+export const idempotencyTable: IdempotencyTable = {{ .IdempotencyTableLiteral }};
+{{- end }}
 
 /** The operation table: what the schema declares about each route. */
 export const operationSpecs = {
@@ -230,6 +243,9 @@ export const operationSpecs = {
 {{- if .RateLimitPrincipal }}
     rateLimitKey: 'principal',
 {{- end }}
+{{- end }}
+{{- if .Idempotent }}
+    idempotent: {{ .IdempotentLiteral }},
 {{- end }}
 {{- if .TimeoutSeconds }}
     timeoutSeconds: {{ .TimeoutSeconds }},

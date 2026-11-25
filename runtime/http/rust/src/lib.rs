@@ -16,6 +16,9 @@ pub mod bucket;
     feature = "sqlite"
 ))]
 mod civil;
+/// The oldest version of each client an API serves, and the 426 that
+/// turns an older one away (D143).
+pub mod client_version;
 mod context;
 mod controls;
 // A site's CORS (D55), which a stack server answers for the APIs it serves.

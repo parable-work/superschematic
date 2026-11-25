@@ -27,9 +27,14 @@ type Bucket interface {
 	Name() string
 
 	// Put writes the object name from body, replacing any object of that
-	// name, and returns what the provider stored. It streams body: the
-	// object is whole once Put returns, and absent if it fails.
-	Put(ctx context.Context, name string, body io.Reader, opts PutOptions) (Object, error)
+	// name, or with opts.IfAbsent leaving one that is there, and returns
+	// what the bucket holds under the name. It streams body: the object is
+	// whole once Put returns, and absent if it fails.
+	Put(ctx context.Context, name string, body io.Reader, opts PutOptions) (PutResult, error)
+
+	// Head returns what the bucket holds of the object name, without its
+	// bytes, and false when there is no such object (D142).
+	Head(ctx context.Context, name string) (Object, bool, error)
 
 	// Get opens the object name for reading. The caller closes the
 	// Reader. ErrNotFound when there is no such object.
@@ -82,6 +87,20 @@ type PutOptions struct {
 	// ContentType is the object's media type; empty lets the provider
 	// pick, application/octet-stream on GCS.
 	ContentType string
+
+	// IfAbsent writes only when no object has the name (D142): the
+	// provider checks and writes in one step, so of two puts of one name
+	// one creates the object and the other finds it. The result's Created
+	// says which.
+	IfAbsent bool
+}
+
+// PutResult is what Put answers: the object the bucket holds under the
+// name, and whether this Put wrote it. Created is false only for a Put
+// with IfAbsent that found an object there, which it left as it was.
+type PutResult struct {
+	Object
+	Created bool
 }
 
 // ListOptions select a page of objects.

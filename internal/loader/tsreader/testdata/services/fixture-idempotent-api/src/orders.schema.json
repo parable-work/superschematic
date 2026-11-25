@@ -1,0 +1,60 @@
+{
+  "name": "fixture-idempotent-api",
+  "kind": "API",
+  "types": {
+    "Order": {
+      "name": "Order",
+      "comment": "An order placed: its number, counted from 1, and what it holds.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        { "name": "number", "typeRef": { "name": "number" }, "required": true },
+        { "name": "sku", "typeRef": { "name": "string" }, "required": true },
+        { "name": "quantity", "typeRef": { "name": "number" }, "required": true },
+        { "name": "cancelled", "typeRef": { "name": "boolean" }, "required": true }
+      ]
+    },
+    "PlaceOrderInput": {
+      "name": "PlaceOrderInput",
+      "role": "APIInput",
+      "fields": [
+        { "name": "sku", "typeRef": { "name": "string" }, "required": true },
+        { "name": "quantity", "typeRef": { "name": "number" }, "required": true }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Orders",
+      "operations": [
+        {
+          "name": "placeOrder",
+          "comment": "Places an order. A retry under the same Idempotency-Key places none, and is answered the first one (D140).",
+          "typeRef": { "name": "Order" },
+          "required": true,
+          "arguments": [{ "name": "input", "typeRef": { "name": "PlaceOrderInput" }, "required": true }],
+          "httpMethod": "POST",
+          "restPath": "orders",
+          "idempotent": { "ttlSeconds": 3600 },
+          "middleware": { "timeout": 30 }
+        },
+        {
+          "name": "cancelOrder",
+          "comment": "Cancels an order. It needs an Idempotency-Key.",
+          "typeRef": { "name": "Order" },
+          "required": true,
+          "arguments": [{ "name": "number", "typeRef": { "name": "number" }, "required": true }],
+          "httpMethod": "DELETE",
+          "restPath": "orders/{number}",
+          "idempotent": { "required": true }
+        },
+        {
+          "name": "listOrders",
+          "typeRef": { "name": "Order", "isArray": true },
+          "required": true,
+          "httpMethod": "GET",
+          "restPath": "orders"
+        }
+      ]
+    }
+  ]
+}

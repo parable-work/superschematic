@@ -27,5 +27,8 @@ function statementsImplementation(deps: Deps): StatementsImplementation {
     async originalStatement() {
       throw notImplemented('statements.originalStatement');
     },
+    async previewStatement() {
+      throw notImplemented('statements.previewStatement');
+    },
   };
 }

@@ -161,6 +161,10 @@ type EndpointInfo struct {
 	// the adapter applies them with the Go runtime's semantics.
 	RateLimitPerMinute *int
 	TimeoutSeconds     *int
+	// Idempotent is the operation's @idempotent (D140), nil for every
+	// other: the operation table carries it, and the router keeps a
+	// request's key in RouterOptions.idempotencyStore.
+	Idempotent *ir.IdempotentConfig
 	// RateLimitPrincipal marks a RateLimitPerMinute that counts per
 	// principal, the core's @rateLimit key 'principal' (D131): the spec
 	// says rateLimitKey 'principal', and the runtime counts each caller
@@ -399,12 +403,31 @@ func (e EndpointInfo) InputDeclaredKeysLiteral() string {
 	return tsStringList(e.InputDeclaredKeys)
 }
 
-// DownloadLiteral is the operation table's download, its OperationDownload.
+// DownloadLiteral is the operation table's download, its OperationDownload:
+// the media type, and each member the schema writes beside it (D141).
 func (e EndpointInfo) DownloadLiteral() string {
-	if e.Download.Filename == "" {
-		return fmt.Sprintf("{ contentType: %s }", tsString(e.Download.ContentType))
+	download := e.Download
+	members := []string{"contentType: " + tsString(download.ContentType)}
+	if len(download.ContentTypes) > 0 {
+		members = append(members, "contentTypes: "+tsStringList(download.ContentTypes))
 	}
-	return fmt.Sprintf("{ contentType: %s, filename: %s }", tsString(e.Download.ContentType), tsString(e.Download.Filename))
+	if download.Filename != "" {
+		members = append(members, "filename: "+tsString(download.Filename))
+	}
+	if download.DispositionOrDefault() != ir.FileDispositionAttachment {
+		members = append(members, "disposition: "+tsString(download.Disposition))
+	}
+	if download.CacheControl != "" {
+		members = append(members, "cacheControl: "+tsString(download.CacheControl))
+	}
+	if download.Sandbox != nil {
+		if len(download.Sandbox.Allow) == 0 {
+			members = append(members, "sandbox: true")
+		} else {
+			members = append(members, "sandbox: "+tsStringList(download.Sandbox.Allow))
+		}
+	}
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // InputArgType is args.input's type: the input type, without its file
@@ -606,6 +629,10 @@ type PackageImport struct {
 
 // APIOutput is the template data for the generated package.
 type APIOutput struct {
+	// IdempotencyTable names the table of the API's database that keeps
+	// the keys of its @idempotent operations (D140), nil for an API with
+	// none: router.ts exports the names for the entrypoint's store.
+	IdempotencyTable *ir.IdempotencyTable
 	// HasPrincipalRateLimit reports whether a route's @rateLimit counts per
 	// principal (D131): RouterOptions then requires a
 	// principalRateLimitStore.
@@ -1084,6 +1111,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
 		HasPrincipalRateLimit: apiOutput.HasPrincipalRateLimit,
+		IdempotencyTable:      apiOutput.IdempotencyTable,
 		SchemaName:            opts.SchemaName,
 		PackageName:           opts.Naming.NpmAPIPackage(opts.SchemaName),
 		TypesPackage:          opts.Naming.NpmTypesPackage(opts.SchemaName),
@@ -1644,6 +1672,7 @@ func (b *builder) identityEndpoint(ep apigen.EndpointInfo) EndpointInfo {
 		endpoint.RateLimitPerMinute = &rateLimit
 		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
+	endpoint.Idempotent = ep.Idempotent
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout
 		endpoint.TimeoutSeconds = &timeout
@@ -1697,6 +1726,7 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		endpoint.RateLimitPerMinute = &rateLimit
 		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
+	endpoint.Idempotent = ep.Idempotent
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout
 		endpoint.TimeoutSeconds = &timeout
@@ -2223,11 +2253,14 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "Multipart: the files ("+strings.Join(names, ", ")+") arrive in args.files, checked against their fields' limits.")
 	}
 	if ep.Download != nil {
-		line := "Answers a file (" + ep.Download.ContentType + "): a FileDownload, its body and its filename"
+		line := "Answers a file (" + strings.Join(ep.Download.AllContentTypes(), ", or ") + "), " + ep.Download.DispositionOrDefault() + ": a FileDownload, its body and its filename"
 		if ep.Download.Filename != "" {
 			line += ", " + ep.Download.Filename + " when it names none"
 		}
-		lines = append(lines, line+".")
+		if len(ep.Download.ContentTypes) > 0 {
+			line += ", and its contentType when it is not the first"
+		}
+		lines = append(lines, line+". An etag or a lastModified beside them answers a matching request 304.")
 	}
 	if ep.WebhookProvider != "" {
 		lines = append(lines, "Webhook: the "+ep.WebhookProvider+" webhook verifier checks the request before every other step.")
@@ -2382,4 +2415,23 @@ func templateFuncs() template.FuncMap {
 		// schedule such as */15 would.
 		"jsdoc": codegen.JSDocEscape,
 	}
+}
+
+// IdempotentLiteral is the operation table's idempotent, its
+// OperationIdempotency (D140).
+func (e EndpointInfo) IdempotentLiteral() string {
+	literal := fmt.Sprintf("{ ttlSeconds: %d", e.Idempotent.TTL())
+	if e.Idempotent.Required {
+		literal += ", required: true"
+	}
+	return literal + " }"
+}
+
+// IdempotencyTableLiteral is the names of the API's idempotency table as
+// the HTTP runtime's IdempotencyTable (D140).
+func (o *APIOutput) IdempotencyTableLiteral() string {
+	t := o.IdempotencyTable
+	return fmt.Sprintf("{ table: %s, columns: { lookup: %s, operation: %s, principal: %s, key: %s, requestHash: %s, state: %s, status: %s, body: %s, startedAt: %s, expiresAt: %s } }",
+		tsString(t.Table), tsString(t.Lookup), tsString(t.Operation), tsString(t.Principal), tsString(t.Key), tsString(t.RequestHash),
+		tsString(t.State), tsString(t.Status), tsString(t.Body), tsString(t.StartedAt), tsString(t.ExpiresAt))
 }

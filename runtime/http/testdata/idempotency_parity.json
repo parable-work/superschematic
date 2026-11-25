@@ -1,0 +1,673 @@
+{
+  "description": "Idempotency keys (D140). `keys`: what an Idempotency-Key header may hold, 1 to 255 printable ASCII characters, `valid` ones and `invalid` ones. `lookups`: what names a key's row, the SHA-256 of the operation, the principal and the key, each as its length in UTF-8 bytes, a colon and its bytes. `hashes`: what a request is, the SHA-256 of its method in upper case, a line feed, its path with its query, a line feed and its body. `scenarios`: calls on one empty store, in order, each at a time in milliseconds since the epoch: `begin`, of a request with `lookup` and `requestHash`, whose row expires `ttlMs` after `at` and which takes over a running row that started more than `inFlightMs` before `at`, and what it decides, `want.kind` (`started`, `replay` with the stored `status` and `body`, `mismatch`, or `running` with the `startedAt` of the row that holds the key); `finish` and `abandon`, of the attempt that started at `startedAt`; and `sweep`, which deletes up to `limit` rows expired at `at` and answers how many. The Go runtime's idempotency package and the TypeScript runtime's idempotency.ts answer each vector alike, the scenarios on SQLite, and on Postgres when a test database is named.",
+  "keys": {
+    "valid": [
+      "a",
+      "order-7",
+      "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "two words",
+      "~!@#$%^&*()_+{}|:\"<>?",
+      "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+    ],
+    "invalid": [
+      "",
+      "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+      "line\nfeed",
+      "tab\tbed",
+      "caf\u00e9",
+      "nul\u0000",
+      "\u007f"
+    ]
+  },
+  "lookups": [
+    {
+      "name": "an operation, a principal and a key",
+      "operation": "orders.createOrder",
+      "principal": "user-1",
+      "key": "order-7",
+      "lookup": "16b2cea399ac21d1e721f07d559e14155709ff3971a770e9ef167c426a85b448"
+    },
+    {
+      "name": "another principal is another row",
+      "operation": "orders.createOrder",
+      "principal": "user-2",
+      "key": "order-7",
+      "lookup": "960cb84066766106f74fbeb9762aa140cedbac2fde17eefc6c7c7d4c8c72210e"
+    },
+    {
+      "name": "another operation is another row",
+      "operation": "orders.cancelOrder",
+      "principal": "user-1",
+      "key": "order-7",
+      "lookup": "bb5549ed8e55d9c035c436a1abc60bc2b6cd6751cfee3a3eeb5eb8d5fdbede40"
+    },
+    {
+      "name": "no principal",
+      "operation": "orders.createOrder",
+      "principal": "",
+      "key": "order-7",
+      "lookup": "77b87882f6a609cd607a62358f73f402d932950d8f1960ff71e3f80ce97492e2"
+    },
+    {
+      "name": "the parts do not run together",
+      "operation": "a",
+      "principal": "bc",
+      "key": "d",
+      "lookup": "804e34a7d2df7522b77ec933f2e0b140effa9bd9ff35cea082570e4dd418a6ac"
+    },
+    {
+      "name": "the parts do not run together, moved",
+      "operation": "ab",
+      "principal": "c",
+      "key": "d",
+      "lookup": "6e73693b49b937026f2172cc516664316e4edd290366e6449d4aa6fb0ac3c5e9"
+    },
+    {
+      "name": "a principal outside ASCII, measured in bytes",
+      "operation": "orders.createOrder",
+      "principal": "ren\u00e9e",
+      "key": "k",
+      "lookup": "94d602f453572cb94ed04584783825a02ffa7014149ba3dc080984c21ccbd3f1"
+    }
+  ],
+  "hashes": [
+    {
+      "name": "a POST with a body",
+      "method": "POST",
+      "path": "/api/orders",
+      "body": "{\"sku\":\"tea\",\"quantity\":2}",
+      "hash": "81caa09543b3f52df28788aa3e93cb934ac606b067590fdc34271a04cbc38958"
+    },
+    {
+      "name": "another body",
+      "method": "POST",
+      "path": "/api/orders",
+      "body": "{\"sku\":\"tea\",\"quantity\":3}",
+      "hash": "787adc6cbbd59c35882e23a25353613ec1b16aef0416ec708d5dabccb63d1f7e"
+    },
+    {
+      "name": "another path",
+      "method": "POST",
+      "path": "/api/orders/7/cancel",
+      "body": "{\"sku\":\"tea\",\"quantity\":2}",
+      "hash": "0bc8bc0eec0d0a79cd28bc0b959ea7004d48d0665fea2b9af89949dff3f1e252"
+    },
+    {
+      "name": "a query is part of the request",
+      "method": "POST",
+      "path": "/api/orders?dryRun=true",
+      "body": "{\"sku\":\"tea\",\"quantity\":2}",
+      "hash": "9603cc53bc5988f022aa014bd9e5a099fadc2877aa966ca9bf20c13e2bd1f08c"
+    },
+    {
+      "name": "another method",
+      "method": "PUT",
+      "path": "/api/orders",
+      "body": "{\"sku\":\"tea\",\"quantity\":2}",
+      "hash": "aff7b310cd2c52970c390a407768f6b385e7e9181f147cf46617ae6e08986f65"
+    },
+    {
+      "name": "a method in lower case is the same request",
+      "method": "post",
+      "path": "/api/orders",
+      "body": "{\"sku\":\"tea\",\"quantity\":2}",
+      "hash": "81caa09543b3f52df28788aa3e93cb934ac606b067590fdc34271a04cbc38958"
+    },
+    {
+      "name": "no body",
+      "method": "DELETE",
+      "path": "/api/orders/7",
+      "body": "",
+      "hash": "d91378b988f0217e45d90bf99496079b584cdcc7264cf8385933a86b586e1ed4"
+    },
+    {
+      "name": "a body outside ASCII",
+      "method": "PATCH",
+      "path": "/api/orders/7",
+      "body": "{\"note\":\"caf\u00e9\"}",
+      "hash": "3e51b37a4c9f9e5cc77cf3b10832186ba0f0ba36d8287f8b3767b1dc5f871709"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "a first request runs, and a repeat is answered what it answered",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000,
+          "status": 201,
+          "body": "{\"data\":{\"id\":\"7\"},\"meta\":{\"requestId\":\"req-1\"}}"
+        },
+        {
+          "call": "begin",
+          "at": 1800000000005,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 201,
+            "body": "{\"data\":{\"id\":\"7\"},\"meta\":{\"requestId\":\"req-1\"}}"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800082800000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 201,
+            "body": "{\"data\":{\"id\":\"7\"},\"meta\":{\"requestId\":\"req-1\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a refusal under 500 is stored as any answer",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000,
+          "status": 409,
+          "body": "{\"status\":409,\"code\":\"conflict\"}"
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 409,
+            "body": "{\"status\":409,\"code\":\"conflict\"}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the key with another request is a mismatch, done or running",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "mismatch"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000,
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "call": "begin",
+          "at": 1800000000002,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "mismatch"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000003,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 200,
+            "body": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a repeat while the first runs waits, and takes the row over past the time limit",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000001000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000000000
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000060000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000000000
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000060001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000,
+          "status": 200,
+          "body": "\"the first attempt, too late\""
+        },
+        {
+          "call": "begin",
+          "at": 1800000060002,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000060001
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000060001,
+          "status": 200,
+          "body": "\"the second attempt\""
+        },
+        {
+          "call": "begin",
+          "at": 1800000060003,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 200,
+            "body": "\"the second attempt\""
+          }
+        }
+      ]
+    },
+    {
+      "name": "an abandoned attempt leaves no row, so a retry runs again",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "abandon",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "abandon",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000
+        },
+        {
+          "call": "begin",
+          "at": 1800000000002,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000000001
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000001,
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "call": "abandon",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000001
+        },
+        {
+          "call": "begin",
+          "at": 1800000000003,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 200,
+            "body": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an expired row is a new key, whatever it held",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800000000000,
+          "status": 200,
+          "body": "\"old\""
+        },
+        {
+          "call": "begin",
+          "at": 1800003599999,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 200,
+            "body": "\"old\""
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800003600000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800003600001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "mismatch"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "startedAt": 1800003600000,
+          "status": 202,
+          "body": "\"new\""
+        },
+        {
+          "call": "begin",
+          "at": 1800003600002,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 202,
+            "body": "\"new\""
+          }
+        }
+      ]
+    },
+    {
+      "name": "a sweep deletes expired rows, the oldest first, up to its limit",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "2222222222222222222222222222222222222222222222222222222222222222",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 7200000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000002,
+          "lookup": "3333333333333333333333333333333333333333333333333333333333333333",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "sweep",
+          "at": 1800003599999,
+          "limit": 100,
+          "want": 0
+        },
+        {
+          "call": "sweep",
+          "at": 1800010800000,
+          "limit": 1,
+          "want": 1
+        },
+        {
+          "call": "begin",
+          "at": 1800010800000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "sweep",
+          "at": 1800010800000,
+          "limit": 100,
+          "want": 1
+        },
+        {
+          "call": "sweep",
+          "at": 1800010800000,
+          "limit": 100,
+          "want": 0
+        },
+        {
+          "call": "begin",
+          "at": 1800010800001,
+          "lookup": "3333333333333333333333333333333333333333333333333333333333333333",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 86400000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000000002
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800010800001,
+          "lookup": "2222222222222222222222222222222222222222222222222222222222222222",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ttlMs": 3600000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        }
+      ]
+    },
+    {
+      "name": "keys are rows of their own",
+      "steps": [
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000000,
+          "lookup": "2222222222222222222222222222222222222222222222222222222222222222",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "started"
+          }
+        },
+        {
+          "call": "finish",
+          "lookup": "2222222222222222222222222222222222222222222222222222222222222222",
+          "startedAt": 1800000000000,
+          "status": 204,
+          "body": ""
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "1111111111111111111111111111111111111111111111111111111111111111",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "running",
+            "startedAt": 1800000000000
+          }
+        },
+        {
+          "call": "begin",
+          "at": 1800000000001,
+          "lookup": "2222222222222222222222222222222222222222222222222222222222222222",
+          "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ttlMs": 86400000,
+          "inFlightMs": 60000,
+          "want": {
+            "kind": "replay",
+            "status": 204,
+            "body": ""
+          }
+        }
+      ]
+    }
+  ]
+}

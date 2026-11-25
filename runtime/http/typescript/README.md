@@ -24,6 +24,28 @@ Its entry points:
   (below), a token-bucket rate limiter with a pluggable store, and what a
   generated server reads at startup: the stack's derived config fields
   and a JSON-lines logger (below).
+  `parseMinClientVersions` reads `MIN_CLIENT_VERSIONS`, the oldest
+  version of each client an API serves (D143), and `loadMinClientVersions`
+  reads it from the environment as a generated `EnvConfig` does;
+  `clientTooOld` decides a request by its `X-Client-Version`,
+  `<name>/<version>`, comparing as semantic versions (`compareVersions`),
+  and a route mounted with `minClientVersions` in its options answers a
+  listed client under its minimum 426 with the problem `client_too_old`
+  before any other step, as the Go and Rust runtimes do
+  (`runtime/http/testdata/client_version_parity.json`).
+  A route whose spec says `idempotent` runs once per `Idempotency-Key`
+  (D140): `runIdempotent` keeps an answer under 500 and answers a repeat
+  with it and `Idempotent-Replay: true`, refuses the key with another
+  request 422 `idempotency_key_reused` and a repeat while the first runs
+  409 `idempotency_in_flight` with `Retry-After`. The router's options
+  take the store, `idempotencyStore`: `postgresIdempotencyStore` over a
+  pg pool or `sqliteIdempotencyStore` over a SQLite or D1 database, on
+  the table a generated API package names (`idempotencyTable`), or
+  `memoryIdempotencyStore` in a test. `isIdempotencyKey`,
+  `idempotencyLookup` and `idempotencyRequestHash` answer as the Go
+  runtime's do (`runtime/http/testdata/idempotency_parity.json`). The MCP
+  endpoint sends a tool's `idempotencyKey` argument to such a route as the
+  header.
   `readPage` reads a `@paginated` operation's `cursor` and `limit` (D60)
   with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
   `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust
@@ -661,7 +683,16 @@ bucket an API lists in its `buckets` (D54), which its `Deps` holds: `put`
 (from a stream, the bytes or a string), `get` (a stream and the object's
 metadata), `delete`, `list` (a page under a prefix, with the next page's
 token) and `signedUrl` (a V4 URL to `GET` or `PUT` one object, for up to
-seven days). A missing object is an `ObjectNotFoundError`.
+seven days). A missing object is an `ObjectNotFoundError`. `put` with
+`ifAbsent` writes only when no object has the name, in one step with the
+provider, and every `put` answers `created`; `head` is the object's
+metadata without its bytes, or `undefined` (D142). `contentBucket(bucket,
+{ maxBytes })` is the `ContentBucket` a generated `Deps` holds for a
+Bucket service whose config says `contentAddressed`: `put` reads a body
+whole, names it `sha256/<hex>` by its SHA-256 and writes it if absent,
+and `has`, `missing`, `get` and `signedUrl` read by hash, as the Go
+runtime's `bucket.ContentBucket` does
+(`runtime/http/testdata/content_bucket_parity.json`).
 `openBucket(connection, { env })`, from `@superschematic/http-runtime/gcs`,
 opens one over a `BucketConnection` with `@google-cloud/storage`, an
 optional peer dependency that a server installs only when its APIs list a

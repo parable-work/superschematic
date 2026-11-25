@@ -262,6 +262,9 @@ A response outside 2xx is an error that carries the status, the problem's
 | Python | `APIError` (`status_code`, `code`, `request_id`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retry_after`) |
 | Rust | `SDKError::Api { status_code, .. }` | `is_auth_denied()` | `is_auth_denied()` | `is_transient()`, `retry_after()` |
 
+A 426 whose problem `code` is `client_too_old` is an error of its own in
+every SDK ([The client's name and version](#the-clients-name-and-version)).
+
 A Rust `SDKError::Api` reads the request id from `X-Request-ID` (else the
 problem's `requestId`) into `request_id()`, the seconds of `Retry-After`
 into `retry_after()`, and a refused input's field errors, the problem's
@@ -436,6 +439,7 @@ holder })`. The events a pool member's rechecks emit reach no SDK.
 | Token per request | `AuthConfig.GetToken` | `auth.getToken` | `auth_token_provider` | `auth_token_provider` |
 | Refresh after a 401 | `AuthConfig.RefreshToken` | `auth.refreshToken` | `auth_token_refresher` | `refresh_auth_token` |
 | Service credential | `ServiceCredential` | `serviceCredential` | `service_credential` | `service_credential` |
+| Client name and version | `Client` | `client` | `client` | `client` |
 | Forward the end user | `AuthConfig.GetToken`, from the call's context | `{ forward: ctx }`, a method's last argument | no | `RequestOptions::forward` |
 | Retries a 429 | up to 3 times, after `Retry-After` (`MaxRateLimitRetries`) | no | up to 3 times, after `Retry-After` (`max_rate_limit_retries`) | no |
 | Edit each request | `RequestInterceptor`, `Transport` | `requestInterceptor`, `fetch` | `request_interceptor`, `default_headers` | `request_interceptor` |
@@ -470,6 +474,124 @@ TypeScript a method's last argument, an `AbortSignal` until now, also takes
 token, or no `Authorization` when the request has none, in place of the
 client's own, and never refreshes it. The Python SDK has the credential and
 no forward option, since no server is written in Python.
+
+## The client's name and version
+
+An application with a command-line client or an installed app has to turn
+away a copy too old to speak to its API. Each SDK's config takes the
+client it runs in, a name and the application's own version, not the SDK
+package's:
+
+| Language | The option |
+| --- | --- |
+| TypeScript | `new ShopApiSDK({ baseUrl, client: { name: "cli", version: "0.5.0" } })` |
+| Go | `sdk.New(sdk.SDKConfig{BaseURL: url, Client: &sdk.ClientIdentity{Name: "cli", Version: "0.5.0"}})` |
+| Python | `ShopApiSDK(ClientConfig(base_url=url, client=ClientIdentity(name="cli", version="0.5.0")))` |
+| Rust | `ClientConfig { base_url, client: Some(ClientIdentity::new("cli", "0.5.0")), ..Default::default() }` |
+
+The SDK then sends `X-Client-Version: cli/0.5.0` on every call. Without
+the option it sends no such header. A name is letters, digits, `.`, `_`
+and `-`, starting with a letter or a digit, 64 characters at most, and a
+version is the same with `+`, 128 at most; anything else is refused where
+the client is built.
+
+An API whose config says `clientVersions: true` reads the oldest version
+of each client it serves from an optional setting of its `EnvConfig`,
+`MIN_CLIENT_VERSIONS`, so an environment raises a minimum with no build:
+
+<Snippet file="schemas/services/shop-orders/schema.config.ts" from="// The server turns away" to="clientVersions: true" />
+
+```
+MIN_CLIENT_VERSIONS=cli=0.5.0,desktop=2.1.0
+```
+
+In a stack it is an `env` setting of the server
+([Stacks](/superschematic/guides/stacks/#environments)). A request whose
+header names a listed client at a lower version is answered 426 with the
+problem `client_too_old`, before any other step of its route:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Upgrade Required",
+  "status": 426,
+  "detail": "cli 0.4.0 is older than 0.5.0, the oldest version of cli this API serves. Upgrade cli.",
+  "code": "client_too_old",
+  "requestId": "req-1",
+  "details": { "client": "cli", "version": "0.4.0", "minimum": "0.5.0" }
+}
+```
+
+- Versions compare as semantic versions (semver.org 2.0.0): `0.10.0` is
+  newer than `0.9.0`, a pre-release, `0.5.0-rc.1`, is older than its
+  release, and build metadata, `0.5.0+b7`, takes no part.
+- A request with no header, a client the list does not name, or a version
+  that is no semantic version passes: a browser sends none, and the
+  header is no credential. Anyone can send another version, so a minimum
+  is a message to an honest client, not a control.
+- The list is entries of `<client>=<version>` separated by commas. A
+  server does not start on a list it cannot read: an entry without one
+  `=`, a minimum that is no semantic version, or a client listed twice.
+  Unset or empty, every client is served.
+- One setting serves every API of a server whose config says
+  `clientVersions`: a client is the application's, not one API's.
+- The 426 carries no `Upgrade` header, though RFC 9110 asks one of a 426.
+  `Upgrade` names a protocol to switch the connection to, and there is
+  none: the client upgrades itself, as `details.minimum` says. It is also
+  a connection header, which HTTP/2 and HTTP/3 forbid, so a server behind
+  a load balancer that speaks either could not send it intact. A client
+  reads the problem's `code`, never the header.
+- The Go, TypeScript and Rust servers decide each request alike
+  (`runtime/http/testdata/client_version_parity.json`). A hand-written
+  server passes the minimums itself: `Config.MinClientVersions` in Go,
+  `minClientVersions` in the TypeScript router's options and
+  `RouterOptions.min_client_versions` in Rust.
+
+Each SDK raises a typed error for it, so a client can tell its user to
+upgrade:
+
+| Language | The error | Its members |
+| --- | --- | --- |
+| TypeScript | `ClientTooOldError`, an `ApiError` | `client`, `version`, `minimum` |
+| Go | `*ClientTooOldError`, which unwraps to its `*APIError` | `Client`, `Version`, `Minimum` |
+| Python | `ClientTooOldError`, an `APIError` | `client`, `version`, `minimum` |
+| Rust | `SDKError::Api`, whose `client_too_old()` is `Some(ClientTooOld)` | `client`, `version`, `minimum` |
+
+```ts
+try {
+  await sdk.carts.listCarts();
+} catch (error) {
+  if (error instanceof ClientTooOldError) {
+    console.error(`Upgrade to ${error.minimum} or newer.`);
+    process.exit(1);
+  }
+  throw error;
+}
+```
+
+## An idempotency key
+
+A method of an [`@idempotent`](/superschematic/guides/api-routes/#a-call-that-runs-once)
+operation sends an `Idempotency-Key` with every call (D140). Given none,
+it makes a UUID for the call, so the SDK's own retries of that call, after
+a 401 it refreshed a token for or a 429 it waited out, send the same key
+and run the operation once. Name a key to retry across calls, or across a
+restart of the client: the same key with the same arguments is answered
+what the first call was.
+
+| Language | Naming the key |
+| --- | --- |
+| TypeScript | `sdk.orders.placeOrder(input, { idempotencyKey: "order-7" })`, a member of the method's `RequestOptions` |
+| Go | `client.OrdersNamespace.PlaceOrder(runtime.WithIdempotencyKey(ctx, "order-7"), input)`, from the SDK's `runtime` package |
+| Python | `sdk.orders.place_order(input, idempotency_key="order-7")` |
+| Rust | not built yet: the Rust SDK sends no key |
+
+A method of any other operation sends no key, and the Python one takes no
+`idempotency_key`. The answer of a repeat is the first call's, so a
+method returns it as it returned the first. A key used for another
+request is the API's 422 `idempotency_key_reused`, and a repeat while the
+first call is still running its 409 `idempotency_in_flight`, each the
+SDK's API error with that code.
 
 ## Install them
 

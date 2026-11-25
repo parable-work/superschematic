@@ -1,0 +1,6 @@
+{
+  "name": "fixture-idempotent-api",
+  "kind": "API",
+  "dependencies": [{ "name": "fixture-idempotent-db", "kind": "DB" }],
+  "outputs": {}
+}

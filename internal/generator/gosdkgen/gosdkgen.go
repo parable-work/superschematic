@@ -299,6 +299,10 @@ type EndpointInfo struct {
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the runtime's DownloadedFile, the bytes and the filename.
 	FileDownload bool
+	// Idempotent marks an @idempotent operation (D140): the method sends
+	// an Idempotency-Key, the one its context carries
+	// (runtime.WithIdempotencyKey) or a UUID it makes.
+	Idempotent bool
 
 	// OutputArrayDepth is the number of list levels of the response: 0, 1
 	// for a list, 2 for a list of lists. For a map it is the list levels
@@ -817,6 +821,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		OutputType:            ep.OutputType,
 		OutputGoType:          outputGoType,
 		FileDownload:          ep.FileDownload != nil,
+		Idempotent:            ep.Idempotent != nil,
 		OutputArrayDepth:      ep.OutputArrayDepth(),
 		OutputIsMap:           ep.OutputIsMap,
 		OutputNullable:        ep.OutputNullable,
@@ -1417,7 +1422,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 				}
 			}
 		}
-		if ep.HasEncryptedBody || ep.FileDownload {
+		if ep.HasEncryptedBody || ep.FileDownload || ep.Idempotent {
 			needsRuntime = true
 		}
 		if ep.HasInput || ep.HasScalarArgs {

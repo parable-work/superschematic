@@ -39,4 +39,20 @@ export class Statements {
   originalStatement(accountId: Identity.UUID): FileDownload<{ contentType: "application/octet-stream" }> {
     throw new Error("schema declaration only");
   }
+
+  // The last statement as a page shows it (D141): its text, or the page
+  // an OFX import renders, inline, revalidated and sandboxed.
+  @rest(HttpMethod.GET, "statements/{accountId}/preview")
+  previewStatement(
+    accountId: Identity.UUID,
+  ): FileDownload<{
+    contentType: "text/plain; charset=utf-8";
+    contentTypes: ["text/html; charset=utf-8"];
+    filename: "statement.txt";
+    disposition: "inline";
+    cacheControl: "private, no-cache";
+    sandbox: ["allow-popups"];
+  }> {
+    throw new Error("schema declaration only");
+  }
 }

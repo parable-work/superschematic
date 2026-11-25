@@ -45,6 +45,17 @@ func TestFileTransfersInTheAPIOutput(t *testing.T) {
 	if export.FileDownload == nil || export.FileDownload.ContentType != "text/csv; charset=utf-8" || export.OutputType != "" {
 		t.Errorf("exportStatement download = %+v, output %q", export.FileDownload, export.OutputType)
 	}
+	preview := byName["previewStatement"].FileDownload
+	if preview == nil || preview.Disposition != "inline" || strings.Join(preview.ContentTypes, ",") != "text/html; charset=utf-8" ||
+		preview.CacheControl != "private, no-cache" || preview.SandboxPolicy() != "sandbox allow-popups" || preview.Filename != "statement.txt" {
+		t.Errorf("previewStatement download = %+v", preview)
+	}
+	if got := byName["previewStatement"].FileSpecLiteral(); got != `FileSpec{ContentType: "text/plain; charset=utf-8", ContentTypes: []string{"text/html; charset=utf-8"}, Filename: "statement.txt", Disposition: "inline", CacheControl: "private, no-cache", Sandbox: true, SandboxAllow: []string{"allow-popups"}}` {
+		t.Errorf("previewStatement spec = %s", got)
+	}
+	if got := export.FileSpecLiteral(); got != `FileSpec{ContentType: "text/csv; charset=utf-8", Filename: "statement.csv"}` {
+		t.Errorf("exportStatement spec = %s", got)
+	}
 	if export.MCP == nil || !export.MCP.Hidden || export.MCP.HiddenReason == "" {
 		t.Errorf("exportStatement's tool = %+v, want it hidden with a reason", export.MCP)
 	}
@@ -53,6 +64,10 @@ func TestFileTransfersInTheAPIOutput(t *testing.T) {
 		"(allowed extensions: .csv, .ofx, .qfx), max size: 1024 bytes",
 		`"text/csv; charset=utf-8": {`, `"format": "binary"`, `"Content-Disposition": {`,
 		`\"statement.csv\" unless the operation names another`,
+		// D141: each media type, the disposition, the headers and the 304.
+		`"text/html; charset=utf-8": {`, `inline, with the file's name in filename and filename* (RFC 6266)`,
+		`"description": "sandbox allow-popups"`, `"Cross-Origin-Resource-Policy": {`, `"X-Content-Type-Options": {`,
+		`\"private, no-cache\", unless the operation sets another`, `"ETag": {`, `"304": {`,
 	} {
 		if !strings.Contains(output.OpenAPISpecRaw, want) {
 			t.Errorf("the OpenAPI document lacks %s", want)

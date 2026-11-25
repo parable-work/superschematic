@@ -29,11 +29,27 @@ func (e *emitter) fileUploadExpr(config *ir.FileUploadConfig) string {
 	return e.use("FileUpload") + "<{ " + strings.Join(members, "; ") + " }>"
 }
 
-// fileDownloadExpr renders FileDownload<C> (D81).
+// fileDownloadExpr renders FileDownload<C> (D81, D141).
 func (e *emitter) fileDownloadExpr(download *ir.FileDownloadDef) string {
 	members := []string{"contentType: " + strconv.Quote(download.ContentType)}
+	if len(download.ContentTypes) > 0 {
+		members = append(members, "contentTypes: "+stringTupleExpr(download.ContentTypes))
+	}
 	if download.Filename != "" {
 		members = append(members, "filename: "+strconv.Quote(download.Filename))
+	}
+	if download.Disposition != "" && download.Disposition != ir.FileDispositionAttachment {
+		members = append(members, "disposition: "+strconv.Quote(download.Disposition))
+	}
+	if download.CacheControl != "" {
+		members = append(members, "cacheControl: "+strconv.Quote(download.CacheControl))
+	}
+	if download.Sandbox != nil {
+		if len(download.Sandbox.Allow) == 0 {
+			members = append(members, "sandbox: true")
+		} else {
+			members = append(members, "sandbox: "+stringTupleExpr(download.Sandbox.Allow))
+		}
 	}
 	return e.use("FileDownload") + "<{ " + strings.Join(members, "; ") + " }>"
 }

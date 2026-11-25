@@ -163,6 +163,17 @@ TypeScript runtimes' (D51):
   reads as a JWK. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
+- `client_version`, with no feature: the oldest version of each client an
+  API serves (D143), the twin of Go's `clientversion` package and
+  TypeScript's `client-version.ts`. `Minimums::parse` reads
+  `MIN_CLIENT_VERSIONS`, a list such as `cli=0.5.0,desktop=2.1.0`, and
+  `Minimums::from_env` reads it from the environment as a generated
+  `EnvConfig` does; `Minimums::check` decides a request by its
+  `X-Client-Version`, `<name>/<version>`, comparing as semantic versions;
+  and `require_client_version`, which a generated router layers inside
+  `request_ids` over `RouterOptions::min_client_versions`, answers a
+  listed client under its minimum 426 with the problem `client_too_old`
+  (`runtime/http/testdata/client_version_parity.json`).
 - `cors`, with no feature: a site's CORS (D55), the twin of Go's
   `cors.Handler` and TypeScript's `corsHandler`. `cors::Api::new(&cors,
   operations::ALL)` is an API's policy, its `<API>_CORS` origins and the
@@ -172,10 +183,11 @@ TypeScript runtimes' (D51):
   the API a request with an `Origin` is, a preflight by the method it asks
   for: a preflight from an origin the policy lists is answered 204 with
   `Access-Control-Allow-Origin`, `-Credentials`, `-Methods`, `-Headers`
-  (`Accept, Authorization, Content-Type`) and `-Max-Age: 600`, and any
-  other request reaches the router, whose answer gets the policy's headers
-  where it set none (`Allow-Origin` and `Allow-Credentials` for a listed
-  origin, `Vary` always). A preflight from an origin the site's policy does
+  (`Accept, Authorization, Content-Type, Idempotency-Key,
+  X-Client-Version`) and `-Max-Age: 600`, and any other request reaches
+  the router, whose answer gets the policy's headers where it set none
+  (`Allow-Origin`, `Allow-Credentials` and `Expose-Headers:
+  Idempotent-Replay, Retry-After` for a listed origin, `Vary` always). A preflight from an origin the site's policy does
   not list reaches the router too, so `identity::CorsLayer` on the API's
   router answers the origins its identity config trusts (D55, amended).
   `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`

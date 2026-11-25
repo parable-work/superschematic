@@ -42,6 +42,7 @@ const STATUS_TEXT: Record<number, string> = {
   415: 'Unsupported Media Type',
   422: 'Unprocessable Entity',
   423: 'Locked',
+  426: 'Upgrade Required',
   428: 'Precondition Required',
   429: 'Too Many Requests',
   500: 'Internal Server Error',

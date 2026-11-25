@@ -759,6 +759,33 @@ The Go server serves no MCP endpoint yet. Its config fails to load with
 `mcp` on:
 `outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
 
+### A key for a call that runs once
+
+A tool call has no headers, so the tool of an
+[`@idempotent`](/superschematic/guides/api-routes/#a-call-that-runs-once)
+operation takes the key of the call as an argument, `idempotencyKey`
+(D140). `tools/list` adds it to the tool's input schema, a string of 1 to
+255 characters, required when the operation says `required: true`. A
+`tools/call` that sends it runs the route with the argument as its
+`Idempotency-Key` header, as the caller the endpoint authenticated:
+
+- a repeat of the call with the same key and the same arguments runs
+  nothing and has the first call's result;
+- the key with other arguments is the tool error `422
+  idempotency_key_reused`, and a repeat while the first call runs `409
+  idempotency_in_flight`;
+- a key that is no key is `400 idempotency_key_invalid`, and a call with
+  none to an operation that requires one `400 idempotency_key_required`.
+
+An `Idempotency-Key` header on the endpoint's own request is not a
+call's, and does not reach the route. An operation with an argument of
+its own named `idempotencyKey` keeps it as its argument: its tool then
+carries no key. The argument is the endpoint's, which the TypeScript
+server serves: the tool documents (`tools/schema.json`) do not list it
+yet, and an operation's `@docs` does not get `replayMode: "idempotent"`
+from the decorator. A Rust API with an `@idempotent` operation is not
+generated.
+
 ### A Rust API's endpoint
 
 A Rust API with `mcp` on serves the same endpoint (D116): the same tool

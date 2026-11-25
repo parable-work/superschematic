@@ -113,6 +113,9 @@ type NamespaceInfo struct {
 	// HasPagedEndpoints gates the imports of Page, Iterator and SDKError and
 	// the _coerce_page helper, for an operation that pages (D60).
 	HasPagedEndpoints bool
+	// HasIdempotentEndpoints gates the import of uuid, for the key a
+	// method of an @idempotent operation makes (D140).
+	HasIdempotentEndpoints bool
 	// PageType is the name the namespace gives the SDK's Page: Page, or
 	// SDKPage when the namespace imports a schema type named Page, which
 	// would rebind the name for a type checker, as the TypeScript SDK
@@ -227,6 +230,9 @@ type EndpointInfo struct {
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the client's DownloadedFile, the bytes and the filename.
 	FileDownload bool
+	// Idempotent marks an @idempotent operation (D140): the method takes
+	// idempotency_key and sends it as Idempotency-Key, or a UUID it makes.
+	Idempotent bool
 
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
@@ -568,6 +574,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			namespace.HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
 		}
+		if converted.Idempotent {
+			namespace.HasIdempotentEndpoints = true
+		}
 
 		collectNamespaceImports(importsByNamespace[namespaceName], endpoint)
 	}
@@ -835,7 +844,8 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		FileUploadFields:     fileFields,
 		FilesTypeName:        toPythonClassName(endpoint.Name) + "Files",
 		MultipartStripKeys:   multipartStripKeys,
-		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody),
+		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody, endpoint.Idempotent != nil),
+		Idempotent:           endpoint.Idempotent != nil,
 
 		OutputIsArrayOfArrays: endpoint.OutputIsArrayOfArrays,
 		OutputIsMap:           endpoint.OutputIsMap,
@@ -984,6 +994,7 @@ func buildMethodParams(
 	hasRequiredFileField bool,
 	filesTypeName string,
 	hasEncryptedBody bool,
+	idempotent bool,
 ) []MethodParam {
 	methodParams := make([]MethodParam, 0, len(pathParams)+len(scalarArgs)+len(queryParams)+6)
 
@@ -1068,6 +1079,14 @@ func buildMethodParams(
 		methodParams = append(methodParams, MethodParam{
 			Name:        "options",
 			Declaration: "options: EncryptedRequestOptions | None = None",
+		})
+	}
+
+	if idempotent {
+		// The Idempotency-Key of the call (D140): a UUID when left out.
+		methodParams = append(methodParams, MethodParam{
+			Name:        "idempotency_key",
+			Declaration: "idempotency_key: str | None = None",
 		})
 	}
 

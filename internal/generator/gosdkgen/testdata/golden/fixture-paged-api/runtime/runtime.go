@@ -1,6 +1,9 @@
 package runtime
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -9,6 +12,57 @@ import (
 	"strconv"
 	"strings"
 )
+
+// idempotencyKey is the context key of the key a caller names for a call
+// to an @idempotent operation, and idempotentCall that of the key the call
+// sends (D140).
+type (
+	idempotencyKey struct{}
+	idempotentCall struct{}
+)
+
+// WithIdempotencyKey returns a context whose call to an @idempotent
+// operation sends key as its Idempotency-Key (D140): a retry that sends the
+// same key is answered what the first call was, and runs nothing twice.
+// Without it the method makes a UUID for each call, which covers the
+// client's own retries of that call. Name one to retry across calls, or
+// across restarts. A key is 1 to 255 printable ASCII characters. An
+// operation that is not @idempotent sends none.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, idempotencyKey{}, key)
+}
+
+// IdempotentCall returns the context of one call to an @idempotent
+// operation: it carries the key the call sends, the one WithIdempotencyKey
+// named or a new UUID (D140). The generated methods call it.
+func IdempotentCall(ctx context.Context) context.Context {
+	key, _ := ctx.Value(idempotencyKey{}).(string)
+	if key == "" {
+		key = newIdempotencyKey()
+	}
+	return context.WithValue(ctx, idempotentCall{}, key)
+}
+
+// CallIdempotencyKey is the Idempotency-Key the call of ctx sends, false
+// for a call to an operation that is not @idempotent.
+func CallIdempotencyKey(ctx context.Context) (string, bool) {
+	key, ok := ctx.Value(idempotentCall{}).(string)
+	return key, ok
+}
+
+// newIdempotencyKey is a UUID v4.
+func newIdempotencyKey() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail on a supported platform; a key that
+		// is not random would make two calls one.
+		panic("idempotency key: " + err.Error())
+	}
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+}
 
 // DownloadedFile is the file a FileDownload operation answers (D81): its
 // bytes, the filename Content-Disposition offered, "" for none, and the

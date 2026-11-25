@@ -46,6 +46,21 @@ func TestFileTransfersLoad(t *testing.T) {
   @rest(HttpMethod.GET, "statements/{accountId}/raw")
   exportRaw(accountId: Identity.UUID): FileDownload<{ contentType: "application/octet-stream" }> {
     throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "statements/{accountId}/preview")
+  preview(accountId: Identity.UUID): FileDownload<{ contentType: "image/png"; contentTypes: readonly ["image/jpeg", "image/webp"]; disposition: "inline"; cacheControl: "private, max-age=60"; sandbox: true }> {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "statements/{accountId}/page")
+  page(accountId: Identity.UUID): FileDownload<{ contentType: "text/html"; disposition: "attachment"; sandbox: ["allow-scripts", "allow-same-origin"] }> {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "statements/{accountId}/plain")
+  plain(accountId: Identity.UUID): FileDownload<{ contentType: "text/plain"; sandbox: false }> {
+    throw new Error("schema declaration only");
   }`)
 	schema, _, err := LoadService(dir)
 	if err != nil {
@@ -80,6 +95,18 @@ func TestFileTransfersLoad(t *testing.T) {
 	}
 	if got, want := raw.FileDownload, (&ir.FileDownloadDef{ContentType: "application/octet-stream"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("exportRaw's download = %+v, want %+v", got, want)
+	}
+	// D141's members: the list of media types, inline, the Cache-Control
+	// and the sandbox, `true` or its tokens; attachment and `false` are
+	// what leaving them out is.
+	for i, want := range []*ir.FileDownloadDef{
+		{ContentType: "image/png", ContentTypes: []string{"image/jpeg", "image/webp"}, Disposition: "inline", CacheControl: "private, max-age=60", Sandbox: &ir.FileDownloadSandbox{}},
+		{ContentType: "text/html", Sandbox: &ir.FileDownloadSandbox{Allow: []string{"allow-scripts", "allow-same-origin"}}},
+		{ContentType: "text/plain"},
+	} {
+		if got := ops[3+i].FileDownload; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s's download = %+v (sandbox %+v), want %+v", ops[3+i].Name, got, got.Sandbox, want)
+		}
 	}
 }
 
@@ -154,6 +181,65 @@ func TestFileTransfersRefused(t *testing.T) {
 			methods: `  @rest(HttpMethod.GET, "statements")
   exportStatement(): FileDownload<{ contentType: "text/csv"; filename: "../a.csv" }> { throw new Error("schema declaration only"); }`,
 			want: "is not a filename alone",
+		},
+		{
+			name:  "a download disposition that is neither",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  // @ts-expect-error the disposition is attachment or inline
+  exportStatement(): FileDownload<{ contentType: "text/csv"; disposition: "download" }> { throw new Error("schema declaration only"); }`,
+			want: `FileDownload disposition must be "attachment" or "inline"`,
+		},
+		{
+			name:  "a download contentTypes that is no tuple",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  // @ts-expect-error contentTypes is a list
+  exportStatement(): FileDownload<{ contentType: "text/csv"; contentTypes: "text/plain" }> { throw new Error("schema declaration only"); }`,
+			want: "FileDownload contentTypes is a tuple of media types",
+		},
+		{
+			name:  "a download contentTypes entry that is no media type",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  exportStatement(): FileDownload<{ contentType: "text/csv"; contentTypes: ["csv"] }> { throw new Error("schema declaration only"); }`,
+			want: `FileDownload contentTypes holds "csv", which is not a media type`,
+		},
+		{
+			name:  "a download cacheControl with a line break",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  exportStatement(): FileDownload<{ contentType: "text/csv"; cacheControl: "private\nSet-Cookie: a=b" }> { throw new Error("schema declaration only"); }`,
+			want: "is not a Cache-Control value of printable ASCII",
+		},
+		{
+			name:  "a download sandbox token that is none",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  exportStatement(): FileDownload<{ contentType: "text/html"; sandbox: ["scripts"] }> { throw new Error("schema declaration only"); }`,
+			want: `FileDownload sandbox holds "scripts", which is not a sandbox token`,
+		},
+		{
+			name:  "a download sandbox token written twice",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  exportStatement(): FileDownload<{ contentType: "text/html"; sandbox: ["allow-scripts", "allow-scripts"] }> { throw new Error("schema declaration only"); }`,
+			want: `FileDownload sandbox holds "allow-scripts" twice`,
+		},
+		{
+			name:  "a download sandbox that is a string",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  // @ts-expect-error sandbox is true or a list
+  exportStatement(): FileDownload<{ contentType: "text/html"; sandbox: "allow-scripts" }> { throw new Error("schema declaration only"); }`,
+			want: "FileDownload sandbox is true, or a tuple of sandbox tokens",
+		},
+		{
+			name:  "a download member it does not take",
+			decls: "",
+			methods: `  @rest(HttpMethod.GET, "statements")
+  exportStatement(): FileDownload<{ contentType: "text/html"; etag: "v1" }> { throw new Error("schema declaration only"); }`,
+			want: `FileDownload has no member "etag"; it takes contentType, contentTypes, filename, disposition, cacheControl and sandbox`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -106,3 +106,26 @@ operationSets:
         restPath: statements/{accountId}/original
         fileDownload:
           contentType: application/octet-stream
+      # The last statement as a page shows it (D141): its text, or the page
+      # an OFX import renders, inline, revalidated and sandboxed.
+      - name: previewStatement
+        typeRef:
+          name: ""
+        required: true
+        arguments:
+          - name: accountId
+            typeRef:
+              name: Identity.UUID
+            required: true
+        httpMethod: GET
+        restPath: statements/{accountId}/preview
+        fileDownload:
+          contentType: text/plain; charset=utf-8
+          contentTypes:
+            - text/html; charset=utf-8
+          filename: statement.txt
+          disposition: inline
+          cacheControl: private, no-cache
+          sandbox:
+            allow:
+              - allow-popups

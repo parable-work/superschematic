@@ -1506,79 +1506,49 @@ root as it would on any child table.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 
-An operation's docs may say `replayMode: idempotent` and name the
-arguments that carry its keys. That reaches the tool manifest and the
-guidance, and nothing in a generated server keeps a key. A client that
-retries a write after a timeout runs it twice unless the application
-wrote its own table of keys.
+Built: `@idempotent({ ttl?, required? })`, the reserved class
+`IdempotencyKey implements IdempotencyKeys` and its table, the check that
+refuses an API whose database lacks it, the route step in the Go and
+TypeScript runtimes and routers
+(`runtime/http/testdata/idempotency_parity.json`), the store a generated
+Go or TypeScript entrypoint builds over the database, the header and its
+refusals in OpenAPI, the key a TypeScript, Go or Python SDK method sends,
+and the `idempotencyKey` argument of a tool on the TypeScript server's MCP
+endpoint (the API routes guide, "A call that runs once"). The commit that
+built it names D140 and says where it departs from the table this entry
+held: the decorator is also refused on an encrypted operation, a manual
+route and an operation that uploads files, the request's hash covers its
+query, and a row has a UUID key and a unique hash of operation, principal
+and key.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@idempotent({ ttl?, required? })` on an operation that is a `POST`, `PUT`, `PATCH` or `DELETE` and answers the JSON envelope. `ttl` is a duration, `24h` when absent. A caller sends `Idempotency-Key`, 1 to 255 printable ASCII characters. Without the header the call runs as it does now, unless `required: true`, which answers 400. | A key in the body, which every input type would then hold; every write idempotent unasked, which stores every answer |
-| The keys live in a table of the API's database that the DB schema declares with one reserved class, as it declares `Session`: `export abstract class IdempotencyKey implements IdempotencyKeys {}`. An API with an `@idempotent` operation over a database without it is refused at `check`, with the line to add. | A table the API's build adds to another service's migrations unseen |
-| A row is keyed by operation, principal and key, and holds a SHA-256 of the method, the path and the body, a state (`running` or `done`), the answer's status and body, and when it expires. | Keying by key alone, which lets one caller read another's answer |
-| Before the handler the runtime inserts a `running` row. If it inserted, the handler runs; an answer under 500 is stored as `done`, and one of 500 or more deletes the row, so a retry runs again. If a `done` row exists with the same hash, the stored answer is returned with `Idempotent-Replay: true`. A different hash is 422, `idempotency_key_reused`. A `running` row younger than the route's time limit is 409, `idempotency_in_flight`, with `Retry-After`; an older one is taken over. | Blocking the repeat until the first ends, which holds a connection for it |
-| The row is not in the handler's transaction, which the runtime does not own. A crash after the handler commits and before the answer is stored leaves `running`, and a repeat after the time limit runs the handler again. The docs say so: it is once per key but for that window. | Wrapping every handler in one transaction, which changes what a handler may do |
-| On the MCP endpoint the key is an argument, `idempotencyKey`, since a tool call has no headers. The operation's docs get `replayMode: idempotent` and that pointer from the decorator. | A second mechanism for tools |
-| A generated SDK's method for such an operation takes `idempotencyKey` and makes a UUID when given none. | Leaving the header to each caller |
-| After an insert, at most once a minute, a server deletes up to 100 expired rows. | A job every stack must schedule |
-| A file download and a streamed answer are refused the decorator. | |
-
-Build: the registry, `ir`, the reserved class in the loader, `sqlgen`, the
-Go, TypeScript and Rust HTTP runtimes and servers, the four SDK
-generators, the tool manifest, the parity tests and the API routes guide.
-
-## D141. A file answer may be inline, carries validators, and may be sandboxed (D81 amended)
-
-`FileDownload<{ contentType, filename? }>` answers
-`Content-Disposition: attachment`. A file a page shows, an image or a
-document in a frame, has to be a manual route, which signs in its caller
-itself and writes its own headers.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `FileDownload<{ contentType, contentTypes?, filename?, disposition?, cacheControl?, sandbox? }>`. `disposition` is `attachment` (the default) or `inline`. `contentTypes` lists media types the implementation may answer in place of `contentType`; one it names outside the list is a 500. | A second result type for inline files |
-| The implementation may return `etag` and `lastModified` beside `body`. The runtime sends them, and answers 304 with no body to a matching `If-None-Match`, or to `If-Modified-Since` when the request names no tag, cancelling the body it was handed unread. | Validators each implementation compares itself |
-| `cacheControl` is sent as written. Absent, a file answer says `private, no-store` as it does now. | |
-| Every file answer says `X-Content-Type-Options: nosniff`. `sandbox: true` adds `Content-Security-Policy: sandbox` and `Cross-Origin-Resource-Policy: same-origin`; a list, `sandbox: ["allow-scripts"]`, adds those tokens to the policy. | Headers a route returns freely, which the next route forgets |
-| Go and TypeScript. The Rust server still refuses files (D81). | |
-
-Build: `runtime/http/typescript/src/download.ts` and Go's, the parity
-vectors beside `content_disposition_parity.json`, the servers'
-generators, the OpenAPI and the API routes guide.
+Left: the Rust runtime, router and SDK. `rustrestgen` refuses an API with
+an `@idempotent` operation, and the Rust SDK sends no key. An operation's
+docs do not get `replayMode: idempotent` and the pointer from the
+decorator, and the tool documents (`tools/schema.json`, the SDKs' tool
+invokers) do not list `idempotencyKey`: the replay contract holds a
+pointer to a required string argument of the tool, which the key is not
+unless the operation says `required`, and each SDK's invoker would have to
+pass it to the method as the key. A tool that both asks the person to
+confirm (D93) and is `@idempotent` asks again on a repeat that the route
+would answer from the kept answer: the endpoint confirms before the route
+reads the key, and its check (D98) keeps no key, so it cannot tell a
+replay from a first call.
 
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 
-A bucket's interface is `put`, `get`, `delete`, `list` and `signedUrl`.
-An application that stores each file once, under its hash, and asks which
-of a set of files are already there, writes the hashing, the existence
-checks and the race between two uploads of one file itself.
+Built: `put` with `ifAbsent` and its `created`, `head`, the Bucket
+config's `contentAddressed` and `maxBytes`, and the content bucket in
+`Deps`, in Go and TypeScript over GCS and in TypeScript over an R2
+binding (`runtime/http/testdata/content_bucket_parity.json`, the buckets
+guide). The commit that built it names D142.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `put` takes `ifAbsent: true`: it writes only when no object has the name, and its result says `created`. On GCS it is `ifGenerationMatch=0`, on R2 its conditional write. | A `head` then a `put`, which two callers interleave |
-| `head(name)` returns the object's record or nothing, without its bytes. | A `get` that is cancelled |
-| A Bucket service's config may say `contentAddressed: true`, with `maxBytes` (32 MiB when absent). `Deps` then holds a content bucket: `put(body, { contentType })` reads the body whole, up to `maxBytes`, names the object `sha256/<hex>` and writes it if absent, answering `{ hash, size, created }`; `has(hash)`, `missing(hashes)`, `get(hash)` and `signedUrl(hash)` read. It has no delete. Its `raw` member is the plain interface, for the caller that needs one. | Hashing a stream into a temporary object and renaming it, which needs a server-side copy that not every provider's binding has; a signed upload the server checks afterwards, during which a wrong object is readable under a hash |
-| Go, TypeScript and Rust, over GCS, and TypeScript over an R2 binding, as the interface is today. | |
-
-Build: the three runtimes' bucket clients, the Bucket kind's config, the
-servers' `Deps`, fake-gcs-server in the tests, and the buckets guide.
-
-## D143. An API names the oldest version of each client it serves (new)
-
-An application with a command-line client or an installed app has to turn
-away a copy too old to speak to it. Nothing in a generated SDK says which
-client it is in, and nothing in a server asks.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A generated SDK's client takes `client: { name, version }` and sends `X-Client-Version: <name>/<version>` on every call. Without the option it sends no such header. | The SDK package's own version, which is not the application's |
-| An API service's config may say `clientVersions: true`. Its `EnvConfig` then gains an optional setting, `MIN_CLIENT_VERSIONS`, a list such as `cli=0.5.0,desktop=2.1.0`, so an environment raises a minimum with no build. | A minimum in the schema, which a build and a deploy stand between |
-| A request whose header names a listed client at a lower version is answered 426 with the problem `client_too_old` and `{ client, version, minimum }`. Versions compare as semantic versions. A request with no header, a client that is not listed, or a version that does not parse, passes: a browser sends none. | Refusing a request without the header, which locks out every other caller |
-| Each SDK raises a typed error for it, so a client can tell its user to upgrade. | |
-
-Build: the service config, `envgen`, the three HTTP runtimes, the four
-SDK generators and the client SDKs guide.
+Left: the Rust runtime. Its `Bucket` trait has no `ifAbsent` and no
+`head`, it has no content bucket, and a Rust server's `Deps` holds the
+plain `Arc<dyn Bucket>` for a Bucket service whose config says
+`contentAddressed`. `gcs.rs` can send `ifGenerationMatch=0` on its multipart
+upload as the other two do. The R2 conditional write, `onlyIf` with
+`If-None-Match: *`, is tested against a stand-in of the binding, not
+against R2.
 
 ## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
 

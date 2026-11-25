@@ -2,8 +2,11 @@
 The provider-neutral interface of a bucket an API lists in its config's
 buckets (D54, section 8.9 of docs/stack-model.md), the twin of the Go
 runtime's bucket package: private object storage the API's implementation
-puts, gets, deletes and lists objects in, and signs URLs for, so that a
-browser uploads or downloads an object directly. The generated Deps holds a
+puts, gets, heads, deletes and lists objects in, and signs URLs for, so
+that a browser uploads or downloads an object directly. A put may write
+only when no object has the name, and a Bucket service whose config says
+contentAddressed gives Deps a ContentBucket, which names each object by
+the SHA-256 of its bytes (D142). The generated Deps holds a
 Bucket per listed bucket, and the generated entrypoint opens it with the
 implementation its provider needs: GCS's, from this package's ./gcs entry,
 which reaches the local target's emulator too. Nothing here imports a
@@ -29,6 +32,21 @@ export type BucketBody = ReadableStream<Uint8Array> | Uint8Array | string;
 export interface PutOptions {
   /** The object's media type; absent lets the provider pick, application/octet-stream on GCS. */
   readonly contentType?: string;
+  /**
+   * Writes only when no object has the name (D142): the provider checks
+   * and writes in one step, so of two puts of one name one creates the
+   * object and the other finds it. The result's created says which.
+   */
+  readonly ifAbsent?: boolean;
+}
+
+/**
+ * What put answers: the object the bucket holds under the name, and
+ * whether this put wrote it. created is false only for a put with
+ * ifAbsent that found an object there, which it left as it was.
+ */
+export interface PutResult extends BucketObject {
+  readonly created: boolean;
 }
 
 /** An object get opened: what the bucket holds of it, and its bytes as a stream, which the caller reads or cancels. */
@@ -80,8 +98,15 @@ export interface SignedUrlOptions {
 export interface Bucket {
   /** The bucket's name with its provider. */
   readonly name: string;
-  /** Writes the object name from body, replacing any object of that name, and returns what the provider stored. The object is whole once put resolves, and absent if it rejects. */
-  put(name: string, body: BucketBody, options?: PutOptions): Promise<BucketObject>;
+  /**
+   * Writes the object name from body, replacing any object of that name,
+   * or with ifAbsent leaving one that is there, and returns what the
+   * bucket holds under the name. The object is whole once put resolves,
+   * and absent if it rejects.
+   */
+  put(name: string, body: BucketBody, options?: PutOptions): Promise<PutResult>;
+  /** Returns what the bucket holds of the object name, without its bytes, or undefined when there is no such object (D142). */
+  head(name: string): Promise<BucketObject | undefined>;
   /** Opens the object name for reading. Rejects with ObjectNotFoundError when there is no such object. */
   get(name: string): Promise<BucketRead>;
   /** Removes the object name. Rejects with ObjectNotFoundError when there is no such object. */
@@ -103,6 +128,150 @@ export class ObjectNotFoundError extends Error {
     this.bucket = bucket;
     this.object = object;
   }
+}
+
+/** The largest object a content bucket puts when its Bucket service names none: 32 MiB. */
+export const DEFAULT_CONTENT_MAX_BYTES = 32 * 1024 * 1024;
+
+/** The prefix of a content bucket's object names, before the hash. */
+export const CONTENT_PREFIX = 'sha256/';
+
+/** What a content bucket's put answers. */
+export interface ContentPut {
+  /** The SHA-256 of the bytes, 64 lowercase hex digits: what names them from then on. */
+  readonly hash: string;
+  /** Their length in bytes. */
+  readonly size: number;
+  /** Whether this put wrote the object; false when the bucket already held these bytes. */
+  readonly created: boolean;
+}
+
+/**
+ * A bucket that names each object by its content (D142): the Deps member
+ * of a Bucket service whose config says contentAddressed. An object is
+ * `sha256/<hex>`, the SHA-256 of its bytes, so the same bytes are stored
+ * once however often they are put, and an object never changes. It has no
+ * delete; raw is the plain interface for the caller that needs one.
+ */
+export interface ContentBucket {
+  /** The bucket's name with its provider. */
+  readonly name: string;
+  /** The largest object put accepts, in bytes. */
+  readonly maxBytes: number;
+  /**
+   * Reads body whole, up to maxBytes, hashes it and writes it under its
+   * hash if no object has that name. Rejects with ContentTooLargeError for
+   * a longer body, having written nothing.
+   */
+  put(body: BucketBody, options?: { readonly contentType?: string }): Promise<ContentPut>;
+  /** Whether the bucket holds the bytes of hash. */
+  has(hash: string): Promise<boolean>;
+  /** The hashes of hashes the bucket does not hold, each once, in the order given. */
+  missing(hashes: readonly string[]): Promise<string[]>;
+  /** Opens the bytes of hash for reading. Rejects with ObjectNotFoundError when the bucket does not hold them. */
+  get(hash: string): Promise<BucketRead>;
+  /** Returns a URL that lets whoever holds it GET the bytes of hash until it expires. It signs no upload: an object is written only by put, which hashes it. */
+  signedUrl(hash: string, options: { readonly expiresInSeconds: number }): Promise<string>;
+  /** The plain bucket, whose names are sha256/<hex>. */
+  readonly raw: Bucket;
+}
+
+/** What a content bucket's put rejects a body longer than its maxBytes with. */
+export class ContentTooLargeError extends Error {
+  readonly bucket: string;
+  readonly maxBytes: number;
+
+  constructor(bucket: string, maxBytes: number) {
+    super(`content bucket ${bucket} puts at most ${maxBytes} bytes, and the body is longer`);
+    this.name = 'ContentTooLargeError';
+    this.bucket = bucket;
+    this.maxBytes = maxBytes;
+  }
+}
+
+const CONTENT_HASH = /^[0-9a-f]{64}$/u;
+
+/** The object name of a content hash. Throws for anything but 64 lowercase hex digits, so no caller's text reaches a name. */
+export function contentObjectName(hash: string): string {
+  if (typeof hash !== 'string' || !CONTENT_HASH.test(hash)) {
+    throw new Error(`a content hash is 64 lowercase hex digits, the SHA-256 of the bytes, not ${JSON.stringify(hash)}`);
+  }
+  return CONTENT_PREFIX + hash;
+}
+
+/** Reads body whole, or rejects with ContentTooLargeError past maxBytes, cancelling a stream it stops reading. */
+async function readWhole(body: BucketBody, bucket: string, maxBytes: number): Promise<Uint8Array> {
+  if (typeof body === 'string') body = new TextEncoder().encode(body);
+  if (body instanceof Uint8Array) {
+    if (body.byteLength > maxBytes) throw new ContentTooLargeError(bucket, maxBytes);
+    return body;
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ContentTooLargeError(bucket, maxBytes);
+    }
+    chunks.push(value);
+  }
+  const whole = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    whole.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return whole;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** How many heads missing runs at once. */
+const MISSING_CONCURRENCY = 16;
+
+/**
+ * The content bucket over bucket (D142), which the generated entrypoint
+ * builds for a Bucket service whose config says contentAddressed, with
+ * its maxBytes.
+ */
+export function contentBucket(bucket: Bucket, options: { readonly maxBytes?: number } = {}): ContentBucket {
+  const maxBytes = options.maxBytes ?? DEFAULT_CONTENT_MAX_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error(`a content bucket's maxBytes is a whole number of bytes above 0, not ${maxBytes}`);
+  }
+  const has = async (hash: string): Promise<boolean> => (await bucket.head(contentObjectName(hash))) !== undefined;
+  return {
+    name: bucket.name,
+    maxBytes,
+    raw: bucket,
+    async put(body, put = {}) {
+      const bytes = await readWhole(body, bucket.name, maxBytes);
+      const hash = await sha256Hex(bytes);
+      const result = await bucket.put(CONTENT_PREFIX + hash, bytes, { contentType: put.contentType, ifAbsent: true });
+      return { hash, size: bytes.byteLength, created: result.created };
+    },
+    has,
+    async missing(hashes) {
+      const asked = [...new Set(hashes)];
+      for (const hash of asked) contentObjectName(hash);
+      const held: boolean[] = new Array<boolean>(asked.length).fill(false);
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        for (let index = next++; index < asked.length; index = next++) held[index] = await has(asked[index]!);
+      };
+      await Promise.all(Array.from({ length: Math.min(MISSING_CONCURRENCY, asked.length) }, worker));
+      return asked.filter((_, index) => !held[index]);
+    },
+    get: hash => bucket.get(contentObjectName(hash)),
+    signedUrl: (hash, signed) => bucket.signedUrl(contentObjectName(hash), { method: 'GET', expiresInSeconds: signed.expiresInSeconds }),
+  };
 }
 
 /** Throws for options no provider signs: another method, an expiry out of range, and a content type on a GET. */

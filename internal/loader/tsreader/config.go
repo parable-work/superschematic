@@ -2,6 +2,7 @@ package tsreader
 
 import (
 	"fmt"
+	"math"
 	"path"
 
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -272,6 +273,19 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 
 	if public, ok := obj["public"].(bool); ok {
 		cfg.Public = public
+	}
+	if clientVersions, ok := obj["clientVersions"].(bool); ok {
+		cfg.ClientVersions = clientVersions
+	}
+	if contentAddressed, ok := obj["contentAddressed"].(bool); ok {
+		cfg.ContentAddressed = contentAddressed
+	}
+	if raw, set := obj["maxBytes"]; set {
+		bytes, ok := raw.(float64)
+		if !ok || bytes != math.Trunc(bytes) || bytes < 1 || bytes > 1<<53 {
+			return nil, errorAtNode(at, "maxBytes must be a whole number of bytes above 0")
+		}
+		cfg.MaxBytes = int64(bytes)
 	}
 	if authDB, ok := obj["authDb"].(serviceHandle); ok {
 		cfg.AuthDB = authDB.name

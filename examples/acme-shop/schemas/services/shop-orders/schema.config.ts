@@ -12,6 +12,10 @@ export default defineConfig({
   // through its Go SDK (D57), and shop-stock files a restock request for a
   // product it ran low: the implementation's Deps holds the client.
   calls: [ShopStock],
+  // The server turns away a client too old to speak to it (D143): its
+  // EnvConfig reads MIN_CLIENT_VERSIONS, such as "cli=0.5.0", and a
+  // request whose X-Client-Version names an older cli is answered 426.
+  clientVersions: true,
   outputs: {
     types: {
       [TargetLanguage.Go]: { enabled: true },

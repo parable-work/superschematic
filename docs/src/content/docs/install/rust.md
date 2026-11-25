@@ -368,6 +368,15 @@ uploads files, or whose result is a `FileDownload`, unless it is
 or answers the file. The Go and TypeScript servers serve both
 ([Files](/superschematic/guides/api-routes/#files)); support here follows.
 
+The router keeps no idempotency keys either. The build refuses an API with
+an `@idempotent` operation
+([A call that runs once](/superschematic/guides/api-routes/#a-call-that-runs-once)),
+since a route that ran a repeated call twice would break what the
+decorator says: serve the API in Go or TypeScript, or drop the decorator
+and keep the keys in the implementation. The Rust SDK sends no
+`Idempotency-Key` for such an operation of an API served in another
+language. Support here follows.
+
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
 provider's verifier before the handler and its body extractor.
