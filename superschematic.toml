@@ -171,3 +171,4 @@ state_guard_refused = "{column} cannot move from % to %"
 # compiles and behaves the same.
 [go]
 limit_constants = "off"
+optional_zero = "omit"

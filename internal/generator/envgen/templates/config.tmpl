@@ -197,7 +197,7 @@ func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 	}
 {{- else if .OptionalBool }}
 	if lookup("{{ .Key }}") != "" {
-		cfg.{{ .GoName }} = new({{ loaderExpr . }})
+		cfg.{{ .GoName }} = new({{ primitiveAssign . (loaderExpr .) }})
 	}
 {{- else }}
 	cfg.{{ .GoName }} = {{ primitiveAssign . (loaderExpr .) }}

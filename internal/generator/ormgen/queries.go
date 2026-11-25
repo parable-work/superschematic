@@ -125,7 +125,7 @@ func (o *ORMOutput) HasQueries() bool {
 }
 
 // queriesOf is what queries.go writes for schema's queries.
-func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, dependencies map[string]*ir.Schema) ([]Query, error) {
+func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, dependencies map[string]*ir.Schema, shapes codegen.GoOptionalShapes) ([]Query, error) {
 	models, err := sqlutil.QueriesOf(schema, dependencies)
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 		}
 		query.SQL = strconv.Quote(text)
 		for _, a := range q.Args {
-			f := extractField(a.Def, schema, scalars, unionNames)
+			f := extractField(a.Def, schema, scalars, unionNames, shapes)
 			bind, err := queryBind(f, a.Class, "params."+codegen.ToPascalCase(a.Name))
 			if err != nil {
 				return nil, fmt.Errorf("ormgen: query %s: parameter %s: %w", q.Name, a.Name, err)
@@ -163,7 +163,7 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 			query.Args = append(query.Args, "args = append(args, "+bind+")")
 		}
 		for _, rf := range q.RowFields {
-			f := extractField(rf.Def, schema, scalars, unionNames)
+			f := extractField(rf.Def, schema, scalars, unionNames, shapes)
 			field, err := queryRowField(q.Name, f, rf)
 			if err != nil {
 				return nil, fmt.Errorf("ormgen: query %s: row field %s: %w", q.Name, rf.Name, err)
@@ -171,7 +171,7 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 			query.RowFields = append(query.RowFields, field)
 		}
 		if o := q.OrderBy; o != nil {
-			f := extractField(o.Param.Def, schema, scalars, unionNames)
+			f := extractField(o.Param.Def, schema, scalars, unionNames, shapes)
 			value := "string(params." + codegen.ToPascalCase(o.Param.Name) + ")"
 			if f.GoPointer() {
 				value = "queryOrder(params." + codegen.ToPascalCase(o.Param.Name) + ", " + strconv.Quote(o.Default) + ")"
@@ -192,7 +192,7 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 				KeyType:    method + "PageKey",
 			}
 			for _, k := range p.Key {
-				f := extractField(k.Def, schema, scalars, unionNames)
+				f := extractField(k.Def, schema, scalars, unionNames, shapes)
 				goName := codegen.ToPascalCase(k.Name)
 				bind, err := queryBind(f, k.Class, "after."+goName)
 				if err != nil {

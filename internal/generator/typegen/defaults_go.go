@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // formatGoDefaultLiteral renders the raw @default value as a Go literal for
@@ -71,4 +72,57 @@ func durationDefaultLiteral(raw string, field FieldInfo) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("%s(%d)", field.GoType, int64(parsed)), true
+}
+
+// formatGoPointerDefaultLiteral renders the default of a field whose Go
+// type is a pointer, for go.optional_zero = "keep" (D161): a pointer to
+// the value's literal, new(TemporalDuration(30000000000)) or
+// new(Stage("draft")). applyDefaults sets it before the decode, so an
+// absent key keeps the default and an explicit null decodes to nil. A
+// scalar whose Go value has no literal of its text, such as a UUID or a
+// time, gets none, as under the core's rule.
+func formatGoPointerDefaultLiteral(raw string, kind codegen.DefaultLiteralKind, field FieldInfo) (string, bool) {
+	valueType, isPointer := strings.CutPrefix(field.GoType, "*")
+	if !isPointer || field.UsesWrapper {
+		return "", false
+	}
+	if kind == codegen.DefaultLiteralString && field.IsScalar && field.ScalarInfo != nil &&
+		!isDurationTextField(field) && !scalarHoldsText(field.ScalarInfo) {
+		return "", false
+	}
+	valueField := field
+	valueField.GoType = valueType
+	literal, ok := formatGoDefaultLiteral(raw, kind, valueField)
+	if !ok {
+		return "", false
+	}
+	if !strings.HasPrefix(literal, valueType+"(") {
+		literal = valueType + "(" + literal + ")"
+	}
+	return "new(" + literal + ")", true
+}
+
+// scalarHoldsText reports whether a scalar's Go value is text, so a quoted
+// default converts to it.
+func scalarHoldsText(scalar *ScalarInfo) bool {
+	traits := scalar.Traits
+	return scalar.Primitive == ir.LanguageString && !traits.IsUUIDLike && !traits.IsDateTimeLike &&
+		!traits.IsDurationLike && !traits.IsJSONLike && !traits.IsObjectLike && traits.StructuredJSON == ""
+}
+
+// defaultHidesZero reports whether an optional bool, float64 or string
+// field's default differs from its Go zero value: omitempty would then
+// drop an explicit false, 0 or "", and the decode would restore the
+// default instead.
+func defaultHidesZero(goType, literal string) bool {
+	switch goType {
+	case "bool":
+		return literal == "true"
+	case "float64":
+		value, err := strconv.ParseFloat(literal, 64)
+		return err == nil && value != 0
+	case "string":
+		return literal != `""`
+	}
+	return false
 }

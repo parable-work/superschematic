@@ -212,9 +212,13 @@ type ConfigField struct {
 	// ScalarIntegerLike marks a scalar whose Go type is an integer, such as
 	// Temporal.Seconds or Network.Port. The types module declares an optional
 	// field of such a scalar as a pointer only when it has no default (see
-	// codegen.GoOptionalIntegerScalarIsPointer); with a default it is a value
-	// and the loader assigns the parsed value.
+	// codegen.GoOptionalShapes.IntegerScalarIsPointer); with a default it is
+	// a value and the loader assigns the parsed value.
 	ScalarIntegerLike bool
+	// ScalarValue marks an optional scalar the types module declares as a
+	// value: an integer-like one with a default, unless go.optional_zero is
+	// "keep".
+	ScalarValue bool
 	// EnumValues are the valid values for enum types.
 	EnumValues []string
 	// Description is the field doc text from the schema.
@@ -226,7 +230,9 @@ type ConfigField struct {
 	// changes it while the process runs (D129).
 	Runtime bool
 	// OptionalBool marks an optional boolean without a default, which the
-	// types module declares as *bool; the loader leaves it nil when unset.
+	// types module declares as *bool, and with go.optional_zero = "keep" an
+	// optional number without a default too, *float64
+	// (codegen.GoOptionalShapes); the loader leaves it nil when unset.
 	OptionalBool bool
 }
 
@@ -402,7 +408,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	usedEnums := make(map[string]bool)
 
 	for _, field := range envVarsType.Fields {
-		configField, err := extractConfigFieldIR(field, schema, enumMap, scalarMap)
+		configField, err := extractConfigFieldIR(field, schema, enumMap, scalarMap, codegen.GoOptionalShapes{KeepZero: names.Go.KeepsOptionalZero()})
 		if err != nil {
 			return nil, fmt.Errorf("failed to process field %s: %w", field.Name, err)
 		}
@@ -475,7 +481,7 @@ func derivedFields(schema *ir.Schema, envVarsType *ir.TypeDef, names naming.Nami
 }
 
 // extractConfigFieldIR extracts configuration field information from an IR FieldDef.
-func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[string]enumMapping, scalarMap map[string]scalarInfo) (ConfigField, error) {
+func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[string]enumMapping, scalarMap map[string]scalarInfo, shapes codegen.GoOptionalShapes) (ConfigField, error) {
 	typeName := field.TypeRef.Name
 	enumConfig, isEnum := enumMap[typeName]
 	scalarConfig, isScalar := scalarMap[typeName]
@@ -491,8 +497,8 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 		Description: codegen.DocText(field.Description, field.Comment),
 		Secret:      field.Secret,
 		Runtime:     field.Runtime,
-		OptionalBool: codegen.GoOptionalBoolIsPointer(
-			typeName, field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default),
+		OptionalBool: shapes.PrimitiveIsPointer(
+			typeName, field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default, true),
 	}
 
 	if isEnum {
@@ -503,6 +509,8 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 		configField.ScalarPrimitive = scalarConfig.LanguagePrimitive
 		configField.ScalarKind = scalarConfig.Primitive
 		configField.ScalarIntegerLike = scalarConfig.IntegerLike
+		configField.ScalarValue = scalarConfig.IntegerLike &&
+			!shapes.IntegerScalarIsPointer(field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default, false)
 	}
 
 	goType, err := mapConfigGoType(typeName, isEnum, isScalar, scalarConfig)
@@ -827,7 +835,7 @@ func assignsPointer(field ConfigField) bool {
 		return false
 	}
 	if field.IsScalar {
-		return !field.ScalarIntegerLike || !field.HasDefault
+		return !field.ScalarValue
 	}
 	return field.IsEnum || isNamedConfigField(field)
 }

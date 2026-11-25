@@ -144,6 +144,12 @@ An integer scalar, such as `Generic.Int64`, is a pointer for the same
 reason, so an explicit `0` is written. With a default it stays the value
 type and is left out when `0`.
 
+The naming file's `go.optional_zero = "keep"` makes a pointer of every
+optional field whose value type would drop an explicit zero or read an
+explicit `null` as its default: a `number` without a default, a scalar
+with one, and a `boolean`, `number` or `string` whose default is not its
+zero value ([go.optional_zero](/superschematic/reference/naming/#gooptional_zero)).
+
 ### A field that is always null
 
 `RequiredNull`, from `@superschematic/schema`, is a field that is present

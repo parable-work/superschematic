@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -83,13 +84,21 @@ func TestOptionalBool(t *testing.T) {
 // it with go test.
 func runGeneratedLoaderTest(t *testing.T, schema *ir.Schema, file string, code func(*envgen.ConfigOutput) string) {
 	t.Helper()
-	output, err := envgen.Generate(schema, "fixture-general")
+	runGeneratedLoaderTestWith(t, schema, naming.Naming{}, file, code)
+}
+
+// runGeneratedLoaderTestWith is runGeneratedLoaderTest under the naming
+// file n, which the loader and its types module both read.
+func runGeneratedLoaderTestWith(t *testing.T, schema *ir.Schema, n naming.Naming, file string, code func(*envgen.ConfigOutput) string) {
+	t.Helper()
+	output, err := envgen.GenerateWithOptions(schema, envgen.Options{SchemaName: "fixture-general", Naming: n})
 	if err != nil {
 		t.Fatalf("generate env config: %v", err)
 	}
 	types, err := typegen.Generate(schema, typegen.Options{
 		SchemaName: "fixture-general",
 		ModulePath: output.TypesModule,
+		Naming:     n,
 		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
 	})
 	if err != nil {

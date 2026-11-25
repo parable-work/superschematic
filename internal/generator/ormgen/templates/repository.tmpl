@@ -283,7 +283,7 @@ var temp{{ toGoName $member.Field.Name }} pgtype.Point
 var temp{{ toGoName $member.Field.Name }} *time.Duration
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Date
-{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
+{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
 var temp{{ toGoName $member.Field.Name }} sql.NullString
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
 var temp{{ toGoName $member.Field.Name }} *{{ $member.Field.GoType }}
@@ -345,7 +345,7 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 	result.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
 	{{- end }}
 }
-{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
+{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	result.{{ toGoName $member.Field.Name }} = temp{{ toGoName $member.Field.Name }}.String
 }
@@ -420,7 +420,7 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 	entity.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
 	{{- end }}
 }
-{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
+{{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	entity.{{ toGoName $member.Field.Name }} = temp{{ toGoName $member.Field.Name }}.String
 }
@@ -503,7 +503,7 @@ var temp{{ toGoName $field.Name }} pgtype.Point
 var temp{{ toGoName $field.Name }} *time.Duration
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 var temp{{ toGoName $field.Name }} pgtype.Date
-{{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") }}
+{{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") (not $field.IsNullableBool) }}
 var temp{{ toGoName $field.Name }} sql.NullString
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) }}
 var temp{{ toGoName $field.Name }} *{{ $field.GoType }}
@@ -607,7 +607,7 @@ if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	result.{{ toGoName $field.Name }} = {{ $field.GoType }}(temp{{ toGoName $field.Name }}.Time.Format("2006-01-02"))
 	{{- end }}
 }
-{{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") }}
+{{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") (not $field.IsNullableBool) }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	result.{{ toGoName $field.Name }} = temp{{ toGoName $field.Name }}.String
 }

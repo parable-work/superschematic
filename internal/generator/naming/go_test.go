@@ -23,17 +23,19 @@ func TestTheGoTableDefaultsToTheCore(t *testing.T) {
 func TestParseReadsTheGoTable(t *testing.T) {
 	n, err := Parse([]byte(`[go]
 limit_constants = "on"
+optional_zero = "keep"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := defaultGoConfig()
 	want.LimitConstants = GoOn
+	want.OptionalZero = GoOptionalKeep
 	if n.Go != want {
 		t.Errorf("[go] = %+v, want %+v", n.Go, want)
 	}
-	if !n.Go.WritesLimitConstants() {
-		t.Error("WritesLimitConstants() = false with limit_constants = \"on\"")
+	if !n.Go.WritesLimitConstants() || !n.Go.KeepsOptionalZero() {
+		t.Errorf("WritesLimitConstants() %t, KeepsOptionalZero() %t; want both true", n.Go.WritesLimitConstants(), n.Go.KeepsOptionalZero())
 	}
 }
 
@@ -42,6 +44,7 @@ limit_constants = "on"
 func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
 	for _, tc := range []struct{ file, want string }{
 		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
+		{"[go]\noptional_zero = \"pointers\"\n", `go.optional_zero is "pointers": use "omit" or "keep"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

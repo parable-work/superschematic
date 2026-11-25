@@ -1000,6 +1000,35 @@ aliases a dependency's type aliases its constants beside it. Two
 constants with one name, or a constant with the name of a type, enum or
 union, fail the build. `off` writes none. Any other value fails the load.
 
+### `go.optional_zero`
+
+Default: `omit`
+
+How a generated Go type holds a single optional field of a boolean, a
+number, a string or an integer scalar, such as `Generic.Int64`. `omit` is
+the core's rule
+([Required, nullable and optional](/superschematic/guides/modeling-types/#required-nullable-and-optional)):
+a `number` or a `string` is its value, left out when empty, and so is an
+integer scalar or a `boolean` with a default.
+
+`keep` keeps every value a payload states. A field whose value type would
+drop an explicit `0`, `""` or `false`, or read an explicit `null` as its
+default, is a pointer instead:
+
+| Optional field | `keep` |
+| --- | --- |
+| a scalar, with or without a default | `*T` |
+| `boolean` or `number` without a default | `*bool`, `*float64` |
+| `boolean`, `number` or `string` whose default is not `false`, `0` or `""` | `*bool`, `*float64`, `*string`, outside an `@envVars` class |
+| `number` or `string` whose default is `0` or `""`, `string` without a default | the value, left out when empty |
+
+An absent key decodes to a pointer to the default, and an explicit `null`
+to `nil`: the default does not apply. In an `@envVars` class a field with
+a default stays its value, since an unset variable is absent and never
+null; one whose default is not its zero value is always written. The ORM
+reads and writes each column into the type's shape, and the env loader
+assigns it. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches
