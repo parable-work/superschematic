@@ -160,6 +160,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(nearestFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove nearest.go: %w", err)
 	}
+	// merge.go holds the MergeInto of each table that implements Mergeable
+	// (D147); a schema without one has none.
+	mergeFile := filepath.Join(outputDir, "merge.go")
+	if output.HasMergeable {
+		if err := generateFile(generator, "merge.tmpl", mergeFile, output); err != nil {
+			return fmt.Errorf("failed to write merge.go: %w", err)
+		}
+	} else if err := os.Remove(mergeFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove merge.go: %w", err)
+	}
 	// rules.go embeds the layout of the tables whose fields are behaviors
 	// (D103); a schema without one has none.
 	rulesFile := filepath.Join(outputDir, "rules.go")

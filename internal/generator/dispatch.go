@@ -816,9 +816,9 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
-	// Deps.ts declares the derivers, typed by the engine database's types
-	// (D74).
-	if err := output.SetDerivers(apiOutput.Engine); err != nil {
+	// Deps.ts declares the derivers, typed by the database's types (D74,
+	// D146).
+	if err := output.SetDerivers(apiOutput.Engine, apiOutput.TableDerivers); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
 	output.HasEnvConfig = envOutput != nil
@@ -965,7 +965,7 @@ func (r run) typeScriptORM(db, dialect string) (string, error) {
 // definitions, which the worker claims with and the implementation
 // enqueues with. Each worker must handle a queue of db, whose TypeScript
 // types must be generated. A deriver's methods are typed by db's engine
-// types too (D74). An API with no worker and no deriver loads no database
+// types or its tables too (D74, D146). An API with no worker and no deriver loads no database
 // here, and its implementation adds the types' dependency itself to
 // enqueue.
 func (r run) typeScriptQueuesPackage(db string) (string, error) {
@@ -974,7 +974,7 @@ func (r run) typeScriptQueuesPackage(db string) (string, error) {
 	}
 	schema, err := r.LoadDependency(db)
 	if err != nil {
-		return "", fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle or whose engine types its derivers fill: %w", db, r.Config.Name, err)
+		return "", fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle or whose types its derivers fill: %w", db, r.Config.Name, err)
 	}
 	if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
 		return "", err
@@ -987,7 +987,7 @@ func (r run) typeScriptQueuesPackage(db string) (string, error) {
 			}
 			if !outputs.TypesEnabled(LangTypeScript) {
 				if len(r.Schema.Workers) == 0 {
-					return "", fmt.Errorf("generator: the TypeScript derivers of %s fill engine types of %s, whose TypeScript types type their methods, and %s generates none; enable outputs.types.%s in %s's config (D74)", r.Config.Name, db, db, LangTypeScript, db)
+					return "", fmt.Errorf("generator: the TypeScript derivers of %s fill types of %s, whose TypeScript types type their methods, and %s generates none; enable outputs.types.%s in %s's config (D74)", r.Config.Name, db, db, LangTypeScript, db)
 				}
 				return "", fmt.Errorf("generator: the TypeScript workers of %s handle the queues of %s, whose TypeScript types declare the messages and the queues' definitions, and %s generates none; enable outputs.types.%s in %s's config (D53)", r.Config.Name, db, db, LangTypeScript, db)
 			}
@@ -1104,6 +1104,10 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	tableDerivers, err := r.tableDerivers(deps)
+	if err != nil {
+		return nil, err
+	}
 
 	idempotencyTable, err := r.idempotencyTable()
 	if err != nil {
@@ -1128,6 +1132,7 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
 		Engine:             engine,
+		TableDerivers:      tableDerivers,
 		// The catalog lists Constants' and StateRules' permission under an
 		// operation that updates a row of their table, which the core
 		// checks on the write (D104).
@@ -1638,7 +1643,10 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 		return nil, nil, err
 	}
 	// Deps.rs declares the derivers, typed by the engine database's Rust
-	// types (D74).
+	// types (D74). A deriver of tables runs on a TypeScript API (D146).
+	if err := refuseRustTableDerivers(r.Schema, apiOutput.TableDerivers); err != nil {
+		return nil, nil, err
+	}
 	fieldTypes := func(schema string) (map[string]string, error) {
 		db, err := r.LoadDependency(apiOutput.Engine.Database)
 		if err != nil {

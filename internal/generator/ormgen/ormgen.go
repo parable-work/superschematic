@@ -182,7 +182,11 @@ type ORMOutput struct {
 	// go.mod requires the schema runtime, whose fieldcrypt package seals
 	// and opens the envelopes. SchemaRuntimeReplacePath is that module's
 	// replace target, relative to the output directory; empty omits it.
-	HasEncryptedFields       bool
+	HasEncryptedFields bool
+
+	// HasMergeable is true when a table implements Mergeable (D147):
+	// merge.go then holds each one's MergeInto.
+	HasMergeable             bool
 	SchemaRuntimeReplacePath string
 
 	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
@@ -297,6 +301,11 @@ type Repository struct {
 	Relationships          []Relationship
 	ReferencedBy           []InboundReference
 	OrderedMembers         []ColumnMember // fields + to-one FKs in schema order (matches DDL column order)
+
+	// Merge is what MergeInto of a table that implements Mergeable runs
+	// (D147): the statements sqlutil writes from the relations and the
+	// unique indexes of the schema. Nil for any other table.
+	Merge *sqlutil.MergePlan
 
 	// HistoryActorCol is, on a versioned table, the column a delete
 	// tombstone records its actor in: deleted_by when the table has one,
@@ -1026,6 +1035,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		if err := attachTable(&repo, &tables[i]); err != nil {
 			return nil, err
 		}
+		if typeDef.Mergeable {
+			if repo.Merge, err = sqlutil.MergePlanOf(schema, tables, typeDef.Name); err != nil {
+				return nil, err
+			}
+		}
 		repositories = append(repositories, repo)
 	}
 
@@ -1203,6 +1217,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HistoryActorCTE:          sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		HasEncryptedFields:       hasEncryptedFields,
+		HasMergeable:             slices.ContainsFunc(repositories, func(repo Repository) bool { return repo.Merge != nil }),
 		DefaultLimit:             sqlutil.DefaultLimit,
 		Clauses:                  sqlutil.PostgresClauses(),
 		TxStatements:             txStatements(),
@@ -2088,4 +2103,12 @@ func computeImportNeeds(repo *Repository) {
 			repo.NeedsReflect = true
 		}
 	}
+}
+
+// MergeKeysAreTypes reports whether a table that implements Mergeable is
+// keyed by a type of the types module, which merge.go then imports.
+func (o *ORMOutput) MergeKeysAreTypes() bool {
+	return slices.ContainsFunc(o.Repositories, func(repo Repository) bool {
+		return repo.Merge != nil && strings.HasPrefix(repo.PrimaryKeyType, "types.")
+	})
 }

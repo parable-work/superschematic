@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyRoleRepositoryInterface is the reads of RoleRepositoryInterface (D150).
+type ReadOnlyRoleRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RoleGetOptions) (*types.Role, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Role, error)
+	FindOne(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) (*types.Role, error)
+	FindMany(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) ([]*types.Role, int, error)
+	FindPage(ctx context.Context, filter *RoleFilter, opts *RolePageOptions) (*RolePage, error)
+}
+
 // RoleRepositoryInterface defines the contract for Role data access.
 type RoleRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RoleGetOptions) (*types.Role, error)
@@ -26,6 +35,15 @@ type RoleRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *RoleFilter, update *RoleUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *RoleFilter) (int, error)
+}
+
+// ReadOnlySessionRepositoryInterface is the reads of SessionRepositoryInterface (D150).
+type ReadOnlySessionRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *SessionGetOptions) (*types.Session, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Session, error)
+	FindOne(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) (*types.Session, error)
+	FindMany(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) ([]*types.Session, int, error)
+	FindPage(ctx context.Context, filter *SessionFilter, opts *SessionPageOptions) (*SessionPage, error)
 }
 
 // SessionRepositoryInterface defines the contract for Session data access.
@@ -46,6 +64,15 @@ type SessionRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *SessionFilter) (int, error)
 }
 
+// ReadOnlyUserRepositoryInterface is the reads of UserRepositoryInterface (D150).
+type ReadOnlyUserRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserGetOptions) (*types.User, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.User, error)
+	FindOne(ctx context.Context, filter *UserFilter, opts *UserFindOptions) (*types.User, error)
+	FindMany(ctx context.Context, filter *UserFilter, opts *UserFindOptions) ([]*types.User, int, error)
+	FindPage(ctx context.Context, filter *UserFilter, opts *UserPageOptions) (*UserPage, error)
+}
+
 // UserRepositoryInterface defines the contract for User data access.
 type UserRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserGetOptions) (*types.User, error)
@@ -62,6 +89,15 @@ type UserRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *UserFilter, update *UserUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *UserFilter) (int, error)
+}
+
+// ReadOnlyUserApiKeyRepositoryInterface is the reads of UserApiKeyRepositoryInterface (D150).
+type ReadOnlyUserApiKeyRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserApiKeyGetOptions) (*types.UserApiKey, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserApiKey, error)
+	FindOne(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyFindOptions) (*types.UserApiKey, error)
+	FindMany(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyFindOptions) ([]*types.UserApiKey, int, error)
+	FindPage(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyPageOptions) (*UserApiKeyPage, error)
 }
 
 // UserApiKeyRepositoryInterface defines the contract for UserApiKey data access.
@@ -82,6 +118,15 @@ type UserApiKeyRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *UserApiKeyFilter) (int, error)
 }
 
+// ReadOnlyUserCredentialRepositoryInterface is the reads of UserCredentialRepositoryInterface (D150).
+type ReadOnlyUserCredentialRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserCredentialGetOptions) (*types.UserCredential, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserCredential, error)
+	FindOne(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) (*types.UserCredential, error)
+	FindMany(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, int, error)
+	FindPage(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialPageOptions) (*UserCredentialPage, error)
+}
+
 // UserCredentialRepositoryInterface defines the contract for UserCredential data access.
 type UserCredentialRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserCredentialGetOptions) (*types.UserCredential, error)
@@ -98,6 +143,15 @@ type UserCredentialRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *UserCredentialFilter, update *UserCredentialUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *UserCredentialFilter) (int, error)
+}
+
+// ReadOnlyUserRoleGrantRepositoryInterface is the reads of UserRoleGrantRepositoryInterface (D150).
+type ReadOnlyUserRoleGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserRoleGrantGetOptions) (*types.UserRoleGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error)
+	FindOne(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) (*types.UserRoleGrant, error)
+	FindMany(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error)
+	FindPage(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantPageOptions) (*UserRoleGrantPage, error)
 }
 
 // UserRoleGrantRepositoryInterface defines the contract for UserRoleGrant data access.
@@ -118,18 +172,56 @@ type UserRoleGrantRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *UserRoleGrantFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
+	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
+	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
+	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
+	GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
+	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
+	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
+	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
+	GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetRoleRepository() RoleRepositoryInterface
+	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
+	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
+	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
+	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
+	GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -138,11 +230,17 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetRoleRepository() RoleRepositoryInterface
+	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
+	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
+	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
+	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
+	GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -196,9 +294,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -208,6 +327,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -229,11 +358,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetRoleRepository() RoleRepositoryInterface {
 	return db.Role
 }
 
+func (db *NoOpDatabase) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
+	return db.Role
+}
+
 func (tx *NoOpTx) GetRoleRepository() RoleRepositoryInterface {
+	return tx.Role
+}
+
+func (tx *NoOpTx) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
 	return tx.Role
 }
 
@@ -307,7 +449,15 @@ func (db *NoOpDatabase) GetSessionRepository() SessionRepositoryInterface {
 	return db.Session
 }
 
+func (db *NoOpDatabase) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
+	return db.Session
+}
+
 func (tx *NoOpTx) GetSessionRepository() SessionRepositoryInterface {
+	return tx.Session
+}
+
+func (tx *NoOpTx) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
 	return tx.Session
 }
 
@@ -381,7 +531,15 @@ func (db *NoOpDatabase) GetUserRepository() UserRepositoryInterface {
 	return db.User
 }
 
+func (db *NoOpDatabase) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
+	return db.User
+}
+
 func (tx *NoOpTx) GetUserRepository() UserRepositoryInterface {
+	return tx.User
+}
+
+func (tx *NoOpTx) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
 	return tx.User
 }
 
@@ -455,7 +613,15 @@ func (db *NoOpDatabase) GetUserApiKeyRepository() UserApiKeyRepositoryInterface 
 	return db.UserApiKey
 }
 
+func (db *NoOpDatabase) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
+	return db.UserApiKey
+}
+
 func (tx *NoOpTx) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return tx.UserApiKey
+}
+
+func (tx *NoOpTx) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
 	return tx.UserApiKey
 }
 
@@ -529,7 +695,15 @@ func (db *NoOpDatabase) GetUserCredentialRepository() UserCredentialRepositoryIn
 	return db.UserCredential
 }
 
+func (db *NoOpDatabase) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
+	return db.UserCredential
+}
+
 func (tx *NoOpTx) GetUserCredentialRepository() UserCredentialRepositoryInterface {
+	return tx.UserCredential
+}
+
+func (tx *NoOpTx) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
 	return tx.UserCredential
 }
 
@@ -603,7 +777,15 @@ func (db *NoOpDatabase) GetUserRoleGrantRepository() UserRoleGrantRepositoryInte
 	return db.UserRoleGrant
 }
 
+func (db *NoOpDatabase) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
+	return db.UserRoleGrant
+}
+
 func (tx *NoOpTx) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return tx.UserRoleGrant
+}
+
+func (tx *NoOpTx) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
 	return tx.UserRoleGrant
 }
 
@@ -674,20 +856,36 @@ func (r *NoOpUserRoleGrantRepository) DeleteMany(_ context.Context, _ *UserRoleG
 }
 
 var (
-	_ DatabaseInterface                 = (*Database)(nil)
-	_ DatabaseInterface                 = (*NoOpDatabase)(nil)
-	_ TxInterface                       = (*Tx)(nil)
-	_ TxInterface                       = (*NoOpTx)(nil)
-	_ RoleRepositoryInterface           = (*RoleRepository)(nil)
-	_ RoleRepositoryInterface           = (*NoOpRoleRepository)(nil)
-	_ SessionRepositoryInterface        = (*SessionRepository)(nil)
-	_ SessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
-	_ UserRepositoryInterface           = (*UserRepository)(nil)
-	_ UserRepositoryInterface           = (*NoOpUserRepository)(nil)
-	_ UserApiKeyRepositoryInterface     = (*UserApiKeyRepository)(nil)
-	_ UserApiKeyRepositoryInterface     = (*NoOpUserApiKeyRepository)(nil)
-	_ UserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)
-	_ UserCredentialRepositoryInterface = (*NoOpUserCredentialRepository)(nil)
-	_ UserRoleGrantRepositoryInterface  = (*UserRoleGrantRepository)(nil)
-	_ UserRoleGrantRepositoryInterface  = (*NoOpUserRoleGrantRepository)(nil)
+	_ DatabaseInterface                         = (*Database)(nil)
+	_ DatabaseInterface                         = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                 = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                 = (*NoOpDatabase)(nil)
+	_ TxInterface                               = (*Tx)(nil)
+	_ TxInterface                               = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                       = (*Tx)(nil)
+	_ ReadOnlyTxInterface                       = (*NoOpTx)(nil)
+	_ RoleRepositoryInterface                   = (*RoleRepository)(nil)
+	_ RoleRepositoryInterface                   = (*NoOpRoleRepository)(nil)
+	_ ReadOnlyRoleRepositoryInterface           = (*RoleRepository)(nil)
+	_ ReadOnlyRoleRepositoryInterface           = (*NoOpRoleRepository)(nil)
+	_ SessionRepositoryInterface                = (*SessionRepository)(nil)
+	_ SessionRepositoryInterface                = (*NoOpSessionRepository)(nil)
+	_ ReadOnlySessionRepositoryInterface        = (*SessionRepository)(nil)
+	_ ReadOnlySessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
+	_ UserRepositoryInterface                   = (*UserRepository)(nil)
+	_ UserRepositoryInterface                   = (*NoOpUserRepository)(nil)
+	_ ReadOnlyUserRepositoryInterface           = (*UserRepository)(nil)
+	_ ReadOnlyUserRepositoryInterface           = (*NoOpUserRepository)(nil)
+	_ UserApiKeyRepositoryInterface             = (*UserApiKeyRepository)(nil)
+	_ UserApiKeyRepositoryInterface             = (*NoOpUserApiKeyRepository)(nil)
+	_ ReadOnlyUserApiKeyRepositoryInterface     = (*UserApiKeyRepository)(nil)
+	_ ReadOnlyUserApiKeyRepositoryInterface     = (*NoOpUserApiKeyRepository)(nil)
+	_ UserCredentialRepositoryInterface         = (*UserCredentialRepository)(nil)
+	_ UserCredentialRepositoryInterface         = (*NoOpUserCredentialRepository)(nil)
+	_ ReadOnlyUserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)
+	_ ReadOnlyUserCredentialRepositoryInterface = (*NoOpUserCredentialRepository)(nil)
+	_ UserRoleGrantRepositoryInterface          = (*UserRoleGrantRepository)(nil)
+	_ UserRoleGrantRepositoryInterface          = (*NoOpUserRoleGrantRepository)(nil)
+	_ ReadOnlyUserRoleGrantRepositoryInterface  = (*UserRoleGrantRepository)(nil)
+	_ ReadOnlyUserRoleGrantRepositoryInterface  = (*NoOpUserRoleGrantRepository)(nil)
 )

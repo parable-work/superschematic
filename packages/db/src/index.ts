@@ -127,4 +127,5 @@ export type {
   WorkflowTransitionOn,
 } from "./wrappers";
 export type { IdempotencyKeys, RoleSeed, User, UserConfig, UserRole } from "./user";
+export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";

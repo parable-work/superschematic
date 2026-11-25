@@ -14,9 +14,9 @@ import (
 // identity are its API's, as a worker's are: the resolver treats a deriver
 // as it treats a worker wherever a deployable runs code
 // (ir.DeployableKind.RunsCode). What is its own is decided here: the
-// engine types whose Derived fields it fills, which must be types of the
-// engine database its API connects to that compose Derived, and whether
-// its one instance runs. It claims from no queue.
+// types whose Derived fields it fills, which must be types of the database
+// its API connects to that compose Derived, engine types or tables (D146),
+// and whether its one instance runs. It claims from no queue.
 
 // Derivers returns the derivers of in.Stack, which no environment
 // changes: a deriver per `@deriver` of every API service the stack
@@ -171,14 +171,18 @@ func (r *resolver) applyDeriverSettings(where, env string, d *deployable, entry 
 	return true
 }
 
-// runDerivers decides what each deriver runs in the environment (D74): the
-// engine database its API connects to, which must be one; the engine types
-// whose Derived fields it fills, those its decorator names, each a type of
-// that database that composes Derived, or every such type when it names
-// none, and at least one; its concurrency and batch size, the decorator's
-// unless the settings change the concurrency; and its instances, one
-// unless the settings turn it off. A Go API's deriver is refused: a
-// deriver runs on a TypeScript or Rust API.
+// runDerivers decides what each deriver runs in the environment (D74,
+// D146): the database its API connects to, one whose types compose
+// Derived; the types whose Derived fields it fills, those its decorator
+// names, each an engine type or a table of that database that composes
+// Derived, or every such type when it names none, and at least one; its
+// concurrency and batch size, the decorator's unless the settings change
+// the concurrency; and its instances, one unless the settings turn it off.
+// A deriver fills engine types through the engine, or tables through
+// their repositories, not both: one whose schemas are of both kinds is
+// refused, and so is one that names none over a database that has both. A
+// Go API's deriver is refused: a deriver runs on a TypeScript or Rust API.
+// A deriver of tables runs on a TypeScript API alone so far.
 func (r *resolver) runDerivers() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -190,28 +194,36 @@ func (r *resolver) runDerivers() {
 			r.fail(CodeInvalidStack, "deriver %s of %s: %v", d.deriver.Name, run.API, err)
 			continue
 		}
-		if lang := r.services[run.API].Language; lang == "" || lang == registry.APILanguageGo {
+		lang := r.services[run.API].Language
+		if lang == "" || lang == registry.APILanguageGo {
 			r.fail(CodeUnrealizable, "deriver %s of %s: %s is a Go API, and %s; write the API in TypeScript or Rust", d.deriver.Name, run.API, run.API, DeriverLanguages)
 			continue
 		}
 		db, ok := r.connectsQuietly(r.services[run.API])
-		if !ok || !r.services[db].Engine {
-			r.fail(CodeInvalidStack, "deriver %s of %s fills Derived fields, and %s connects to no engine database; a deriver's schemas are engine types of its API's database, its authDb or its one DB dependency", d.deriver.Name, run.API, run.API)
+		if !ok || (!r.services[db].Engine && len(r.services[db].DerivedTables) == 0) {
+			r.fail(CodeInvalidStack, "deriver %s of %s fills Derived fields, and %s connects to no database whose types compose Derived; a deriver's schemas are engine types or tables of its API's database, its authDb or its one DB dependency", d.deriver.Name, run.API, run.API)
 			continue
 		}
 		run.Database = db
-		derived := r.services[db].Derived
+		engineTypes, tables := r.services[db].Derived, r.services[db].DerivedTables
+		derived := slices.Concat(engineTypes, tables)
+		slices.Sort(derived)
 		run.Schemas = nil
+		unknown := false
 		for _, schema := range d.deriver.Schemas {
 			if !slices.Contains(derived, schema) {
 				declared := "none"
 				if len(derived) > 0 {
 					declared = strings.Join(derived, ", ")
 				}
-				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, which is no engine type of %s that composes Derived (its types that do: %s)", d.deriver.Name, run.API, schema, db, declared)
+				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, which is no engine type or table of %s that composes Derived (its types that do: %s)", d.deriver.Name, run.API, schema, db, declared)
+				unknown = true
 				continue
 			}
 			run.Schemas = append(run.Schemas, schema)
+		}
+		if unknown {
+			continue
 		}
 		if len(d.deriver.Schemas) == 0 {
 			run.Schemas = slices.Clone(derived)
@@ -219,6 +231,22 @@ func (r *resolver) runDerivers() {
 				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, and no type of %s composes Derived; compose Derived on a type, or remove the deriver", d.deriver.Name, run.API, db, db)
 				continue
 			}
+		}
+		var ofEngine, ofTables []string
+		for _, schema := range run.Schemas {
+			if slices.Contains(tables, schema) {
+				ofTables = append(ofTables, schema)
+			} else {
+				ofEngine = append(ofEngine, schema)
+			}
+		}
+		if len(ofEngine) > 0 && len(ofTables) > 0 {
+			r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, engine types of %s, and of %s, tables of it; a deriver fills engine types through the engine or tables through their repositories, so declare a deriver for each and name its schemas (D146)", d.deriver.Name, run.API, strings.Join(ofEngine, ", "), db, strings.Join(ofTables, ", "))
+			continue
+		}
+		if len(ofTables) > 0 && lang != registry.APILanguageTypeScript {
+			r.fail(CodeUnrealizable, "deriver %s of %s fills the derived fields of %s, tables of %s, and %s is a %s API; %s", d.deriver.Name, run.API, strings.Join(ofTables, ", "), db, run.API, lang, TableDeriverLanguages)
+			continue
 		}
 		run.Concurrency = registry.DeriverConcurrency(d.deriver)
 		if s.concurrency != nil {
@@ -238,3 +266,7 @@ func (r *resolver) runDerivers() {
 // DeriverLanguages says which languages a deriver runs in (D74), for the
 // refusals of a Go API's deriver.
 const DeriverLanguages = "a deriver runs on a TypeScript or Rust API; Go follows"
+
+// TableDeriverLanguages says which languages a deriver of tables runs in
+// (D146), for the refusals of a Rust API's.
+const TableDeriverLanguages = "a deriver of tables runs on a TypeScript API, where a table's Derived operations are served; Rust and Go follow (D146)"

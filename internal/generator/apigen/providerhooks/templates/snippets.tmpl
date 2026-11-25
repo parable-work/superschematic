@@ -1,0 +1,62 @@
+{{/* The snippets of the route hooks test provider. The route snippets
+     write marker calls, so the test can read where each one lands in a
+     route's middleware list. The others are empty. */}}
+
+{{ define "contextImports" }}{{ end }}
+{{ define "contextAuth" }}{{ end }}
+{{ define "middlewareStdImports" }}{{ end }}
+{{ define "middlewareImports" }}{{ end }}
+{{ define "middlewareAliases" }}{{ end }}
+{{ define "middlewareAuthz" }}{{ end }}
+{{ define "middlewareStores" }}{{ end }}
+{{ define "routesImports" }}{{ end }}
+{{ define "routesConfigStores" }}{{ end }}
+{{ define "routesConfigMiddlewares" }}{{ end }}
+{{ define "routesConfigFields" }}
+
+	// StepGuard is the provider's field, which every API's Config has.
+	StepGuard func(operation string) func(gohttp.Handler) gohttp.Handler
+{{- end }}
+{{ define "routesConfigValidate" }}{{ end }}
+{{ define "routesConfigExample" }}{{ end }}
+{{ define "routesSetupPre" }}{{ end }}
+{{ define "routesSetup" }}{{ end }}
+{{ define "routesProtectedMiddleware" }}{{ end }}
+
+{{ define "routeMiddlewaresFirst" }}
+{{- if .RequiresAuth }}
+				firstStep("{{ .HandlerName }}"),
+{{- end }}
+{{- end }}
+
+{{ define "routePermissions" }}
+				permissionStep({{ len .RequiredPerms }}),
+{{- end }}
+
+{{ define "routeMiddlewaresAfterDecrypt" }}
+{{- if .RequiresAuth }}
+				afterDecryptStep("{{ .HandlerName }}"),
+{{- end }}
+{{- end }}
+
+{{ define "routesDeclarations" }}
+
+// firstStep, permissionStep and afterDecryptStep are the marker steps the
+// route snippets write.
+func firstStep(string) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+
+func permissionStep(int) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+
+func afterDecryptStep(string) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+{{- end }}
+
+{{ define "moduleRequires" }}{{ end }}
+{{ define "moduleReplaces" }}{{ end }}
+{{ define "callerImports" }}{{ end }}
+{{ define "callerPrincipal" }}""{{ end }}

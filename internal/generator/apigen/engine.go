@@ -51,11 +51,12 @@ type EngineInfo struct {
 	Derivers []DeriverInfo
 }
 
-// DeriverInfo is a deriver of an API (D74): its @deriver class, the
-// subject it acts as and the permissions it holds, the engine types whose
-// Derived fields it fills, and how it runs unless an environment changes
-// it. The API's generators write a typed method for each derived field of
-// its schemas, and its entrypoint hands each stale field to it.
+// DeriverInfo is a deriver of an API (D74, D146): its @deriver class, the
+// subject it acts as and the permissions it holds, the engine types or the
+// tables whose Derived fields it fills, and how it runs unless an
+// environment changes it. The API's generators write a typed method for
+// each derived field of its schemas, and its entrypoint hands each stale
+// field to it.
 type DeriverInfo struct {
 	// Name is the @deriver class.
 	Name string
@@ -73,12 +74,18 @@ type DeriverInfo struct {
 	Concurrency int
 	BatchSize   int
 
-	// Schemas are the engine types it fills, in the decorator's order, or
-	// sorted by name when it names none.
+	// Schemas are the types it fills, in the decorator's order, or sorted
+	// by name when it names none: engine types, or tables when Tables.
 	Schemas []DerivedSchema
+
+	// Tables reports that its schemas are tables that implement Derived
+	// (D146): its entrypoint pulls and settles through their repositories,
+	// as a behavior caller holding each Derived config's permission, and
+	// opens no engine.
+	Tables bool
 }
 
-// DerivedSchema is an engine type a deriver fills: its type, the
+// DerivedSchema is an engine type or a table a deriver fills: its type, the
 // permission its Derived config names, and its derived fields, sorted by
 // name.
 type DerivedSchema struct {

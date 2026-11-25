@@ -6,10 +6,11 @@ import (
 )
 
 // Deriver is a deriver an API service declares with `@deriver` on a class
-// of its schema: a deployable that fills the Derived fields of the engine
-// types of the API's engine database (D73, D74). It pulls the fields that
-// are stale (staleDerivations), hands each to the project's generated
-// Derivers interface, which calls a model, and settles the answers
+// of its schema: a deployable that fills the Derived fields of types of
+// the API's database, its engine types (D73, D74) or its tables that
+// implement Derived (D146). It pulls the fields that are stale
+// (staleDerivations), hands each to the project's generated Derivers
+// interface, which calls a model, and settles the answers
 // (settleDerivations). It runs until it is stopped, as a worker does, and
 // claims from no queue. The class's name is the deriver's, and the class
 // holds nothing else, so a deriver is no type: the loaders record it in
@@ -22,9 +23,10 @@ type Deriver struct {
 	// Comment stores the node-attached comment of the class declaration.
 	Comment string `json:"comment,omitempty" yaml:"comment,omitempty"`
 
-	// Schemas are the engine types whose Derived fields the deriver fills,
-	// types of the engine database the API connects to that compose
-	// Derived. Empty is every such type of that database.
+	// Schemas are the types whose Derived fields the deriver fills, engine
+	// types or tables of the database the API connects to that compose
+	// Derived, one kind per deriver. Empty is every such type of that
+	// database.
 	Schemas []string `json:"schemas,omitempty" yaml:"schemas,omitempty"`
 
 	// Concurrency is how many answers an instance runs at a time. Zero is

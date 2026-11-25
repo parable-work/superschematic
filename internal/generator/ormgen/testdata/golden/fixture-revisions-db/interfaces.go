@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyNoteRepositoryInterface is the reads of NoteRepositoryInterface (D150).
+type ReadOnlyNoteRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
+	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
+	FindMany(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, int, error)
+	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
+}
+
 // NoteRepositoryInterface defines the contract for Note data access.
 type NoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
@@ -24,6 +33,15 @@ type NoteRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *NoteFilter) (int, error)
 	Revisions() NoteRevisionsOperations
+}
+
+// ReadOnlyPolicyRepositoryInterface is the reads of PolicyRepositoryInterface (D150).
+type ReadOnlyPolicyRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *PolicyGetOptions) (*types.Policy, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Policy, error)
+	FindOne(ctx context.Context, filter *PolicyFilter, opts *PolicyFindOptions) (*types.Policy, error)
+	FindMany(ctx context.Context, filter *PolicyFilter, opts *PolicyFindOptions) ([]*types.Policy, int, error)
+	FindPage(ctx context.Context, filter *PolicyFilter, opts *PolicyPageOptions) (*PolicyPage, error)
 }
 
 // PolicyRepositoryInterface defines the contract for Policy data access.
@@ -42,14 +60,40 @@ type PolicyRepositoryInterface interface {
 	Revisions() PolicyRevisionsOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
+	GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 	GetPolicyRepository() PolicyRepositoryInterface
+	GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -58,7 +102,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetNoteRepository() NoteRepositoryInterface
+	GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface
 	GetPolicyRepository() PolicyRepositoryInterface
+	GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -96,9 +142,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -108,6 +175,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -129,11 +206,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetNoteRepository() NoteRepositoryInterface {
 	return db.Note
 }
 
+func (db *NoOpDatabase) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
+	return db.Note
+}
+
 func (tx *NoOpTx) GetNoteRepository() NoteRepositoryInterface {
+	return tx.Note
+}
+
+func (tx *NoOpTx) GetNoteReadOnlyRepository() ReadOnlyNoteRepositoryInterface {
 	return tx.Note
 }
 
@@ -231,7 +321,15 @@ func (db *NoOpDatabase) GetPolicyRepository() PolicyRepositoryInterface {
 	return db.Policy
 }
 
+func (db *NoOpDatabase) GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface {
+	return db.Policy
+}
+
 func (tx *NoOpTx) GetPolicyRepository() PolicyRepositoryInterface {
+	return tx.Policy
+}
+
+func (tx *NoOpTx) GetPolicyReadOnlyRepository() ReadOnlyPolicyRepositoryInterface {
 	return tx.Policy
 }
 
@@ -326,12 +424,20 @@ func (noOpPolicyRevisionsOperations) ListProposals(_ context.Context, _ types.Id
 }
 
 var (
-	_ DatabaseInterface         = (*Database)(nil)
-	_ DatabaseInterface         = (*NoOpDatabase)(nil)
-	_ TxInterface               = (*Tx)(nil)
-	_ TxInterface               = (*NoOpTx)(nil)
-	_ NoteRepositoryInterface   = (*NoteRepository)(nil)
-	_ NoteRepositoryInterface   = (*NoOpNoteRepository)(nil)
-	_ PolicyRepositoryInterface = (*PolicyRepository)(nil)
-	_ PolicyRepositoryInterface = (*NoOpPolicyRepository)(nil)
+	_ DatabaseInterface                 = (*Database)(nil)
+	_ DatabaseInterface                 = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface         = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface         = (*NoOpDatabase)(nil)
+	_ TxInterface                       = (*Tx)(nil)
+	_ TxInterface                       = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface               = (*Tx)(nil)
+	_ ReadOnlyTxInterface               = (*NoOpTx)(nil)
+	_ NoteRepositoryInterface           = (*NoteRepository)(nil)
+	_ NoteRepositoryInterface           = (*NoOpNoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface   = (*NoteRepository)(nil)
+	_ ReadOnlyNoteRepositoryInterface   = (*NoOpNoteRepository)(nil)
+	_ PolicyRepositoryInterface         = (*PolicyRepository)(nil)
+	_ PolicyRepositoryInterface         = (*NoOpPolicyRepository)(nil)
+	_ ReadOnlyPolicyRepositoryInterface = (*PolicyRepository)(nil)
+	_ ReadOnlyPolicyRepositoryInterface = (*NoOpPolicyRepository)(nil)
 )

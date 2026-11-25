@@ -6991,6 +6991,10 @@
           "default": "",
           "type": "string"
         },
+        "mergeable": {
+          "default": false,
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },

@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D149 is the highest so far.
+  the highest number any branch has used. D150 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -727,11 +727,10 @@ Postgres, which D83's DDL has no form for (and which says capacity 1
 alone); two claims raced through a Go or a Rust API server; and the
 Reservation bundle (step 5).
 
-What Derived and Provenance left: a deriver deployable over a table that
-implements Derived (`internal/stack` takes a `@deriver` over such a table,
-the TypeScript and Rust deriver entrypoints open the database's
-repository as the deriver, a `DerivationSource` maps to the table's
-operations, and its answers are typed from the table's own fields); an
+What Derived and Provenance left: a Rust deriver deployable over a table
+that implements Derived (D146 built TypeScript's: `internal/stack` takes a
+`@deriver` over such a table, and the deriver's entrypoint opens the
+database's repositories as the deriver); an
 index for a deriver's pull, which scans rows a page at a time until a
 declaration may list a column (step 7); raw writes, which neither hears;
 the computed `fields` and `stale` served by the repositories and the API;
@@ -1611,39 +1610,75 @@ Left:
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 
-A table that composes Derived has `staleDerivations` and
-`settleDerivations` on its repository. A stack's deriver, the worker that
-calls a model and settles what it answers, reads engine types alone, so a
-compiled project writes that loop itself.
+Built: `@deriver({ schemas })` in a TypeScript API over a database of
+tables that implement Derived. The resolver admits it
+(`internal/stack/derivers.go`), the API's `Derivers` type is the one an
+engine database's deriver has, a method per derived field typed by the
+field, and the generated entrypoint opens the database's repositories as
+the deriver and runs the HTTP runtime's `runDeriver`
+(`@superschematic/http-runtime/deriver`) over each table's
+`staleDerivations` and `settleDerivations`
+(`docs/src/content/docs/guides/stacks.mdx`, Derivers). A deriver fills
+tables or engine types, not both: one whose schemas are of both kinds is
+refused, and names its schemas over a database that has both. The commit
+that built it names D146.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@deriver({ schemas })` in an API over a database of tables names tables that compose Derived, as it names engine types over an engine database. The resolver admits it, and the generated deriver runs the same loop over the tables' repositories: read a page of stale fields, hand each to the implementation's method for that field, settle the answers by hash. | A loop per application |
-| The implementation is the `Derivers` type the API already generates: a method per derived field, typed by the field. Nothing in it says which store it runs over. | A second shape for tables |
-| TypeScript first, since that is where a table's Derived operations are served. The entry keeps Rust and Go, and D74 keeps the model label and the cost cap. | |
-
-Build: `internal/stack/derivers.go`, the deriver entrypoint in
-`servergen`, the TypeScript runtime's loop, a fixture and the stacks
-guide.
+Left: a Rust and a Go deriver of tables, which the build refuses; a wake
+on a write, where the loop pulls again every five seconds, and each pull
+is a scan of the table's rows with their derivations sub-table, since the
+core keeps no index of stale fields; an item the core skips without
+counting an attempt, which is answered again at every pull while its
+guard holds it; and D74's model label and cost cap, which stay D74's.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
-Applications keep registries of names people type: labels, customers,
-tags. The same three things are written each time. A name is unique
-without regard to case. A renamed row is still found by its old name. Two
-rows that turn out to be one thing are merged, and everything that pointed
-at one points at the other.
+Built: `implements Mergeable`, a core trait of `@superschematic/db`
+(`TypeDef.Mergeable`, `mergeable: true` in the data forms). The Go and the
+TypeScript repository of such a table gain `MergeInto` and
+`mergeInto({ from, into })` on Postgres. They run the statements
+`sqlutil.MergePlanOf` writes from the schema's to-one relations and the
+unique keys of the tables that hold them, with the two columns of a
+`@manyToMany`'s join table and the column a `@hasMany` adds to a target
+that declares no relation back, in one transaction: lock both rows, delete the referencing rows a unique key would refuse once
+repointed, repoint the rest, delete `from` as the repository's delete
+does, and answer the rows repointed and deleted by table
+(`docs/src/content/docs/guides/database-tables.mdx`, Merging rows). The
+commit that built it names D147. It settled what the text left open: a
+refused row is stamped deleted where its table deletes softly and the
+index holds live rows alone, and removed anywhere else; a behavior's
+sub-tables are not repointed; a merge into a row that references `from`
+through a relation of the table to itself is refused, and no longer
+cycle is checked; a merge that stamps a row deleted needs an acting user
+before it writes; a version graph's table that references the table, and
+a unique index that lists no keys on a referencing table, are refused at
+the build; and the counts are disjoint and leave `from` out.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A field typed `Aliased<T, { normalize? }>` is a name with aliases. `normalize` is `lower` (the default) or `slug`. The behavior adds a sub-table of aliases, each unique in its normalized form across the table's names and aliases together. | A unique index and a second table per application |
-| Its operations: `rename({ name })`, which keeps the old name as an alias; `addAlias` and `removeAlias`; and on the table, `resolve({ name })`, which answers the row whose name or alias matches. A name that another row holds, as a name or an alias, is refused with that row's key. The rules are in the behaviors' core. | Rules written per language |
-| A table that `implements Mergeable` gains `mergeInto({ from, into })` on its repository. In one transaction it repoints every relation of the database that references `from` to `into`, which the build enumerates; where that would break a unique index of the referencing table, it deletes the row that pointed at `from`; it moves `from`'s aliases and adds its name as one when the table has an `Aliased` field; then it deletes `from`, softly when the table deletes softly. It answers how many rows of each table it repointed and deleted. | A merge each application writes against the relations it remembers |
-| TypeScript and Go repositories on Postgres first. | |
+Left: `Aliased`, whole. A field typed `Aliased<T, { normalize? }>` is a
+name with aliases, `normalize` being `lower` (the default) or `slug`. The
+behavior keeps a table of the names, each unique in its normalized form
+across the table's names and aliases together. Its operations are
+`rename({ name })`, which keeps the old name as an alias, `addAlias` and
+`removeAlias`, and on the table `resolve({ name })`, which answers the row
+whose name or alias matches. A name another row holds, as a name or an
+alias, is refused with that row's key. The rules are the behaviors'
+core's, and a merge of a table with such a field moves `from`'s aliases to
+`into` and adds its name as one, a statement of `sqlutil.MergePlan`.
 
-Build: the behaviors' core and its declarations, `behaviorlayout`,
-`ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
-guide.
+Two things it waits on in the core. A field anchor's field is its
+behavior's alone (`anchored_writes` refuses it in a create), so a name a
+create gives needs a field anchor whose value a create hands the behavior,
+or the use on the type naming an own field. And uniqueness across rows
+needs a key the database holds: a use's shared table keyed by the
+normalized name serves it (`ReadRequest::SharedRow`), but the core deletes
+no shared row and reads no sub-table across rows, so a removed alias and
+a deleted row's names need one of the two.
+
+Also left: `merge_into` in the Rust repositories, SQLite and D1; a route
+that serves a table's `mergeInto`; a merge that repoints a version graph's
+table, which needs the merge as a commit; a Derived field whose input is
+a repointed relation, which the merge does not hash again (Derived hears
+no set-based write); and a check of cycles longer than `into` under
+`from` in a relation of the table to itself.
 
 ## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
 

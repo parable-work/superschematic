@@ -23,7 +23,10 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool           *pgxpool.Pool
+	pool *pgxpool.Pool
+	// readReplica is the Database over the read replica's pool, nil when
+	// ConnectWithPools was given none (D150).
+	readReplica    *Database
 	Role           *RoleRepository
 	Session        *SessionRepository
 	User           *UserRepository
@@ -108,13 +111,59 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	return db, nil
 }
 
-// Close closes the database connection
+// ConnectWithPools creates a Database over primary, the pool that takes the
+// writes, and readReplica, a pool of a read replica of it (D150).
+// ReadReplica and ReadOnly read through the replica; every other method
+// runs on primary. When readReplica is nil or primary itself, there is no
+// replica, and they read on primary.
+func ConnectWithPools(primary, readReplica *pgxpool.Pool) (*Database, error) {
+	db, err := ConnectWithPool(primary)
+	if err != nil {
+		return nil, err
+	}
+	if readReplica != nil && readReplica != primary {
+		replica, err := ConnectWithPool(readReplica)
+		if err != nil {
+			return nil, err
+		}
+		db.readReplica = replica
+	}
+	return db, nil
+}
+
+// Close closes the database connection, and the read replica's.
 func (db *Database) Close() {
+	if db.readReplica != nil && db.readReplica.pool != db.pool {
+		db.readReplica.pool.Close()
+	}
 	db.pool.Close()
+}
+
+// HasReadReplica reports whether the Database reads through a read replica
+// of its own, a pool ConnectWithPools was given beside the primary.
+func (db *Database) HasReadReplica() bool {
+	return db != nil && db.readReplica != nil
+}
+
+// ReadReplica returns the Database over the read replica's pool, or db
+// itself when it has none. The replica's repositories, declared queries and
+// raw reads run on its pool. A write through it fails as the replica
+// refuses it: Postgres refuses a write on a standby with SQLSTATE 25006. A
+// read on the replica may lag the primary's latest commit.
+func (db *Database) ReadReplica() DatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
 }
 
 // GetRoleRepository returns the Role repository interface.
 func (db *Database) GetRoleRepository() RoleRepositoryInterface {
+	return db.Role
+}
+
+// GetRoleReadOnlyRepository returns the Role repository's reads.
+func (db *Database) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
 	return db.Role
 }
 
@@ -123,8 +172,18 @@ func (db *Database) GetSessionRepository() SessionRepositoryInterface {
 	return db.Session
 }
 
+// GetSessionReadOnlyRepository returns the Session repository's reads.
+func (db *Database) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
+	return db.Session
+}
+
 // GetUserRepository returns the User repository interface.
 func (db *Database) GetUserRepository() UserRepositoryInterface {
+	return db.User
+}
+
+// GetUserReadOnlyRepository returns the User repository's reads.
+func (db *Database) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
 	return db.User
 }
 
@@ -133,8 +192,18 @@ func (db *Database) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
 	return db.UserApiKey
 }
 
+// GetUserApiKeyReadOnlyRepository returns the UserApiKey repository's reads.
+func (db *Database) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
+	return db.UserApiKey
+}
+
 // GetUserCredentialRepository returns the UserCredential repository interface.
 func (db *Database) GetUserCredentialRepository() UserCredentialRepositoryInterface {
+	return db.UserCredential
+}
+
+// GetUserCredentialReadOnlyRepository returns the UserCredential repository's reads.
+func (db *Database) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
 	return db.UserCredential
 }
 
@@ -143,8 +212,18 @@ func (db *Database) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterfac
 	return db.UserRoleGrant
 }
 
+// GetUserRoleGrantReadOnlyRepository returns the UserRoleGrant repository's reads.
+func (db *Database) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
+	return db.UserRoleGrant
+}
+
 // GetRoleRepository returns the Role transaction repository interface.
 func (tx *Tx) GetRoleRepository() RoleRepositoryInterface {
+	return tx.Role
+}
+
+// GetRoleReadOnlyRepository returns the Role transaction repository's reads.
+func (tx *Tx) GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface {
 	return tx.Role
 }
 
@@ -153,8 +232,18 @@ func (tx *Tx) GetSessionRepository() SessionRepositoryInterface {
 	return tx.Session
 }
 
+// GetSessionReadOnlyRepository returns the Session transaction repository's reads.
+func (tx *Tx) GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface {
+	return tx.Session
+}
+
 // GetUserRepository returns the User transaction repository interface.
 func (tx *Tx) GetUserRepository() UserRepositoryInterface {
+	return tx.User
+}
+
+// GetUserReadOnlyRepository returns the User transaction repository's reads.
+func (tx *Tx) GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface {
 	return tx.User
 }
 
@@ -163,13 +252,28 @@ func (tx *Tx) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
 	return tx.UserApiKey
 }
 
+// GetUserApiKeyReadOnlyRepository returns the UserApiKey transaction repository's reads.
+func (tx *Tx) GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface {
+	return tx.UserApiKey
+}
+
 // GetUserCredentialRepository returns the UserCredential transaction repository interface.
 func (tx *Tx) GetUserCredentialRepository() UserCredentialRepositoryInterface {
 	return tx.UserCredential
 }
 
+// GetUserCredentialReadOnlyRepository returns the UserCredential transaction repository's reads.
+func (tx *Tx) GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface {
+	return tx.UserCredential
+}
+
 // GetUserRoleGrantRepository returns the UserRoleGrant transaction repository interface.
 func (tx *Tx) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return tx.UserRoleGrant
+}
+
+// GetUserRoleGrantReadOnlyRepository returns the UserRoleGrant transaction repository's reads.
+func (tx *Tx) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
 	return tx.UserRoleGrant
 }
 
@@ -211,6 +315,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	return nil
 }
 
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
+}
+
 // Exec runs raw SQL within the open transaction. Prefer generated repository
 // methods when they exist; use this only for operations the ORM does not
 // expose (e.g. clearing soft-delete columns that UpdateOne blocks).
@@ -224,6 +354,22 @@ func (tx *Tx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.Co
 // returned rows.
 func (tx *Tx) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
 	return tx.tx.Query(ctx, sql, arguments...)
+}
+
+// Query runs one raw read on the pool, outside any transaction, for a read
+// the repositories do not express. One statement reads the same with or
+// without BEGIN, so a lone read saves the BEGIN and COMMIT that Transaction
+// sends around it. A read that needs what an earlier statement set, such
+// as a transaction-local set_config, or several statements that must
+// agree, belongs in a transaction. The caller closes the returned rows.
+func (db *Database) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
+	return db.pool.Query(ctx, sql, arguments...)
+}
+
+// QueryRow is Query for a read of at most one row. Its Scan returns
+// pgx.ErrNoRows when the read finds none.
+func (db *Database) QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row {
+	return db.pool.QueryRow(ctx, sql, arguments...)
 }
 
 // WithUserID returns a new context with the user ID set
@@ -302,6 +448,15 @@ func mustParseUserID(text string) types.IdentityUUID {
 
 // Ping checks if the database connection is alive
 func (db *Database) Ping(ctx context.Context) error {
+	return db.pool.Ping(ctx)
+}
+
+// PingReadReplica checks if the read replica's connection is alive, or the
+// primary's when the Database has no replica.
+func (db *Database) PingReadReplica(ctx context.Context) error {
+	if db.readReplica != nil {
+		return db.readReplica.pool.Ping(ctx)
+	}
 	return db.pool.Ping(ctx)
 }
 

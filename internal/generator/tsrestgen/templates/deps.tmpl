@@ -274,7 +274,7 @@ export type DerivedAnswer<T> =
  * The derivers of {{ .SchemaName }}, a member per @deriver class. A deriver's
  * entrypoint pulls the stale derived fields of its schemas and calls the
  * method of each with a signal that aborts when the deriver stops. A value
- * of the wrong type fails to compile; one the engine still refuses counts
+ * of the wrong type fails to compile; one {{ .DeriverJudge }} still refuses counts
  * an attempt.
  */
 export interface Derivers {

@@ -305,6 +305,91 @@ export interface ReferenceDefinition {
   readonly live?: string;
 }
 
+/**
+ * One statement of a merge (D147), as sqlutil writes it: it takes the key
+ * of the row merged away as $1 and the key of the row that stays as $2,
+ * and, with actor, the acting user as $3, in the database's form of a UUID
+ * for a uuid column, null for none.
+ */
+export interface MergeStatement {
+  readonly sql: string;
+  readonly actor?: 'uuid' | 'text';
+}
+
+/**
+ * One foreign key of the schema that references a Mergeable table. source
+ * is what the counts name its rows by: the type of the table that holds
+ * it, or for a @manyToMany's join table the declaring type and the field,
+ * dotted (Board.labels). field is what holds the reference.
+ */
+export interface MergeStep {
+  readonly source: string;
+  readonly field: string;
+  /** On a relation of the table to itself, reads whether the row that stays references the row merged away through it. */
+  readonly selfReference?: string;
+  /** Each deletes the rows that reference the row merged away and that one unique key of their table would refuse once repointed. */
+  readonly collisions?: readonly MergeStatement[];
+  /** Repoints every row that references the row merged away. */
+  readonly repoint: MergeStatement;
+}
+
+/** What mergeInto of a table that implements Mergeable runs (D147), written at build time from the schema's relations and unique indexes. */
+export interface MergeDefinition {
+  /** Reads the two rows, locked: a row per one it finds, true for the row merged away. */
+  readonly lock: string;
+  /** A step deletes rows of a @versioned table, whose tombstone records the acting user. */
+  readonly historyActor?: boolean;
+  /** The merge stamps a row deleted, so it needs an acting user before it writes, as a soft delete does. */
+  readonly requiresUser?: boolean;
+  readonly steps: readonly MergeStep[];
+}
+
+/**
+ * What a merge did to the tables that referenced the row merged away, each
+ * by its type's name: the rows it repointed to the row that stays, and the
+ * rows it deleted because a unique index of their table would have refused
+ * them once repointed. No row is in both: one stamped deleted is counted
+ * as deleted. The rows of a @manyToMany's join table are under the
+ * declaring type and its field, dotted (Board.labels). The row merged away
+ * is in neither.
+ */
+export interface MergeResult {
+  readonly repointed: Readonly<Record<string, number>>;
+  readonly deleted: Readonly<Record<string, number>>;
+}
+
+/** What the repository of a table that implements Mergeable adds (D147). */
+export interface MergeableRepository<Key> {
+  /**
+   * Folds the row from into the row into, in one transaction, the
+   * repository's own when it runs in one. For each relation of the schema
+   * that references the table it deletes the rows that reference from and
+   * that a unique index of their table would refuse once they referenced
+   * into, stamping one deleted where the index holds live rows alone, then
+   * repoints every other row that references from, deleted rows among
+   * them, the rows of a @manyToMany's join table and a @hasMany's
+   * back-reference too. Then it deletes from as deleteOne does.
+   * NotFoundError when either is no live row; MergeError when they are one
+   * row, or when into references from through a relation of the table to
+   * itself (it checks no longer cycle); NoUserError, before it writes, when
+   * it stamps a row deleted and no user acts. Its writes of the referencing
+   * tables are set-based, as updateMany's are, and do not go through the
+   * behaviors' core.
+   */
+  mergeInto(input: { readonly from: Key; readonly into: Key }): Promise<MergeResult>;
+}
+
+/** The error of a merge the repository refuses before it writes: of a row into itself (self), or into a row that references the one merged away through a relation of the table to itself (self_reference). */
+export class MergeError extends Error {
+  constructor(
+    readonly code: 'self' | 'self_reference',
+    message: string
+  ) {
+    super(message);
+    this.name = 'MergeError';
+  }
+}
+
 /** A table, as a types package's ./orm entry describes it. */
 export interface TableDefinition {
   /** The table type. */
@@ -322,6 +407,8 @@ export interface TableDefinition {
   readonly historyActor?: boolean;
   /** The table's @fenced fields, in the order declared (D119); absent for a table with none. */
   readonly fences?: readonly FenceDefinition[];
+  /** What mergeInto runs, for a table that implements Mergeable (D147); absent for any other. */
+  readonly merge?: MergeDefinition;
   /** The search column, qualified, of a table with search fields, or of a view's source with them (D99). */
   readonly search?: string;
   /** A view's: the condition its search words' conditions sit in, %s their WHERE, the view's key in the keys of the source's rows they keep (D99). */
@@ -2462,6 +2549,66 @@ class TableRepository {
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
     if (rowCount === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+  }
+
+  async mergeInto(input: { readonly from: unknown; readonly into: unknown }): Promise<MergeResult> {
+    const merge = this.def.merge;
+    if (!merge) throw new Error(`orm: ${this.def.name} does not implement Mergeable, so its repository has no mergeInto (D147)`);
+    const keyColumn = this.keyColumn();
+    const from = this.encode(input.from, keyColumn, 'from');
+    const into = this.encode(input.into, keyColumn, 'into');
+    if (String(from) === String(into)) throw new MergeError('self', `${this.def.name} ${String(input.from)} cannot be merged into itself`);
+    // The merge stamps a row deleted, which records who deleted it.
+    if (merge.requiresUser) this.requireUser();
+    const fold = async (repo: TableRepository): Promise<MergeResult> => {
+      const runner = repo.runner;
+      // Both rows, locked in key order, so two merges of one pair wait for one another.
+      const locked = await run(runner, merge.lock, [from, into]);
+      const found = locked.rows.map(row => Object.values(row as Record<string, unknown>)[0] === true);
+      if (!found.includes(true)) throw new NotFoundError(`${this.def.name} ${String(input.from)} not found`);
+      if (!found.includes(false)) throw new NotFoundError(`${this.def.name} ${String(input.into)} not found`);
+      const args = (statement: MergeStatement): unknown[] => {
+        if (statement.actor === undefined) return [from, into];
+        if (repo.user === undefined) return [from, into, null];
+        return [from, into, statement.actor === 'uuid' ? uuidToDb(repo.user) : repo.user];
+      };
+      const repointed: Record<string, number> = {};
+      const deleted: Record<string, number> = {};
+      // A row a step deletes of a @versioned table leaves a tombstone, which records the acting user.
+      if (merge.historyActor) {
+        await run(runner, `${this.orm.historyActorCTE}SELECT _history_actor FROM history_actor`, [repo.user === undefined ? null : uuidToDb(repo.user)]);
+      }
+      for (const step of merge.steps) {
+        if (step.selfReference !== undefined && (await run(runner, step.selfReference, [from, into])).rows.length > 0) {
+          throw new MergeError(
+            'self_reference',
+            `${this.def.name} ${String(input.into)} references ${String(input.from)} through ${step.field}, and would reference itself: point it elsewhere first`
+          );
+        }
+        for (const collision of step.collisions ?? []) {
+          const { rowCount } = await run(runner, collision.sql, args(collision));
+          if (rowCount > 0) deleted[step.source] = (deleted[step.source] ?? 0) + rowCount;
+        }
+        const { rowCount } = await run(runner, step.repoint.sql, args(step.repoint));
+        if (rowCount > 0) repointed[step.source] = (repointed[step.source] ?? 0) + rowCount;
+      }
+      if (merge.historyActor) await run(runner, this.orm.clearHistoryActor, []);
+      await repo.deleteOne(input.from);
+      return { repointed, deleted };
+    };
+    if (!this.runner.inTransaction) return this.atomically(fold);
+    // In a caller's transaction, a savepoint: a merge that is refused or
+    // fails writes nothing there either, and leaves the transaction usable.
+    await run(this.runner, 'SAVEPOINT merge_into', []);
+    try {
+      const result = await fold(this);
+      await run(this.runner, 'RELEASE SAVEPOINT merge_into', []);
+      return result;
+    } catch (error) {
+      await run(this.runner, 'ROLLBACK TO SAVEPOINT merge_into', []);
+      await run(this.runner, 'RELEASE SAVEPOINT merge_into', []);
+      throw error;
+    }
   }
 
   // ---- Behaviors (D103) ----

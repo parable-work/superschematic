@@ -126,15 +126,30 @@ var (
 
 {{ define "routesConfigStores" }}{{ end }}
 {{ define "routesConfigMiddlewares" }}{{ end }}
+{{ define "routesConfigFields" }}{{ end }}
+
 {{ define "routesConfigValidate" }}{{ end }}
 {{ define "routesConfigExample" }}{{ end }}
 {{ define "routesSetupPre" }}{{ end }}
 {{ define "routesSetup" }}{{ end }}
 {{ define "routesProtectedMiddleware" }}{{ end }}
 
+{{ define "routeMiddlewaresFirst" }}{{ end }}
+
 {{ define "routePermissions" }}
 				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
 {{- end }}
 
+{{ define "routeMiddlewaresAfterDecrypt" }}{{ end }}
+
+{{ define "routesDeclarations" }}{{ end }}
+
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
+
+{{ define "callerImports" }}
+
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "callerPrincipal" }}runtimesession.GetPrincipalID(ctx){{ end }}

@@ -196,6 +196,7 @@ type Config struct {
 	// route to you to mount.
 	ManualRoutes *ManualRoutes
 {{- end }}
+{{- authSnippet "routesConfigFields" . }}
 
 	// MinClientVersions is the oldest version of each client the API
 	// serves (D143): a request under /api whose X-Client-Version names a
@@ -422,10 +423,13 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
-{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. An @idempotent route then keeps the request's key, around the timeout (D140). The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. An @idempotent route then keeps the request's key, around the timeout (D140). The timeout wraps the handler. The auth provider's routeMiddlewaresFirst snippet comes before them all, for a step that must run before any other refusal, and its routeMiddlewaresAfterDecrypt snippet after the decryptor and before the idempotency step and the timeout, for a step that reads the request a handler reads, so a key keeps no answer that step refused. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
 {{- define "routeMiddlewares" }}
-			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .Idempotent .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
+			{{- $first := authSnippet "routeMiddlewaresFirst" .EndpointInfo }}
+			{{- $afterDecrypt := authSnippet "routeMiddlewaresAfterDecrypt" .EndpointInfo }}
+			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .Idempotent .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers (ne $first "") (ne $afterDecrypt "") }}
 			Middlewares: []runtimerouting.Middleware{
+				{{- $first }}
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}
@@ -457,6 +461,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- if .Encrypted }}
 				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 				{{- end }}
+				{{- $afterDecrypt }}
 				{{- if .Idempotent }}
 				// After the permission check, so a key is read for a caller it
 				// let in alone, and around the timeout, whose 504 stores
@@ -1812,6 +1817,7 @@ func createRapiDocHandler() gohttp.HandlerFunc {
 		w.Write([]byte(rapidocHTML))
 	}
 }
+{{- authSnippet "routesDeclarations" . }}
 
 {{- if .HasWebhookHMACEndpoints }}
 

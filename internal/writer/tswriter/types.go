@@ -141,7 +141,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
-		def.User != nil || def.UserRole != nil || def.IdempotencyKeys != nil ||
+		def.User != nil || def.UserRole != nil || def.IdempotencyKeys != nil || def.Mergeable ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
 		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
@@ -609,8 +609,9 @@ func (e *emitter) implementedBehaviors(def *ir.TypeDef) []string {
 	return out
 }
 
-// identityTraits renders the user model's traits a table carries (D50):
-// User<{ login: "email"; name: "displayName" }> and UserRole.
+// identityTraits renders the core traits a table carries: the user
+// model's (D50), User<{ login: "email"; name: "displayName" }> and
+// UserRole, IdempotencyKeys (D140), and Mergeable (D147).
 func (e *emitter) identityTraits(def *ir.TypeDef) []string {
 	var out []string
 	if user := def.User; user != nil {
@@ -625,6 +626,9 @@ func (e *emitter) identityTraits(def *ir.TypeDef) []string {
 	}
 	if def.IdempotencyKeys != nil {
 		out = append(out, e.useCoreTrait(ir.IdempotencyKeysTraitName))
+	}
+	if def.Mergeable {
+		out = append(out, e.useCoreTrait("Mergeable"))
 	}
 	return out
 }

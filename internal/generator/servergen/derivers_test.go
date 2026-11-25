@@ -174,7 +174,7 @@ func TestDeriverRefusals(t *testing.T) {
 
 	f = loadDeriverFixture(t)
 	f.schemas["triage-ts-api"].Derivers[0].Schemas = []string{"Note"}
-	if err := build(f, "triage-db", "triage-ts-api"); err == nil || !strings.Contains(err.Error(), "deriver TriageTickets of triage-ts-api fills the derived fields of Note, which is no engine type of triage-db that composes Derived (its types that do: Ticket)") {
+	if err := build(f, "triage-db", "triage-ts-api"); err == nil || !strings.Contains(err.Error(), "deriver TriageTickets of triage-ts-api fills the derived fields of Note, which is no engine type or table of triage-db that composes Derived (its types that do: Ticket)") {
 		t.Errorf("build = %v, want a schema without Derived refused", err)
 	}
 

@@ -22,10 +22,14 @@ const derivedProvenanceFixture = "fixture-derived-provenance-db"
 // Derived's pulls and settles under derived, operations of the table as a
 // whole that take no key, applyDerived and rederive taking the row's key,
 // Provenance's accept and reject under provenance; a table whose
-// behaviors keep sub-tables has no upserts; and each derived field's
-// schema in the layout.
-const derivedCheck = `import type { FixtureDerivedProvenanceDbOrm, TicketRow } from './orm';
+// behaviors keep sub-tables has no upserts; each derived field's schema in
+// the layout; and a table's derived operations as the DerivedTable a
+// deriver's loop runs over (D146).
+const derivedCheck = `import type { DerivedTable } from '@superschematic/http-runtime/deriver';
+import type { FixtureDerivedProvenanceDbOrm, TicketRow } from './orm';
 import { fixtureDerivedProvenanceDbRules } from './orm';
+
+export const derivedTables = (orm: FixtureDerivedProvenanceDbOrm): Record<string, DerivedTable> => ({ Ticket: orm.ticket.derived, Article: orm.article.derived });
 
 export async function triage(orm: FixtureDerivedProvenanceDbOrm, id: TicketRow['id']): Promise<unknown> {
   await orm.ticket.derived.staleDerivations({ field: 'category', limit: 10 });
@@ -44,6 +48,7 @@ export const output: unknown = fixtureDerivedProvenanceDbRules.types.Ticket.spec
 var derivedCases = []string{
 	"a deriver pulls a ticket's stale fields and settles them as own fields, the unsure one proposed until a reviewer accepts it",
 	"a value the field's enum refuses counts an attempt and writes no own field",
+	"a deriver's loop hands each stale field to a model and settles its answers",
 }
 
 // TestDerivedTablesEndToEnd holds the generator's layout, each derived
@@ -55,7 +60,9 @@ var derivedCases = []string{
 // each dialect: on bun:sqlite, over the SQLite create.sql D27 plans, the
 // adapter run on the layout the generated orm.ts embeds; on Postgres, over
 // the generated create.sql in a schema of its own at
-// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, the generated repository. Every
+// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, the generated repository, over
+// whose derived operations the runtime's runDeriver runs with a model that
+// is not one (D146). Every
 // case must pass on bun:sqlite, and on Postgres when the database is set;
 // it skips without bun unless SUPERSCHEMATIC_REQUIRE_TS_CHECKS says the
 // gate must run.

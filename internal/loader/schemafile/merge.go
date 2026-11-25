@@ -361,6 +361,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.User == nil &&
 		def.UserRole == nil &&
 		def.IdempotencyKeys == nil &&
+		!def.Mergeable &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&
 		!def.JsonField &&
