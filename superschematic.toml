@@ -172,3 +172,4 @@ state_guard_refused = "{column} cannot move from % to %"
 [go]
 limit_constants = "off"
 optional_zero = "omit"
+env_number_scalars = "parse"

@@ -24,6 +24,7 @@ func TestParseReadsTheGoTable(t *testing.T) {
 	n, err := Parse([]byte(`[go]
 limit_constants = "on"
 optional_zero = "keep"
+env_number_scalars = "strconv"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -31,11 +32,13 @@ optional_zero = "keep"
 	want := defaultGoConfig()
 	want.LimitConstants = GoOn
 	want.OptionalZero = GoOptionalKeep
+	want.EnvNumberScalars = GoEnvStrconv
 	if n.Go != want {
 		t.Errorf("[go] = %+v, want %+v", n.Go, want)
 	}
-	if !n.Go.WritesLimitConstants() || !n.Go.KeepsOptionalZero() {
-		t.Errorf("WritesLimitConstants() %t, KeepsOptionalZero() %t; want both true", n.Go.WritesLimitConstants(), n.Go.KeepsOptionalZero())
+	if !n.Go.WritesLimitConstants() || !n.Go.KeepsOptionalZero() || !n.Go.ParsesEnvNumbersWithStrconv() {
+		t.Errorf("WritesLimitConstants() %t, KeepsOptionalZero() %t, ParsesEnvNumbersWithStrconv() %t; want all true",
+			n.Go.WritesLimitConstants(), n.Go.KeepsOptionalZero(), n.Go.ParsesEnvNumbersWithStrconv())
 	}
 }
 
@@ -45,6 +48,7 @@ func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
 	for _, tc := range []struct{ file, want string }{
 		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
 		{"[go]\noptional_zero = \"pointers\"\n", `go.optional_zero is "pointers": use "omit" or "keep"`},
+		{"[go]\nenv_number_scalars = \"atoi\"\n", `go.env_number_scalars is "atoi": use "parse" or "strconv"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -59,6 +59,11 @@ type ConfigOutput struct {
 	HasEnums bool
 	// HasScalars indicates if any field uses a custom scalar type.
 	HasScalars bool
+	// ParsesIntScalars and ParsesFloatScalars declare the loader's own
+	// parseIntScalar and parseFloatScalar (go.env_number_scalars =
+	// "strconv", D162).
+	ParsesIntScalars   bool
+	ParsesFloatScalars bool
 	// HasNamed indicates if any field uses a named generated type that is not
 	// available in the local enum map, usually an imported enum.
 	HasNamed bool
@@ -219,6 +224,11 @@ type ConfigField struct {
 	// value: an integer-like one with a default, unless go.optional_zero is
 	// "keep".
 	ScalarValue bool
+	// ScalarNumberParse is "int" or "float" for a number scalar the loader
+	// parses itself with strconv (go.env_number_scalars = "strconv",
+	// D162), and "" for a scalar it hands to the types package's Parse
+	// function.
+	ScalarNumberParse string
 	// EnumValues are the valid values for enum types.
 	EnumValues []string
 	// Description is the field doc text from the schema.
@@ -408,7 +418,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	usedEnums := make(map[string]bool)
 
 	for _, field := range envVarsType.Fields {
-		configField, err := extractConfigFieldIR(field, schema, enumMap, scalarMap, codegen.GoOptionalShapes{KeepZero: names.Go.KeepsOptionalZero()})
+		configField, err := extractConfigFieldIR(field, schema, enumMap, scalarMap, codegen.GoOptionalShapes{KeepZero: names.Go.KeepsOptionalZero()}, names.Go.ParsesEnvNumbersWithStrconv())
 		if err != nil {
 			return nil, fmt.Errorf("failed to process field %s: %w", field.Name, err)
 		}
@@ -422,6 +432,12 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 
 		if configField.IsScalar {
 			output.HasScalars = true
+		}
+		switch configField.ScalarNumberParse {
+		case scalarParseInt:
+			output.ParsesIntScalars = true
+		case scalarParseFloat:
+			output.ParsesFloatScalars = true
 		}
 
 		if isNamedConfigField(configField) {
@@ -481,7 +497,7 @@ func derivedFields(schema *ir.Schema, envVarsType *ir.TypeDef, names naming.Nami
 }
 
 // extractConfigFieldIR extracts configuration field information from an IR FieldDef.
-func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[string]enumMapping, scalarMap map[string]scalarInfo, shapes codegen.GoOptionalShapes) (ConfigField, error) {
+func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[string]enumMapping, scalarMap map[string]scalarInfo, shapes codegen.GoOptionalShapes, strconvNumbers bool) (ConfigField, error) {
 	typeName := field.TypeRef.Name
 	enumConfig, isEnum := enumMap[typeName]
 	scalarConfig, isScalar := scalarMap[typeName]
@@ -511,6 +527,9 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 		configField.ScalarIntegerLike = scalarConfig.IntegerLike
 		configField.ScalarValue = scalarConfig.IntegerLike &&
 			!shapes.IntegerScalarIsPointer(field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default, false)
+		if strconvNumbers {
+			configField.ScalarNumberParse = scalarNumberParse(scalarConfig)
+		}
 	}
 
 	goType, err := mapConfigGoType(typeName, isEnum, isScalar, scalarConfig)
@@ -822,6 +841,7 @@ func templateFuncs() template.FuncMap {
 		"assignsPointer":    assignsPointer,
 		"isNamed":           isNamedConfigField,
 		"primitiveAssign":   primitiveAssignExpr,
+		"scalarParse":       scalarParseExpr,
 		"envConfigType":     func() string { return EnvConfigTypeName },
 	}
 }
@@ -838,6 +858,47 @@ func assignsPointer(field ConfigField) bool {
 		return !field.ScalarValue
 	}
 	return field.IsEnum || isNamedConfigField(field)
+}
+
+// The ways the loader parses a number scalar itself (ScalarNumberParse).
+const (
+	scalarParseInt   = "int"
+	scalarParseFloat = "float"
+)
+
+// scalarNumberParse is how the loader parses a scalar with strconv: "int"
+// for an integer-like scalar or one whose catalog primitive is an
+// integer, "float" for one whose catalog primitive is a float, and "" for
+// any other, which keeps the types package's Parse function.
+func scalarNumberParse(scalar scalarInfo) string {
+	switch strings.ToLower(strings.TrimSpace(scalar.Primitive)) {
+	case "int", "int32", "int64", "integer":
+		return scalarParseInt
+	case "float", "float32", "float64", "number":
+		if !scalar.IntegerLike {
+			return scalarParseFloat
+		}
+		return scalarParseInt
+	}
+	if scalar.IntegerLike {
+		return scalarParseInt
+	}
+	return ""
+}
+
+// scalarParseExpr is the Go expression that parses a scalar field's text,
+// valueExpr, into the field's type and an error: the loader's own
+// parseIntScalar or parseFloatScalar for a number scalar under
+// go.env_number_scalars = "strconv", the types package's Parse function
+// otherwise.
+func scalarParseExpr(field ConfigField, valueExpr string) string {
+	switch field.ScalarNumberParse {
+	case scalarParseInt:
+		return fmt.Sprintf("parseIntScalar[types.%s](%s)", field.GoType, valueExpr)
+	case scalarParseFloat:
+		return fmt.Sprintf("parseFloatScalar[types.%s](%s)", field.GoType, valueExpr)
+	}
+	return fmt.Sprintf("types.Parse%s(%s)", field.GoType, valueExpr)
 }
 
 func isNamedConfigField(field ConfigField) bool {

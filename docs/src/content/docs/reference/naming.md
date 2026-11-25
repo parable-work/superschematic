@@ -1029,6 +1029,22 @@ null; one whose default is not its zero value is always written. The ORM
 reads and writes each column into the type's shape, and the env loader
 assigns it. Any other value fails the load.
 
+### `go.env_number_scalars`
+
+Default: `parse`
+
+How the Go env loader reads the variable of a number scalar, such as
+`Generic.Int64`, `Generic.Float64` or a port. `parse` hands the text to
+the types package's `Parse<Scalar>`, which the scalar library's parser
+backs. `strconv` trims the text and reads it with Go's `strconv`: an
+integer scalar with `ParseInt`, a float scalar with `ParseFloat`, which
+also refuses a value that is not finite. `Validate` then checks the
+scalar's rules, under either value. A text the loader cannot read fails
+the load with `environment variable <NAME>: not a valid integer`, `not a
+valid number` or `not a finite number`. Use `strconv` with a scalar
+library whose types package has no `Parse` function for a number scalar.
+Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches
