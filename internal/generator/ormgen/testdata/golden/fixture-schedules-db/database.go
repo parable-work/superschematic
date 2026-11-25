@@ -23,8 +23,11 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool    *pgxpool.Pool
-	Problem *ProblemRepository
+	pool *pgxpool.Pool
+	// readReplica is the Database over the read replica's pool, nil when
+	// ConnectWithPools was given none (D150).
+	readReplica *Database
+	Problem     *ProblemRepository
 }
 
 // Tx represents a database transaction with repositories
@@ -88,9 +91,50 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	return db, nil
 }
 
-// Close closes the database connection
+// ConnectWithPools creates a Database over primary, the pool that takes the
+// writes, and readReplica, a pool of a read replica of it (D150).
+// ReadReplica and ReadOnly read through the replica; every other method
+// runs on primary. When readReplica is nil or primary itself, there is no
+// replica, and they read on primary.
+func ConnectWithPools(primary, readReplica *pgxpool.Pool) (*Database, error) {
+	db, err := ConnectWithPool(primary)
+	if err != nil {
+		return nil, err
+	}
+	if readReplica != nil && readReplica != primary {
+		replica, err := ConnectWithPool(readReplica)
+		if err != nil {
+			return nil, err
+		}
+		db.readReplica = replica
+	}
+	return db, nil
+}
+
+// Close closes the database connection, and the read replica's.
 func (db *Database) Close() {
+	if db.readReplica != nil && db.readReplica.pool != db.pool {
+		db.readReplica.pool.Close()
+	}
 	db.pool.Close()
+}
+
+// HasReadReplica reports whether the Database reads through a read replica
+// of its own, a pool ConnectWithPools was given beside the primary.
+func (db *Database) HasReadReplica() bool {
+	return db != nil && db.readReplica != nil
+}
+
+// ReadReplica returns the Database over the read replica's pool, or db
+// itself when it has none. The replica's repositories, declared queries and
+// raw reads run on its pool. A write through it fails as the replica
+// refuses it: Postgres refuses a write on a standby with SQLSTATE 25006. A
+// read on the replica may lag the primary's latest commit.
+func (db *Database) ReadReplica() DatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
 }
 
 // GetProblemRepository returns the Problem repository interface.
@@ -243,6 +287,15 @@ func mustParseUserID(text string) types.IdentityUUID {
 
 // Ping checks if the database connection is alive
 func (db *Database) Ping(ctx context.Context) error {
+	return db.pool.Ping(ctx)
+}
+
+// PingReadReplica checks if the read replica's connection is alive, or the
+// primary's when the Database has no replica.
+func (db *Database) PingReadReplica(ctx context.Context) error {
+	if db.readReplica != nil {
+		return db.readReplica.pool.Ping(ctx)
+	}
 	return db.pool.Ping(ctx)
 }
 

@@ -520,7 +520,7 @@ var packageNames = []string{
 	"IsolationLevel", "UpsertOptions", "UpsertResult", "UpsertStatus", "UpsertInserted", "UpsertUpdated",
 	"UpsertUnchanged", "ErrNotFound", "ErrVersionConflict", "ErrNoUserInContext", "RulesLayout",
 	"WithBehaviorCaller", "WithPreconditions", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
-	"Connect", "ConnectWithPool",
+	"Connect", "ConnectWithPool", "ConnectWithPools",
 }
 
 // attachRules gives the repositories of the schema's tables that compose

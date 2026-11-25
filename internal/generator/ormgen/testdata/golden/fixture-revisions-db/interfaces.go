@@ -46,6 +46,8 @@ type PolicyRepositoryInterface interface {
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetNoteRepository() NoteRepositoryInterface
@@ -99,6 +101,16 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.

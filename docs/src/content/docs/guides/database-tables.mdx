@@ -1552,6 +1552,32 @@ message commits with the rows ([Queues and workers](/superschematic/guides/queue
 same options as `TransactionWith`, and `tx.transaction(fn)` nests a
 savepoint, which a throw rolls back to.
 
+## A read replica
+
+In Go, `ConnectWithPools(primary, replica)` connects the database over two
+pgx pools: `primary`, which takes the writes, and `replica`, a pool of a
+read replica of it (D150). When `replica` is nil or `primary` itself,
+there is no replica. The database's own repositories, raw reads and
+transactions run on `primary`, as they do after `ConnectWithPool`.
+
+- `db.HasReadReplica()` is true when the database has a replica of its
+  own.
+- `db.ReadReplica()` returns the database over the replica's pool, or `db`
+  itself when there is none. Its repositories, declared queries and raw
+  reads run on the replica. A write through it fails as the replica
+  refuses it: Postgres refuses a write on a standby with SQLSTATE `25006`.
+  It returns a `DatabaseInterface`, whose value is a `*Database`.
+- `db.PingReadReplica(ctx)` pings the replica, or the primary when there is
+  none.
+- `db.Close()` closes both pools.
+
+A replica can lag the primary, so a read that must see a write the request
+just made reads on the primary. `Connect` and `ConnectWithPool` take no
+replica, and the no-op database has none: its `ReadReplica` is itself.
+A database with `Encrypted<T>` fields takes its options after the two
+pools and gives both the same keys. The TypeScript repositories have no
+read replica.
+
 ## TypeScript
 
 A DB service whose `outputs.types` lists TypeScript, and whose
