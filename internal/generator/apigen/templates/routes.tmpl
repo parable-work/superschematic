@@ -185,6 +185,7 @@ type Config struct {
 	// route to you to mount.
 	ManualRoutes *ManualRoutes
 {{- end }}
+{{- authSnippet "routesConfigFields" . }}
 
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations

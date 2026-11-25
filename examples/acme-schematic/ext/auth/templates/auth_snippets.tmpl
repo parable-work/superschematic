@@ -198,6 +198,8 @@ func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
 
 {{ define "routesConfigMiddlewares" }}{{ end }}
 
+{{ define "routesConfigFields" }}{{ end }}
+
 {{ define "routesConfigValidate" }}
 	if c.APIKeys == nil {
 		return fmt.Errorf("Config.APIKeys is required")

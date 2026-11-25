@@ -12,6 +12,11 @@
 {{ define "routesImports" }}{{ end }}
 {{ define "routesConfigStores" }}{{ end }}
 {{ define "routesConfigMiddlewares" }}{{ end }}
+{{ define "routesConfigFields" }}
+
+	// StepGuard is the provider's field, which every API's Config has.
+	StepGuard func(operation string) func(gohttp.Handler) gohttp.Handler
+{{- end }}
 {{ define "routesConfigValidate" }}{{ end }}
 {{ define "routesConfigExample" }}{{ end }}
 {{ define "routesSetupPre" }}{{ end }}

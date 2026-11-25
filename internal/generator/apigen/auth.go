@@ -137,6 +137,7 @@ var AuthSnippets = []string{
 	"routesImports",                // imports the per-route permission middleware calls need
 	"routesConfigStores",           // Config fields after DB (public APIs)
 	"routesConfigMiddlewares",      // Config fields after AuthMiddleware (APIs with one: public, or over the user model, Auth.Identity)
+	"routesConfigFields",           // Config fields of every API, public or not, before Implementations: the fields the provider's route middlewares read
 	"routesConfigValidate",         // Validate checks for those fields (the same APIs), after the AuthMiddleware or Identity check
 	"routesConfigExample",          // doc-comment lines after AuthMiddleware, or Identity, in the RegisterRoutes example
 	"routesSetupPre",               // RegisterRoutes setup before LoggerMiddleware (public APIs)

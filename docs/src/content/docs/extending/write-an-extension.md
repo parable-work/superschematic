@@ -542,7 +542,8 @@ Three snippets add middlewares to each mounted route, and take the
 route's `EndpointInfo`: `routeMiddlewaresFirst` runs before every other
 step, `routePermissions` runs after the rate limit, body limit and service
 step, and `routeMiddlewaresAfterDecrypt` runs after the payload decryptor
-and before the timeout.
+and before the timeout. `routesConfigFields` adds the `Config` fields they
+read, in every API, public or not.
 
 ## Policy on what the core writes
 

@@ -44,28 +44,36 @@ func (provider) Funcs() template.FuncMap                                        
 func (provider) Files(*apigen.APIOutput) []codegen.ConditionalFile                   { return nil }
 func (provider) OpenAPIParameters(*apigen.APIOutput) []map[string]any                { return nil }
 
-// writeFixtureAPI writes fixture-api with the test provider and returns its
-// output and its directory.
+// writeFixtureAPI writes fixture-api, public, with the test provider and
+// returns its output and its directory.
 func writeFixtureAPI(t *testing.T) (*apigen.APIOutput, string) {
+	t.Helper()
+	return writeFixtureAPIWith(t, true)
+}
+
+// writeFixtureAPIWith writes fixture-api, public over fixture-db or not
+// public, with the test provider.
+func writeFixtureAPIWith(t *testing.T, public bool) (*apigen.APIOutput, string) {
 	t.Helper()
 	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {
 		t.Fatalf("load fixture-api: %v", err)
 	}
-	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
-	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
+	opts := apigen.Options{
+		Provider:    provider{},
+		SchemaName:  "fixture-api",
+		ModulePath:  "example.com/schemas/api/fixture-api",
+		TypesModule: "example.com/schemas/types/go/fixture-api",
+		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	}
-	output, err := apigen.Generate(apiSchema, apigen.Options{
-		Provider:       provider{},
-		SchemaName:     "fixture-api",
-		ModulePath:     "example.com/schemas/api/fixture-api",
-		TypesModule:    "example.com/schemas/types/go/fixture-api",
-		IsPublic:       true,
-		UpstreamSchema: "fixture-db",
-		UpstreamIR:     dbSchema,
-		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
-	})
+	if public {
+		dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+		if err != nil {
+			t.Fatalf("load fixture-db: %v", err)
+		}
+		opts.IsPublic, opts.UpstreamSchema, opts.UpstreamIR = true, "fixture-db", dbSchema
+	}
+	output, err := apigen.Generate(apiSchema, opts)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
