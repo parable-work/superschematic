@@ -3575,8 +3575,9 @@ export abstract class FulfilOrders {}
   whose instances keep running, or `drain` (D145). A worker in drain mode
   runs as a job: its entrypoint claims as a pool's instance does and exits
   0 once no message was ready or held for `idle`, thirty seconds unless
-  the settings say (`ir.DefaultWorkerIdleSeconds`), so a queue that is
-  empty runs nothing. `instances` is then how many of it may run at once,
+  the settings say (`ir.DefaultWorkerIdleSeconds`), and none falls due
+  within its horizon, five minutes, so a queue that is empty runs
+  nothing. `instances` is then how many of it may run at once,
   and `maxInstances` beside it is refused, as is `idle` on a pool's
   worker, and drain mode on a behavior worker, whose queues triggers and
   the clock fill. The core names no provider. It gives a platform three
@@ -3609,7 +3610,12 @@ export abstract class FulfilOrders {}
     lock it takes is its slot, and none is every slot taken. The lock is
     the session's, so giving the slot back closes the connection, and a
     worker that dies gives it back as its connection ends. SQLite has no
-    such lock, and a worker there takes no slot.
+    such lock, and a worker there takes no slot. And one more, `nextDue`,
+    `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8`
+    over the ready messages due later, which the Go ORM's
+    `<Queue>Queue.NextDue(ctx)` and the TypeScript
+    `postgresQueue(...).nextDue()` run: the seconds until the first
+    message that waits falls due, or none.
 
   The queue clients send the wake. The Go ORM's `queues.go` has
   `OnEnqueue(func(queue string))`, which every `Enqueue<Queue>` calls with
@@ -3658,7 +3664,12 @@ export abstract class FulfilOrders {}
     and returns at once when none is free; then runs the same loop, which
     ends, with `drained: no message was ready or held`, once a claim
     found nothing, no method runs and none has run or returned for the
-    idle time. It stops its prune, gives the slot back and exits 0. A
+    idle time, and the queue's `NextDue` reads no message due within the
+    horizon (`worker.DrainHorizon`, five minutes). One due within it, a
+    delayed message or a retry, the loop waits for, logging `idle, and
+    waiting for a message due soon`, and claims again; one due later it
+    logs and leaves to the tick. It stops its prune, gives the slot back
+    and exits 0. A
     behavior worker's claim loops share one idle clock (`worker.RunAll`),
     so they stop together.
 
@@ -3740,8 +3751,10 @@ export abstract class FulfilOrders {}
   setting of `gcp.cloudrunworker`, five minutes unless set, as the
   worker's own account, which holds `roles/run.invoker` on the job
   (`<worker>.tick-invoker`), as a scheduled job's account does. A tick is
-  minutes that divide an hour or hours that divide a day, since Cloud
-  Scheduler takes a cron schedule. For each deployable in the worker's
+  minutes that divide an hour, or an hour, since Cloud Scheduler takes a
+  cron schedule and the tick bounds how late a retry or a delayed message
+  runs that falls due past the worker's horizon; a longer one is
+  refused. For each deployable in the worker's
   `WokenBy` that runs on Cloud Run, the worker lowers
   `<worker>.woken-by.<deployable>`, `roles/run.invoker` on the job for
   that deployable's account, and that deployable's container takes

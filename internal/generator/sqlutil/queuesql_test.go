@@ -151,7 +151,7 @@ func TestQueueConflictReplacesOrSkips(t *testing.T) {
 	for _, s := range PostgresQueueStatements(spec).All() {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "insert,dueIn,conflict,expire,claim,complete,fail,extend,release,prune,slot" {
+	if strings.Join(names, ",") != "insert,dueIn,conflict,expire,claim,complete,fail,extend,release,prune,slot,nextDue" {
 		t.Errorf("All = %v", names)
 	}
 }
@@ -289,5 +289,25 @@ func TestQueueDueIn(t *testing.T) {
 		if !strings.Contains(s.Conflict, "due_at = excluded.due_at") {
 			t.Errorf("%s: a replace does not take the new message's due time: %s", name, s.Conflict)
 		}
+	}
+}
+
+// TestQueueNextDue (D145): on Postgres a queue reads how long, by the
+// database's clock, until its first ready message that waits for a later
+// time falls due, which a worker in drain mode waits for within its
+// horizon before it exits; a message due already, or none, reads NULL.
+// SQLite has no such statement, since no target drains a SQLite queue.
+func TestQueueNextDue(t *testing.T) {
+	spec := QueueSpec{Table: "ping_queue", Columns: []string{"sent_at"}, KeepDone: true}
+	want := "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ping_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
+	if got := PostgresQueueStatements(spec).NextDue; got != want {
+		t.Errorf("postgres nextDue =\n%s\nwant\n%s", got, want)
+	}
+	if got := SQLiteQueueStatements(spec).NextDue; got != "" {
+		t.Errorf("sqlite nextDue = %s, want none", got)
+	}
+	all := PostgresQueueStatements(spec).All()
+	if last := all[len(all)-1]; last.Name != "nextDue" || last.SQL != want {
+		t.Errorf("All ends %v, want nextDue", last)
 	}
 }

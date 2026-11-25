@@ -100,6 +100,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
       prune: limit => queue.prune(limit),
 {{- if not $db.SQLite }}
       slot: slots => queue.slot(slots),
+      nextDue: () => queue.nextDue(),
 {{- end }}
     },
     { signal, concurrency, graceMs: GRACE_MS, logger, drain: workerDrain() }

@@ -185,6 +185,7 @@ func run(logger *zap.Logger) error {
 		Release:  queue.Release,
 		Prune:    queue.Prune,
 		Slot:     queue.Slot,
+		NextDue:  queue.NextDue,
 	}, worker.Options{Concurrency: concurrency, Grace: {{ .Worker.GraceSeconds }} * time.Second, Logger: logger, Drain: drain})
 }
 {{- end }}

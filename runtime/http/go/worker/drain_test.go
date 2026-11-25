@@ -289,3 +289,74 @@ func TestDrainFromEnv(t *testing.T) {
 		t.Errorf("DrainFromEnv with an unknown mode = %v", err)
 	}
 }
+
+// TestADrainWorkerWaitsForAMessageDueWithinItsHorizon (D145): a worker in
+// drain mode that found its queue idle reads when the next message falls
+// due, a delayed one or a retry, waits for one due within its horizon and
+// handles it, and stops once the next is due past the horizon; it logs
+// both. One whose due time cannot be read, or reads none, stops once
+// idle.
+func TestADrainWorkerWaitsForAMessageDueWithinItsHorizon(t *testing.T) {
+	f := newFake()
+	dueAt := time.Now().Add(150 * time.Millisecond)
+	var later bool
+	time.AfterFunc(150*time.Millisecond, func() {
+		f.add("delayed", func(context.Context) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			// The next message is due in an hour, past the horizon.
+			later = true
+			return nil
+		})
+	})
+	q := f.queue(time.Minute)
+	q.NextDue = func(context.Context) (time.Duration, bool, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch {
+		case later:
+			return time.Hour, true, nil
+		case len(f.ready) > 0:
+			return 0, false, nil
+		}
+		return max(time.Until(dueAt), 0), true, nil
+	}
+	core, logs := observer.New(zap.InfoLevel)
+	started := time.Now()
+	if err := Run(context.Background(), q, Options{Idle: 5 * time.Millisecond, Logger: zap.New(core), Drain: &Drain{Idle: 20 * time.Millisecond, Horizon: time.Minute}}); err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	if took := time.Since(started); took < 145*time.Millisecond {
+		t.Errorf("the worker stopped after %s, before the delayed message was due", took)
+	}
+	f.mu.Lock()
+	completed := f.completed
+	f.mu.Unlock()
+	if len(completed) != 1 || completed[0] != "delayed" {
+		t.Errorf("completed %v, want the delayed message", completed)
+	}
+	for _, msg := range []string{"idle, and waiting for a message due soon", "the next message is due past the drain's horizon: a wake or the tick runs it", "drained: no message was ready or held"} {
+		if n := logs.FilterMessage(msg).Len(); n == 0 {
+			t.Errorf("no %q logged", msg)
+		}
+	}
+
+	for name, next := range map[string]func(context.Context) (time.Duration, bool, error){
+		"none": func(context.Context) (time.Duration, bool, error) { return 0, false, nil },
+		"past": func(context.Context) (time.Duration, bool, error) { return 10 * time.Minute, true, nil },
+		"a failed read": func(context.Context) (time.Duration, bool, error) {
+			return 0, false, errors.New("the database is down")
+		},
+		"no NextDue set": nil,
+	} {
+		q := newFake().queue(time.Minute)
+		q.NextDue = next
+		started := time.Now()
+		if err := Run(context.Background(), q, Options{Idle: 5 * time.Millisecond, Drain: &Drain{Idle: 20 * time.Millisecond}}); err != nil {
+			t.Errorf("%s: Run = %v", name, err)
+		}
+		if took := time.Since(started); took > 5*time.Second {
+			t.Errorf("%s: the worker took %s to stop", name, took)
+		}
+	}
+}

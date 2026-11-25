@@ -848,7 +848,7 @@ settings: [{ of: ShopOrders, worker: "FulfilOrders", mode: "drain", idle: "1m", 
 | `mode` | `"pool"` | `"drain"` runs the worker as a job that empties its queue and exits |
 | `idle` | `30s` | how long a drain worker waits with no message ready or held before it exits, in whole seconds; only a drain worker takes it |
 | `instances` | `1` | in drain mode, how many of the worker may run at once; `maxInstances` beside `mode: "drain"` does not resolve |
-| `tick` | `5m` | on gcp, how often the worker is started whatever its queue holds: `1m` to `30m` in steps that divide an hour, or `1h` to `24h` in steps that divide a day |
+| `tick` | `5m` | on gcp, how often the worker is started whatever its queue holds: `1m` to `30m` in steps that divide an hour, or `1h`, the longest |
 
 Three things make it work:
 
@@ -864,7 +864,11 @@ Three things make it work:
   message an `@enqueueOnChange` trigger wrote, a retry or a
   [delayed message](/superschematic/guides/queues/#enqueue-for-later) that
   falls due later, a message a Rust API enqueued, and a wake that was
-  lost.
+  lost. A worker that is running and finds its queue idle waits for a
+  retry or a delayed message that falls due within five minutes, its
+  horizon, rather than exit; one due later waits for the tick. So the
+  tick bounds how late such a message runs, which is why it is an hour at
+  most.
 - **Slots.** As it starts, a drain worker takes one of `instances`
   advisory locks named for its queue, on a connection it keeps while it
   runs, and exits at once when none is free. So wakes that overlap cost a

@@ -359,6 +359,43 @@ describe('runWorker in drain mode (D145)', () => {
     expect(locks.asked).toEqual([]);
   });
 
+  test('an idle worker waits for a message due within its horizon, a delayed one or a retry, and handles it, and stops once the next is due past it', async () => {
+    const f = new FakeQueue(60);
+    // The queue holds a message due 150 ms from now: the claims find
+    // nothing until then.
+    const dueAt = Date.now() + 150;
+    let later = false;
+    const queue: WorkerQueue = {
+      ...f.queue(),
+      nextDue: async () => {
+        if (f.ready.length > 0 || later) return later ? 3600 : undefined;
+        return Math.max(0, dueAt - Date.now()) / 1000;
+      },
+    };
+    setTimeout(() => {
+      f.add('delayed', async () => {
+        // A message due in an hour waits past the horizon of a minute.
+        later = true;
+      });
+    }, 150);
+    const { lines, logger } = logs();
+    const started = Date.now();
+    await runWorker(queue, { signal: never, idleMs: 5, logger, drain: { idleMs: 20 }, drainHorizonMs: 60_000 });
+    expect(f.completed).toEqual(['delayed']);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(145);
+    expect(lines.some(line => line.msg === 'idle, and waiting for a message due soon')).toBe(true);
+    expect(lines.some(line => line.msg === "the next message is due past the drain's horizon: a wake or the tick runs it")).toBe(true);
+    expect(lines.filter(line => line.msg === 'drained: no message was ready or held')).toHaveLength(1);
+  });
+
+  test('a worker whose next message is due past its horizon, or whose due time cannot be read, stops once idle', async () => {
+    for (const nextDue of [async () => 600, async () => Promise.reject(new Error('the database is down'))]) {
+      const started = Date.now();
+      await runWorker({ ...new FakeQueue(60).queue(), nextDue }, { signal: never, idleMs: 5, drain: { idleMs: 20 }, drainHorizonMs: 60_000 });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    }
+  });
+
   test('a signal stops a draining worker as it stops any, and its slot is given back', async () => {
     const locks = new Slots();
     const stop = new AbortController();

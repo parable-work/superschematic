@@ -132,13 +132,26 @@ const drainTaskSeconds = 24 * 60 * 60
 // settings say.
 const defaultDrainTick = "5m"
 
+// maxDrainTick is the longest tick of a drain worker. The tick bounds how
+// late a message runs that no wake starts the worker for and that falls
+// due past the horizon a running worker waits within (worker.DrainHorizon,
+// five minutes): a delayed message (D80), a retry after its backoff, one
+// a trigger enqueued, or one whose wake was lost. Every queue retries, so
+// a longer tick would leave a retry waiting for hours; a worker whose
+// messages may wait that long can run as a pool instead.
+const maxDrainTick = time.Hour
+
 // drainTick reads a drain worker's tick as the cron schedule Cloud
-// Scheduler runs: a whole number of minutes that divides an hour, or of
-// hours that divides a day, so the firings are evenly spaced.
+// Scheduler runs: a whole number of minutes that divides an hour, or an
+// hour, so the firings are evenly spaced and none is more than an hour
+// after the last (maxDrainTick).
 func drainTick(tick string) (string, error) {
 	d, err := time.ParseDuration(tick)
 	if err != nil || d <= 0 {
-		return "", fmt.Errorf("tick is %q; it is a duration of whole minutes or hours, such as %q", tick, defaultDrainTick)
+		return "", fmt.Errorf("tick is %q; it is a duration of whole minutes, or 1h, such as %q", tick, defaultDrainTick)
+	}
+	if d > maxDrainTick {
+		return "", fmt.Errorf("tick is %q, and a drain worker's tick is an hour at most: the tick bounds how late a retry, a delayed message or one whose wake was lost runs once it is due past the five minutes a running worker waits for it; give it a tick of 1h or less, or leave its mode out so it runs as a worker pool", tick)
 	}
 	minutes := int(d / time.Minute)
 	switch {
@@ -149,12 +162,8 @@ func drainTick(tick string) (string, error) {
 		return fmt.Sprintf("*/%d * * * *", minutes), nil
 	case minutes == 60:
 		return "0 * * * *", nil
-	case minutes%60 == 0 && minutes/60 < 24 && 24%(minutes/60) == 0:
-		return fmt.Sprintf("0 */%d * * *", minutes/60), nil
-	case minutes == 24*60:
-		return "0 0 * * *", nil
 	}
-	return "", fmt.Errorf("tick is %q; Cloud Scheduler runs a schedule of evenly spaced firings, so a tick is 1m, 2m, 3m, 4m, 5m, 6m, 10m, 12m, 15m, 20m or 30m, or 1h, 2h, 3h, 4h, 6h, 8h, 12h or 24h", tick)
+	return "", fmt.Errorf("tick is %q; Cloud Scheduler runs a schedule of evenly spaced firings, so a tick is 1m, 2m, 3m, 4m, 5m, 6m, 10m, 12m, 15m, 20m, 30m or 1h", tick)
 }
 
 // lowerDrainWorker lowers a worker in drain mode to what lowerWorkload

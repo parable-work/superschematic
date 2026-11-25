@@ -98,9 +98,10 @@ type queueTable struct {
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more; slot takes
-// slot $1 of the locks a worker in drain mode holds while it runs.
+// slot $1 of the locks a worker in drain mode holds while it runs; nextDue
+// reads the seconds until the first ready message that waits falls due.
 type queueStatements struct {
-	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot, nextDue string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -184,6 +185,20 @@ func (t queueTable) slot(ctx context.Context, pool *pgxpool.Pool, slots int) (re
 	}
 	conn.Release()
 	return nil, false, nil
+}
+
+// nextDue reads how long until the first ready message that is not due
+// yet falls due, by the database's clock, and reports false when none
+// waits (D145).
+func (t queueTable) nextDue(ctx context.Context, pool *pgxpool.Pool) (time.Duration, bool, error) {
+	var seconds *float64
+	if err := pool.QueryRow(ctx, t.statements.nextDue).Scan(&seconds); err != nil {
+		return 0, false, fmt.Errorf("read when the next message of %s is due: %w", t.name, err)
+	}
+	if seconds == nil {
+		return 0, false, nil
+	}
+	return time.Duration(*seconds * float64(time.Second)), true, nil
 }
 
 // claim marks dead each message whose last attempt's claim expired, then
@@ -335,7 +350,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.entry_posted_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.entry_posted_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM entry_posted_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -447,4 +463,12 @@ func (q *EntryPostedQueue) Prune(ctx context.Context, limit int) (int, error) {
 // otherwise returns the function that gives the slot back.
 func (q *EntryPostedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
 	return entryPostedQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *EntryPostedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return entryPostedQueue.nextDue(ctx, q.pool)
 }

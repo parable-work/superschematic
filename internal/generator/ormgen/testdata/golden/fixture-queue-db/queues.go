@@ -100,9 +100,10 @@ type queueTable struct {
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more; slot takes
-// slot $1 of the locks a worker in drain mode holds while it runs.
+// slot $1 of the locks a worker in drain mode holds while it runs; nextDue
+// reads the seconds until the first ready message that waits falls due.
 type queueStatements struct {
-	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot, nextDue string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -186,6 +187,20 @@ func (t queueTable) slot(ctx context.Context, pool *pgxpool.Pool, slots int) (re
 	}
 	conn.Release()
 	return nil, false, nil
+}
+
+// nextDue reads how long until the first ready message that is not due
+// yet falls due, by the database's clock, and reports false when none
+// waits (D145).
+func (t queueTable) nextDue(ctx context.Context, pool *pgxpool.Pool) (time.Duration, bool, error) {
+	var seconds *float64
+	if err := pool.QueryRow(ctx, t.statements.nextDue).Scan(&seconds); err != nil {
+		return 0, false, fmt.Errorf("read when the next message of %s is due: %w", t.name, err)
+	}
+	if seconds == nil {
+		return 0, false, nil
+	}
+	return time.Duration(*seconds * float64(time.Second)), true, nil
 }
 
 // claim marks dead each message whose last attempt's claim expired, then
@@ -341,7 +356,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM order_changed_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -471,6 +487,14 @@ func (q *OrderChangedQueue) Slot(ctx context.Context, slots int) (release func()
 	return orderChangedQueue.slot(ctx, q.pool, slots)
 }
 
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *OrderChangedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return orderChangedQueue.nextDue(ctx, q.pool)
+}
+
 // orderPlacedQueue is the table of the queue OrderPlaced.
 var orderPlacedQueue = queueTable{
 	name:       `order_placed_queue`,
@@ -515,7 +539,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM order_placed_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -669,6 +694,14 @@ func (q *OrderPlacedQueue) Slot(ctx context.Context, slots int) (release func(),
 	return orderPlacedQueue.slot(ctx, q.pool, slots)
 }
 
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *OrderPlacedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return orderPlacedQueue.nextDue(ctx, q.pool)
+}
+
 // pingQueue is the table of the queue Ping.
 var pingQueue = queueTable{
 	name:       `ping_queue`,
@@ -713,7 +746,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ping_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -832,6 +866,14 @@ func (q *PingQueue) Slot(ctx context.Context, slots int) (release func(), ok boo
 	return pingQueue.slot(ctx, q.pool, slots)
 }
 
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *PingQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return pingQueue.nextDue(ctx, q.pool)
+}
+
 // stockCheckedQueue is the table of the queue StockChecked.
 var stockCheckedQueue = queueTable{
 	name:       `stock_checked_queue`,
@@ -878,7 +920,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM stock_checked_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -995,6 +1038,14 @@ func (q *StockCheckedQueue) Slot(ctx context.Context, slots int) (release func()
 	return stockCheckedQueue.slot(ctx, q.pool, slots)
 }
 
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *StockCheckedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return stockCheckedQueue.nextDue(ctx, q.pool)
+}
+
 // stockMovedQueue is the table of the queue StockMoved.
 var stockMovedQueue = queueTable{
 	name:       `stock_moved_queue`,
@@ -1043,7 +1094,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM stock_moved_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -1164,6 +1216,14 @@ func (q *StockMovedQueue) Slot(ctx context.Context, slots int) (release func(), 
 	return stockMovedQueue.slot(ctx, q.pool, slots)
 }
 
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *StockMovedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return stockMovedQueue.nextDue(ctx, q.pool)
+}
+
 // syncRequestedQueue is the table of the queue SyncRequested.
 var syncRequestedQueue = queueTable{
 	name:       `sync_requested_queue`,
@@ -1210,7 +1270,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
-		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM sync_requested_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -1329,4 +1390,12 @@ func (q *SyncRequestedQueue) Prune(ctx context.Context, limit int) (int, error) 
 // otherwise returns the function that gives the slot back.
 func (q *SyncRequestedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
 	return syncRequestedQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *SyncRequestedQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return syncRequestedQueue.nextDue(ctx, q.pool)
 }

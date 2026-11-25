@@ -107,6 +107,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
       release: (id, token) => queue.release(id, token),
       prune: limit => queue.prune(limit),
       slot: slots => queue.slot(slots),
+      nextDue: () => queue.nextDue(),
     },
     { signal, concurrency, graceMs: GRACE_MS, logger, drain: workerDrain() }
   );

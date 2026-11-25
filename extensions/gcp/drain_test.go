@@ -170,9 +170,9 @@ func wakeGrants(env *ir.ResolvedEnvironment) []string {
 // once, which its entrypoint reads as WORKER_SLOTS, and every execution is
 // still one task; idle reaches it as WORKER_IDLE_SECONDS; tick sets the
 // schedule; a drain worker the environment turns off keeps its job and
-// loses its tick; and a tick that Cloud Scheduler cannot space evenly, a
-// tick on a pool's worker, a Rust worker and a grace of ten seconds are
-// refused.
+// loses its tick; and a tick that Cloud Scheduler cannot space evenly,
+// one over an hour, a tick on a pool's worker, a Rust worker and a grace
+// of ten seconds are refused.
 func TestDrainWorkerSettings(t *testing.T) {
 	reg := assemble(t)
 	s := drainShop()
@@ -195,7 +195,7 @@ func TestDrainWorkerSettings(t *testing.T) {
 		t.Errorf("the tick runs on %v (%v), want every 15 minutes", tick["schedule"], tick["description"])
 	}
 
-	for tick, want := range map[string]string{"1m": "* * * * *", "30m": "*/30 * * * *", "60m": "0 * * * *", "1h": "0 * * * *", "6h": "0 */6 * * *", "24h": "0 0 * * *"} {
+	for tick, want := range map[string]string{"1m": "* * * * *", "30m": "*/30 * * * *", "60m": "0 * * * *", "1h": "0 * * * *"} {
 		s := drainShop()
 		workerSettings(s, "Staging").Values = map[string]any{"tick": tick}
 		env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
@@ -224,10 +224,17 @@ func TestDrainWorkerSettings(t *testing.T) {
 			t.Errorf("%s: err = %v, want it to say %q", what, err, want)
 		}
 	}
-	for _, tick := range []string{"7m", "90m", "5h", "48h"} {
+	for _, tick := range []string{"7m", "45m"} {
 		s := drainShop()
 		workerSettings(s, "Staging").Values = map[string]any{"tick": tick}
 		refused("a tick of "+tick, s, stacktest.AcmeShop(), `tick is "`+tick+`"; Cloud Scheduler runs a schedule of evenly spaced firings`)
+	}
+	// A tick bounds how late a retry or a delayed message due past the
+	// drain's horizon runs, so it is an hour at most.
+	for _, tick := range []string{"90m", "2h", "6h", "24h", "48h"} {
+		s := drainShop()
+		workerSettings(s, "Staging").Values = map[string]any{"tick": tick}
+		refused("a tick of "+tick, s, stacktest.AcmeShop(), `tick is "`+tick+`", and a drain worker's tick is an hour at most`)
 	}
 	s = drainShop()
 	workerSettings(s, "Staging").Values = map[string]any{"tick": "30s"}

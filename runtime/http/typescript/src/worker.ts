@@ -68,6 +68,18 @@ export const WORKER_SLOTS_VARIABLE = 'WORKER_SLOTS';
 export const DEFAULT_DRAIN_IDLE_MS = 30_000;
 
 /**
+ * How far ahead a worker in drain mode that found its queue idle looks for
+ * a message that is not due yet, a delayed one or a retry after its
+ * backoff (D145): it waits for one due within this horizon instead of
+ * exiting, and leaves one due later to the platform's next start, a wake
+ * or its tick. Five minutes is gcp's default tick, so with that tick a
+ * message waits at most about one tick past its due time whether the
+ * worker waits for it or not; and a worker kept for it costs at most five
+ * minutes of a task that does nothing.
+ */
+export const DRAIN_HORIZON_MS = 300_000;
+
+/**
  * How a worker in drain mode runs (D145): it claims as any worker does, and
  * runWorker resolves once no message was ready or held for idleMs, so the
  * process exits 0 and a queue that is empty runs nothing. slots is how many
@@ -161,6 +173,14 @@ export interface WorkerQueue {
    * started then drains.
    */
   slot?(slots: number): Promise<(() => Promise<void>) | undefined>;
+  /**
+   * Resolves to the seconds until the first ready message that is not due
+   * yet falls due, or to undefined when none waits (D145): a worker in
+   * drain mode that found the queue idle waits for one due within
+   * DRAIN_HORIZON_MS instead of stopping. Without it the worker stops once
+   * idle.
+   */
+  nextDue?(): Promise<number | undefined>;
 }
 
 export interface WorkerOptions {
@@ -178,10 +198,13 @@ export interface WorkerOptions {
   readonly logger?: Logger;
   /**
    * Runs the worker in drain mode (D145): it takes a slot of the queue, and
-   * resolves once no message was ready or held for the drain's idle time.
-   * Without it the worker polls until the signal aborts.
+   * resolves once no message was ready or held for the drain's idle time
+   * and none falls due within DRAIN_HORIZON_MS. Without it the worker
+   * polls until the signal aborts.
    */
   readonly drain?: WorkerDrain;
+  /** How far ahead a worker in drain mode looks for a message that is not due yet; DRAIN_HORIZON_MS unless set, for a test. */
+  readonly drainHorizonMs?: number;
 }
 
 /**
@@ -375,6 +398,26 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
 
   // Claims for the free slots until the signal aborts.
   let wait = idleMs;
+  const horizonMs = options.drainHorizonMs !== undefined && options.drainHorizonMs >= 0 ? options.drainHorizonMs : DRAIN_HORIZON_MS;
+  // How long until a message that is not due yet falls due, within the
+  // horizon, or undefined: the worker then stops.
+  const untilNextDue = async (): Promise<number | undefined> => {
+    if (queue.nextDue === undefined) return undefined;
+    let seconds: number | undefined;
+    try {
+      seconds = await withTimeout(queue.nextDue());
+    } catch (error) {
+      logger.warn('reading when the next message is due failed: the tick runs it', { error });
+      return undefined;
+    }
+    if (seconds === undefined) return undefined;
+    const ms = Math.max(0, seconds * 1000);
+    if (ms > horizonMs) {
+      logger.info("the next message is due past the drain's horizon: a wake or the tick runs it", { dueIn: seconds, horizon: horizonMs / 1000 });
+      return undefined;
+    }
+    return ms;
+  };
   while (!signal.aborted) {
     const free = concurrency - running.size;
     if (free <= 0) {
@@ -402,6 +445,14 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     wait = idleMs;
     for (const message of messages) start(message);
     if (drain !== undefined && messages.length === 0 && running.size === 0 && Date.now() - busy >= drainIdleMs) {
+      // A message that falls due within the horizon, a delayed one or a
+      // retry, is waited for: the claim after the wait takes it.
+      const dueInMs = await untilNextDue();
+      if (dueInMs !== undefined) {
+        logger.info('idle, and waiting for a message due soon', { dueIn: dueInMs / 1000 });
+        if (!(await sleep(Math.max(dueInMs, idleMs), signal))) break;
+        continue;
+      }
       logger.info('drained: no message was ready or held', { idle: drainIdleMs / 1000 });
       stopper.abort();
       break;

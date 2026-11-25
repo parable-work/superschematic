@@ -299,9 +299,11 @@ makes it due at once. Under `skip` the waiting message keeps its own due
 time.
 
 A worker that polls claims a delayed message within its poll of the time
-it falls due. A worker in [drain mode](#drain-mode) is not running while
-its queue waits, and its tick starts it: a delayed message is handled
-within a tick of its due time.
+it falls due. A worker in [drain mode](#drain-mode) that is running when
+it finds its queue idle waits for a message due within five minutes, and
+handles it as it falls due. One due later finds the worker gone, and its
+tick starts it: such a message is handled within a tick of its due
+time.
 
 ### From TypeScript
 
@@ -834,7 +836,11 @@ Its entrypoint is the pool's, told to drain by `WORKER_MODE`: it claims
 and handles as before, and exits 0 once no message was ready or held for
 `idle`, thirty seconds unless set. That is long enough for the
 transaction that enqueued to commit after its wake went out, and for the
-next message of a burst to find the worker still up.
+next message of a burst to find the worker still up. Before it exits it
+asks when the next ready message falls due, a retry after its backoff or
+a [delayed message](#enqueue-for-later): one due within five minutes, its
+horizon, it waits for and handles, so a retry or a short delay does not
+wait for the tick.
 
 An enqueue starts it. The Go ORM's `Enqueue<Queue>` and the TypeScript
 `enqueue` send the queue's wake once their statement has run, where the
@@ -862,7 +868,9 @@ retry due after its backoff, a [delayed message](#enqueue-for-later), one
 a Rust API enqueued, and one whose wake was lost. So the longest a
 message waits for a worker that is not running is one tick, and the least
 a quiet queue costs is one start per tick, of a job that finds nothing
-and exits after `idle`.
+and exits after `idle`. For a retry or a delayed message due past the
+worker's five-minute horizon, the tick is the bound on how late it runs,
+so a tick is an hour at most.
 
 `instances` is how many of the worker may run at once, one unless set.
 Each start is one task, which takes one of that many advisory locks named
@@ -873,7 +881,7 @@ free. A burst therefore brings up one more worker per wake, up to
 
 | Setting | Default | |
 | --- | --- | --- |
-| `tick` | `5m` | `1m`, `2m`, `3m`, `4m`, `5m`, `6m`, `10m`, `12m`, `15m`, `20m` or `30m`, or `1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h` or `24h`: Cloud Scheduler runs evenly spaced firings |
+| `tick` | `5m` | `1m`, `2m`, `3m`, `4m`, `5m`, `6m`, `10m`, `12m`, `15m`, `20m`, `30m` or `1h`: Cloud Scheduler runs evenly spaced firings, and the tick bounds how late a retry or a delayed message due past the worker's horizon runs |
 | `cpu`, `memory` | `1`, `512Mi` | as a pool's |
 
 A task runs for a day at most, then Cloud Run stops it as it stops any

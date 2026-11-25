@@ -72,11 +72,23 @@ const (
 	// DefaultDrainIdle is how long a worker in drain mode waits idle
 	// before it exits, unless IdleSecondsVariable says.
 	DefaultDrainIdle = 30 * time.Second
+
+	// DrainHorizon is how far ahead a worker in drain mode that found its
+	// queue idle looks for a message that is not due yet, a delayed one
+	// or a retry after its backoff (D145): it waits for one due within
+	// the horizon instead of exiting, and leaves one due later to the
+	// platform's next start, a wake or its tick. Five minutes is gcp's
+	// default tick, so with that tick a message waits at most about one
+	// tick past its due time whether the worker waits for it or not; and
+	// a worker kept for it costs at most five minutes of a task that does
+	// nothing.
+	DrainHorizon = 5 * time.Minute
 )
 
 // Drain is how a worker in drain mode runs (D145): it claims as any worker
-// does, and Run returns once no message was ready or held for Idle, so the
-// process exits 0 and a queue that is empty runs nothing. Slots is how
+// does, and Run returns once no message was ready or held for Idle and
+// none falls due within Horizon, so the process exits 0 and a queue that
+// is empty runs nothing. Slots is how
 // many such workers may run at once: each takes one of that many locks
 // named for its queue as it starts (Queue.Slot), and one that finds none
 // free returns at once, so starts that overlap cost a start and nothing
@@ -89,6 +101,10 @@ type Drain struct {
 	// Slots is how many workers may drain the queue at once; less than
 	// one is one.
 	Slots int
+
+	// Horizon is how far ahead the worker looks for a message that is not
+	// due yet before it stops (Queue.NextDue); zero is DrainHorizon.
+	Horizon time.Duration
 }
 
 // DrainFromEnv returns the drain the environment gives a worker, or nil
@@ -206,6 +222,12 @@ type Queue struct {
 	// back. Nil takes none, as on a database with no such lock: every
 	// worker started then drains.
 	Slot func(ctx context.Context, slots int) (release func(), ok bool, err error)
+
+	// NextDue reports how long until the first ready message that is not
+	// due yet falls due, or false when none waits (D145): a worker in drain
+	// mode that found the queue idle waits for one due within its horizon
+	// instead of stopping. Nil reads none: the worker stops once idle.
+	NextDue func(ctx context.Context) (time.Duration, bool, error)
 }
 
 // Options are how Run runs.
@@ -345,6 +367,9 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 		if drain.Slots < 1 {
 			drain.Slots = 1
 		}
+		if drain.Horizon <= 0 {
+			drain.Horizon = DrainHorizon
+		}
 		opts.Drain = &drain
 		if opts.quiet == nil {
 			opts.quiet = &quiet{}
@@ -410,7 +435,8 @@ type handling struct {
 	released bool
 }
 
-// claimLoop claims messages for the free slots until ctx ends.
+// claimLoop claims messages for the free slots until ctx ends, or, in
+// drain mode, until the worker has drained.
 func (w *loop) claimLoop(ctx context.Context) {
 	wait := w.opts.Idle
 	for ctx.Err() == nil {
@@ -440,12 +466,50 @@ func (w *loop) claimLoop(ctx context.Context) {
 			w.start(msg)
 		}
 		if w.drained(len(msgs)) {
-			return
+			// A message that falls due within the horizon, a delayed one
+			// or a retry, is waited for: the claim after the wait takes it.
+			due, ok := w.nextDue(ctx)
+			if !ok {
+				w.logger.Info("drained: no message was ready or held", zap.Duration("idle", w.opts.Drain.Idle))
+				return
+			}
+			w.logger.Info("idle, and waiting for a message due soon", zap.Duration("dueIn", due))
+			if !sleep(ctx, max(due, w.opts.Idle)) {
+				return
+			}
+			continue
 		}
 		if len(msgs) < free && !w.idle(ctx) {
 			return
 		}
 	}
+}
+
+// nextDue reports how long until a message that is not due yet falls due,
+// when that is within the drain's horizon: a worker in drain mode that
+// found its queue idle waits for it. A queue that reads none, or whose
+// read fails, reports false, and the worker stops.
+func (w *loop) nextDue(ctx context.Context) (time.Duration, bool) {
+	if w.q.NextDue == nil {
+		return 0, false
+	}
+	readCtx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	due, ok, err := w.q.NextDue(readCtx)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			w.logger.Warn("reading when the next message is due failed: the tick runs it", zap.Error(err))
+		}
+		return 0, false
+	case !ok:
+		return 0, false
+	case due > w.opts.Drain.Horizon:
+		w.logger.Info("the next message is due past the drain's horizon: a wake or the tick runs it",
+			zap.Duration("dueIn", due), zap.Duration("horizon", w.opts.Drain.Horizon))
+		return 0, false
+	}
+	return max(due, 0), true
 }
 
 // drained reports whether a worker in drain mode is done: its claim found
@@ -460,11 +524,7 @@ func (w *loop) drained(claimed int) bool {
 		q.busy()
 		return false
 	}
-	if !q.over(d.Idle) {
-		return false
-	}
-	w.logger.Info("drained: no message was ready or held", zap.Duration("idle", d.Idle))
-	return true
+	return q.over(d.Idle)
 }
 
 // pruneLoop prunes the queue at once, then every PruneEvery, until ctx

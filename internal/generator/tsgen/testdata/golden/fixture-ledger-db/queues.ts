@@ -65,6 +65,8 @@ export interface QueueStatements {
   readonly prune: string;
   /** On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs, and returns whether it took it. */
   readonly slot?: string;
+  /** On Postgres alone: the seconds until the first ready message that is not due yet falls due, or NULL when none waits. */
+  readonly nextDue?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -150,5 +152,6 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   FOR UPDATE SKIP LOCKED
 )`,
     slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.entry_posted_queue'), $1::int)`,
+    nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM entry_posted_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
   },
 };

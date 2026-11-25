@@ -735,6 +735,36 @@ describe.skipIf(dsn === '')('on Postgres', () => {
     }
   });
 
+  test('nextDue reads the seconds until the first ready message that waits falls due, and none for one due already or a queue that is empty (D145)', async () => {
+    const schema = `queue_next_due_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(createTable('order_placed_queue'));
+      const table = 'order_placed_queue';
+      const def = { ...definition(), statements: { ...definition().statements, nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ${table} WHERE state = 'ready' AND due_at > clock_timestamp()` } };
+      const queue = postgresQueue(pool, def);
+      expect(await queue.nextDue()).toBeUndefined();
+      const message = { orderId: '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b9d', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } };
+      await enqueue(pool, def, message);
+      expect(await queue.nextDue()).toBeUndefined();
+      await enqueue(pool, def, message, { delaySeconds: 90 });
+      await enqueue(pool, def, message, { delaySeconds: 30 });
+      const seconds = await queue.nextDue();
+      expect(seconds).toBeGreaterThan(25);
+      expect(seconds).toBeLessThanOrEqual(30);
+      // A definition written before the statement reads none.
+      const { nextDue: _, ...before } = def.statements;
+      expect(await postgresQueue(pool, { ...def, statements: before }).nextDue()).toBeUndefined();
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   test("a delayed enqueue late in a long transaction is due its delay after the statement, not after the transaction's start (D80)", async () => {
     const schema = `queue_due_in_${Date.now()}`;
     const admin = new pg.Pool({ connectionString: dsn, max: 1 });

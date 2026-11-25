@@ -277,6 +277,21 @@ export function postgresQueue<M>(pool: QueuePool, queue: QueueDefinition<M>): Po
       session.release();
       return undefined;
     },
+    async nextDue() {
+      // A definition written before the statement reads no due time, so a
+      // worker in drain mode stops once idle, as it did.
+      const statement = queue.statements.nextDue;
+      if (statement === undefined) return undefined;
+      try {
+        const { rows } = await pool.query({ text: statement, values: [], rowMode: 'array' });
+        const seconds = (rows[0] as unknown[] | undefined)?.[0];
+        if (seconds === null || seconds === undefined) return undefined;
+        const n = Number(seconds);
+        return Number.isFinite(n) ? n : undefined;
+      } catch (error) {
+        throw new Error(`read when the next message of ${queue.table} is due: ${errorMessage(error)}`, { cause: error });
+      }
+    },
   };
   return claims;
 }

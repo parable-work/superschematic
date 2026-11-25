@@ -116,6 +116,15 @@ type QueueStatements struct {
 	// gives the slot back. SQLite has none: a worker there takes no slot.
 	Slot string
 
+	// NextDue, on Postgres alone, reads how many seconds remain, by the
+	// database's clock, until the first ready message that is not due yet
+	// falls due, or NULL when no ready message waits for a later time
+	// (D145). A worker in drain mode that found its queue idle reads it
+	// before it exits, and waits for a message due within its horizon
+	// instead: a delayed message (D80) or a retry after its backoff, which
+	// would otherwise wait for the next tick. SQLite has none.
+	NextDue string
+
 	// Due, on SQLite alone, reads whether a message is due or claimed past
 	// its claim's expiry, a row or none, with no parameter: a claim runs it
 	// first and takes the write lock only when it finds one, so an idle
@@ -318,6 +327,8 @@ func PostgresQueueStatements(spec QueueSpec) QueueStatements {
 		Insert: "INSERT INTO " + table,
 		DueIn:  "clock_timestamp() + make_interval(secs => $1)",
 		Slot:   fmt.Sprintf("SELECT pg_try_advisory_lock(hashtext(%s), $1::int)", QuoteLiteral(QueueDrainLock(spec.Table))),
+		NextDue: fmt.Sprintf("SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM %s WHERE state = '%s' AND due_at > clock_timestamp()",
+			table, ir.QueueStateReady),
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),
 			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()",
@@ -588,6 +599,9 @@ func (s QueueStatements) All() []NamedStatement {
 	)
 	if s.Slot != "" {
 		all = append(all, NamedStatement{"slot", s.Slot})
+	}
+	if s.NextDue != "" {
+		all = append(all, NamedStatement{"nextDue", s.NextDue})
 	}
 	if s.Due != "" {
 		all = append(all, NamedStatement{"due", s.Due})

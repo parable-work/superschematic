@@ -1326,6 +1326,21 @@ func testDrainSlotsAndTheWakeHook(t *testing.T) {
 	if len(woken) != 1 {
 		t.Errorf("an enqueue after OnEnqueue(nil) told the old function: %v", woken)
 	}
+
+	// NextDue reads how long until the first ready message that waits
+	// falls due, which a worker in drain mode waits for within its
+	// horizon: none while every ready message is due already, and a
+	// delayed one's delay once one waits.
+	if due, ok, err := p.db.OrderPlacedQueue().NextDue(p.ctx); err != nil || ok {
+		t.Errorf("NextDue of a queue whose messages are due = %s, %t, %v", due, ok, err)
+	}
+	msg = order("e0000000-0000-4000-8000-000000000003")
+	if err := p.enqueueIn(&msg, 40*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if due, ok, err := p.db.OrderPlacedQueue().NextDue(p.ctx); err != nil || !ok || due <= 30*time.Second || due > 40*time.Second {
+		t.Errorf("NextDue of a message delayed 40s = %s, %t, %v", due, ok, err)
+	}
 }
 
 // enqueueIn writes msg with the Go ORM, due once delay has passed, in a

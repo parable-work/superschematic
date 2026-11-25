@@ -51,7 +51,8 @@
     "extend": "UPDATE order_placed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM order_placed_queue WHERE id IN (\n  SELECT id FROM order_placed_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM order_placed_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO order_placed_queue",

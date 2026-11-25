@@ -151,6 +151,9 @@ type QueueStatements struct {
 	// Slot takes slot $1 of the locks a worker in drain mode holds while
 	// it runs (D145), on Postgres alone.
 	Slot string `json:"slot,omitempty"`
+	// NextDue reads the seconds until the first ready message that waits
+	// falls due (D145), on Postgres alone.
+	NextDue string `json:"nextDue,omitempty"`
 	// Due is SQLite's read of whether a message is due, which a claim
 	// runs before it takes the write lock; Postgres has none.
 	Due string `json:"due,omitempty"`
@@ -170,6 +173,7 @@ func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 		Release:  s.Release,
 		Prune:    s.Prune,
 		Slot:     s.Slot,
+		NextDue:  s.NextDue,
 		Due:      s.Due,
 	}
 }

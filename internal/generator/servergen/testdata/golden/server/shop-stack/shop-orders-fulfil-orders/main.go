@@ -180,6 +180,7 @@ func run(logger *zap.Logger) error {
 		Release:  queue.Release,
 		Prune:    queue.Prune,
 		Slot:     queue.Slot,
+		NextDue:  queue.NextDue,
 	}, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})
 }
 

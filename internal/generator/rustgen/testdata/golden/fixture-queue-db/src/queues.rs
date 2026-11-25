@@ -60,7 +60,8 @@ pub const ORDER_CHANGED_QUEUE: &str = r#"{
     "extend": "UPDATE order_changed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE order_changed_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN 'done' ELSE 'ready' END,\n  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM order_changed_queue WHERE id IN (\n  SELECT id FROM order_changed_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM order_changed_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO order_changed_queue",
@@ -151,7 +152,8 @@ pub const ORDER_PLACED_QUEUE: &str = r#"{
     "extend": "UPDATE order_placed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM order_placed_queue WHERE id IN (\n  SELECT id FROM order_placed_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM order_placed_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO order_placed_queue",
@@ -211,7 +213,8 @@ pub const PING_QUEUE: &str = r#"{
     "extend": "UPDATE ping_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM ping_queue WHERE id IN (\n  SELECT id FROM ping_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ping_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO ping_queue",
@@ -276,7 +279,8 @@ pub const STOCK_CHECKED_QUEUE: &str = r#"{
     "extend": "UPDATE stock_checked_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE stock_checked_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,\n  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM stock_checked_queue WHERE id IN (\n  SELECT id FROM stock_checked_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM stock_checked_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO stock_checked_queue",
@@ -349,7 +353,8 @@ pub const STOCK_MOVED_QUEUE: &str = r#"{
     "extend": "UPDATE stock_moved_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE stock_moved_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,\n  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM stock_moved_queue WHERE id IN (\n  SELECT id FROM stock_moved_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM stock_moved_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO stock_moved_queue",
@@ -416,7 +421,8 @@ pub const SYNC_REQUESTED_QUEUE: &str = r#"{
     "extend": "UPDATE sync_requested_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE sync_requested_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "prune": "DELETE FROM sync_requested_queue WHERE id IN (\n  SELECT id FROM sync_requested_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
-    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)"
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM sync_requested_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   },
   "sqliteStatements": {
     "insert": "INSERT INTO sync_requested_queue",

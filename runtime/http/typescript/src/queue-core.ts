@@ -73,6 +73,11 @@ export interface QueueStatements {
    * advisory lock named for the queue's table, and returns whether it took it.
    */
   readonly slot?: string;
+  /**
+   * On Postgres alone: the seconds, by the database's clock, until the first ready message that is not due yet
+   * falls due, or NULL when none waits (D145).
+   */
+  readonly nextDue?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -155,10 +160,16 @@ export interface Queue<M> {
    * gives the slot back, or to undefined when every one is taken. A queue on SQLite has none.
    */
   slot?(slots: number): Promise<(() => Promise<void>) | undefined>;
+  /**
+   * Resolves to the seconds, by the database's clock, until the first ready message that is not due yet falls
+   * due, or to undefined when none waits (D145): a worker in drain mode that found the queue idle waits for one
+   * due within its horizon instead of stopping. A queue on SQLite has none.
+   */
+  nextDue?(): Promise<number | undefined>;
 }
 
-/** The claims of a queue over a pg pool, which postgresQueue makes: a queue's, with its slots. */
-export type PostgresQueue<M> = Queue<M> & Required<Pick<Queue<M>, 'slot'>>;
+/** The claims of a queue over a pg pool, which postgresQueue makes: a queue's, with its slots and its next due time. */
+export type PostgresQueue<M> = Queue<M> & Required<Pick<Queue<M>, 'slot' | 'nextDue'>>;
 
 /** How an enqueue writes its message, beside the message. */
 export interface EnqueueOptions {
