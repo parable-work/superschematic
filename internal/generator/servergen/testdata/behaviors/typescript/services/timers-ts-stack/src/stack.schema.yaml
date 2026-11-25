@@ -18,3 +18,23 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
+  # Edge, on stacktest's fake target, places the server on the fake bundle
+  # platform, as Workers, and the behavior workers on the fake drain
+  # platform, as Workers under a Cron Trigger (D151), over the database on
+  # the fake Postgres one: each worker's package gets a drain.ts that runs
+  # its table's behavior queues at each firing and exports its Workflow.
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { service: { name: fixture-timers-api, kind: API } }
+          platform: fake.bundle
+        - of: { service: { name: fixture-timers-api, kind: API }, worker: TicketTimers }
+          platform: fake.drain
+        - of: { service: { name: fixture-timers-api, kind: API }, worker: InvoiceTimers }
+          platform: fake.drain
+        - of: { service: { name: fixture-timers-db, kind: DB } }
+          platform: fake.sql

@@ -17,7 +17,8 @@ a raw SQL write, or a repository's bulk or hard write, is heard after its
 commit. The worker's main runs each queue with runWorker; the queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
-the queue's backoff, and dead once its retries are spent.
+the queue's backoff, and dead once its retries are spent. nextDue tells a
+run that drains, a wake's on Workers (D151), when the next falls due.
 */
 
 import type { Pool } from 'pg';
@@ -58,6 +59,7 @@ export function jobDeadlinesQueues(pool: Pool, orm: FixtureAgentsDbOrm, logger?:
       fail: (id, token, cause) => deadlines.fail(id, token, cause),
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
+      nextDue: () => deadlines.nextDue(),
     },
   ];
 }
@@ -93,6 +95,7 @@ export function sessionPresenceQueues(pool: Pool, orm: FixtureAgentsDbOrm, logge
       fail: (id, token, cause) => deadlines.fail(id, token, cause),
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
+      nextDue: () => deadlines.nextDue(),
     },
   ];
 }

@@ -28,7 +28,7 @@ schema's instances into claimable work, are another thing.
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a Go or a TypeScript worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing; drain mode for a Rust worker and a behavior worker, and a wake from the Rust queue client |
+| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a Go or a TypeScript worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute, and which an enqueue due before the next firing wakes through its Workflow; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; drain mode for a Rust worker and a behavior worker, and a wake from the Rust queue client |
 | `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
 D53, D68, D80, D88 and D96 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions, and section 8.8 of
@@ -942,6 +942,29 @@ the six connections a Worker's invocation may hold open at once, which
 its database's and its fetches share. `enabled: false`, or `instances: 0`,
 leaves the Worker with no Cron Trigger. A Go or Rust worker does not
 resolve, and neither does one whose queue is on D1.
+
+### Woken before the next firing
+
+A message due before the next firing need not wait for it (D151). The
+worker's Worker is also a Workflow, of the class `QueueWake` its
+`drain.ts` exports, and each server and job that may enqueue to its queue
+holds a binding to it, which `QUEUE_WAKES` names for the queue. An
+enqueue whose message is due within the minute, at once or with
+`delaySeconds`, creates an instance named for the second it is due in:
+it sleeps until then and runs one firing as a drain, which stops once
+the queue is idle. A message due later is found by a firing, within a
+minute of its time, so no instance sleeps for long.
+
+```ts
+// Due in thirty seconds: a run wakes for it then, not at the next firing.
+await enqueue(tx, reminderDue, { reminderId }, { delaySeconds: 30 });
+```
+
+The wake is sent after the enqueue's statement and fails nothing; the
+request's `waitUntil` keeps it going after the response. A worker's own
+enqueues to another worker's queue send none: that worker's next firing
+takes them. A firing that ends with messages left logs `backlog left for
+the next firing`, naming the queue.
 
 A deploy migrates the database from the deploying machine
 ([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),

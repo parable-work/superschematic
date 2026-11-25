@@ -231,6 +231,15 @@ func (r *resolver) runWorkers() {
 			continue
 		}
 		run.Database = db
+		if d.worker.BehaviorWorker != nil {
+			// A behavior worker claims each of its table's queues the
+			// database holds (D103, D151).
+			for _, queue := range d.worker.Queues {
+				if slices.Contains(r.services[db].Queues, queue) {
+					run.Queues = append(run.Queues, queue)
+				}
+			}
+		}
 		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" {
 			switch {
 			case host.platform.NoQueueClaims != "":
@@ -297,12 +306,22 @@ func (r *resolver) runWorkers() {
 // code, a server, a job, a worker or an app, with a sql edge to the
 // database that holds the queue, but the worker itself, which runs
 // whenever it enqueues. A worker the environment turns off is not woken.
+//
+// A worker whose platform runs it at the firings of a schedule
+// (registry.PlatformSpec.WakesWorkers: a Cron Trigger's on Cloudflare) is
+// woken whatever its mode (D151): a message due before the next firing,
+// an urgent deadline or an event, starts a run that waits for it. A
+// behavior worker is woken for each of its queues.
 func (r *resolver) wakeWorkers() {
 	for _, name := range sortedKeys(r.deployables) {
 		w := r.deployables[name]
 		run := w.res.Worker
-		if w.res.Kind != ir.DeployableWorker || !run.Drains() || run.Instances == 0 || run.Database == "" {
+		if w.res.Kind != ir.DeployableWorker || !(run.Drains() || w.platform.WakesWorkers) || run.Instances == 0 || run.Database == "" {
 			continue
+		}
+		queues := []string{run.Queue}
+		if w.platform.WakesWorkers {
+			queues = run.AllQueues()
 		}
 		for _, id := range sortedKeys(r.edges) {
 			e := r.edges[id]
@@ -314,8 +333,64 @@ func (r *resolver) wakeWorkers() {
 			default:
 				continue
 			}
-			e.from.res.Wakes = append(e.from.res.Wakes, ir.ResolvedWake{Worker: name, Queue: run.Queue, Database: run.Database, Platform: w.res.Platform, ResourceName: w.res.ResourceName})
+			for _, queue := range queues {
+				e.from.res.Wakes = append(e.from.res.Wakes, ir.ResolvedWake{Worker: name, Queue: queue, Database: run.Database, Platform: w.res.Platform, ResourceName: w.res.ResourceName})
+			}
 			w.res.WokenBy = append(w.res.WokenBy, ir.ResolvedWaker{Deployable: e.from.res.Name, Platform: e.from.res.Platform})
+		}
+	}
+}
+
+// behaviorQueueWhat names what a behavior queue of each kind holds, for
+// the refusal of one nothing drains.
+var behaviorQueueWhat = map[string]string{
+	ir.BehaviorQueueDeadlines: "deadline queue",
+	ir.BehaviorQueueChanges:   "change queue",
+	ir.BehaviorQueueEvents:    "event queue",
+}
+
+// checkBehaviorQueues refuses an environment that runs a database one of
+// whose tables keeps a deadline, change or event queue (D103, D104) that
+// no worker the environment runs drains (D151). Its change trigger writes
+// a message for every write of a row, its behaviors arm deadlines and emit
+// events into the others, and nothing else claims them: they would grow
+// while no deadline fires, no change is heard and no event is handled.
+// The verifier warns of a table no @behaviorWorker of an API runs; this is
+// the deploy's check, which sees which workers the environment runs: a
+// worker counts once it claims the queue and the environment runs at
+// least one instance of it. Each refusal names the database, the table,
+// the queue and what it holds.
+func (r *resolver) checkBehaviorQueues() {
+	drained := map[string]bool{}
+	for _, name := range sortedKeys(r.deployables) {
+		d := r.deployables[name]
+		run := d.res.Worker
+		if d.res.Kind != ir.DeployableWorker || run == nil || run.Instances == 0 || run.Database == "" {
+			continue
+		}
+		for _, queue := range run.AllQueues() {
+			drained[run.Database+"/"+queue] = true
+		}
+	}
+	for _, db := range sortedKeys(r.members) {
+		svc := r.services[db]
+		if svc == nil || svc.Kind != ir.SchemaKindDB || len(svc.BehaviorQueues) == 0 {
+			continue
+		}
+		if host, ok := r.byService[db]; !ok || r.deployables[host] == nil {
+			continue
+		}
+		for _, queue := range sortedKeys(svc.BehaviorQueues) {
+			if drained[db+"/"+queue] {
+				continue
+			}
+			bq := svc.BehaviorQueues[queue]
+			what := behaviorQueueWhat[bq.Kind]
+			if what == "" {
+				what = bq.Kind + " queue"
+			}
+			r.fail(CodeUnrealizable, "environment %s runs database %s, whose table %s keeps its %s in queue %s, and no worker the environment runs drains it: its messages would wait for good; declare @behaviorWorker(%s) on an API over %s and run it in environment %s, or turn on the one its settings turn off (D103, D151)",
+				r.envName(), db, bq.Row, what, queue, bq.Row, db, r.envName())
 		}
 	}
 }

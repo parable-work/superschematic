@@ -22,6 +22,22 @@
       ],
       "language": "TYPESCRIPT",
       "artifact": "bundle",
+      "wakes": [
+        {
+          "worker": "finances-api-embed-line-items",
+          "queue": "EmbedLineItem",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-embed-line-items"
+        },
+        {
+          "worker": "finances-api-sync-plaid-item",
+          "queue": "PlaidSyncRequested",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-sync-plaid-item"
+        }
+      ],
       "exposed": true,
       "resourceName": "ledger-stack-staging-finances-api",
       "address": "https://ledger-stack-staging-finances-api",
@@ -66,6 +82,29 @@
         "concurrency": 4,
         "graceSeconds": 8
       },
+      "wakes": [
+        {
+          "worker": "finances-api-sync-plaid-item",
+          "queue": "PlaidSyncRequested",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-sync-plaid-item"
+        }
+      ],
+      "wokenBy": [
+        {
+          "deployable": "finances-api",
+          "platform": "cloudflare.workers"
+        },
+        {
+          "deployable": "finances-api-sync-all-plaid-items",
+          "platform": "cloudflare.cron"
+        },
+        {
+          "deployable": "finances-api-sync-plaid-item",
+          "platform": "cloudflare.drainer"
+        }
+      ],
       "settings": {
         "drainSeconds": 40
       },
@@ -108,6 +147,22 @@
         "timeZone": "UTC",
         "timeoutSeconds": 600
       },
+      "wakes": [
+        {
+          "worker": "finances-api-embed-line-items",
+          "queue": "EmbedLineItem",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-embed-line-items"
+        },
+        {
+          "worker": "finances-api-sync-plaid-item",
+          "queue": "PlaidSyncRequested",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-sync-plaid-item"
+        }
+      ],
       "resourceName": "ledger-stack-staging-finances-api-sync-all-plaid-items",
       "bindings": [
         {
@@ -149,6 +204,29 @@
         "concurrency": 2,
         "graceSeconds": 8
       },
+      "wakes": [
+        {
+          "worker": "finances-api-embed-line-items",
+          "queue": "EmbedLineItem",
+          "database": "finances-db",
+          "platform": "cloudflare.drainer",
+          "resourceName": "ledger-stack-staging-finances-api-embed-line-items"
+        }
+      ],
+      "wokenBy": [
+        {
+          "deployable": "finances-api",
+          "platform": "cloudflare.workers"
+        },
+        {
+          "deployable": "finances-api-embed-line-items",
+          "platform": "cloudflare.drainer"
+        },
+        {
+          "deployable": "finances-api-sync-all-plaid-items",
+          "platform": "cloudflare.cron"
+        }
+      ],
       "resourceName": "ledger-stack-staging-finances-api-sync-plaid-item",
       "bindings": [
         {
@@ -412,6 +490,29 @@
         ]
       },
       {
+        "id": "finances-api-embed-line-items.workflow",
+        "type": "cloudflare:index/workflow:Workflow",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "className": "QueueWake",
+          "scriptName": {
+            "$output": {
+              "resource": "finances-api-embed-line-items.worker",
+              "name": "name"
+            }
+          },
+          "workflowName": "ledger-stack-staging-finances-api-embed-line-items"
+        },
+        "dependsOn": [
+          "finances-api-embed-line-items.deployment",
+          "finances-api-embed-line-items.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-embed-line-items"
+        ]
+      },
+      {
         "id": "finances-api-sync-all-plaid-items.deployment",
         "type": "cloudflare:index/workersDeployment:WorkersDeployment",
         "properties": {
@@ -498,9 +599,24 @@
               "type": "secrets_store_secret"
             },
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"EmbedLineItem\":[{\"binding\":\"WAKE_FINANCES_API_EMBED_LINE_ITEMS\"}],\"PlaidSyncRequested\":[{\"binding\":\"WAKE_FINANCES_API_SYNC_PLAID_ITEM\"}]}",
+              "type": "plain_text"
+            },
+            {
               "name": "SUPERSCHEMATIC_BUNDLE",
               "text": "{bundle-digest}",
               "type": "plain_text"
+            },
+            {
+              "name": "WAKE_FINANCES_API_EMBED_LINE_ITEMS",
+              "type": "workflow",
+              "workflowName": "ledger-stack-staging-finances-api-embed-line-items"
+            },
+            {
+              "name": "WAKE_FINANCES_API_SYNC_PLAID_ITEM",
+              "type": "workflow",
+              "workflowName": "ledger-stack-staging-finances-api-sync-plaid-item"
             }
           ],
           "compatibilityDate": "2026-09-15",
@@ -536,7 +652,9 @@
           }
         },
         "dependsOn": [
-          "finances-api-sync-all-plaid-items.worker"
+          "finances-api-embed-line-items.workflow",
+          "finances-api-sync-all-plaid-items.worker",
+          "finances-api-sync-plaid-item.workflow"
         ],
         "phase": "rollout",
         "owners": [
@@ -750,6 +868,29 @@
         ]
       },
       {
+        "id": "finances-api-sync-plaid-item.workflow",
+        "type": "cloudflare:index/workflow:Workflow",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "className": "QueueWake",
+          "scriptName": {
+            "$output": {
+              "resource": "finances-api-sync-plaid-item.worker",
+              "name": "name"
+            }
+          },
+          "workflowName": "ledger-stack-staging-finances-api-sync-plaid-item"
+        },
+        "dependsOn": [
+          "finances-api-sync-plaid-item.deployment",
+          "finances-api-sync-plaid-item.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-sync-plaid-item"
+        ]
+      },
+      {
         "id": "finances-api.deployment",
         "type": "cloudflare:index/workersDeployment:WorkersDeployment",
         "properties": {
@@ -808,6 +949,21 @@
               "secretName": "ledger-stack-Staging-FinancesConfig-PLAID_SECRET",
               "storeId": "5ec0000000000000000000000000000a",
               "type": "secrets_store_secret"
+            },
+            {
+              "name": "QUEUE_WAKES",
+              "text": "{\"EmbedLineItem\":[{\"binding\":\"WAKE_FINANCES_API_EMBED_LINE_ITEMS\"}],\"PlaidSyncRequested\":[{\"binding\":\"WAKE_FINANCES_API_SYNC_PLAID_ITEM\"}]}",
+              "type": "plain_text"
+            },
+            {
+              "name": "WAKE_FINANCES_API_EMBED_LINE_ITEMS",
+              "type": "workflow",
+              "workflowName": "ledger-stack-staging-finances-api-embed-line-items"
+            },
+            {
+              "name": "WAKE_FINANCES_API_SYNC_PLAID_ITEM",
+              "type": "workflow",
+              "workflowName": "ledger-stack-staging-finances-api-sync-plaid-item"
             }
           ],
           "compatibilityDate": "2026-09-15",
@@ -843,6 +999,8 @@
           }
         },
         "dependsOn": [
+          "finances-api-embed-line-items.workflow",
+          "finances-api-sync-plaid-item.workflow",
           "finances-api.worker"
         ],
         "phase": "rollout",
@@ -905,6 +1063,7 @@
         "finances-api-embed-line-items.deployment",
         "finances-api-embed-line-items.schedule",
         "finances-api-embed-line-items.version",
+        "finances-api-embed-line-items.workflow",
         "finances-api-sync-all-plaid-items.deployment",
         "finances-api-sync-all-plaid-items.schedule",
         "finances-api-sync-all-plaid-items.version",
@@ -912,6 +1071,7 @@
         "finances-api-sync-plaid-item.deployment",
         "finances-api-sync-plaid-item.schedule",
         "finances-api-sync-plaid-item.version",
+        "finances-api-sync-plaid-item.workflow",
         "finances-api.deployment",
         "finances-api.version"
       ]

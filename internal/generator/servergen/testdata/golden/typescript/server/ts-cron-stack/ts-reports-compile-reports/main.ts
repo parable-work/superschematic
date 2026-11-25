@@ -76,7 +76,8 @@ function main(): void {
   const pools: { end(): Promise<void> }[] = [];
   const started = Date.now();
   const end = (code: number): void => {
-    void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));
+    // The wakes the job's enqueues sent go out before it exits (D145, D151).
+    void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
   };
   run(stop.signal, pools).then(
     () => {

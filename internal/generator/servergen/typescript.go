@@ -876,9 +876,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if s.Deriver != nil {
 			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server, a job or a worker alone (D64, D92)", in.Stack, s.Kind, in.Server)
 		}
-		if s.Worker != nil && s.Worker.Behavior != nil {
-			return nil, fmt.Errorf("servergen: stack %s: worker %s runs %s, the behavior worker %s (D103), and an environment places it on Cloudflare Workers, whose drain.ts runs a @worker's handler alone; place the worker on a platform that builds an image", in.Stack, in.Server, s.Worker.Behavior.Runs(), s.Worker.Name)
-		}
+		// A behavior worker's drain.ts runs its table's behavior queues at
+		// each firing, as its main.ts runs them (D151).
 		s.Workers = true
 	}
 	taken := names{}
@@ -1452,8 +1451,25 @@ func (s *TypeScriptServer) WorkersImports() []string {
 	if len(s.SecretBindings()) > 0 {
 		out = append(out, "stackEnvWithSecrets")
 	}
+	if s.WakesQueues() {
+		out = append(out, "installQueueWakes", "queueWakesSettled")
+	}
 	return out
 }
+
+// WakesQueues reports whether a Workers entrypoint installs the queue
+// wakes its Worker's QUEUE_WAKES binding names and hands each invocation's
+// waitUntil the wakes it sent (D151): one that reaches a Postgres database
+// through Hyperdrive, on which a worker on Workers claims, so its enqueues,
+// its deadlines and its events may leave a worker a message due before
+// the worker's next firing.
+func (s *TypeScriptServer) WakesQueues() bool {
+	return s.Workers && len(s.PostgresDatabases()) > 0
+}
+
+// QueueWakeClass is the class a worker's drain.ts exports, the worker's
+// Workflow, which a wake creates an instance of (D151).
+func (s *TypeScriptServer) QueueWakeClass() string { return ir.QueueWakeClass }
 
 // ImportsPostgres reports whether main.ts imports the HTTP runtime's
 // ./postgres entry: for its pools, or, for a runner, for the Cloud SQL
@@ -1815,9 +1831,14 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		)
 	} else if s.Workers && s.Worker != nil {
 		// A worker's claims for a window at each firing of its Cron
-		// Trigger (D92).
+		// Trigger (D92), a behavior worker's on each of its table's
+		// behavior queues (D151).
+		drain := "drain.ts.tmpl"
+		if s.Worker.Behavior != nil {
+			drain = "behavior_drain.ts.tmpl"
+		}
 		files = append(files,
-			struct{ template, name string }{"drain.ts.tmpl", TypeScriptDrainFile},
+			struct{ template, name string }{drain, TypeScriptDrainFile},
 			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},
 			struct{ template, name string }{"workers.d.ts.tmpl", TypeScriptWorkersTypesFile},
 		)

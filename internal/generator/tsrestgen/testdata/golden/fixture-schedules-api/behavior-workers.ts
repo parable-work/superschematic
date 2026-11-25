@@ -24,7 +24,8 @@ completion commit together or not at all, and its rejection fails the
 message. The worker's main runs each queue with runWorker; the queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
-the queue's backoff, and dead once its retries are spent.
+the queue's backoff, and dead once its retries are spent. nextDue tells a
+run that drains, a wake's on Workers (D151), when the next falls due.
 */
 
 import type { Pool } from 'pg';
@@ -73,6 +74,7 @@ export function problemWakeUpsQueues(pool: Pool, orm: FixtureSchedulesDbOrm, wor
       fail: (id, token, cause) => deadlines.fail(id, token, cause),
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
+      nextDue: () => deadlines.nextDue(),
     },
     {
       name: changes.name,
@@ -93,6 +95,7 @@ export function problemWakeUpsQueues(pool: Pool, orm: FixtureSchedulesDbOrm, wor
       fail: (id, token, cause) => changes.fail(id, token, cause),
       release: (id, token) => changes.release(id, token),
       prune: limit => changes.prune(limit),
+      nextDue: () => changes.nextDue(),
     },
     {
       name: events.name,
@@ -115,6 +118,7 @@ export function problemWakeUpsQueues(pool: Pool, orm: FixtureSchedulesDbOrm, wor
       fail: (id, token, cause) => events.fail(id, token, cause),
       release: (id, token) => events.release(id, token),
       prune: limit => events.prune(limit),
+      nextDue: () => events.nextDue(),
     },
   ];
 }

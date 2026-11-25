@@ -278,6 +278,51 @@ const drained = performance.now() - enqueued;
 ok(`the worker drained ${prefix}tea`, drained);
 timings.push(['enqueue to drained', drained]);
 
+// What a behavior worker moves (D151), and a message enqueued five seconds
+// on. Each is polled until it moves, and the time from its write is
+// printed: under stack dev a worker polls each second; on Cloudflare the
+// write wakes the worker's Workflow, which runs at the message's time, so
+// each moves within seconds of it, not at the next Cron firing. The change
+// a Reaction hears wakes nothing and moves at the next firing.
+async function until(what: string, path: string, moved: (data: Record<string, unknown>) => boolean): Promise<number> {
+  const from = performance.now();
+  const by = Date.now() + Number(flags['drain-seconds']) * 1000;
+  for (;;) {
+    const read = await member.call('GET', `${api}/${path}`);
+    expect(`read ${what}`, read.status, 200, read.text);
+    if (moved(read.json?.data ?? {})) return performance.now() - from;
+    if (Date.now() > by) fail(`${what} did not move within ${flags['drain-seconds']}s: ${read.text.slice(0, 300)}`);
+    await sleep(500);
+  }
+}
+
+const later = await member.call('POST', `${api}/line-items/${items.coffee}/drain-later`);
+expect('request a drain five seconds on', later.status, [200, 202], later.text);
+const drainedLater = await until(`${prefix}coffee`, `line-items/${items.coffee}`, data => Boolean(data.drainedAt));
+if (drainedLater < 4_000) fail(`the worker drained ${prefix}coffee ${Math.round(drainedLater)} ms after its delayed enqueue, before it was due`);
+ok(`the worker drained ${prefix}coffee once its delay had passed`, drainedLater);
+timings.push(['delayed enqueue to drained', drainedLater]);
+
+const followUp = await member.call('POST', `${api}/follow-ups`, { title: `${prefix}follow-up` });
+expect('create a follow-up', followUp.status, [200, 201], followUp.text);
+const followUpDue = await until('the follow-up', `follow-ups/${followUp.json?.data?.id}`, data => data.status === 'due');
+ok("the follow-up's Timers deadline fired", followUpDue);
+timings.push(['deadline to fired', followUpDue]);
+
+const checkIn = await member.call('POST', `${api}/check-ins`, { title: `${prefix}check-in` });
+expect('create a check-in', checkIn.status, [200, 201], checkIn.text);
+const checkedIn = await until('the check-in', `check-ins/${checkIn.json?.data?.id}`, data => Boolean(data.ranAt));
+ok("the check-in's Schedules run reached its handler", checkedIn);
+timings.push(['schedule to run handled', checkedIn]);
+
+const alert = await member.call('POST', `${api}/alerts`);
+expect('create an alert', alert.status, [200, 201], alert.text);
+const high = await member.call('POST', `${api}/alerts/${alert.json?.data?.id}/high`);
+expect('raise the alert', high.status, 200, high.text);
+const raised = await until('the alert', `alerts/${alert.json?.data?.id}`, data => data.status === 'raised');
+ok("the alert's Reactions rule ran on its change", raised);
+timings.push(['change to reaction', raised]);
+
 const out = await member.call('POST', `${api}/auth/logout`);
 expect('sign out', out.status, [200, 204], out.text);
 const after = await member.call('GET', `${api}/auth/me`);

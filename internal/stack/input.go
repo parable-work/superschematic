@@ -154,6 +154,12 @@ type Service struct {
 	// table; every other queue's table is its class's name with _queue.
 	QueueTables map[string]string
 
+	// BehaviorQueues are the queues of a DB service that the loader adds
+	// for a table's behaviors (D103, D104), by queue: the table and what
+	// the queue holds, deadlines, changes or events. An environment that
+	// runs the database runs a worker that drains each (D151).
+	BehaviorQueues map[string]ir.BehaviorQueue
+
 	// Engine reports that a DB service is an engine database (D58): a type
 	// of it composes a behavior. The servers of the APIs that connect to it
 	// open the engine on its database, and the stack runs the engine's

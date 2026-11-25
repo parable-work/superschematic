@@ -92,6 +92,12 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		svc.FieldKeys = outputs.EncryptionKey()
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
+			if td.BehaviorQueue != nil {
+				if svc.BehaviorQueues == nil {
+					svc.BehaviorQueues = map[string]ir.BehaviorQueue{}
+				}
+				svc.BehaviorQueues[td.Name] = ir.BehaviorQueue{Row: td.BehaviorQueue.Row, Kind: td.BehaviorQueue.Kind}
+			}
 			if td.SQLName != "" {
 				if svc.QueueTables == nil {
 					svc.QueueTables = map[string]string{}
