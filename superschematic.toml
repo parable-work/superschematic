@@ -177,3 +177,4 @@ undeclared_input_keys = "refuse"
 input_trailing_data = "refuse"
 optional_input_empty_body = "refuse"
 strict_input_refusals = "route"
+app_error_context = false

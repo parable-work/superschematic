@@ -1069,6 +1069,18 @@ enum lacks does not match the declared type. A runtime with its own
 answers words them from the type's name. An open type's answers do not
 change. Any other value fails the load.
 
+### `go_api.app_error_context`
+
+Default: `false`
+
+`true` makes `RespondAppError` take the request's context after the
+writer, `RespondAppError(w, ctx, logger, err)`, and pass it to the
+runtime's `apperror.Respond` as its second argument. Every call the router
+writes passes `r.Context()`. It is for a runtime that answers a request the
+client canceled, or whose deadline passed, from that context.
+superschematic's runtime takes no context, so a project sets the key only
+with a runtime whose `Respond` does.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

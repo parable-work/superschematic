@@ -64,6 +64,25 @@ type GoAPIConfig struct {
 	// in the refusal of an undeclared key, and a string an enum lacks does
 	// not match the declared type.
 	StrictInputRefusals string `toml:"strict_input_refusals"`
+
+	// AppErrorContext makes RespondAppError take the request's context
+	// after the writer, and pass it to the runtime's apperror.Respond as
+	// its second argument, for a runtime that answers a request the client
+	// canceled or whose deadline passed from that context. Every call the
+	// router writes passes r.Context(). superschematic's runtime takes no
+	// context, so the key is for a runtime whose Respond does. False
+	// (default) passes none.
+	AppErrorContext bool `toml:"app_error_context"`
+}
+
+// AppErrorContextArg is the argument the router's calls of
+// RespondAppError pass before the logger: "r.Context(), " under
+// app_error_context, and nothing otherwise.
+func (c GoAPIConfig) AppErrorContextArg() string {
+	if c.AppErrorContext {
+		return "r.Context(), "
+	}
+	return ""
 }
 
 // The values of strict_input_refusals.

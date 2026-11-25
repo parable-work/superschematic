@@ -598,7 +598,7 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 		return handler
 	}
 	return gohttp.HandlerFunc(func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		RespondAppError(w, LoggerFromContext(r.Context()), NotImplementedError(operation+" has no manual route handler"))
+		RespondAppError(w, {{ appErrorContext }}LoggerFromContext(r.Context()), NotImplementedError(operation+" has no manual route handler"))
 	})
 }
 {{- end }}
@@ -1531,7 +1531,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
 			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
+			RespondAppError(w, {{ appErrorContext }}logger, err)
 			return
 		}
 
@@ -1564,7 +1564,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
+			RespondAppError(w, {{ appErrorContext }}logger, err)
 			return
 		}
 		{{- end }}
@@ -1573,7 +1573,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// amended); a next no router reads back under it is the
 		// implementation's error.
 		if result, err = paging.Bind(result, page); err != nil {
-			RespondAppError(w, LoggerFromContext(r.Context()), err)
+			RespondAppError(w, {{ appErrorContext }}LoggerFromContext(r.Context()), err)
 			return
 		}
 		{{- end }}

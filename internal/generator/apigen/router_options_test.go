@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -19,7 +20,8 @@ import (
 const routerOptionsAPI = "router-options-api"
 
 // routerOptions is the [go_api] table the option run sets: every key away
-// from its default.
+// from its default but app_error_context, which needs a runtime whose
+// Respond takes a context (TestAppErrorContext).
 var routerOptions = naming.GoAPIConfig{
 	ValidationErrorCode:    "VALIDATION-1",
 	PathParamError:         "{name} is not a path segment",
@@ -61,6 +63,57 @@ func TestRouterOptionsAnswerTheirRequests(t *testing.T) {
 			}
 			runGoAPIModule(t, apiDir)
 		})
+	}
+}
+
+// TestAppErrorContext: under go_api.app_error_context RespondAppError takes
+// the request's context and passes it to the runtime's Respond, and every
+// call routes.go writes passes r.Context(). superschematic's runtime takes
+// no context, so the module is not built here; without the key the module
+// TestRouterOptionsAnswerTheirRequests builds calls the runtime without
+// one.
+func TestAppErrorContext(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join("testdata", "services", routerOptionsAPI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, on := range []bool{false, true} {
+		names := naming.Default()
+		names.GoAPI.AppErrorContext = on
+		output, err := apigen.Generate(schema, apigen.Options{
+			Provider:    sessionauth.Provider{},
+			SchemaName:  routerOptionsAPI,
+			ModulePath:  "example.com/schemas/api/" + routerOptionsAPI,
+			TypesModule: "example.com/schemas/types/go/" + routerOptionsAPI,
+			Naming:      names,
+			Clock:       goModuleClock,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outDir := t.TempDir()
+		if err := apigen.WriteAPI(output, outDir); err != nil {
+			t.Fatal(err)
+		}
+		read := func(name string) string {
+			data, err := os.ReadFile(filepath.Join(outDir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(data)
+		}
+		errorsGo, routesGo := read("errors.go"), read("routes.go")
+		signature, call, passing := "func RespondAppError(w http.ResponseWriter, logger *zap.Logger, err error) {", "runtimeapperror.Respond(w, logger, err)", 0
+		calls := strings.Count(routesGo, "RespondAppError(w, ")
+		if on {
+			signature, call, passing = "func RespondAppError(w http.ResponseWriter, ctx context.Context, logger *zap.Logger, err error) {", "runtimeapperror.Respond(w, ctx, logger, err)", calls
+		}
+		if !strings.Contains(errorsGo, signature) || !strings.Contains(errorsGo, call) {
+			t.Errorf("app_error_context %t: errors.go lacks %q and %q", on, signature, call)
+		}
+		if got := strings.Count(routesGo, "RespondAppError(w, r.Context(), "); calls == 0 || got != passing {
+			t.Errorf("app_error_context %t: %d of the %d RespondAppError calls in routes.go pass r.Context(), want %d", on, got, calls, passing)
+		}
 	}
 }
 

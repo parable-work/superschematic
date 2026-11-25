@@ -3,6 +3,9 @@
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if $.Naming.GoAPI.AppErrorContext }}
+	"context"
+{{- end }}
 	"net/http"
 
 	runtimeapperror "{{ $.Naming.HTTPRuntimeGoModule }}/apperror"
@@ -31,9 +34,18 @@ type ValidationAppError = runtimeapperror.ValidationAppError
 // RespondAppError handles error responses by logging full error details server-side
 // and returning safe user-facing messages to clients.
 // This is the exported version for use in implementation code.
+{{- if $.Naming.GoAPI.AppErrorContext }}
+// ctx is the request's context, which the runtime reads to answer a
+// request the client canceled or whose deadline passed
+// (go_api.app_error_context).
+func RespondAppError(w http.ResponseWriter, ctx context.Context, logger *zap.Logger, err error) {
+	runtimeapperror.Respond(w, ctx, logger, err)
+}
+{{- else }}
 func RespondAppError(w http.ResponseWriter, logger *zap.Logger, err error) {
 	runtimeapperror.Respond(w, logger, err)
 }
+{{- end }}
 
 // NewAppError creates a new AppError with the given code, message, and wrapped error.
 func NewAppError(code, message string, err error) *AppError {
