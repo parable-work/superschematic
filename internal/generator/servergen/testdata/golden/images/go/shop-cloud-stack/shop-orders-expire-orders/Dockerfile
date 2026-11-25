@@ -25,7 +25,8 @@
 # apt-get to install one with, so the image runs the binary on the slim
 # image of the Debian release the build stage links it against, with what
 # distroless cc held beside glibc, the CA certificates, OpenSSL and the
-# time zones, as the same non-root user:
+# time zones, as the same non-root user, in its home, as distroless's
+# nonroot image runs it:
 #
 #   poppler-utils
 #
@@ -74,4 +75,5 @@ RUN apt-get update \
     && useradd --uid 65532 --gid 65532 --create-home nonroot
 COPY --from=build /out/job /job
 USER nonroot
+WORKDIR /home/nonroot
 ENTRYPOINT ["/job"]

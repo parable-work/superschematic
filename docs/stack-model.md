@@ -2074,7 +2074,9 @@ and `extend`.
   links the binary against and distroless `cc` is built from, installs
   beside them what distroless held, the CA certificates, OpenSSL and the
   time zones, and runs the binary as a user it makes with distroless's
-  name and id, `nonroot`, 65532. Not taken: an arbitrary `RUN` line,
+  name and id, `nonroot`, 65532, in that user's home, `/home/nonroot`,
+  which distroless's `nonroot` image starts in too, so a program that
+  writes to its working directory may. Not taken: an arbitrary `RUN` line,
   which is a Dockerfile by another name.
 - **`extend`** is the path of a Dockerfile the project owns, relative to
   the repository root. A deploy builds the generated image, then builds

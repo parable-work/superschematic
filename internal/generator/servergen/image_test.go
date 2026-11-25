@@ -119,7 +119,7 @@ func TestGoImageAdditions(t *testing.T) {
 	wantAll(t, "shop-api's Dockerfile", dockerfile,
 		"\nFROM debian:trixie-slim\nRUN apt-get update \\\n    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\\n"+
 			"      ca-certificates \\\n      chromium \\\n      fonts-liberation \\\n      openssl \\\n      tzdata \\\n    && rm -rf /var/lib/apt/lists/* \\\n",
-		"    && groupadd --gid 65532 nonroot \\\n    && useradd --uid 65532 --gid 65532 --create-home nonroot\nCOPY --from=build /out/server /server\nUSER nonroot\n",
+		"    && groupadd --gid 65532 nonroot \\\n    && useradd --uid 65532 --gid 65532 --create-home nonroot\nCOPY --from=build /out/server /server\nUSER nonroot\nWORKDIR /home/nonroot\n",
 		"#   chromium fonts-liberation\n")
 	if strings.Contains(dockerfile, "FROM gcr.io/distroless") {
 		t.Errorf("shop-api's Dockerfile, which installs packages, still runs on distroless:\n%s", dockerfile)
@@ -138,7 +138,7 @@ func TestGoImageAdditions(t *testing.T) {
 	wantAll(t, "the worker's ignore file", ignore, "\n!docker/fulfil\n", "\n!docker/fulfil/Dockerfile\n")
 
 	dockerfile, _ = readDocker(t, repoRoot, cloudStack, expireOrders)
-	wantAll(t, "the job's Dockerfile", dockerfile, "      poppler-utils \\\n", "--build-arg BASE=", "\nFROM debian:trixie-slim\n", "COPY --from=build /out/job /job\nUSER nonroot\n")
+	wantAll(t, "the job's Dockerfile", dockerfile, "      poppler-utils \\\n", "--build-arg BASE=", "\nFROM debian:trixie-slim\n", "COPY --from=build /out/job /job\nUSER nonroot\nWORKDIR /home/nonroot\n")
 
 	// Storefront, which the stack names nothing for, is as shop-stack's
 	// build writes it.
@@ -279,7 +279,7 @@ func TestRustImageAdditions(t *testing.T) {
 	wantAll(t, "rs-stock's Dockerfile", dockerfile,
 		"\nFROM debian:trixie-slim\nRUN apt-get update \\\n    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\\n"+
 			"      ca-certificates \\\n      openssl \\\n      poppler-utils \\\n      tzdata \\\n    && rm -rf /var/lib/apt/lists/* \\\n",
-		"COPY --from=build /out/rs-stock /rs-stock\nUSER nonroot\n",
+		"COPY --from=build /out/rs-stock /rs-stock\nUSER nonroot\nWORKDIR /home/nonroot\n",
 		"#   docker build -f docker/stock.Dockerfile --build-arg BASE=<the image this file built> .\n")
 	wantAll(t, "rs-stock's ignore file", ignore, "\n!docker\n", "\n!docker/stock.Dockerfile\n")
 
@@ -352,6 +352,10 @@ func TestTheDockerfileWithImageAdditionsBuildsAnImageThatServes(t *testing.T) {
 		"test -d /usr/share/zoneinfo/Europe && echo held":         "held",
 		"ls /var/lib/apt/lists | wc -l":                           "0",
 		"touch \"$HOME/probe\" && echo written":                   "written",
+		// It starts in the user's home, as distroless's nonroot image
+		// does, which it may write.
+		"pwd":                         "/home/nonroot",
+		"touch probe && echo written": "written",
 	} {
 		if got := strings.TrimSpace(sh(image, script)); got != want {
 			t.Errorf("in the image, `%s` prints %q, want %q", script, got, want)

@@ -1765,7 +1765,7 @@ What the final stage runs on:
 | Language | With no packages | With packages |
 | --- | --- | --- |
 | TypeScript | Bun's image, a Debian one | the same, with the packages installed before it leaves root |
-| Go, Rust | distroless `cc`, as a non-root user | `debian:trixie-slim`, the release the build stage links the binary against, as the same non-root user (`nonroot`, 65532), with the CA certificates, OpenSSL and time zones distroless held, since distroless has no `apt-get` |
+| Go, Rust | distroless `cc`, as a non-root user | `debian:trixie-slim`, the release the build stage links the binary against, as the same non-root user (`nonroot`, 65532) in its home, `/home/nonroot`, as distroless starts it, with the CA certificates, OpenSSL and time zones distroless held, since distroless has no `apt-get` |
 
 An image's identity is its build context's digest, and a deploy builds it
 again only when that changes. The generated Dockerfile holds the
