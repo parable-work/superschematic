@@ -96,6 +96,17 @@ pub struct StockChecked {
     pub quantity: GenericInt64,
 }
 
+/// Sent when stock moves within a warehouse: one waits per warehouse and SKU
+/// together, the two fields its key names (D80). A later move of that SKU
+/// there replaces the one that waits, the same SKU in another warehouse
+/// waits beside it, and a worker holds one claim per warehouse and SKU.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StockMoved {
+    pub warehouse: String,
+    pub sku: String,
+    pub quantity: GenericInt64,
+}
+
 /// Sent when an account's records are to be synced: every request is kept,
 /// and the worker syncs one account at a time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

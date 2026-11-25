@@ -3,6 +3,8 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"path"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -52,6 +54,12 @@ const (
 	// the handles of the APIs its origin serves, every API it calls when
 	// apis is left out.
 	stackOriginSchema = `{"type":"object","required":["site"],"additionalProperties":false,"properties":{"site":` + stackHandleSchema + `,"apis":{"type":"array","minItems":1,"items":` + stackHandleSchema + `}}}`
+	// stackImageSchema is what `images` lists (D144): a deployable that
+	// runs code, named as a settings element names one, with the packages
+	// its image installs and the Dockerfile that extends it.
+	stackImageSchema = `{"type":"object","required":["of"],"additionalProperties":false,"properties":{"of":` + stackRefSchema + `,` +
+		`"job":{"type":"string","minLength":1},"worker":{"type":"string","minLength":1},"deriver":{"type":"string","minLength":1},"app":{"type":"string","minLength":1},"runner":{"const":true},` +
+		`"packages":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"extend":{"type":"string","minLength":1}}}`
 )
 
 var (
@@ -61,7 +69,8 @@ var (
 		"properties": {
 			"deploy": {"type": "array", "items": ` + stackHandleSchema + `},
 			"expose": {"type": "array", "items": ` + stackExposeSchema + `},
-			"origins": {"type": "array", "items": ` + stackOriginSchema + `}
+			"origins": {"type": "array", "items": ` + stackOriginSchema + `},
+			"images": {"type": "array", "items": ` + stackImageSchema + `}
 		}
 	}`)
 	serverArgs = json.RawMessage(`{
@@ -185,12 +194,13 @@ func stackDeclaration(td *ir.TypeDef) string {
 	return ""
 }
 
-// applyStack reads @stack({ deploy, expose, origins }).
+// applyStack reads @stack({ deploy, expose, origins, images }).
 func applyStack(td *ir.TypeDef, arg any) error {
 	var args struct {
 		Deploy  []ir.ServiceRef `json:"deploy"`
 		Expose  []any           `json:"expose"`
 		Origins []*ir.Origin    `json:"origins"`
+		Images  []any           `json:"images"`
 	}
 	if err := DecodeArgs([]any{arg}, &args); err != nil {
 		return err
@@ -203,7 +213,94 @@ func applyStack(td *ir.TypeDef, arg any) error {
 		}
 		decl.Expose = append(decl.Expose, ref)
 	}
+	for i, v := range args.Images {
+		image, err := deployableImage(v)
+		if err != nil {
+			return ArgErrorf(0, "@stack images[%d]: %v", i, err)
+		}
+		decl.Images = append(decl.Images, image)
+	}
 	td.Stack = decl
+	return nil
+}
+
+// deployableImage reads one `images` element (D144): of, with a job, a
+// worker, a deriver, an app or runner beside a handle as a settings
+// element names one, and the image's packages and extend.
+func deployableImage(v any) (*ir.DeployableImage, error) {
+	element, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("want an object: { of, packages, extend }")
+	}
+	ref, err := deployableRef(element["of"])
+	if err != nil {
+		return nil, fmt.Errorf("of: %w", err)
+	}
+	image := &ir.DeployableImage{Of: ref}
+	for _, key := range []string{"job", "worker", "deriver", "app"} {
+		name, _ := element[key].(string)
+		if name == "" {
+			continue
+		}
+		if ref.Service == nil {
+			return nil, fmt.Errorf("%s %s names a %s of the API service of names, but of names no service; write `of: <API handle>, %s: %q`", key, name, key, key, name)
+		}
+		switch key {
+		case "job":
+			image.Of.Job = name
+		case "worker":
+			image.Of.Worker = name
+		case "deriver":
+			image.Of.Deriver = name
+		case "app":
+			image.Of.App = name
+		}
+	}
+	if runner, _ := element["runner"].(bool); runner {
+		if ref.Service == nil {
+			return nil, fmt.Errorf("runner names the engine's runner of the DB service of names, but of names no service; write `of: <DB handle>, runner: true`")
+		}
+		image.Of.Runner = true
+	}
+	if list, ok := element["packages"].([]any); ok {
+		for _, p := range list {
+			name, _ := p.(string)
+			image.Packages = append(image.Packages, name)
+		}
+	}
+	image.Extend, _ = element["extend"].(string)
+	return image, nil
+}
+
+// imagePackagePattern is the shape of a Debian package's name: lower-case
+// letters, digits, plus, minus and period, two characters or more,
+// beginning with a letter or a digit (Debian policy, section 5.6.1).
+var imagePackagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`)
+
+// CheckDeployableImage checks one `images` element in every form (D144):
+// it names packages or a Dockerfile to extend with; each package is a
+// Debian package's name, with no version, option or shell word, named
+// once; and extend is a slash-separated path under the repository root.
+// Which deployable it names is resolution's to check.
+func CheckDeployableImage(image *ir.DeployableImage) error {
+	if len(image.Packages) == 0 && image.Extend == "" {
+		return fmt.Errorf("names no packages and no Dockerfile to extend with; an image element sets packages, extend or both")
+	}
+	seen := map[string]bool{}
+	for _, p := range image.Packages {
+		switch {
+		case !imagePackagePattern.MatchString(p):
+			return fmt.Errorf("package %q is no Debian package name: lower-case letters, digits, +, - and ., two characters or more, with no version; what a package's name cannot say belongs in the Dockerfile `extend` names", p)
+		case seen[p]:
+			return fmt.Errorf("package %s is named twice", p)
+		}
+		seen[p] = true
+	}
+	if e := image.Extend; e != "" {
+		if strings.HasPrefix(e, "/") || strings.Contains(e, `\`) || path.Clean(e) != e || e == ".." || strings.HasPrefix(e, "../") || e == "." {
+			return fmt.Errorf("extend is %q; it is the path of a Dockerfile under the repository root, slash-separated and relative to it, as docker/shop-api.Dockerfile", e)
+		}
+	}
 	return nil
 }
 
@@ -261,6 +358,13 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 	settings := &ir.DeployableSettings{}
 	var job, worker, deriver, app string
 	var runner bool
+	// A worker's element takes maxInstances, mode and idle as its own
+	// (D53, D145); on any other element each is the platform's setting of
+	// that name, as a Cloud Run server's maxInstances is.
+	isWorker := false
+	if name, _ := element["worker"].(string); name != "" {
+		isWorker = true
+	}
 	for _, key := range sortedKeys(element) {
 		value := element[key]
 		switch key {
@@ -313,6 +417,32 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 				settings.Env[field] = ir.EnvValue{Value: v}
 			}
 		default:
+			if isWorker {
+				switch key {
+				case "maxInstances":
+					n, ok := value.(float64)
+					if !ok || n != float64(int(n)) {
+						return nil, fmt.Errorf("maxInstances is %v; it is a whole number, one or more", value)
+					}
+					maxInstances := int(n)
+					settings.MaxInstances = &maxInstances
+					continue
+				case "mode":
+					mode, ok := value.(string)
+					if !ok {
+						return nil, fmt.Errorf("mode is %v; it is %q or %q", value, ir.WorkerModePool, ir.WorkerModeDrain)
+					}
+					settings.Mode = mode
+					continue
+				case "idle":
+					idle, ok := value.(string)
+					if !ok {
+						return nil, fmt.Errorf("idle is %v; it is a duration such as \"30s\"", value)
+					}
+					settings.Idle = idle
+					continue
+				}
+			}
 			if settings.Values == nil {
 				settings.Values = map[string]any{}
 			}
@@ -509,6 +639,16 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 					r.Errorf(td.Owner, "%s names deriver %s; only a server is exposed", where, ref.Deriver)
 				}
 			}
+			for i, image := range td.Stack.Images {
+				if image == nil {
+					continue
+				}
+				where := fmt.Sprintf("@stack class %s images[%d]", name, i)
+				checkRef(where+" of", image.Of)
+				if err := CheckDeployableImage(image); err != nil {
+					r.Errorf(td.Owner, "%s %v", where, err)
+				}
+			}
 		}
 		if td.Environment != nil {
 			for i, settings := range td.Environment.Settings {
@@ -604,6 +744,12 @@ func checkWorkerSettings(where, owner string, settings *ir.DeployableSettings, r
 		if settings.Concurrency != nil {
 			keys = append(keys, "concurrency")
 		}
+		if settings.Mode != "" {
+			keys = append(keys, "mode")
+		}
+		if settings.Idle != "" {
+			keys = append(keys, "idle")
+		}
 		if len(keys) > 0 {
 			r.Errorf(owner, "%s sets %s, which only a worker or a deriver takes; name the worker beside its API's handle, `of: <API handle>, worker: \"<worker class>\"`, or the deriver, `of: <API handle>, deriver: \"<deriver class>\"`", where, strings.Join(keys, " and "))
 		}
@@ -618,4 +764,24 @@ func checkWorkerSettings(where, owner string, settings *ir.DeployableSettings, r
 	if settings.Concurrency != nil && *settings.Concurrency < 1 {
 		r.Errorf(owner, "%s concurrency is %d; it is one or more", where, *settings.Concurrency)
 	}
+	if err := CheckWorkerMode(settings.Mode, settings.Idle); err != nil {
+		r.Errorf(owner, "%s %v", where, err)
+	}
+}
+
+// CheckWorkerMode checks a worker's mode and idle settings in every form
+// (D145): a mode of pool or drain, and an idle of whole seconds, which
+// only drain mode reads.
+func CheckWorkerMode(mode, idle string) error {
+	switch mode {
+	case "", ir.WorkerModePool, ir.WorkerModeDrain:
+	default:
+		return fmt.Errorf("mode is %q; it is %q, a worker whose instances keep running, or %q, one that runs as a job that empties its queue and exits", mode, ir.WorkerModePool, ir.WorkerModeDrain)
+	}
+	if idle != "" {
+		if _, err := TimeoutSeconds(idle); err != nil {
+			return fmt.Errorf("idle: %w", err)
+		}
+	}
+	return nil
 }

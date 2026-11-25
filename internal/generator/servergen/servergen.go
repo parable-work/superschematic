@@ -220,6 +220,10 @@ type Input struct {
 	// rules-wasm crate's staticlib, and a release's archives hold.
 	RulesGo string
 
+	// Image is what the stack adds to the entrypoint's image, nil when it
+	// adds nothing (D144).
+	Image *ImageInput
+
 	// opensEngine is true when the entrypoint opens an engine (D58), whose
 	// archive its image must link.
 	opensEngine bool
@@ -602,6 +606,12 @@ type Database struct {
 	// (D85): every API on the database holds the one secret. Empty for a
 	// database without one.
 	FieldKeys string
+
+	// Queues is true when the database declares a queue: the entrypoint
+	// gives its ORM's OnEnqueue the wakes the environment holds, so an
+	// enqueue starts the queue's worker where it runs in drain mode
+	// (D145).
+	Queues bool
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -661,6 +671,10 @@ type Docker struct {
 	// archive (D103): the rules stage builds it, or the release's archives
 	// hold it.
 	LinksRules bool
+
+	// Image is what the stack adds to the image, nil when it adds
+	// nothing (D144).
+	Image *Image
 
 	// Include are the paths the build context holds.
 	Include []string
@@ -882,6 +896,7 @@ func Plan(in Input) (*Server, error) {
 				if keys := o.Deps.FieldKeys; keys != "" {
 					d.FieldKeys = api.Var + "Config." + keys
 				}
+				d.Queues = o.Deps.Queues
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
 				if slices.Contains(in.CloudSQL, db) {
@@ -1008,6 +1023,11 @@ func Plan(in Input) (*Server, error) {
 	s.Docker, s.NoDocker, err = planDocker(in, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(in.Image, s.Kind, s.Name, in.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", in.Stack, err)
+		}
 	}
 	return s, nil
 }
@@ -1489,6 +1509,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyIdentity": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
+		},
+		"anyQueues": func(databases []*Database) bool {
+			return slices.ContainsFunc(databases, func(d *Database) bool { return d.Queues })
 		},
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })

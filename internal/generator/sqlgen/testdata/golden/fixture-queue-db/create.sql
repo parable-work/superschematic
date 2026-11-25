@@ -109,6 +109,26 @@ CREATE TABLE stock_checked_queue (
 COMMENT ON TABLE stock_checked_queue IS 'Sent when a stock count is asked for: one waits per SKU, and a later ask
 while it waits adds nothing.';
 
+CREATE TABLE stock_moved_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  warehouse TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  quantity BIGINT NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE stock_moved_queue IS 'Sent when stock moves within a warehouse: one waits per warehouse and SKU
+together, the two fields its key names (D80). A later move of that SKU
+there replaces the one that waits, the same SKU in another warehouse
+waits beside it, and a worker holds one claim per warehouse and SKU.';
+
 CREATE TABLE sync_requested_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   account_id UUID NOT NULL,
@@ -171,6 +191,16 @@ CREATE INDEX idx_stock_checked_queue_claim_expires_at ON stock_checked_queue USI
 CREATE INDEX idx_stock_checked_queue_updated_at ON stock_checked_queue USING BTREE (updated_at) WHERE state = 'done';
 
 CREATE UNIQUE INDEX uq_stock_checked_queue_ready_key ON stock_checked_queue USING BTREE (sku) WHERE state = 'ready';
+
+CREATE INDEX idx_stock_moved_queue_due_at ON stock_moved_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_stock_moved_queue_claim_expires_at ON stock_moved_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_stock_moved_queue_updated_at ON stock_moved_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE UNIQUE INDEX uq_stock_moved_queue_ready_key ON stock_moved_queue USING BTREE (warehouse, sku) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_stock_moved_queue_claimed_key ON stock_moved_queue USING BTREE (warehouse, sku) WHERE state = 'claimed';
 
 CREATE INDEX idx_sync_requested_queue_due_at ON sync_requested_queue USING BTREE (due_at) WHERE state = 'ready';
 

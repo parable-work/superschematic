@@ -344,6 +344,24 @@
         }
       ],
       "settings": {
+        "cors": [
+          {
+            "exposeHeaders": [
+              "etag"
+            ],
+            "headers": [
+              "content-type"
+            ],
+            "maxAge": "1h",
+            "methods": [
+              "GET",
+              "PUT"
+            ],
+            "origins": [
+              "https://staging.acme.dev"
+            ]
+          }
+        ],
         "deleteAfterDays": 30
       },
       "resourceName": "acme-staging-mixed-shop-shop-media",
@@ -2097,6 +2115,22 @@
         "id": "shop-media.bucket",
         "type": "gcp:storage/bucket:Bucket",
         "properties": {
+          "cors": [
+            {
+              "maxAgeSeconds": 3600,
+              "methods": [
+                "GET",
+                "PUT"
+              ],
+              "origins": [
+                "https://staging.acme.dev"
+              ],
+              "responseHeaders": [
+                "content-type",
+                "etag"
+              ]
+            }
+          ],
           "forceDestroy": false,
           "lifecycleRules": [
             {

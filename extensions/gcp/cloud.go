@@ -189,6 +189,12 @@ type BuildSpec struct {
 	// Dockerfile is the Dockerfile's path in the context.
 	Dockerfile string
 
+	// Extend is the path in the context of a Dockerfile that extends the
+	// image Dockerfile builds (D144), or empty. The build then makes
+	// Dockerfile's image under BuildBaseTag, which it does not push, and
+	// Image from Extend with the build argument BASE naming it.
+	Extend string
+
 	// Image is the repository and tag the build pushes,
 	// `<repository>:<tag>`.
 	Image string
@@ -839,11 +845,7 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 		Source: &cloudbuildpb.Source{Source: &cloudbuildpb.Source_StorageSource{
 			StorageSource: &cloudbuildpb.StorageSource{Bucket: spec.Bucket, Object: spec.Object},
 		}},
-		Steps: []*cloudbuildpb.BuildStep{{
-			Name: dockerStep,
-			Env:  []string{"DOCKER_BUILDKIT=1"},
-			Args: []string{"build", "-f", spec.Dockerfile, "-t", spec.Image, "."},
-		}},
+		Steps:          buildSteps(spec),
 		Images:         []string{spec.Image},
 		ServiceAccount: "projects/" + project + "/serviceAccounts/" + spec.ServiceAccount,
 		Timeout:        durationpb.New(spec.Timeout),
@@ -883,6 +885,31 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 		}
 	}
 	return nil, fmt.Errorf("gcp: the build of %s pushed no image of that name (logs: %s)", spec.Image, done.GetLogUrl())
+}
+
+// BuildBaseTag is the tag a build gives the image its generated Dockerfile
+// builds when another Dockerfile extends it (D144). It names the image in
+// the build's own Docker daemon alone, for the extending build's FROM: the
+// build pushes the extended image and never this one.
+const BuildBaseTag = "superschematic-generated:base"
+
+// buildSteps are the steps of a build of spec: one docker build of its
+// Dockerfile, tagged as the image the build pushes, or, when a Dockerfile
+// extends the image (D144), that build tagged BuildBaseTag and then the
+// extending Dockerfile's, with the build argument BASE naming it, tagged
+// as the image. Both run in one build, so the second reads the first from
+// the build's daemon.
+func buildSteps(spec BuildSpec) []*cloudbuildpb.BuildStep {
+	step := func(args ...string) *cloudbuildpb.BuildStep {
+		return &cloudbuildpb.BuildStep{Name: dockerStep, Env: []string{"DOCKER_BUILDKIT=1"}, Args: args}
+	}
+	if spec.Extend == "" {
+		return []*cloudbuildpb.BuildStep{step("build", "-f", spec.Dockerfile, "-t", spec.Image, ".")}
+	}
+	return []*cloudbuildpb.BuildStep{
+		step("build", "-f", spec.Dockerfile, "-t", BuildBaseTag, "."),
+		step("build", "-f", spec.Extend, "--build-arg", registry.ImageBaseArg+"="+BuildBaseTag, "-t", spec.Image, "."),
+	}
 }
 
 // buildPoll is how often waitBuild reads a running build.

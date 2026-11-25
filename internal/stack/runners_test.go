@@ -227,7 +227,7 @@ func TestRunnerRefusals(t *testing.T) {
 		s, services := runnerShop()
 		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Instances = intp(2)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "on runner shop-db-engine-runner; only a worker takes instances, maxInstances and concurrency")
+		mustFail(t, errs, stack.CodeInvalidSettings, "on runner shop-db-engine-runner; only a worker takes instances, maxInstances, concurrency, mode and idle")
 	})
 	t.Run("a schedule on a runner", func(t *testing.T) {
 		s, services := runnerShop()

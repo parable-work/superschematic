@@ -432,7 +432,8 @@ func Register(r *registry.Registry) error {
 
 // targetValues is the schema of a local environment's values: the
 // Postgres image and the host port its container publishes, the storage
-// emulator's (D54), and the memory store's (D75).
+// emulator's (D54), with the request headers its CORS answers beside its
+// own (D148), and the memory store's (D75).
 const targetValues = `{
   "type": "object",
   "properties": {
@@ -440,6 +441,7 @@ const targetValues = `{
     "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535},
     "storageImage": {"type": "string", "minLength": 1},
     "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "storageCorsHeaders": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_|~-]+$"}},
     "memoryStoreImage": {"type": "string", "minLength": 1},
     "memoryStorePort": {"type": "integer", "minimum": 1, "maximum": 65535}
   },

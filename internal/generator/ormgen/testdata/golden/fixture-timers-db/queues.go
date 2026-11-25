@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	types "example.com/schemas/types/go/fixture-timers-db"
@@ -77,6 +78,8 @@ func keyHeld(err error) bool {
 // claim alike.
 type queueTable struct {
 	name string
+	// queue is the `@queue` class, which an enqueue's wake names.
+	queue string
 	// retries is how many times a failed message is handled again; backoff
 	// is how long it then waits, doubled for each attempt before, up to
 	// maxBackoff.
@@ -89,13 +92,16 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue, and conflict ends one on a queue that keeps one ready message
+// enqueue, dueIn is the due time of one with a delay, $1 seconds from now,
+// and conflict ends one on a queue that keeps one ready message
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
-// prune deletes up to $2 messages done $1 seconds ago or more.
+// prune deletes up to $2 messages done $1 seconds ago or more; slot takes
+// slot $1 of the locks a worker in drain mode holds while it runs; nextDue
+// reads the seconds until the first ready message that waits falls due.
 type queueStatements struct {
-	insert, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot, nextDue string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -104,13 +110,25 @@ type queueStatements struct {
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none. On a queue that keeps one ready message per key, the conflict
-// clause replaces or keeps the ready message of the key.
-func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
+// clause replaces or keeps the ready message of the key. A message with a
+// delay is due that long after the database's clock: it writes due_at
+// first, as the statements' dueIn of the delay's seconds.
+func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
+	if delay > 0 {
+		columns = append([]string{"due_at"}, columns...)
+		values = append([]any{delay.Seconds()}, values...)
+	}
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		if delay > 0 {
+			placeholders[0] = t.statements.dueIn
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -120,7 +138,67 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
+	if f := onEnqueue.Load(); f != nil {
+		(*f)(t.queue)
+	}
 	return nil
+}
+
+// onEnqueue is what OnEnqueue last gave, or nil.
+var onEnqueue atomic.Pointer[func(queue string)]
+
+// OnEnqueue has every enqueue of the package call f once its statement has
+// run, with the queue's `@queue` class (D145): an entrypoint gives the
+// function that wakes the queue's worker where it runs in drain mode, the
+// HTTP runtime's wake.Notifier's Enqueued. f is called in the enqueue's
+// goroutine, before its transaction commits, so it returns at once and
+// fails nothing. A nil f, the package's state until OnEnqueue is called,
+// calls nothing.
+func OnEnqueue(f func(queue string)) {
+	if f == nil {
+		onEnqueue.Store(nil)
+		return
+	}
+	onEnqueue.Store(&f)
+}
+
+// slot takes one of slots locks named for the table, the first that is
+// free, on a connection of its own, and returns the function that gives
+// it back; it reports false when every one is taken (D145). The lock is
+// the session's, so release closes the connection, and a worker that dies
+// gives its slot back as its connection ends.
+func (t queueTable) slot(ctx context.Context, pool *pgxpool.Pool, slots int) (release func(), ok bool, err error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("take a slot of %s: %w", t.name, err)
+	}
+	for slot := 1; slot <= slots; slot++ {
+		var held bool
+		if err := conn.QueryRow(ctx, t.statements.slot, slot).Scan(&held); err != nil {
+			conn.Release()
+			return nil, false, fmt.Errorf("take a slot of %s: %w", t.name, err)
+		}
+		if held {
+			session := conn.Hijack()
+			return func() { _ = session.Close(context.Background()) }, true, nil
+		}
+	}
+	conn.Release()
+	return nil, false, nil
+}
+
+// nextDue reads how long until the first ready message that is not due
+// yet falls due, by the database's clock, and reports false when none
+// waits (D145).
+func (t queueTable) nextDue(ctx context.Context, pool *pgxpool.Pool) (time.Duration, bool, error) {
+	var seconds *float64
+	if err := pool.QueryRow(ctx, t.statements.nextDue).Scan(&seconds); err != nil {
+		return 0, false, fmt.Errorf("read when the next message of %s is due: %w", t.name, err)
+	}
+	if seconds == nil {
+		return 0, false, nil
+	}
+	return time.Duration(*seconds * float64(time.Second)), true, nil
 }
 
 // claim marks dead each message whose last attempt's claim expired, then
@@ -231,12 +309,14 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statem
 // invoiceChangeQueue is the table of the queue InvoiceChange.
 var invoiceChangeQueue = queueTable{
 	name:       `invoice_change_queue`,
+	queue:      "InvoiceChange",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO invoice_change_queue`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE invoice_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -272,6 +352,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.invoice_change_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM invoice_change_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -283,6 +365,14 @@ const InvoiceChangeLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueInvoiceChange(ctx context.Context, tx TxInterface, msg *types.InvoiceChange) error {
+	return EnqueueInvoiceChangeIn(ctx, tx, msg, 0)
+}
+
+// EnqueueInvoiceChangeIn writes msg into the queue InvoiceChange in tx as EnqueueInvoiceChange
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueInvoiceChangeIn(ctx context.Context, tx TxInterface, msg *types.InvoiceChange, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -307,7 +397,7 @@ func EnqueueInvoiceChange(ctx context.Context, tx TxInterface, msg *types.Invoic
 		}
 		values = append(values, value)
 	}
-	return invoiceChangeQueue.insert(ctx, tx, columns, values)
+	return invoiceChangeQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // InvoiceChangeQueue claims the messages of the queue InvoiceChange for a worker. A
@@ -400,15 +490,33 @@ func (q *InvoiceChangeQueue) Prune(ctx context.Context, limit int) (int, error) 
 	return invoiceChangeQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *InvoiceChangeQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return invoiceChangeQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *InvoiceChangeQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return invoiceChangeQueue.nextDue(ctx, q.pool)
+}
+
 // invoiceDeadlineQueue is the table of the queue InvoiceDeadline.
 var invoiceDeadlineQueue = queueTable{
 	name:       `invoice_deadline_queue`,
+	queue:      "InvoiceDeadline",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO invoice_deadline_queue`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE invoice_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -442,6 +550,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.invoice_deadline_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM invoice_deadline_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -453,6 +563,14 @@ const InvoiceDeadlineLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueInvoiceDeadline(ctx context.Context, tx TxInterface, msg *types.InvoiceDeadline) error {
+	return EnqueueInvoiceDeadlineIn(ctx, tx, msg, 0)
+}
+
+// EnqueueInvoiceDeadlineIn writes msg into the queue InvoiceDeadline in tx as EnqueueInvoiceDeadline
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueInvoiceDeadlineIn(ctx context.Context, tx TxInterface, msg *types.InvoiceDeadline, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -471,7 +589,7 @@ func EnqueueInvoiceDeadline(ctx context.Context, tx TxInterface, msg *types.Invo
 		}
 		values = append(values, value)
 	}
-	return invoiceDeadlineQueue.insert(ctx, tx, columns, values)
+	return invoiceDeadlineQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // InvoiceDeadlineQueue claims the messages of the queue InvoiceDeadline for a worker. A
@@ -558,15 +676,33 @@ func (q *InvoiceDeadlineQueue) Prune(ctx context.Context, limit int) (int, error
 	return invoiceDeadlineQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *InvoiceDeadlineQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return invoiceDeadlineQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *InvoiceDeadlineQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return invoiceDeadlineQueue.nextDue(ctx, q.pool)
+}
+
 // ticketChangeQueue is the table of the queue TicketChange.
 var ticketChangeQueue = queueTable{
 	name:       `ticket_change_queue`,
+	queue:      "TicketChange",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ticket_change_queue`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE ticket_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -602,6 +738,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ticket_change_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ticket_change_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -613,6 +751,14 @@ const TicketChangeLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueTicketChange(ctx context.Context, tx TxInterface, msg *types.TicketChange) error {
+	return EnqueueTicketChangeIn(ctx, tx, msg, 0)
+}
+
+// EnqueueTicketChangeIn writes msg into the queue TicketChange in tx as EnqueueTicketChange
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueTicketChangeIn(ctx context.Context, tx TxInterface, msg *types.TicketChange, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -637,7 +783,7 @@ func EnqueueTicketChange(ctx context.Context, tx TxInterface, msg *types.TicketC
 		}
 		values = append(values, value)
 	}
-	return ticketChangeQueue.insert(ctx, tx, columns, values)
+	return ticketChangeQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // TicketChangeQueue claims the messages of the queue TicketChange for a worker. A
@@ -730,15 +876,33 @@ func (q *TicketChangeQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return ticketChangeQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *TicketChangeQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return ticketChangeQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *TicketChangeQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return ticketChangeQueue.nextDue(ctx, q.pool)
+}
+
 // ticketDeadlineQueue is the table of the queue TicketDeadline.
 var ticketDeadlineQueue = queueTable{
 	name:       `ticket_deadline_queue`,
+	queue:      "TicketDeadline",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ticket_deadline_queue`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE ticket_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -772,6 +936,8 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot:    `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ticket_deadline_queue'), $1::int)`,
+		nextDue: `SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM ticket_deadline_queue WHERE state = 'ready' AND due_at > clock_timestamp()`,
 	},
 }
 
@@ -783,6 +949,14 @@ const TicketDeadlineLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueTicketDeadline(ctx context.Context, tx TxInterface, msg *types.TicketDeadline) error {
+	return EnqueueTicketDeadlineIn(ctx, tx, msg, 0)
+}
+
+// EnqueueTicketDeadlineIn writes msg into the queue TicketDeadline in tx as EnqueueTicketDeadline
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueTicketDeadlineIn(ctx context.Context, tx TxInterface, msg *types.TicketDeadline, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -801,7 +975,7 @@ func EnqueueTicketDeadline(ctx context.Context, tx TxInterface, msg *types.Ticke
 		}
 		values = append(values, value)
 	}
-	return ticketDeadlineQueue.insert(ctx, tx, columns, values)
+	return ticketDeadlineQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // TicketDeadlineQueue claims the messages of the queue TicketDeadline for a worker. A
@@ -886,4 +1060,20 @@ func (q *TicketDeadlineQueue) Release(ctx context.Context, id, token string) err
 // never deletes a dead message.
 func (q *TicketDeadlineQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return ticketDeadlineQueue.prune(ctx, q.pool, limit)
+}
+
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *TicketDeadlineQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return ticketDeadlineQueue.slot(ctx, q.pool, slots)
+}
+
+// NextDue reports how long until the first ready message that is not due
+// yet falls due, by the database's clock, or false when none waits: a
+// worker in drain mode that found the queue idle waits for one due within
+// its horizon instead of exiting (D145).
+func (q *TicketDeadlineQueue) NextDue(ctx context.Context) (time.Duration, bool, error) {
+	return ticketDeadlineQueue.nextDue(ctx, q.pool)
 }

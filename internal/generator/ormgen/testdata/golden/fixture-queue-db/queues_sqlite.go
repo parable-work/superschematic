@@ -91,14 +91,22 @@ type sqliteClaimed struct {
 
 // insert writes msg into the table through tx: each member its JSON sets
 // writes its column, and each it leaves unset takes the column's default,
-// or an enum's schema default.
-func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) error {
+// or an enum's schema default. A message with a delay is due that long
+// after the database's clock: it writes due_at first, as the statements'
+// dueIn of the delay's seconds.
+func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
 	members, err := sqliteMembers(msg)
 	if err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
 	var columns, placeholders []string
 	var values []any
+	if delay > 0 {
+		columns, placeholders, values = []string{"due_at"}, []string{t.statements.dueIn}, []any{delay.Seconds()}
+	}
 	for _, f := range t.fields {
 		value, set := members[f.name]
 		if !set || sqliteUnset(value, f) {
@@ -441,6 +449,7 @@ var orderChangedSQLiteQueue = sqliteQueueTable{
 	},
 	statements: queueStatements{
 		insert:   `INSERT INTO order_changed_queue`,
+		dueIn:    `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
 		conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
 		expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -487,7 +496,14 @@ LIMIT 1`,
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func EnqueueOrderChangedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.OrderChanged) error {
-	return orderChangedSQLiteQueue.insert(ctx, tx, msg)
+	return orderChangedSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueueOrderChangedSQLiteIn writes msg into the queue OrderChanged on SQLite as
+// EnqueueOrderChangedSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueueOrderChangedIn does on Postgres.
+func EnqueueOrderChangedSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.OrderChanged, delay time.Duration) error {
+	return orderChangedSQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // OrderChangedSQLiteQueue claims the messages of the queue OrderChanged on SQLite for
@@ -569,6 +585,7 @@ var orderPlacedSQLiteQueue = sqliteQueueTable{
 	},
 	statements: queueStatements{
 		insert: `INSERT INTO order_placed_queue`,
+		dueIn:  `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
 		expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
@@ -609,7 +626,14 @@ LIMIT 1`,
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func EnqueueOrderPlacedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.OrderPlaced) error {
-	return orderPlacedSQLiteQueue.insert(ctx, tx, msg)
+	return orderPlacedSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueueOrderPlacedSQLiteIn writes msg into the queue OrderPlaced on SQLite as
+// EnqueueOrderPlacedSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueueOrderPlacedIn does on Postgres.
+func EnqueueOrderPlacedSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.OrderPlaced, delay time.Duration) error {
+	return orderPlacedSQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // OrderPlacedSQLiteQueue claims the messages of the queue OrderPlaced on SQLite for
@@ -685,6 +709,7 @@ var pingSQLiteQueue = sqliteQueueTable{
 	},
 	statements: queueStatements{
 		insert: `INSERT INTO ping_queue`,
+		dueIn:  `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
 		expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
@@ -725,7 +750,14 @@ LIMIT 1`,
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func EnqueuePingSQLite(ctx context.Context, tx SQLiteExecer, msg *types.Ping) error {
-	return pingSQLiteQueue.insert(ctx, tx, msg)
+	return pingSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueuePingSQLiteIn writes msg into the queue Ping on SQLite as
+// EnqueuePingSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueuePingIn does on Postgres.
+func EnqueuePingSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.Ping, delay time.Duration) error {
+	return pingSQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // PingSQLiteQueue claims the messages of the queue Ping on SQLite for
@@ -803,6 +835,7 @@ var stockCheckedSQLiteQueue = sqliteQueueTable{
 	},
 	statements: queueStatements{
 		insert:   `INSERT INTO stock_checked_queue`,
+		dueIn:    `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
 		conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
 		expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -845,7 +878,14 @@ LIMIT 1`,
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func EnqueueStockCheckedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.StockChecked) error {
-	return stockCheckedSQLiteQueue.insert(ctx, tx, msg)
+	return stockCheckedSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueueStockCheckedSQLiteIn writes msg into the queue StockChecked on SQLite as
+// EnqueueStockCheckedSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueueStockCheckedIn does on Postgres.
+func EnqueueStockCheckedSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.StockChecked, delay time.Duration) error {
+	return stockCheckedSQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // StockCheckedSQLiteQueue claims the messages of the queue StockChecked on SQLite for
@@ -909,6 +949,138 @@ func (q *StockCheckedSQLiteQueue) Prune(ctx context.Context, limit int) (int, er
 	return stockCheckedSQLiteQueue.prune(ctx, q.db, limit)
 }
 
+// stockMovedSQLiteQueue is the table of the queue StockMoved on SQLite.
+var stockMovedSQLiteQueue = sqliteQueueTable{
+	name:       `stock_moved_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	fields: []sqliteQueueField{
+		{name: "warehouse", column: `warehouse`},
+		{name: "sku", column: `sku`},
+		{name: "quantity", column: `quantity`},
+	},
+	statements: queueStatements{
+		insert:   `INSERT INTO stock_moved_queue`,
+		dueIn:    `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
+		conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+		expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
+		claim: `UPDATE stock_moved_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+  SELECT m.id FROM stock_moved_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT ?1
+)
+RETURNING id, claim_token, attempts, warehouse, sku, quantity`,
+		complete: `UPDATE stock_moved_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		fail: `UPDATE stock_moved_queue SET
+  state = CASE WHEN attempts > ?3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > ?3 OR EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
+  last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE stock_moved_queue SET claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		release: `UPDATE stock_moved_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = MAX(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		prune: `DELETE FROM stock_moved_queue WHERE id IN (
+  SELECT id FROM stock_moved_queue
+  WHERE state = 'done' AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || (?1) || ' seconds')
+  ORDER BY updated_at
+  LIMIT ?2
+)`,
+		due: `SELECT 1 FROM stock_moved_queue AS m
+WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+LIMIT 1`,
+	},
+}
+
+// EnqueueStockMovedSQLite writes msg into the queue StockMoved on SQLite through
+// tx, the caller's transaction: the message is due once tx commits, and
+// never if it rolls back.
+func EnqueueStockMovedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.StockMoved) error {
+	return stockMovedSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueueStockMovedSQLiteIn writes msg into the queue StockMoved on SQLite as
+// EnqueueStockMovedSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueueStockMovedIn does on Postgres.
+func EnqueueStockMovedSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.StockMoved, delay time.Duration) error {
+	return stockMovedSQLiteQueue.insert(ctx, tx, msg, delay)
+}
+
+// StockMovedSQLiteQueue claims the messages of the queue StockMoved on SQLite for
+// a worker, as StockMovedQueue does on Postgres.
+type StockMovedSQLiteQueue struct {
+	db *sql.DB
+}
+
+// NewStockMovedSQLiteQueue returns the queue StockMoved of the SQLite database db.
+func NewStockMovedSQLiteQueue(db *sql.DB) *StockMovedSQLiteQueue {
+	return &StockMovedSQLiteQueue{db: db}
+}
+
+// Claim claims up to n due messages for lease, each read from its JSON form
+// as the types read it; one that does not read it fails alone.
+func (q *StockMovedSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]StockMovedClaim, error) {
+	rows, err := stockMovedSQLiteQueue.claim(ctx, q.db, n, lease)
+	if err != nil {
+		return nil, err
+	}
+	claims := make([]StockMovedClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := StockMovedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			stockMovedSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *StockMovedSQLiteQueue) Complete(ctx context.Context, id, token string) error {
+	return stockMovedSQLiteQueue.update(ctx, q.db, "complete", stockMovedSQLiteQueue.statements.complete, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *StockMovedSQLiteQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return stockMovedSQLiteQueue.fail(ctx, q.db, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *StockMovedSQLiteQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return stockMovedSQLiteQueue.update(ctx, q.db, "extend", stockMovedSQLiteQueue.statements.extend, id, token, lease.Seconds())
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *StockMovedSQLiteQueue) Release(ctx context.Context, id, token string) error {
+	return stockMovedSQLiteQueue.update(ctx, q.db, "release", stockMovedSQLiteQueue.statements.release, id, token)
+}
+
+// Prune deletes up to limit messages done for the queue's retention or
+// longer, the oldest first, and returns how many it deleted. It never
+// deletes a dead message.
+func (q *StockMovedSQLiteQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return stockMovedSQLiteQueue.prune(ctx, q.db, limit)
+}
+
 // syncRequestedSQLiteQueue is the table of the queue SyncRequested on SQLite.
 var syncRequestedSQLiteQueue = sqliteQueueTable{
 	name:       `sync_requested_queue`,
@@ -922,6 +1094,7 @@ var syncRequestedSQLiteQueue = sqliteQueueTable{
 	},
 	statements: queueStatements{
 		insert: `INSERT INTO sync_requested_queue`,
+		dueIn:  `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
 		expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
@@ -966,7 +1139,14 @@ LIMIT 1`,
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func EnqueueSyncRequestedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.SyncRequested) error {
-	return syncRequestedSQLiteQueue.insert(ctx, tx, msg)
+	return syncRequestedSQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// EnqueueSyncRequestedSQLiteIn writes msg into the queue SyncRequested on SQLite as
+// EnqueueSyncRequestedSQLite does, due once delay has passed by the database's
+// clock (D80), as EnqueueSyncRequestedIn does on Postgres.
+func EnqueueSyncRequestedSQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.SyncRequested, delay time.Duration) error {
+	return syncRequestedSQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // SyncRequestedSQLiteQueue claims the messages of the queue SyncRequested on SQLite for

@@ -195,6 +195,10 @@ type TypeScriptInput struct {
 	// repository root, the parent of the schemas root.
 	ImplementationRoot string
 
+	// Image is what the stack adds to the entrypoint's image, nil when it
+	// adds nothing (D144).
+	Image *ImageInput
+
 	// PackageDirs are the directories of the workspace packages the
 	// server depends on, by npm name: each API package, implementation
 	// and SDK, which its image holds whole.
@@ -681,6 +685,10 @@ type TypeScriptDocker struct {
 	// it, each with the node_modules the install linked into it.
 	Runtime []string
 
+	// Image is what the stack adds to the image, nil when it adds
+	// nothing (D144).
+	Image *Image
+
 	// Include are the paths the build context holds, and Exclude the
 	// paths under them it leaves out: what a checkout builds, which the
 	// image builds again.
@@ -1139,6 +1147,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	s.Docker, s.NoDocker, err = planTypeScriptDocker(in, s, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(in.Image, s.Kind, s.Name, in.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", in.Stack, err)
+		}
 	}
 	return s, nil
 }

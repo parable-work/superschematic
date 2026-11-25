@@ -40,7 +40,7 @@ func ledgerServices() []stack.Service {
 		{
 			Name: "finances-db", Kind: ir.SchemaKindDB,
 			Queues:    []string{"EmbedLineItem", "PlaidSyncRequested"},
-			QueueKeys: map[string]string{"EmbedLineItem": "line_item_id", "PlaidSyncRequested": "plaid_item_id"},
+			QueueKeys: map[string][]string{"EmbedLineItem": {"line_item_id"}, "PlaidSyncRequested": {"plaid_item_id"}},
 			Vectors:   true,
 		},
 		{

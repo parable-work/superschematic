@@ -120,7 +120,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Queue Ping is left out: field every is a list of Temporal.Duration values, an INTERVAL[] column, which the TypeScript queue client does not read yet.",
-		"import type { OrderChanged, OrderPlaced, StockChecked, SyncRequested } from './types';",
+		"import type { OrderChanged, OrderPlaced, StockChecked, StockMoved, SyncRequested } from './types';",
 		"export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {",
 	} {
 		if !strings.Contains(string(text), want) {

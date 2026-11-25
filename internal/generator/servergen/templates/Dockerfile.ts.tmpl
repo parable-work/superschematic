@@ -70,6 +70,24 @@
 # stage emits the package's dist/ with the module in it, which the
 # workspace's root overrides the package with.
 {{- end }}
+{{- with .Docker.Image }}
+{{- if .Packages }}
+#
+# The stack adds Debian packages to the image (D144), which its final stage
+# installs on the Bun image, a Debian one, before it leaves root:
+#
+#   {{ join .Packages " " }}
+{{- end }}
+{{- if .Extend }}
+#
+# The stack extends the image with a Dockerfile of the project's (D144),
+# which the context holds, with the directory beside it. A deploy builds
+# this file, then that one with the build argument BASE naming the image
+# this one built, and deploys the result:
+#
+#   docker build -f {{ .Extend }} --build-arg BASE=<the image this file built> .
+{{- end }}
+{{- end }}
 
 ARG RUST_VERSION={{ .RustVersion }}
 ARG BUN_VERSION={{ .BunVersion }}
@@ -171,6 +189,14 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     && bun install --production $frozen
 
 FROM oven/bun:${BUN_VERSION}
+{{- if and .Docker.Image .Docker.Image.Packages }}
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+{{- range .Docker.Image.Packages }}
+      {{ . }} \
+{{- end }}
+    && rm -rf /var/lib/apt/lists/*
+{{- end }}
 {{- range .Docker.Runtime }}
 COPY --from=build /src/{{ . }} /src/{{ . }}
 {{- end }}

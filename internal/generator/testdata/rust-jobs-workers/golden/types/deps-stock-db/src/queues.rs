@@ -36,13 +36,16 @@ pub const RECOUNT_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO recount_queue",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE recount_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM recount_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE recount_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sku",
     "complete": "UPDATE recount_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "fail": "UPDATE recount_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE recount_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE recount_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "prune": "DELETE FROM recount_queue WHERE id IN (\n  SELECT id FROM recount_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
+    "prune": "DELETE FROM recount_queue WHERE id IN (\n  SELECT id FROM recount_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.recount_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM recount_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   }
 }"#;
 
@@ -90,12 +93,15 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO stock_low_queue",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE stock_low_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM stock_low_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE stock_low_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.product_id, q.level, q.urgency, q.warehouses, q.note",
     "complete": "UPDATE stock_low_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "fail": "UPDATE stock_low_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE stock_low_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE stock_low_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "prune": "DELETE FROM stock_low_queue WHERE id IN (\n  SELECT id FROM stock_low_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
+    "prune": "DELETE FROM stock_low_queue WHERE id IN (\n  SELECT id FROM stock_low_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_low_queue'), $1::int)",
+    "nextDue": "SELECT EXTRACT(EPOCH FROM min(due_at) - clock_timestamp())::float8 FROM stock_low_queue WHERE state = 'ready' AND due_at > clock_timestamp()"
   }
 }"#;

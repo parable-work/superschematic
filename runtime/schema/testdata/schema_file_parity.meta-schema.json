@@ -4016,6 +4016,29 @@
       ],
       "type": "object"
     },
+    "DeployableImage": {
+      "additionalProperties": false,
+      "properties": {
+        "extend": {
+          "default": "",
+          "type": "string"
+        },
+        "of": {
+          "$ref": "#/$defs/DeployableRef"
+        },
+        "packages": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "of"
+      ],
+      "type": "object"
+    },
     "DeployableRef": {
       "additionalProperties": false,
       "properties": {
@@ -4065,11 +4088,19 @@
           "default": {},
           "type": "object"
         },
+        "idle": {
+          "default": "",
+          "type": "string"
+        },
         "instances": {
           "type": "integer"
         },
         "maxInstances": {
           "type": "integer"
+        },
+        "mode": {
+          "default": "",
+          "type": "string"
         },
         "of": {
           "$ref": "#/$defs/DeployableRef"
@@ -6198,6 +6229,13 @@
           "default": "",
           "type": "string"
         },
+        "keys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "lease": {
           "default": "",
           "type": "string"
@@ -6653,6 +6691,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/DeployableRef"
+          },
+          "type": "array"
+        },
+        "images": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeployableImage"
           },
           "type": "array"
         },

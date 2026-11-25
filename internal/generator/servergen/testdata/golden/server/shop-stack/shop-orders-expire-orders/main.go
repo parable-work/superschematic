@@ -30,6 +30,7 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
 	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
+	"github.com/parable-work/superschematic/runtime/http/go/wake"
 	"go.uber.org/zap"
 
 	shoporders "example.com/schemas/api/shop-orders"
@@ -78,6 +79,14 @@ func run(logger *zap.Logger) error {
 
 	// One pool per database, shared by every API on it. A pool connects when
 	// it is first used, so the job starts while its database is not up yet.
+	// The wakes of the workers in drain mode, which the environment holds
+	// where their platform gives one (QUEUE_WAKES, D145): an enqueue sends
+	// its queue's, at most once in five seconds, and waits for none.
+	wakes, err := wake.FromEnv(logger)
+	if err != nil {
+		return err
+	}
+	defer wakes.Wait()
 	shopDbPool, err := connect(ctx, "SHOP_DB_DATABASE", shopOrdersConfig.ShopDbDatabase)
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
@@ -87,6 +96,7 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
 	}
+	shopdborm.OnEnqueue(wakes.Enqueued)
 
 	// One client per API called, shared by every API that calls it.
 	shopApiClient, err := newShopApiClient(shopOrdersConfig.ShopApiService)

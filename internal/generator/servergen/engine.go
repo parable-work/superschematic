@@ -314,6 +314,10 @@ type RunnerInput struct {
 	// database on Cloud SQL: cloudsql.go then serves the engine's socket
 	// over the Cloud SQL connector.
 	CloudSQL bool
+
+	// Image is what the stack adds to the runner's image, nil when it adds
+	// nothing (D144).
+	Image *ImageInput
 }
 
 // PlanRunner plans the entrypoint of an engine's runner (D58): a module
@@ -364,6 +368,7 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 		VersionGraphGo: in.VersionGraphGo,
 		EngineGo:       in.EngineGo,
 		EngineProject:  in.EngineProject,
+		Image:          in.Image,
 		opensEngine:    true,
 	}
 	if err := s.planModule(input, dir); err != nil {
@@ -375,6 +380,11 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 	s.Docker, s.NoDocker, err = planDocker(input, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(input.Image, s.Kind, s.Name, input.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", input.Stack, err)
+		}
 	}
 	return s, nil
 }

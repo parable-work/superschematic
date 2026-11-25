@@ -45,6 +45,11 @@ type DepsInfo struct {
 	// since Go takes no replace from the ORM's go.mod.
 	Rules bool
 
+	// Queues reports whether Database declares a queue: its ORM then has
+	// queues.go, whose OnEnqueue an entrypoint gives the wake of the
+	// queues' workers (D145).
+	Queues bool
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 

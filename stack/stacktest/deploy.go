@@ -280,7 +280,11 @@ func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (strin
 		return "", err
 	}
 	if b.log != nil {
-		b.log.Record("build %s: %s", req.Deployable, req.Dockerfile)
+		if req.Extend != "" {
+			b.log.Record("build %s: %s, extended with %s", req.Deployable, req.Dockerfile, req.Extend)
+		} else {
+			b.log.Record("build %s: %s", req.Deployable, req.Dockerfile)
+		}
 	}
 	if err := b.Fail[req.Deployable]; err != nil {
 		return "", err
