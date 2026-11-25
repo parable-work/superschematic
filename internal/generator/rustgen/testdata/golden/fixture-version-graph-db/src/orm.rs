@@ -457,7 +457,7 @@ pub struct PartReleasedRow {
     pub heading: String,
     #[serde(rename = "commitId")]
     pub commit_id: IdentityUUID,
-    /// That commit's sequence: the published version that last changed the entity.
+    /// That commit's sequence: the published version whose release last wrote the row.
     pub sequence: GenericInt64,
 }
 

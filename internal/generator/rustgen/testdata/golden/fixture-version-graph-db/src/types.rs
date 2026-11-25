@@ -190,7 +190,7 @@ pub struct PartReleased {
     /// The released commit that last wrote the row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<RecipeCommit>,
-    /// That commit's sequence: the published version that last changed the entity.
+    /// That commit's sequence: the published version whose release last wrote the row.
     pub sequence: GenericInt64,
 }
 

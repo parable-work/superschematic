@@ -627,7 +627,8 @@ tree against the new one's with the core's `diff` and hands each such kind
 its part to the adapter's `WriteReleased` (`writeReleased`,
 `write_released`): the rows of the entities added or changed, and the keys
 of the ones deleted. An entity the release did not change keeps the row an
-earlier release wrote, with that release's commit and sequence. A root's
+earlier release wrote, with that release's commit and sequence, which after
+a rollback can be a later release than the pointer names. A root's
 first release has no commit before it, so it writes the whole tree; a
 release of the commit already released does too, after deleting the root's
 rows, which rebuilds them when a kind gains a `releasedTable` after its

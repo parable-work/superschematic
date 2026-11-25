@@ -1176,7 +1176,7 @@ class PartReleased(BaseModel):
     # The released commit that last wrote the row.
     commit: Optional[RecipeCommit] = Field(default=None, alias="commit", serialization_alias="commit")
 
-    # That commit's sequence: the published version that last changed the entity.
+    # That commit's sequence: the published version whose release last wrote the row.
     sequence: GenericInt64 = Field(..., alias="sequence", serialization_alias="sequence")
 
     def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:

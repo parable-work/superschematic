@@ -178,7 +178,7 @@ export interface PartReleased {
   heading: string;
   /** The released commit that last wrote the row. */
   commit: RecipeCommit;
-  /** That commit's sequence: the published version that last changed the entity. */
+  /** That commit's sequence: the published version whose release last wrote the row. */
   sequence: GenericInt64;
 }
 

@@ -276,7 +276,7 @@ func (g *graph) addReleased(member *ir.TypeDef) {
 	commit.Relation.OnDelete = cascade
 	commit.Comment = "The released commit that last wrote the row."
 	sequence := scalarField("sequence", int64Scalar, true)
-	sequence.Comment = "That commit's sequence: the published version that last changed the entity."
+	sequence.Comment = "That commit's sequence: the published version whose release last wrote the row."
 	fields = append(fields, commit, sequence)
 
 	indexes := []ir.IndexDef{releasedIndex(rootField)}

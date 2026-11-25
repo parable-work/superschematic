@@ -223,12 +223,15 @@ it diffs the tree of the commit released before against the new one's, and
 writes each added or changed entity's row and deletes each removed one's,
 so a reader never sees a pointer ahead of its rows. An entity a release did
 not change keeps its row, with the commit and sequence of the release that
-last changed it. A root's first release writes the whole tree. A rollback
-is a release, and rewrites the rows that differ. A release of the commit
-already released deletes the root's rows and writes the whole tree again:
-use it once for each released root after a member gains `released: true`,
-since releases before that wrote nothing, and to repair rows written by
-hand. `Sweep` leaves the table alone.
+last wrote it. A root's first release writes the whole tree. A rollback
+is a release, and rewrites the rows that differ; a row it leaves alone
+keeps the commit and sequence of the release that wrote it, which can be a
+later one than the pointer now names. So a row's `commit` and `sequence`
+say which release wrote it, not which commit last changed the entity. A
+release of the commit already released deletes the root's rows and writes
+the whole tree again: use it once for each released root after a member
+gains `released: true`, since releases before that wrote nothing, and to
+repair rows written by hand. `Sweep` leaves the table alone.
 
 To the ORM it is a table that is read: a repository with gets, finds, lists
 and pages, and no create, update, upsert or delete. The Go repository and
