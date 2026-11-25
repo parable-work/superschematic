@@ -173,7 +173,13 @@ async fn a_delayed_message_waits_out_its_delay() {
     let db = Db::open("delay");
     let def = order_placed();
     let queue = db.queue(def.clone());
-    enqueue_sqlite_in(&db.connection(), &def, &an_order(1), Duration::from_secs(300)).unwrap();
+    enqueue_sqlite_in(
+        &db.connection(),
+        &def,
+        &an_order(1),
+        Duration::from_secs(300),
+    )
+    .unwrap();
     let id: String = db
         .connection()
         .query_row("SELECT id FROM order_placed_queue", [], |row| row.get(0))
@@ -184,16 +190,33 @@ async fn a_delayed_message_waits_out_its_delay() {
         (295.0..=300.0).contains(&due_in),
         "a message delayed by 300s is due in {due_in}s"
     );
-    assert!(queue.claim(5, Duration::from_secs(60)).await.unwrap().is_empty());
+    assert!(queue
+        .claim(5, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .is_empty());
 
     enqueue_sqlite_in(&db.connection(), &def, &an_order(2), Duration::ZERO).unwrap();
     let claims = queue.claim(5, Duration::from_secs(60)).await.unwrap();
-    assert_eq!(claims.len(), 1, "the message with no delay is claimed past the one that waits");
+    assert_eq!(
+        claims.len(),
+        1,
+        "the message with no delay is claimed past the one that waits"
+    );
     assert_eq!(claims[0].message["quantity"], 2);
-    queue.complete(&claims[0].id, &claims[0].token).await.unwrap();
+    queue
+        .complete(&claims[0].id, &claims[0].token)
+        .await
+        .unwrap();
 
     // A fraction of a second is a delay too.
-    enqueue_sqlite_in(&db.connection(), &def, &an_order(3), Duration::from_millis(250)).unwrap();
+    enqueue_sqlite_in(
+        &db.connection(),
+        &def,
+        &an_order(3),
+        Duration::from_millis(250),
+    )
+    .unwrap();
     let soonest: f64 = db
         .connection()
         .query_row(
@@ -202,7 +225,10 @@ async fn a_delayed_message_waits_out_its_delay() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!((-5.0..=0.25).contains(&soonest), "a message delayed by 250ms is due in {soonest}s");
+    assert!(
+        (-5.0..=0.25).contains(&soonest),
+        "a message delayed by 250ms is due in {soonest}s"
+    );
 
     db.exec("UPDATE order_placed_queue SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE state = 'ready'");
     let claims = queue.claim(5, Duration::from_secs(60)).await.unwrap();
@@ -216,9 +242,16 @@ async fn a_delayed_message_waits_out_its_delay() {
 
     let mut before = def.clone();
     before.sqlite_statements.as_mut().unwrap().due_in.clear();
-    let err = enqueue_sqlite_in(&db.connection(), &before, &an_order(4), Duration::from_secs(5)).unwrap_err();
+    let err = enqueue_sqlite_in(
+        &db.connection(),
+        &before,
+        &an_order(4),
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
     assert!(
-        err.to_string().contains("holds no dueIn statement, so it cannot delay a message"),
+        err.to_string()
+            .contains("holds no dueIn statement, so it cannot delay a message"),
         "{err}"
     );
     assert_eq!(db.count("order_placed_queue", "quantity = 4"), 0);

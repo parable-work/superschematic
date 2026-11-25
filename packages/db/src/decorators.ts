@@ -361,7 +361,7 @@ export type QueueOptions = {
   readonly retain?: string;
   /**
    * The message's field that keys it, a required scalar or enum field, or a list of two or more such fields
-   * (`["tenantId", "orderId"]`), which key it together: two messages share a key when they agree on every one. It
+   * (`["warehouse", "sku"]`), which key it together: two messages share a key when they agree on every one. It
    * takes effect with `onDuplicate` `"replace"` or `"skip"`, and with `serialize`.
    */
   readonly key?: string | readonly [string, string, ...string[]];

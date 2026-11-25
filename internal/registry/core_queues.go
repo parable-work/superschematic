@@ -108,7 +108,7 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 			for _, k := range key {
 				name, ok := k.(string)
 				if !ok {
-					return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"tenantId\", \"orderId\"]", *a.Key)
+					return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"warehouse\", \"sku\"]", *a.Key)
 				}
 				def.Keys = append(def.Keys, name)
 			}
@@ -119,7 +119,7 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 				def.Key, def.Keys = def.Keys[0], nil
 			}
 		default:
-			return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"tenantId\", \"orderId\"]", *a.Key)
+			return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"warehouse\", \"sku\"]", *a.Key)
 		}
 	}
 	if a.OnDuplicate != nil {
