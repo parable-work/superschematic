@@ -1122,6 +1122,18 @@ parameter's name. Empty, the route drops an empty item, and a list of no
 item is absent. A list argument of a GET operation drops its empty items
 under either value.
 
+### `go_api.file_upload_type`
+
+Default: empty
+
+A type of the scalar Go module that the API's `FileUploadData` aliases,
+for a scalar library that ships the uploaded file's type, so that the
+implementation and the scalar library pass one type. The type has the
+fields `FileUploadData` has (`Filename`, `ContentType`, `Size`, `Data`,
+`Closer`, `Width`, `Height`) and its methods (`Close`, `ReadAllBytes`,
+`ResetReader`). Empty, the API defines `FileUploadData` itself. A value
+that is not an exported Go identifier fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

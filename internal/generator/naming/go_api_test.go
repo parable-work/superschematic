@@ -34,6 +34,7 @@ app_error_context = true
 manual_route_constants = true
 body_arguments = "struct"
 query_param_list_empty_item = "{name} has an empty item"
+file_upload_type = "UploadedFile"
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -53,6 +54,7 @@ minLength = "min_length"
 		ManualRouteConstants:    true,
 		BodyArguments:           GoAPIStruct,
 		QueryParamListEmptyItem: "{name} has an empty item",
+		FileUploadType:          "UploadedFile",
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -73,6 +75,7 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 		{"[go_api]\noptional_input_empty_body = \"null\"\n", `go_api.optional_input_empty_body is "null": use "refuse" or "object"`},
 		{"[go_api]\nstrict_input_refusals = \"type\"\n", `go_api.strict_input_refusals is "type": use "route" or "decoder"`},
 		{"[go_api]\nbody_arguments = \"object\"\n", `go_api.body_arguments is "object": use "values" or "struct"`},
+		{"[go_api]\nfile_upload_type = \"scalars.File\"\n", `go_api.file_upload_type "scalars.File" is not an exported Go identifier`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

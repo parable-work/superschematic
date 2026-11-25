@@ -129,6 +129,46 @@ func TestAppErrorContext(t *testing.T) {
 	}
 }
 
+// TestFileUploadType: go_api.file_upload_type makes FileUploadData an alias
+// of the scalar Go module's type, with no struct or methods of the API's
+// own; without it the API defines FileUploadData (D81). superschematic's
+// scalar library ships no such type, so the module is not built here.
+func TestFileUploadType(t *testing.T) {
+	schema := loadRawBodyCheckAPI(t)
+	for _, uploadType := range []string{"", "UploadedFile"} {
+		names := naming.Default()
+		names.GoAPI.FileUploadType = uploadType
+		output, err := apigen.Generate(schema, apigen.Options{
+			Provider:    sessionauth.Provider{},
+			SchemaName:  rawBodyCheckAPI,
+			ModulePath:  "example.com/schemas/api/" + rawBodyCheckAPI,
+			TypesModule: "example.com/schemas/types/go/" + rawBodyCheckAPI,
+			Naming:      names,
+			Clock:       goModuleClock,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outDir := t.TempDir()
+		if err := apigen.WriteAPI(output, outDir); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(outDir, "fileupload.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := string(data)
+		alias := strings.Contains(file, "type FileUploadData = scalars.UploadedFile") && strings.Contains(file, `scalars "`+names.ScalarGoModule+`"`)
+		own := strings.Contains(file, "type FileUploadData struct {") && strings.Contains(file, "func (f *FileUploadData) Close() error {")
+		if uploadType == "" && (alias || !own) {
+			t.Errorf("no file_upload_type: alias %t, own type %t", alias, own)
+		}
+		if uploadType != "" && (!alias || own) {
+			t.Errorf("file_upload_type %s: alias %t, own type %t", uploadType, alias, own)
+		}
+	}
+}
+
 // writeRouterOptionsModule generates the Go types module and the Go API
 // module of router-options-api with the [go_api] table options into a temp
 // tree laid out as a build writes it and returns the API module's

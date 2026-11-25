@@ -2,6 +2,7 @@ package naming
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -100,6 +101,15 @@ type GoAPIConfig struct {
 	// argument of a GET operation drops its empty items under either
 	// value.
 	QueryParamListEmptyItem string `toml:"query_param_list_empty_item"`
+
+	// FileUploadType names a type of the scalar Go module that the API's
+	// FileUploadData aliases, for a scalar library that ships the uploaded
+	// file's type, so that the implementation and the scalar library pass
+	// one type. The type has FileUploadData's fields (Filename,
+	// ContentType, Size, Data, Closer, Width, Height) and its methods
+	// (Close, ReadAllBytes, ResetReader). Empty (default), the API defines
+	// FileUploadData itself (D81).
+	FileUploadType string `toml:"file_upload_type"`
 }
 
 // QueryParamListEmptyItemOf is the detail of the 400 for the @query list
@@ -212,6 +222,9 @@ func (c GoAPIConfig) check() error {
 	if err := checkGoAPIChoice("body_arguments", c.BodyArguments, GoAPIValues, GoAPIStruct); err != nil {
 		return err
 	}
+	if c.FileUploadType != "" && !goIdentifierRE.MatchString(c.FileUploadType) {
+		return fmt.Errorf("go_api.file_upload_type %q is not an exported Go identifier", c.FileUploadType)
+	}
 	for from, to := range c.ValidatorNames {
 		if !slices.Contains(RouteValidators, from) {
 			return fmt.Errorf("go_api.validator_names renames %q, which no route check names: rename one of %s", from, strings.Join(RouteValidators, ", "))
@@ -225,6 +238,9 @@ func (c GoAPIConfig) check() error {
 	}
 	return nil
 }
+
+// goIdentifierRE matches an exported Go identifier.
+var goIdentifierRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 // checkGoAPIChoice refuses a value of key other than empty and the values
 // it takes.
