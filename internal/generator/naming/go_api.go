@@ -49,6 +49,21 @@ type GoAPIConfig struct {
 	// it, and leaves the rest of the body unread: trailing data and a
 	// second value are not refused.
 	InputTrailingData string `toml:"input_trailing_data"`
+
+	// OptionalInputEmptyBody is "refuse" (default) or "object". "refuse"
+	// refuses an empty body, as for any input. "object" reads the empty
+	// body of an input the operation does not require as the empty object
+	// {}, which the input type then decodes and validates.
+	OptionalInputEmptyBody string `toml:"optional_input_empty_body"`
+}
+
+// GoAPIObject is the "object" value of optional_input_empty_body.
+const GoAPIObject = "object"
+
+// ReadsOptionalEmptyBodyAsObject reports whether optional_input_empty_body
+// is "object".
+func (c GoAPIConfig) ReadsOptionalEmptyBodyAsObject() bool {
+	return c.OptionalInputEmptyBody == GoAPIObject
 }
 
 // The values of go_api.undeclared_input_keys and input_trailing_data.
@@ -106,6 +121,9 @@ func (c GoAPIConfig) check() error {
 		return err
 	}
 	if err := checkGoAPIChoice("input_trailing_data", c.InputTrailingData, GoAPIRefuse, GoAPIIgnore); err != nil {
+		return err
+	}
+	if err := checkGoAPIChoice("optional_input_empty_body", c.OptionalInputEmptyBody, GoAPIRefuse, GoAPIObject); err != nil {
 		return err
 	}
 	for from, to := range c.ValidatorNames {

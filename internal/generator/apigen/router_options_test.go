@@ -21,11 +21,12 @@ const routerOptionsAPI = "router-options-api"
 // routerOptions is the [go_api] table the option run sets: every key away
 // from its default.
 var routerOptions = naming.GoAPIConfig{
-	ValidationErrorCode: "VALIDATION-1",
-	PathParamError:      "{name} is not a path segment",
-	ValidatorNames:      map[string]string{"minLength": "min_length", "maxLength": "max_length", "listMax": "list_max"},
-	UndeclaredInputKeys: naming.GoAPIKeep,
-	InputTrailingData:   naming.GoAPIIgnore,
+	ValidationErrorCode:    "VALIDATION-1",
+	PathParamError:         "{name} is not a path segment",
+	ValidatorNames:         map[string]string{"minLength": "min_length", "maxLength": "max_length", "listMax": "list_max"},
+	UndeclaredInputKeys:    naming.GoAPIKeep,
+	InputTrailingData:      naming.GoAPIIgnore,
+	OptionalInputEmptyBody: naming.GoAPIObject,
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,

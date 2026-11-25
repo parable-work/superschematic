@@ -14,6 +14,15 @@ func keepsUndeclaredKeys(router naming.GoAPIConfig, endpoint EndpointInfo) bool 
 	return router.KeepsUndeclaredInputKeys() && !endpoint.InputClosed && !endpoint.InputAllowsUnknownFields
 }
 
+// readsEmptyBodyAsObject reports whether the route of endpoint reads an
+// empty body as {}: the naming file says so
+// (go_api.optional_input_empty_body) and the operation does not require
+// its input. A multipart route reads no input from an empty JSON body, so
+// it passes no option.
+func readsEmptyBodyAsObject(router naming.GoAPIConfig, endpoint EndpointInfo) bool {
+	return router.ReadsOptionalEmptyBodyAsObject() && !endpoint.InputRequired && !endpoint.HasFileUpload
+}
+
 // readInputOptions are the bodyargs.ReadOption arguments, each after a
 // comma, the route of endpoint passes to bodyargs.ReadInput, as the naming
 // file's [go_api] table says. With the table at its defaults they are
@@ -25,6 +34,9 @@ func readInputOptions(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	}
 	if router.IgnoresInputTrailingData() {
 		opts = append(opts, "bodyargs.FirstValue()")
+	}
+	if readsEmptyBodyAsObject(router, endpoint) {
+		opts = append(opts, "bodyargs.EmptyBodyAsObject()")
 	}
 	return joinOptions(opts)
 }
@@ -38,6 +50,9 @@ func readInputNote(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	}
 	if router.IgnoresInputTrailingData() {
 		notes = append(notes, "the first JSON value is read and the rest of the body is not")
+	}
+	if readsEmptyBodyAsObject(router, endpoint) {
+		notes = append(notes, "an empty body is the empty object")
 	}
 	if len(notes) == 0 {
 		return ""

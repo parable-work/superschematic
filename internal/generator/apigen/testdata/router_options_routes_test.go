@@ -276,6 +276,33 @@ func TestInputTrailingData(t *testing.T) {
 	})
 }
 
+// TestOptionalInputEmptyBody: under go_api.optional_input_empty_body =
+// "object" the empty body of an optional input is {}, which its type then
+// validates, and a required input's empty body is refused under either
+// value.
+func TestOptionalInputEmptyBody(t *testing.T) {
+	bodyRequired := answer{Status: 400, Code: "bad_request", Detail: "Request body is required"}
+	runCases(t, []routerCase{
+		{
+			name: "an empty body of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: "",
+			defaults: bodyRequired,
+			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input",
+				Errors: "count=min name=minLength"},
+		},
+		{
+			name: "white space of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: " \n",
+			defaults: bodyRequired,
+			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input",
+				Errors: "count=min name=minLength"},
+		},
+		{
+			name: "an empty body of a required input", method: http.MethodPost, target: "/api/widgets", body: "",
+			defaults: bodyRequired,
+			options:  bodyRequired,
+		},
+	})
+}
+
 // TestPathParamError: go_api.path_param_error is the detail of the 400 of a
 // path parameter that does not decode to UTF-8.
 func TestPathParamError(t *testing.T) {

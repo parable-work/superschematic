@@ -1045,6 +1045,17 @@ reads it, and leaves the rest of the body unread: trailing data and a
 second value are not refused, and a read error after the first value is
 not seen. Any other value fails the load.
 
+### `go_api.optional_input_empty_body`
+
+Default: `refuse`
+
+`refuse` refuses an empty input body, or one of white space alone, as for
+any input. `object` reads the empty body of an input the operation does
+not require as the empty object `{}`, which the input type then decodes
+and validates. A required input's empty body is refused under either
+value, and a multipart route reads no input from an empty JSON body under
+either value. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches
