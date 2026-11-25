@@ -9,8 +9,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -146,6 +148,15 @@ func TestBucketOnTheEmulator(t *testing.T) {
 			t.Errorf("the object a second Put left = %q", data)
 		}
 	}
+	// Past the writer's 16 MiB chunk size, which a content bucket's 32 MiB
+	// maxBytes allows, a put of a taken name still finds the object.
+	large := bytes.Repeat([]byte("y"), 17<<20)
+	if first, err := b.Put(ctx, prefix+"large.bin", bytes.NewReader(large), bucket.PutOptions{IfAbsent: true}); err != nil || !first.Created || first.Size != int64(len(large)) {
+		t.Fatalf("a large Put of a free name = %+v, %v", first, err)
+	}
+	if second, err := b.Put(ctx, prefix+"large.bin", bytes.NewReader(large), bucket.PutOptions{IfAbsent: true}); err != nil || second.Created || second.Size != int64(len(large)) {
+		t.Fatalf("a large Put of a taken name = %+v, %v, want the object that was there", second, err)
+	}
 	var wg sync.WaitGroup
 	var winners atomic.Int64
 	for range 8 {
@@ -214,5 +225,48 @@ func TestBucketOnTheEmulator(t *testing.T) {
 	}
 	if err := b.Delete(ctx, prefix+"a.txt"); !errors.Is(err, bucket.ErrNotFound) {
 		t.Errorf("Delete of a deleted object = %v, want ErrNotFound", err)
+	}
+}
+
+// TestPutIfAbsentFindsATakenObjectPastAChunk: a put with IfAbsent of a body
+// past the GCS writer's 16 MiB chunk size, which a content bucket's 32 MiB
+// maxBytes allows, sends it in one request, and the 412 of a name that is
+// taken answers the object that is there, whether it comes from a write
+// or from Close (D142). A stand-in of GCS answers every upload 412, as
+// GCS answers ifGenerationMatch=0 on a taken name, and the object's
+// metadata to a read of it.
+func TestPutIfAbsentFindsATakenObjectPastAChunk(t *testing.T) {
+	ctx := context.Background()
+	var resumable, uploads atomic.Int64
+	gcs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/upload/"):
+			uploads.Add(1)
+			if r.URL.Query().Get("uploadType") == "resumable" {
+				resumable.Add(1)
+			}
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = io.WriteString(w, `{"error":{"code":412,"message":"conditionNotMet"}}`)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/storage/v1/b/media/o/"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"bucket":"media","name":"large.bin","size":"%d","contentType":"application/octet-stream","generation":"1"}`, 17<<20)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gcs.Close()
+	b, err := openBucket(ctx, "SHOP_MEDIA_BUCKET", stackconfig.Bucket{Name: "media", Endpoint: gcs.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBuckets()
+	put, err := b.Put(ctx, "large.bin", bytes.NewReader(bytes.Repeat([]byte("y"), 17<<20)), bucket.PutOptions{IfAbsent: true})
+	if err != nil || put.Created || put.Name != "large.bin" || put.Size != 17<<20 {
+		t.Fatalf("a large Put of a taken name = %+v, %v, want the object that was there", put, err)
+	}
+	if uploads.Load() != 1 || resumable.Load() != 0 {
+		t.Errorf("the put sent %d upload requests, %d of them resumable, want one that is not", uploads.Load(), resumable.Load())
 	}
 }

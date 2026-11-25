@@ -182,12 +182,20 @@ func (b *gcsBucket) Put(ctx context.Context, name string, body io.Reader, opts b
 	}
 	w := object.NewWriter(writeCtx)
 	w.ContentType = opts.ContentType
-	if _, err := io.Copy(w, body); err != nil {
+	if opts.IfAbsent {
+		// One request, as the TypeScript client's resumable: false. Past
+		// the writer's chunk size an upload is resumable, and its 412 can
+		// come from a write as well as from Close.
+		w.ChunkSize = 0
+	}
+	_, err := io.Copy(w, body)
+	if err != nil {
 		cancel()
 		_ = w.Close()
-		return bucket.PutResult{}, fmt.Errorf("bucket %s: put %s: %w", b.name, name, err)
+	} else {
+		err = w.Close()
 	}
-	if err := w.Close(); err != nil {
+	if err != nil {
 		var refused *googleapi.Error
 		if opts.IfAbsent && errors.As(err, &refused) && refused.Code == http.StatusPreconditionFailed {
 			held, found, err := b.Head(ctx, name)
