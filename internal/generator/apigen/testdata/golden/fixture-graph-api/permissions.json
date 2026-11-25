@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "api": "fixture-graph-api",
+  "permissions": [
+    {
+      "name": "recipes.admin",
+      "identity": false,
+      "operations": [
+        "RecipeArrangeHandler",
+        "RecipeCommitHandler",
+        "RecipeDiscardHandler",
+        "RecipeRebaseHandler",
+        "RecipeRevertHandler",
+        "RecipeSaveHandler",
+        "RecipeSealHandler"
+      ]
+    },
+    {
+      "name": "recipes.release",
+      "identity": false,
+      "operations": [
+        "RecipeReleaseHandler"
+      ]
+    },
+    {
+      "name": "recipes.write",
+      "identity": false,
+      "operations": [
+        "RecipeArrangeHandler",
+        "RecipeBranchHandler",
+        "RecipeCommitHandler",
+        "RecipeComposeHandler",
+        "RecipeDiffHandler",
+        "RecipeDiscardHandler",
+        "RecipeEntityHistoryHandler",
+        "RecipeHistoryHandler",
+        "RecipeMaterializeHandler",
+        "RecipeMergeHandler",
+        "RecipeRebaseHandler",
+        "RecipeReleasedHandler",
+        "RecipeRevertHandler",
+        "RecipeSaveHandler",
+        "RecipeSealHandler"
+      ]
+    }
+  ]
+}

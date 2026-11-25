@@ -876,6 +876,17 @@ function scanCommit(row: SqliteRow): Commit {
   };
 }
 
+function scanPatch(row: SqliteRow): Patch {
+  return {
+    commit: text(row["commit_id"], "commit_id"),
+    kind: text(row["entity_kind"], "entity_kind"),
+    entityKey: text(row["entity_key"], "entity_key"),
+    entityId: text(row["entity_id"], "entity_id"),
+    entityVersion: int(row["entity_version"], "entity_version"),
+    operation: text(row["operation"], "operation") as Patch["operation"],
+  };
+}
+
 function scanRelease(row: SqliteRow): Release {
   return {
     id: text(row["id"], "id"),
@@ -1446,6 +1457,30 @@ class SqliteTx implements SyncTx {
     }
   }
 
+  primaryRefs(root: string): Ref[] {
+    return this.#refs(
+      `SELECT ${refColumns} FROM ${this.#a.tables.ref} ` +
+        `WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id`,
+      [this.#a.graph, root],
+    );
+  }
+
+  entityPatches(commits: readonly string[], kindName: string, entityKey: string): Patch[] {
+    if (commits.length === 0) {
+      return [];
+    }
+    const k = this.#kind(kindName);
+    try {
+      return this.#all(
+        `SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM ${this.#a.tables.patch} ` +
+          `WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2)) AND entity_kind = ?3 AND entity_key = ?4`,
+        [this.#a.graph, "[" + commits.map(writeJsonString).join(",") + "]", k.name, entityKey],
+      ).map(scanPatch);
+    } catch (err) {
+      throw withContext("read an entity's patches", err);
+    }
+  }
+
   patches(commits: readonly string[]): Patch[] {
     if (commits.length === 0) {
       return [];
@@ -1455,14 +1490,7 @@ class SqliteTx implements SyncTx {
         `SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM ${this.#a.tables.patch} ` +
           `WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))`,
         [this.#a.graph, "[" + commits.map(writeJsonString).join(",") + "]"],
-      ).map((row) => ({
-        commit: text(row["commit_id"], "commit_id"),
-        kind: text(row["entity_kind"], "entity_kind"),
-        entityKey: text(row["entity_key"], "entity_key"),
-        entityId: text(row["entity_id"], "entity_id"),
-        entityVersion: int(row["entity_version"], "entity_version"),
-        operation: text(row["operation"], "operation") as Patch["operation"],
-      }));
+      ).map(scanPatch);
     } catch (err) {
       throw withContext("read patches", err);
     }

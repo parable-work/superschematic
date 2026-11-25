@@ -376,7 +376,27 @@ func (g *graph) addCommit() {
 			g.actorField("createdBy", true),
 		},
 		Indexes: []ir.IndexDef{commitIndex()},
+		// A commit is written once, so its insert is the commit (D138).
+		EnqueueOnChange: g.enqueue(g.root.VersionGraph.EnqueueOnCommit, []string{ir.EnqueueOnInsert}, nil,
+			map[string]string{"root": "root", "commit": "id", "ref": "ref", "sequence": "sequence"}),
 	})
+}
+
+// enqueue is the @enqueueOnChange a generated table carries for a queue
+// the graph names (D138), or none: it sets each field of message the
+// queue's message declares.
+func (g *graph) enqueue(queue string, on, fields []string, message map[string]string) []*ir.EnqueueOnChange {
+	td := g.schema.Types[queue]
+	if queue == "" || td == nil {
+		return nil
+	}
+	set := map[string]string{}
+	for _, fd := range td.Fields {
+		if source, ok := message[fd.Name]; ok {
+			set[fd.Name] = source
+		}
+	}
+	return []*ir.EnqueueOnChange{{Queue: queue, On: on, Fields: fields, Message: set}}
 }
 
 // addPatch adds <Name>Patch, written once: one entity a commit changed and
@@ -416,6 +436,11 @@ func (g *graph) addRelease() {
 			g.actorField("updatedBy", true),
 		},
 		Indexes: []ir.IndexDef{releaseIndex()},
+		// A root's first release inserts its pointer and a later one
+		// updates it: a pointer moved to another commit enqueues, and a
+		// release of the commit it already names does not (D138).
+		EnqueueOnChange: g.enqueue(g.root.VersionGraph.EnqueueOnRelease, []string{ir.EnqueueOnInsert, ir.EnqueueOnUpdate}, []string{"commit"},
+			map[string]string{"root": "root", "commit": "commit"}),
 	})
 }
 

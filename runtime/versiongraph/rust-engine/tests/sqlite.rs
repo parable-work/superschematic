@@ -6,7 +6,8 @@
 //! clock, its ids, the write lock a second connection waits on, a dropped
 //! transaction, the caller's transaction, an operation run over a storage
 //! it borrows with no executor, arrange's arguments and a typed arrange
-//! through the facade base, the canonical vectors as a round trip, and
+//! through the facade base, an entity's history through the engine, the
+//! canonical vectors as a round trip, and
 //! the rusqlite binding: the Rust port of the TypeScript package's
 //! test/sqlite-cases.ts. Then the shared SQLite vectors (testdata/sqlite):
 //! the layout, and a database the TypeScript adapter wrote, read back
@@ -3317,5 +3318,195 @@ async fn a_database_the_typescript_adapter_wrote_reads_back_as_the_shared_vector
         "{} reads differ:\n{}",
         failures.len(),
         failures.join("\n")
+    );
+}
+
+/// Lands one change on a line, through `run_on`: a change set of the line
+/// that saves the edits and commits, merged into the line. It returns the
+/// merge's commit, and moves `line` to the ref the merge left.
+fn land(
+    engine: &Engine,
+    storage: &SqliteStorage<Rusqlite>,
+    line: &mut Ref,
+    name: &str,
+    edits: &Edits,
+) -> Commit {
+    let draft = engine
+        .run_on(storage, |e| e.branch(COOK, &line.id, name))
+        .expect("branch");
+    let saved = engine
+        .run_on(storage, |e| e.save(COOK, &draft.id, draft.version, edits))
+        .expect("save");
+    let options = CommitOptions::default();
+    engine
+        .run_on(storage, |e| {
+            e.commit(COOK, &draft.id, saved.ref_.version, &options)
+        })
+        .expect("commit");
+    let merged = engine
+        .run_on(storage, |e| {
+            e.merge(COOK, &draft.id, &line.id, line.version, &[], &options)
+        })
+        .expect("merge");
+    assert!(merged.conflicts.is_empty(), "{:?}", merged.conflicts);
+    *line = merged.ref_;
+    merged.commit.expect("a commit")
+}
+
+/// An entity's history (D138) through `run_on`, with no executor: the
+/// commits of its root's primary line that changed it, newest first, each
+/// with what it did, and not a commit that changed another entity alone. It
+/// takes each id hyphenated or canonical, walks at most the engine's
+/// ceiling of commits a line, lists a second primary line's commits after
+/// the first's, and refuses what it cannot read before it begins a
+/// transaction. A typed facade's kind reaches it through the facade base's
+/// `text`, and each operation comes back through `parse`.
+#[test]
+fn entity_history_lists_the_commits_of_the_primary_line_that_changed_an_entity() {
+    use serde::Serialize;
+    use superschematic_versiongraph_engine::{facade, ready};
+
+    #[derive(Serialize)]
+    enum Kind {
+        #[serde(rename = "part")]
+        Part,
+    }
+    #[derive(Debug, PartialEq, Deserialize)]
+    enum Operation {
+        #[serde(rename = "ADD")]
+        Add,
+        #[serde(rename = "UPDATE")]
+        Update,
+        #[serde(rename = "DELETE")]
+        Delete,
+    }
+
+    let client = Rusqlite::new(memory());
+    let adapter =
+        Arc::new(sqlite::Adapter::new(&descriptor(), options()).expect("the fixture's adapter"));
+    ready(adapter.create_tables(&client))
+        .expect("one poll")
+        .expect("create the layout");
+    let storage = ready(adapter.storage(client))
+        .expect("one poll")
+        .expect("bind the client");
+    let engine = Engine::unbound(&descriptor(), Options::default()).expect("the engine");
+    let part = |key: &str, rank: &str, heading: &str| {
+        upserts(&[(
+            "part",
+            vec![json!({"entity_key": key, "parent_key": null, "rank": rank, "heading": heading})],
+        )])
+    };
+    let dropped = Edits::from([(
+        "part".to_owned(),
+        KindEdits {
+            delete: vec!["1".to_owned()],
+            ..KindEdits::default()
+        },
+    )]);
+    let mut main = engine
+        .run_on(&storage, |e| e.create_primary(COOK, BREAD, "main"))
+        .expect("create the primary line");
+    let both = upserts(&[(
+        "part",
+        vec![
+            json!({"entity_key": "1", "parent_key": null, "rank": "F", "heading": "Mix"}),
+            json!({"entity_key": "2", "parent_key": null, "rank": "V", "heading": "Knead"}),
+        ],
+    )]);
+    let added = land(&engine, &storage, &mut main, "write", &both);
+    let updated = land(
+        &engine,
+        &storage,
+        &mut main,
+        "edit",
+        &part("1", "F", "Mix well"),
+    );
+    land(
+        &engine,
+        &storage,
+        &mut main,
+        "knead",
+        &part("2", "V", "Knead well"),
+    );
+    let deleted = land(&engine, &storage, &mut main, "drop", &dropped);
+
+    // The kind and each operation as a generated facade types them.
+    let kind = facade::text("entity kind", &Kind::Part).expect("a kind");
+    let history = |engine: &Engine, root: &str, key: &str| -> Vec<(String, Operation)> {
+        engine
+            .run_on(&storage, |e| e.entity_history(root, &kind, key))
+            .expect("the entity's history")
+            .into_iter()
+            .map(|change| {
+                let operation =
+                    facade::parse("patch operation", &change.operation).expect("an operation");
+                (change.commit.id, operation)
+            })
+            .collect()
+    };
+    let of_the_line = vec![
+        (deleted.id.clone(), Operation::Delete),
+        (updated.id.clone(), Operation::Update),
+        (added.id.clone(), Operation::Add),
+    ];
+    assert_eq!(history(&engine, BREAD, "1"), of_the_line);
+    assert_eq!(
+        history(&engine, BREAD, MIX),
+        of_the_line,
+        "a hyphenated key"
+    );
+    assert_eq!(
+        history(&engine, BREAD, "3"),
+        [],
+        "an entity no commit changed"
+    );
+    assert_eq!(history(&engine, SOUP, "1"), [], "a root with no line");
+    // The drop and the commit before it, which changed another entity.
+    assert_eq!(
+        history(&engine.with_walk_ceiling(2), BREAD, "1"),
+        of_the_line[..1],
+        "at most the ceiling's commits of the line"
+    );
+
+    // A second primary line of the root: its commits after the first's.
+    let mut other = engine
+        .run_on(&storage, |e| e.create_primary(COOK, BREAD, "other"))
+        .expect("create a second primary line");
+    let again = land(
+        &engine,
+        &storage,
+        &mut other,
+        "again",
+        &part("1", "V", "Mix again"),
+    );
+    let mut of_both = of_the_line;
+    of_both.push((again.id, Operation::Add));
+    assert_eq!(history(&engine, BREAD, "1"), of_both);
+
+    // The engine has no storage of its own, so an operation that reaches
+    // its transaction fails for that, and one refused before it does not.
+    let own = |root: &'static str, kind: &'static str, key: &'static str| {
+        ready(engine.entity_history(root, kind, key)).expect("one poll")
+    };
+    refused(
+        "an unknown kind",
+        "unknown kind",
+        &own(BREAD, "garnish", "1"),
+    );
+    refused(
+        "a root that is not a UUID",
+        "root",
+        &own("the bread", "part", "1"),
+    );
+    refused(
+        "a key that is not a UUID",
+        "entity key",
+        &own(BREAD, "part", "the mix"),
+    );
+    refused(
+        "a history the engine can read",
+        "no storage of its own",
+        &own(BREAD, "part", "1"),
     );
 }

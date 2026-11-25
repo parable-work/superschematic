@@ -59,9 +59,16 @@ type OperationSet struct {
 	// [BehaviorOperationsConfig].
 	BehaviorOperations *BehaviorOperationsConfig `json:"behaviorOperations,omitempty" yaml:"behaviorOperations,omitempty"`
 
-	// Auth, Permissions and Public are a @behaviorOperations set's user
-	// clause, @auth, @requirePermission and @publicRoute on its class
-	// (D103), which each operation the loader adds takes as its own. Every
+	// GraphOperations is @graphOperations(Root, { ... }) on a class with
+	// no methods (D138): the loader fills Operations with the operations
+	// of the root's version graph. Nil for every other set. See
+	// [GraphOperationsConfig].
+	GraphOperations *GraphOperationsConfig `json:"graphOperations,omitempty" yaml:"graphOperations,omitempty"`
+
+	// Auth, Permissions and Public are a @behaviorOperations set's and a
+	// @graphOperations set's user clause, @auth, @requirePermission and
+	// @publicRoute on its class
+	// (D103, D138), which each operation the loader adds takes as its own. Every
 	// other set's user clause is its operations' (an Authenticated base
 	// reaches them as Auth), and the verification pass refuses these on
 	// one.

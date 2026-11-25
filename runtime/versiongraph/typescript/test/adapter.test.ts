@@ -3,7 +3,8 @@
 // columns, a prune that keeps pinned images, a sweep lock
 // that one transaction holds at a time, a ref lock another transaction
 // waits for, the version fences of updateRef and discardRef, the released
-// rows writeReleased rewrites, and pgClient's savepoint over a transaction
+// rows writeReleased rewrites, a root's primary lines and an entity's
+// patches, and pgClient's savepoint over a transaction
 // the caller holds. The TypeScript counterpart of the Go module's
 // postgres_test.go.
 import { afterEach, expect, test } from "bun:test";
@@ -312,6 +313,86 @@ test.skipIf(dsn === "")("writeReleased rewrites a root's released rows of a kind
   // A replace with no rows clears the root's rows, and no other root's.
   await write(s, "part", "1", second!, 2, true, []);
   expect(await rows()).toEqual(soupRows);
+});
+
+// primaryRefs reads a root's refs with no parent that are not discarded, in
+// the order they were created: not a change set, a discarded primary line
+// or another root's. entityPatches reads the patches of one entity of one
+// kind among the commits it is given: not another entity's, another kind's
+// entity of the same key, or a commit's it was not given.
+test.skipIf(dsn === "")("primaryRefs reads a root's live primary lines, and entityPatches one entity's patches among commits", async () => {
+  const { pool } = await scratch();
+  await pool.query(insertRoot);
+  await pool.query(`INSERT INTO recipe (id, title, created_by) VALUES ('${soup}', 'Soup', '00000000-0000-0000-0000-000000000002')`);
+  const s = new PostgresAdapter(descriptor).storage(pgPool(pool));
+  const actor = "2";
+  expect(await s.transact((tx) => tx.primaryRefs("1"))).toEqual([]);
+  // Each in a transaction of its own, so each has a later creation time.
+  const line = (root: string, name: string, parent: string | null = null) =>
+    s.transact((tx) => tx.createRef({ root, parent, base: null, name, actor }));
+  const main = await line("1", "main");
+  const draft = await line("1", "draft", main.id);
+  const dropped = await line("1", "dropped");
+  const second = await line("1", "second");
+  const other = await line("3", "main");
+  await s.transact((tx) => tx.discardRef(dropped.id, dropped.version, actor));
+  expect((await s.transact((tx) => tx.primaryRefs("1"))).map((ref) => ref.name)).toEqual(["main", "second"]);
+  expect(await s.transact((tx) => tx.primaryRefs(root))).toEqual([main, second]);
+  expect(await s.transact((tx) => tx.primaryRefs("3"))).toEqual([other]);
+  expect(draft.parent).toBe(main.id);
+
+  const patch = (kind: string, entityKey: string, operation: "ADD" | "UPDATE" | "DELETE") => ({
+    commit: "",
+    kind,
+    entityKey,
+    entityId: "Row",
+    entityVersion: 1,
+    operation,
+  });
+  const commits = await s.transact(async (tx) => {
+    const ids: string[] = [];
+    for (const patches of [
+      [patch("part", "Mix", "ADD"), patch("step", "Mix", "ADD"), patch("part", "Bake", "ADD")],
+      [patch("part", "Bake", "UPDATE")],
+      [patch("part", "Mix", "DELETE")],
+    ]) {
+      const commit = await tx.insertCommit({
+        root: "1",
+        ref: main.id,
+        parent: ids[ids.length - 1] ?? null,
+        message: "",
+        schemaEpoch: 0,
+        contentHash: "h",
+        sequence: null,
+        actor,
+      });
+      await tx.insertPatches(commit.id, patches);
+      ids.push(commit.id);
+    }
+    return ids;
+  });
+  const read = async (among: string[], kind: string, key: string) =>
+    (await s.transact((tx) => tx.entityPatches(among, kind, key)))
+      .map((p) => [commits.indexOf(p.commit), p.kind, p.entityKey, p.entityId, p.entityVersion, p.operation])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+  expect(await read(commits, "part", "Mix")).toEqual([
+    [0, "part", "Mix", "Row", 1, "ADD"],
+    [2, "part", "Mix", "Row", 1, "DELETE"],
+  ]);
+  // The key in its hyphenated form names the same entity.
+  expect(await read(commits, "part", uuidHyphenated("Mix"))).toEqual(await read(commits, "part", "Mix"));
+  expect(await read(commits, "step", "Mix")).toEqual([[0, "step", "Mix", "Row", 1, "ADD"]]);
+  expect(await read(commits, "part", "Bake")).toEqual([
+    [0, "part", "Bake", "Row", 1, "ADD"],
+    [1, "part", "Bake", "Row", 1, "UPDATE"],
+  ]);
+  expect(await read([commits[1]!, commits[2]!], "part", "Mix")).toEqual([[2, "part", "Mix", "Row", 1, "DELETE"]]);
+  expect(await read(commits, "part", "Rest")).toEqual([]);
+  expect(await read(commits, "cover", "Mix")).toEqual([]);
+  // No commits is no statement, and an unknown kind is refused.
+  const unbound = new PostgresAdapter(descriptor).storage(noStatements);
+  expect(await unbound.transact((tx) => tx.entityPatches([], "part", "Mix"))).toEqual([]);
+  await expect(unbound.transact((tx) => tx.entityPatches(commits, "crumb", "Mix"))).rejects.toThrow('postgres: unknown kind "crumb"');
 });
 
 // Bound to a transaction the caller holds with savepoint set, the adapter's

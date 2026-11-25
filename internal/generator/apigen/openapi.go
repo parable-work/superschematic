@@ -533,6 +533,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		if endpoint.BehaviorOperation() != nil {
 			addBehaviorErrorResponses(operation["responses"].(map[string]interface{}))
 		}
+		// A graph operation declares the refusals of the graph's engine and
+		// of its route (D138).
+		if graph := endpoint.GraphOperation(); graph != nil {
+			addGraphErrorResponses(operation["responses"].(map[string]interface{}), graph.Operation)
+		}
 		// Under approval register answers 202 with the same envelope when
 		// the user waits for approval and starts no session (D81).
 		if endpoint.IdentityOperation == ir.IdentityOpRegister && endpoint.OutputType == ir.IdentityRegisterResultType {

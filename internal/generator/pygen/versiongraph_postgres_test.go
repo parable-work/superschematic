@@ -288,6 +288,11 @@ def test_facade_arranges_a_kind_ordered_by_a_string_key(graph):
 
     assert released() == []
     g.release(BREAD, merged.commit.id, 0)
+    # An entity's history is the primary line's commits that changed it
+    # (D138): the merge added Bake.
+    history = g.entity_history(BREAD, "part", bake)
+    assert [(change.commit.id, change.operation) for change in history] == [(merged.commit.id, "ADD")]
+    assert g.entity_history(BREAD, "step", bake) == []
     commit = sql.execute("SELECT commit_id::text FROM recipe_release WHERE root_id = %s::uuid", [BREAD]).fetchone()[0]
     assert released() == [("Bake", "7", 1, commit), ("Mix", "F", 1, commit), ("Knead", "V", 1, commit)]
 

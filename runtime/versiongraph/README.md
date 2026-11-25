@@ -525,7 +525,8 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 
 An engine runs a graph's operations (D19): create a primary line, branch,
 save, arrange, commit, seal, merge, rebase, revert, release, released,
-materialize, compose, diff, history, discard and sweep. It drives the core through its
+materialize, compose, diff, history, entity history, discard and sweep. It
+drives the core through its
 language's binding and reaches storage only through a storage adapter,
 which holds the transaction of each operation and returns canonical rows.
 
@@ -536,7 +537,15 @@ transaction ([Released rows](#released-rows)). Arrange (D137) writes through a c
 the ref, asks the core's `arrange` which of one parent's children need a new
 order key, writes each as the ref's own row, and moves the ref's version,
 also when nothing moved. Each engine also offers the core's `order_keys`,
-which reads no storage. A root's release pointer names a tagged commit and is fenced by its
+which reads no storage. EntityHistory (D138) lists the commits of a root's
+primary line that changed one entity, newest first, each with the
+operation of its patch of the entity (`ADD`, `UPDATE` or `DELETE`): the
+engine reads the root's primary lines from the adapter (`PrimaryRefs`: its
+refs with no parent that are not discarded, in the order they were
+created), each line's commits as History does, at most the walk ceiling of
+them, and the entity's patches among those commits (`EntityPatches`). It
+reads no tree, takes no actor, and lists nothing for a root with no
+primary line or an entity no commit of one changed. A root's release pointer names a tagged commit and is fenced by its
 version (0 for the first release); a release writes no member rows. A
 rebase merges the parent's head into a change set against its base, keeps
 as rows only the entities that differ from the new base, moves the base
@@ -973,6 +982,7 @@ sweep runs.
 | `compose` | `ref` | Compose |
 | `diff` | `from`, `to` | Diff |
 | `history` | `ref` | History |
+| `entityHistory` | `root`, `kind`, `key` (an entity key) | EntityHistory |
 | `discard` | `ref` | Discard |
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
@@ -985,7 +995,10 @@ step that has one, a runner refuses a plain string, a statement for a
 backend it does not know, and a statement that is not text (`null`
 included). It refuses an `sql` step it runs that has no statement for its
 backend, so no step is skipped silently; a step it skips needs none. Every
-`sql` step gives both. A `postgres` statement numbers its placeholders `$1`
+`sql` step gives both, but one that lists its backends: the enqueue
+scenario's read the queues the fixture's graph enqueues its commits and its
+releases on (D138), by triggers the sql generator writes, which the fixed
+layout does not have. A `postgres` statement numbers its placeholders `$1`
 and takes UUIDs hyphenated; a `sqlite` statement is written against the
 SQLite adapter's layout under its default names (`graph_ref`,
 `graph_member_history`), numbers its placeholders `?1` and takes UUIDs in
@@ -1003,6 +1016,7 @@ succeed.
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
+| `entityHistory` | EntityHistory's entries, in order and exactly: each `{"commit", "operation"}`, the commit by name. |
 | `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`); on SQLite, where a column keeps its type, a column that is not text or `NULL` is refused. |
 | `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
 | `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |

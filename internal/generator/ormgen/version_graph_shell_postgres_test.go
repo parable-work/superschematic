@@ -80,7 +80,7 @@ func TestVersionGraphFacadeArranges(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph facade against Postgres")
 	}
-	db, _ := openShellDatabase(t, dsn)
+	db, pool := openShellDatabase(t, dsn)
 	ctx := WithUserID(context.Background(), mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"))
 	g := db.RecipeGraph()
 	keys, err := g.OrderKeys("", "", 3)
@@ -180,6 +180,27 @@ func TestVersionGraphFacadeArranges(t *testing.T) {
 	one, err := db.PartReleased.GetOne(ctx, *released[0].Id, nil)
 	if err != nil || one.Heading != released[0].Heading || one.EntityKey != released[0].EntityKey || one.Sequence != 1 {
 		t.Fatalf("GetOne of a released part = %+v, %v; want %+v", one, err, released[0])
+	}
+
+	// An entity's history is the primary line's commits that changed it
+	// (D138): the merge added Bake, and no commit touched an unknown key.
+	history, err := g.EntityHistory(ctx, *recipe.Id, types.RecipeEntityKind_Part, bake)
+	if err != nil || len(history) != 1 || *history[0].Commit.Id != *merged.Commit.Id || history[0].Operation != types.RecipePatchOperation_Add {
+		t.Fatalf("EntityHistory of Bake = %+v, %v; want the merge's ADD", history, err)
+	}
+	if none, err := g.EntityHistory(ctx, *recipe.Id, types.RecipeEntityKind_Part, *recipe.Id); err != nil || len(none) != 0 {
+		t.Fatalf("EntityHistory of an entity no commit changed = %+v, %v", none, err)
+	}
+
+	// The graph names a queue for its commits and one for its releases
+	// (D138): the change set's commit and the merge's each enqueued, and
+	// so did the release.
+	var commits, releases int
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM recipe_committed_queue WHERE root = $1::uuid), (SELECT count(*) FROM recipe_published_queue WHERE root = $1::uuid AND \"commit\" = $2::uuid)", recipe.Id.ToUUID(), merged.Commit.Id.ToUUID()).Scan(&commits, &releases); err != nil {
+		t.Fatalf("read the graph's queues: %v", err)
+	}
+	if commits != 2 || releases != 1 {
+		t.Fatalf("the graph enqueued %d commits and %d releases, want 2 and 1", commits, releases)
 	}
 }
 

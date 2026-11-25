@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Part, PartReleased, Recipe, RecipeCommit, RecipePatch, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Part, PartReleased, Recipe, RecipeCommit, RecipeCommitted, RecipePatch, RecipePublished, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -139,7 +139,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (14)
+### Types (16)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -155,11 +155,17 @@ index a reader of them uses.
 
 - **PartReleased** - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
 
-- **Recipe** - A recipe: the stable identity its steps and ingredients are versioned under.
+- **Recipe** - A recipe: the stable identity its steps and ingredients are versioned
+under. Its commits and its releases each enqueue a message.
 
 - **RecipeCommit** - A commit of the Recipe version graph: the exact row versions one ref sealed.
 
+- **RecipeCommitted** - Sent for each commit of a recipe's graph, in the transaction that wrote
+it: a worker handles one recipe's commits at a time.
+
 - **RecipePatch** - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
+
+- **RecipePublished** - Sent when a recipe's release moves to another commit.
 
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
 

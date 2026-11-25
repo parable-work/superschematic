@@ -36,6 +36,7 @@ import {
   type Commit,
   type EngineOptions,
   type Edits,
+  type EntityChange,
   type JsonObject,
   type JsonValue,
   type Patch,
@@ -106,6 +107,7 @@ const members = {
     "kind",
     "parent",
     "keys",
+    "key",
     "statement",
     "args",
     "expect",
@@ -126,12 +128,14 @@ const members = {
     "conflicts",
     "changes",
     "commits",
+    "entityHistory",
     "rows",
     "patches",
     "snapshot",
     "release",
     "report",
   ],
+  entityChangeExpect: ["commit", "operation"],
   refExpect: ["version", "sealed", "name", "parent", "base", "head"],
   commitExpect: ["ref", "parent", "message", "sequence", "schemaEpoch", "contentHash", "contentHashOf"],
   releaseExpect: ["commit", "version"],
@@ -411,6 +415,7 @@ const formatCases: [string, string, string, string][] = [
   ["postgres", "no steps", formatScenario(`["Bread"]`), "a scenario has steps"],
   ["postgres", "an unknown scenario member", `{"name": "format", "description": "", "roots": ["Bread"], "backend": "postgres", "steps": [${createPrimaryStep}]}`, `unknown scenario member "backend"`],
   ["postgres", "an arrange step's parent and keys", formatScenario(`["Bread"]`, `{"op": "arrange", "ref": "main", "kind": "part", "parent": "Dough", "keys": ["Mix", "Knead"]}`), ""],
+  ["postgres", "an entityHistory step's key and its expectation", formatScenario(`["Bread"]`, `{"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "expect": {"entityHistory": [{"commit": "c1", "operation": "ADD"}]}}`), ""],
   ["postgres", "an unknown step member", formatScenario(`["Bread"]`, `{"op": "createPrimary", "root": "Bread", "name": "main", "backend": "postgres"}`), `unknown step member "backend"`],
 ];
 
@@ -835,6 +840,7 @@ class Runner {
     let conflicts: unknown[] = [];
     let changes: unknown[] = [];
     let history: Commit[] = [];
+    let entityHistory: EntityChange[] = [];
     let rows: string[] = [];
     let patches: { kind: string; entityKey: string; operation: string; entityVersion: number }[] = [];
     let entries: { kind: string; entityKey: string; entityVersion: number }[] = [];
@@ -959,6 +965,9 @@ class Runner {
         case "history":
           history = await engine.history(this.refID(str(step.get("ref"))));
           break;
+        case "entityHistory":
+          entityHistory = await engine.entityHistory(str(step.get("root")), str(step.get("kind")), str(step.get("key")));
+          break;
         case "discard":
           await engine.discard(actor, this.refID(str(step.get("ref"))), this.version(step, str(step.get("ref"))));
           break;
@@ -1066,6 +1075,22 @@ class Runner {
       const want = (wantCommits as JsonValue[]).map((v) => str(v));
       if (JSON.stringify(got) !== JSON.stringify(want)) {
         this.fail(`history ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+      }
+    }
+    // An entity's history is compared exactly, in order: each entry's
+    // commit by name and its operation, and an empty list matches no entry.
+    const wantEntityHistory = x.get("entityHistory");
+    if (wantEntityHistory !== undefined && wantEntityHistory !== null) {
+      if (!Array.isArray(wantEntityHistory)) {
+        this.fail("an entityHistory expectation is a JSON array");
+      }
+      const got = entityHistory.map((change) => ({ commit: this.commitName(change.commit.id), operation: change.operation }));
+      const want = wantEntityHistory.map((value) => {
+        const entry = object(value, "entityChangeExpect", this.where);
+        return { commit: str(entry.get("commit")), operation: str(entry.get("operation")) };
+      });
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        this.fail(`entity history ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
       }
     }
     const wantRows = x.get("rows");

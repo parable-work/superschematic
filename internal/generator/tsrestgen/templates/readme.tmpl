@@ -73,6 +73,21 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   operation makes it a method of the implementation, with the same route
   and types.
 {{- end }}
+{{- if .HasGraphs }}
+  The operations of its `@graphOperations` sets (D138) have no
+  implementation method: each runs an operation of a version graph of
+  `{{ .Deps.Database }}` with the runtime's handler of the operation and its
+  entry of `graphOperations`. The handler reads the root, and the ref or
+  the commit the path names, through `options.orm`, the database's
+  repositories (`Deps.orm`), and runs the operation through the graph's
+  facade in `options.graphs`, which `{{ .GraphFacadeModule }}` exports
+  ({{ range $i, $g := .GraphSets }}{{ if $i }}, {{ end }}`graphs.{{ $g.Member }}: new {{ $g.Facade }}(pgPool(pool))`{{ end }}), a
+  write as the request's caller. A root, a ref or a commit that is not
+  there is 404 `not_found`, and so is a change set the set's row rule keeps
+  from the caller; a stale `version`, a sealed ref and a write to a
+  primary line are 409 with the engine's code, and an input the engine
+  refuses 422.
+{{- end }}
 {{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling
   service: `authenticateService` verifies its `Service-Authorization`

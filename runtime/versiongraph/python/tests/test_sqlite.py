@@ -5,7 +5,8 @@ tables and foreign keys, two graphs in one file, the name function, the
 clock, its ids, the write lock a second connection waits on, savepoints and
 the caller's transaction, a number's digits end to end, the canonical
 vectors as a round trip, the released table and what write_released writes
-into it, and the sqlite3 binding: what it refuses and what it returns. The Python counterpart of the TypeScript package's
+into it, a root's primary lines and an entity's patches, and the sqlite3
+binding: what it refuses and what it returns. The Python counterpart of the TypeScript package's
 test/sqlite-cases.ts. None needs a database server."""
 
 import json
@@ -917,6 +918,139 @@ def test_the_name_function_names_every_table_and_index(setup: Callable[..., Setu
         sqlite_layout(lambda name: "")
     with pytest.raises(TypeError, match="the table name function named"):
         released_layout(lambda name: "")
+
+
+def ticking(start: int = 1_800_000_000_000_000) -> Callable[[], int]:
+    """A clock that moves a second at each read, so each transaction has a
+    later time than the one before."""
+    now = [start]
+
+    def clock() -> int:
+        now[0] += 1_000_000
+        return now[0]
+
+    return clock
+
+
+def test_primary_refs_are_a_roots_live_lines_in_the_order_they_were_created(setup: Callable[..., Setup]) -> None:
+    """primary_refs reads a root's refs with no parent that are not
+    discarded, by the time each was created and then by id. A change set,
+    a discarded line, another root's line and another graph's are left
+    out."""
+    s = setup(clock=ticking())
+
+    def line(name: str, root: str = BREAD) -> Any:
+        return s.storage.transact(lambda tx: tx.create_ref(NewRef(root, None, None, name, COOK)))
+
+    later = line("later")
+    # Two lines of one transaction have one time, and the id orders them.
+    pair = s.storage.transact(lambda tx: [tx.create_ref(NewRef(BREAD, None, None, name, COOK)) for name in ("b", "a")])
+    dropped = line("dropped")
+    s.storage.transact(lambda tx: tx.create_ref(NewRef(BREAD, later.id, None, "draft", COOK)))
+    soup = line("main", "Soup")
+    SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client).transact(
+        lambda tx: tx.create_ref(NewRef(BREAD, None, None, "main", COOK))
+    )
+    s.storage.transact(lambda tx: tx.discard_ref(dropped.id, dropped.version, COOK))
+
+    def lines(root: str) -> List[str]:
+        return [ref.id for ref in s.storage.transact(lambda tx: tx.primary_refs(root))]
+
+    assert lines(BREAD) == [later.id] + sorted(ref.id for ref in pair)
+    assert lines("Soup") == [soup.id]
+    assert lines("Stew") == []
+    found = s.storage.transact(lambda tx: tx.primary_refs(BREAD))[0]
+    assert found == s.storage.transact(lambda tx: tx.read_ref(later.id))
+
+
+def test_entity_patches_are_one_entitys_among_the_commits_given(setup: Callable[..., Setup]) -> None:
+    """entity_patches reads the patches of one entity of one kind among the
+    commits it is given: another kind's entity of the same key, another
+    entity of the kind, a commit it is not given and another graph's patches
+    are left out. No commits read as no patches, and an unknown kind is
+    refused."""
+    s = setup()
+    main, first = s.storage.transact(ref_and_commit)
+    second = s.storage.transact(
+        lambda tx: tx.insert_commit(NewCommit(BREAD, main.id, first, "", 1, "0" * 64, None, COOK)).id
+    )
+    s.storage.transact(
+        lambda tx: [
+            tx.insert_patches(
+                first,
+                [
+                    Patch("", "step", "Mix", "StepRow", 1, "ADD"),
+                    Patch("", "part", "Mix", "PartRow", 1, "ADD"),
+                    Patch("", "step", "Bake", "BakeRow", 1, "ADD"),
+                ],
+            ),
+            tx.insert_patches(second, [Patch("", "step", "Mix", "StepRow", 2, "UPDATE")]),
+        ]
+    )
+
+    def patches(commits: List[str], kind: str, key: str) -> List[Patch]:
+        return sorted(s.storage.transact(lambda tx: tx.entity_patches(commits, kind, key)), key=lambda p: p.entity_version)
+
+    assert patches([first, second], "step", "Mix") == [
+        Patch(first, "step", "Mix", "StepRow", 1, "ADD"),
+        Patch(second, "step", "Mix", "StepRow", 2, "UPDATE"),
+    ]
+    assert patches([second, first], "part", "Mix") == [Patch(first, "part", "Mix", "PartRow", 1, "ADD")]
+    assert patches([second], "part", "Mix") == []
+    assert patches([first, second], "part", "Bake") == []
+    assert patches([], "step", "Mix") == []
+    menu = SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client)
+    assert menu.transact(lambda tx: tx.entity_patches([first, second], "step", "Mix")) == []
+    with pytest.raises(ValueError, match='sqlite: unknown kind "stew"'):
+        patches([first], "stew", "Mix")
+
+
+def test_an_entitys_history_lists_each_primary_lines_commits_that_changed_it(setup: Callable[..., Setup]) -> None:
+    """The engine's entity_history over the adapter: a root's primary lines
+    in the order they were created, each line's commits that changed the
+    entity newest first with what each did, at most the walk ceiling of
+    commits a line; a change set's own commits and a discarded line's are
+    not in it."""
+    s = setup(clock=ticking())
+    main = s.engine.create_primary(COOK, BREAD, "main")
+    other = s.engine.create_primary(COOK, BREAD, "other")
+    n = [0]
+
+    def change(line: Any, edits: Dict[str, KindEdits]) -> Any:
+        """Merges a change set's edits into a line: the line, and the
+        commit the merge wrote on it."""
+        n[0] += 1
+        draft = s.engine.branch(COOK, line.id, f"draft {n[0]}")
+        draft = s.engine.save(COOK, draft.id, draft.version, edits).ref
+        s.engine.commit(COOK, draft.id, draft.version)
+        merged = s.engine.merge(COOK, draft.id, line.id, line.version, [], CommitOptions(message=f"change {n[0]}"))
+        assert merged.commit is not None
+        return merged.ref, merged.commit
+
+    main, added = change(main, {"part": KindEdits(upsert=[part_row("Mix", "Mix")])})
+    other, stirred = change(other, {"part": KindEdits(upsert=[part_row("Mix", "Stir")])})
+    main, edited = change(main, {"part": KindEdits(upsert=[part_row("Mix", "Mix well")])})
+    main, _ = change(main, {"step": KindEdits(upsert=[step_row("Mix", "Mix")])})
+    main, deleted = change(main, {"part": KindEdits(delete=["Mix"])})
+
+    def history(engine: Engine = s.engine, root: str = BREAD, key: str = "Mix") -> List[Any]:
+        return [(c.commit.id, c.commit.message, c.operation) for c in engine.entity_history(root, "part", key)]
+
+    assert history() == [
+        (deleted.id, "change 5", "DELETE"),
+        (edited.id, "change 3", "UPDATE"),
+        (added.id, "change 1", "ADD"),
+        (stirred.id, "change 2", "ADD"),
+    ]
+    # An id reads hyphenated as it reads canonical.
+    assert history(root=uuid_hyphenated(BREAD), key=uuid_hyphenated("Mix")) == history()
+    # Each line is walked to the ceiling: main's two newest commits, of
+    # which one did not change the part, and other's one.
+    assert history(s.engine.with_walk_ceiling(2)) == [(deleted.id, "change 5", "DELETE"), (stirred.id, "change 2", "ADD")]
+    assert history(key="Bake") == []
+    assert history(root="Soup") == []
+    s.engine.discard(COOK, main.id, main.version)
+    assert history() == [(stirred.id, "change 2", "ADD")]
 
 
 def part_row(key: Optional[str], heading: Optional[str], rank: str = "V", **extra: Any) -> str:

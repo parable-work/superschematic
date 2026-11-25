@@ -450,6 +450,20 @@ fn scan_commit(row: &[SqlValue]) -> Result<Commit, Error> {
     })
 }
 
+/// A patch as a read selects it: its commit, kind, entity key, entity id,
+/// entity version and operation, its ids canonical.
+fn scan_patch(row: &[SqlValue]) -> Result<Patch, Error> {
+    let mut c = Cells::new(row);
+    Ok(Patch {
+        commit: canonical_uuid(&c.text()?)?,
+        kind: c.text()?,
+        entity_key: canonical_uuid(&c.text()?)?,
+        entity_id: canonical_uuid(&c.text()?)?,
+        entity_version: c.int()?,
+        operation: c.text()?,
+    })
+}
+
 fn scan_release(row: &[SqlValue]) -> Result<Release, Error> {
     let mut c = Cells::new(row);
     Ok(Release {
@@ -959,19 +973,44 @@ impl Tx for PgTx<'_> {
         let rows = self
             .query("read patches", &sql, &[SqlValue::TextList(ids)])
             .await?;
-        rows.iter()
-            .map(|row| {
-                let mut c = Cells::new(row);
-                Ok(Patch {
-                    commit: canonical_uuid(&c.text()?)?,
-                    kind: c.text()?,
-                    entity_key: canonical_uuid(&c.text()?)?,
-                    entity_id: canonical_uuid(&c.text()?)?,
-                    entity_version: c.int()?,
-                    operation: c.text()?,
-                })
-            })
-            .collect()
+        rows.iter().map(|row| scan_patch(row)).collect()
+    }
+
+    async fn primary_refs(&mut self, root: &str) -> Result<Vec<Ref>, Error> {
+        let sql = format!(
+            "SELECT {REF_COLUMNS} FROM {} \
+             WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            self.a.ref_table
+        );
+        self.scan_refs(&sql, &[uuid_text(root)?.into()]).await
+    }
+
+    async fn entity_patches(
+        &mut self,
+        commits: &[String],
+        kind: &str,
+        entity_key: &str,
+    ) -> Result<Vec<Patch>, Error> {
+        if commits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let k = self.a.kind(kind)?;
+        let ids = commits
+            .iter()
+            .map(|id| uuid_text(id))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sql = format!(
+            "SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation \
+             FROM {} WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid",
+            self.a.patch_table
+        );
+        let args = [
+            SqlValue::TextList(ids),
+            k.name.as_str().into(),
+            uuid_text(entity_key)?.into(),
+        ];
+        let rows = self.query("read an entity's patches", &sql, &args).await?;
+        rows.iter().map(|row| scan_patch(row)).collect()
     }
 
     async fn next_sequence(&mut self, root: &str) -> Result<i64, Error> {

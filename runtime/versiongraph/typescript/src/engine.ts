@@ -200,6 +200,12 @@ export interface Change {
   row?: string;
 }
 
+/** One commit that changed an entity, and what it did to it. */
+export interface EntityChange {
+  commit: Commit;
+  operation: "ADD" | "UPDATE" | "DELETE";
+}
+
 /** Configure a maintenance pass. */
 export interface SweepOptions {
   /** Who the pass writes as: the discards it makes and the deletes of discarded refs' rows record it. */
@@ -352,6 +358,8 @@ const calls: Calls = {
   insertPatches: call("insertPatches"),
   walk: call("walk"),
   refCommits: call("refCommits"),
+  primaryRefs: call("primaryRefs"),
+  entityPatches: call("entityPatches"),
   patches: call("patches"),
   nextSequence: call("nextSequence"),
   snapshot: call("snapshot"),
@@ -635,6 +643,18 @@ export class Engine {
     return this.#transact(this.#ops.history(ref));
   }
 
+  /**
+   * Lists the commits of root's primary line that changed the entity key of
+   * kind, newest first, each with what it did to the entity (D138). It
+   * reads the line's commits and the entity's patches among them, and no
+   * tree. A root with several primary lines lists each line's in the order
+   * the lines were created; one with none, or an entity no commit changed,
+   * lists nothing. It walks at most the engine's ceiling of commits a line.
+   */
+  async entityHistory(root: string, kind: string, key: string): Promise<EntityChange[]> {
+    return this.#transact(this.#ops.entityHistory(root, kind, key));
+  }
+
   /** Soft-deletes a ref at version, which frees its name. */
   async discard(actor: string, ref: string, version: number): Promise<void> {
     return this.#transact(this.#ops.discard(actor, ref, version));
@@ -848,6 +868,11 @@ export class SyncEngine {
     return this.#transact(this.#ops.history(ref));
   }
 
+  /** Engine's entityHistory: lists the commits of root's primary line that changed an entity, newest first. */
+  entityHistory(root: string, kind: string, key: string): EntityChange[] {
+    return this.#transact(this.#ops.entityHistory(root, kind, key));
+  }
+
   /** Engine's discard: soft-deletes a ref at version. */
   discard(actor: string, ref: string, version: number): void {
     return this.#transact(this.#ops.discard(actor, ref, version));
@@ -861,8 +886,9 @@ export class SyncEngine {
 
 /**
  * One graph's operations, written once for both drivers. Each operation
- * checks its actor and its ids, save the kinds its edits name, and arrange
- * its kind, its parent and its keys, before any transaction begins, and
+ * checks its actor and its ids, save the kinds its edits name, arrange its
+ * kind, its parent and its keys, and entityHistory its kind and its key,
+ * before any transaction begins, and
  * returns its transaction as steps that yield each storage call; Engine and
  * SyncEngine run the steps in one transaction of their storage. The entity
  * keys of save's deletes and unsets and of a merge's or a rebase's
@@ -1247,6 +1273,34 @@ class Operations {
         return [];
       }
       return yield* tx.refCommits(r.id, r.head, this.walkCeiling);
+    });
+  }
+
+  entityHistory(root: string, kind: string, key: string): Body<EntityChange[]> {
+    root = id("id", root);
+    this.#kind(kind);
+    key = id("entity key", key);
+    return this.#transaction(function* (tx) {
+      const changes: EntityChange[] = [];
+      for (const line of yield* tx.primaryRefs(root)) {
+        if (line.head === null) {
+          continue;
+        }
+        const commits = yield* tx.refCommits(line.id, line.head, this.walkCeiling);
+        const patches = yield* tx.entityPatches(
+          commits.map((c) => c.id),
+          kind,
+          key,
+        );
+        const operations = new Map(patches.map((p) => [p.commit, p.operation]));
+        for (const commit of commits) {
+          const operation = operations.get(commit.id);
+          if (operation !== undefined) {
+            changes.push({ commit, operation });
+          }
+        }
+      }
+      return changes;
     });
   }
 

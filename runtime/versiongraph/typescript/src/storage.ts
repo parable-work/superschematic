@@ -106,6 +106,13 @@ export interface Tx {
   walk(commit: string, limit: number): Promise<Commit[]>;
   /** Reads head and the parents of it that ref wrote, nearest first, at most limit of them. */
   refCommits(ref: string, head: string, limit: number): Promise<Commit[]>;
+  /**
+   * Reads a root's primary lines: its refs with no parent that are not
+   * discarded, in the order they were created.
+   */
+  primaryRefs(root: string): Promise<Ref[]>;
+  /** Reads the patches of one entity among commits, in no particular order: at most one a commit. */
+  entityPatches(commits: readonly string[], kind: string, entityKey: string): Promise<Patch[]>;
   /** Reads every patch of the commits. */
   patches(commits: readonly string[]): Promise<Patch[]>;
   /**
@@ -234,6 +241,13 @@ export interface SyncTx {
   walk(commit: string, limit: number): Commit[];
   /** Reads head and the parents of it that ref wrote, nearest first, at most limit of them. */
   refCommits(ref: string, head: string, limit: number): Commit[];
+  /**
+   * Reads a root's primary lines: its refs with no parent that are not
+   * discarded, in the order they were created.
+   */
+  primaryRefs(root: string): Ref[];
+  /** Reads the patches of one entity among commits, in no particular order: at most one a commit. */
+  entityPatches(commits: readonly string[], kind: string, entityKey: string): Patch[];
   /** Reads every patch of the commits. */
   patches(commits: readonly string[]): Patch[];
   /**

@@ -284,6 +284,20 @@ test("the facade arranges a kind ordered by a string key", async () => {
     );
   expect((await releasedParts()).rows).toEqual([]);
   await g.release(root, merged.commit!.id, 0);
+  // An entity's history is the primary line's commits that changed it
+  // (D138): the merge added Bake.
+  expect((await g.entityHistory(root, RecipeEntityKind.Part, bake!)).map((c) => [c.commit.id, c.operation])).toEqual([
+    [merged.commit!.id, RecipePatchOperation.Add],
+  ]);
+  expect(await g.entityHistory(root, RecipeEntityKind.Step, bake!)).toEqual([]);
+  // The graph names a queue for its commits and one for its releases
+  // (D138): the change set's commit and the merge's each enqueued a
+  // message in its transaction, and so did the release.
+  const queued = await pool.query(
+    "SELECT (SELECT count(*) FROM recipe_committed_queue WHERE root = $1::uuid)::int AS commits, (SELECT count(*) FROM recipe_published_queue WHERE root = $1::uuid)::int AS releases",
+    [root],
+  );
+  expect(queued.rows).toEqual([{ commits: 2, releases: 1 }]);
   const commit = hyphenated(merged.commit!.id);
   expect((await releasedParts()).rows).toEqual([
     { heading: "Bake", rank: "7", sequence: "1", commit },

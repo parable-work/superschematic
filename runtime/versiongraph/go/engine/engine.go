@@ -906,6 +906,68 @@ func (e *Engine) History(ctx context.Context, ref string) ([]storage.Commit, err
 	return commits, err
 }
 
+// EntityChange is one commit that changed an entity, and what it did to
+// it: Operation is ADD, UPDATE or DELETE.
+type EntityChange struct {
+	Commit    storage.Commit
+	Operation string
+}
+
+// EntityHistory lists the commits of root's primary line that changed the
+// entity key of kind, newest first, each with what it did to the entity
+// (D138). It reads the line's commits and the entity's patches among them,
+// and no tree. A root with several primary lines lists each line's in the
+// order the lines were created; one with none, or an entity no commit
+// changed, lists nothing. It walks at most the engine's ceiling of commits
+// a line.
+func (e *Engine) EntityHistory(ctx context.Context, root, kind, key string) ([]EntityChange, error) {
+	if err := ids(&root); err != nil {
+		return nil, err
+	}
+	if _, err := e.kind(kind); err != nil {
+		return nil, err
+	}
+	key, err := id("entity key", key)
+	if err != nil {
+		return nil, err
+	}
+	var changes []EntityChange
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		lines, err := tx.PrimaryRefs(ctx, root)
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			if line.Head == "" {
+				continue
+			}
+			commits, err := tx.RefCommits(ctx, line.ID, line.Head, e.walkCeiling)
+			if err != nil {
+				return err
+			}
+			commitIDs := make([]string, len(commits))
+			for i, c := range commits {
+				commitIDs[i] = c.ID
+			}
+			patches, err := tx.EntityPatches(ctx, commitIDs, kind, key)
+			if err != nil {
+				return err
+			}
+			operations := make(map[string]string, len(patches))
+			for _, p := range patches {
+				operations[p.Commit] = p.Operation
+			}
+			for _, c := range commits {
+				if operation, ok := operations[c.ID]; ok {
+					changes = append(changes, EntityChange{Commit: c, Operation: operation})
+				}
+			}
+		}
+		return nil
+	})
+	return changes, err
+}
+
 // Discard soft-deletes a ref at version, which frees its name.
 func (e *Engine) Discard(ctx context.Context, actor, ref string, version int64) error {
 	actor, err := actorID(actor)

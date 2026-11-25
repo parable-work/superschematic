@@ -1,7 +1,8 @@
 // The SQLite adapter's own rules, which the scenarios do not reach or reach
 // only in passing: the version fences of refs and release pointers, a taken
 // name and a discarded ref's name free again, the history it writes, the
-// released rows it rewrites, STRICT tables and foreign keys, two graphs in
+// released rows it rewrites, a root's primary lines and an entity's
+// patches, STRICT tables and foreign keys, two graphs in
 // one file, the name function, the
 // clock, its ids, the write lock a second connection waits on, the caller's
 // transaction, D16's rules for a behavior's SQL, the canonical vectors as a
@@ -669,6 +670,102 @@ export const cases: Case[] = [
       assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, tableName: none }))), /TypeError: sqlite: the table name function named "released" ""/);
       assert.match(String(thrown(() => sqliteReleasedLayout(throws))), /the host declares no released table/);
       assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, tableName: throws }))), /the host declares no released table/);
+    },
+  },
+  {
+    name: "primaryRefs reads a root's live primary lines in the order they were created, and entityPatches one entity's patches among commits",
+    run(binding) {
+      let now = 1_800_000_000_000_000;
+      const clock = () => now++;
+      const s = setup(binding, { clock });
+      using([s], () => {
+        const other = new SqliteAdapter(descriptor, { graph: "menu", clock }).storage(s.client);
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs(bread)), []);
+        const line = (storage: SyncStorage, root: string, name: string, parent: string | null = null): Ref =>
+          storage.transact((tx) => tx.createRef({ root, parent, base: null, name, actor: cook }));
+        const main = line(s.storage, bread, "main");
+        line(s.storage, bread, "draft", main.id);
+        const dropped = line(s.storage, bread, "dropped");
+        const second = line(s.storage, bread, "second");
+        const soup = line(s.storage, "Soup", "main");
+        const theirs = line(other, bread, "main");
+        s.storage.transact((tx) => tx.discardRef(dropped.id, dropped.version, cook));
+        // Not a change set, a discarded line, another root's or another
+        // graph's, and the oldest first.
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs(bread)), [main, second]);
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs("Soup")), [soup]);
+        assert.deepEqual(other.transact((tx) => tx.primaryRefs(bread)), [theirs]);
+        assert.deepEqual(other.transact((tx) => tx.primaryRefs("Soup")), []);
+        // Two lines of one time read by id.
+        const frozen = new SqliteAdapter(descriptor, { graph: "frozen", clock: () => 7 }).storage(s.client);
+        const twins = [line(frozen, bread, "a"), line(frozen, bread, "b")].sort((a, b) => (a.id < b.id ? -1 : 1));
+        assert.deepEqual(frozen.transact((tx) => tx.primaryRefs(bread)), twins);
+
+        const patch = (kind: string, entityKey: string, operation: "ADD" | "UPDATE" | "DELETE") => ({ commit: "", kind, entityKey, entityId: "Row", entityVersion: 1, operation });
+        const write = (storage: SyncStorage, ref: Ref, all: ReturnType<typeof patch>[][]): string[] =>
+          storage.transact((tx) => {
+            const ids: string[] = [];
+            for (const patches of all) {
+              const commit = tx.insertCommit({
+                root: ref.root,
+                ref: ref.id,
+                parent: ids[ids.length - 1] ?? null,
+                message: "",
+                schemaEpoch: 1,
+                contentHash: "0".repeat(64),
+                sequence: null,
+                actor: cook,
+              });
+              tx.insertPatches(commit.id, patches);
+              ids.push(commit.id);
+            }
+            return ids;
+          });
+        const commits = write(s.storage, main, [
+          [patch("part", "Mix", "ADD"), patch("step", "Mix", "ADD"), patch("part", "Bake", "ADD")],
+          [patch("part", "Bake", "UPDATE")],
+          [patch("part", "Mix", "DELETE")],
+        ]);
+        const menu = write(other, theirs, [[patch("part", "Mix", "ADD")]]);
+        const read = (storage: SyncStorage, among: string[], kind: string, key: string): unknown[][] =>
+          storage
+            .transact((tx) => tx.entityPatches(among, kind, key))
+            .map((p) => [among.indexOf(p.commit), p.kind, p.entityKey, p.entityId, p.entityVersion, p.operation])
+            .sort((a, b) => Number(a[0]) - Number(b[0]));
+        assert.deepEqual(read(s.storage, commits, "part", "Mix"), [
+          [0, "part", "Mix", "Row", 1, "ADD"],
+          [2, "part", "Mix", "Row", 1, "DELETE"],
+        ]);
+        // Another kind's entity of the same key, another entity, a commit
+        // it was not given, and another graph's commit are left out.
+        assert.deepEqual(read(s.storage, commits, "step", "Mix"), [[0, "step", "Mix", "Row", 1, "ADD"]]);
+        assert.deepEqual(read(s.storage, commits, "part", "Bake"), [
+          [0, "part", "Bake", "Row", 1, "ADD"],
+          [1, "part", "Bake", "Row", 1, "UPDATE"],
+        ]);
+        assert.deepEqual(read(s.storage, [commits[1]!, commits[2]!], "part", "Mix"), [[1, "part", "Mix", "Row", 1, "DELETE"]]);
+        assert.deepEqual(read(s.storage, commits, "part", "Rest"), []);
+        assert.deepEqual(read(s.storage, commits, "cover", "Mix"), []);
+        assert.deepEqual(read(s.storage, menu, "part", "Mix"), []);
+        assert.deepEqual(read(other, [...menu, ...commits], "part", "Mix"), [[0, "part", "Mix", "Row", 1, "ADD"]]);
+        assert.deepEqual(read(s.storage, [], "part", "Mix"), []);
+        assert.match(String(thrown(() => s.storage.transact((tx) => tx.entityPatches(commits, "crumb", "Mix")))), /sqlite: unknown kind "crumb"/);
+        // The engine reads an entity's history from them: the line's
+        // commits that hold a patch of it, newest first.
+        assert.deepEqual(
+          s.storage.transact((tx) => tx.updateRef({ id: main.id, version: main.version, head: commits[2]!, base: null, seal: false, actor: cook })).head,
+          commits[2],
+        );
+        assert.deepEqual(
+          s.engine.entityHistory(bread, "part", "Mix").map((change) => [commits.indexOf(change.commit.id), change.operation]),
+          [
+            [2, "DELETE"],
+            [0, "ADD"],
+          ],
+        );
+        assert.deepEqual(s.engine.withWalkCeiling(2).entityHistory(bread, "part", "Mix").map((change) => change.operation), ["DELETE"]);
+        assert.deepEqual(s.engine.entityHistory("Soup", "part", "Mix"), []);
+      });
     },
   },
   {

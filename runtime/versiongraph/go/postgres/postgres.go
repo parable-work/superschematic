@@ -757,6 +757,53 @@ func (t *tx) Patches(ctx context.Context, commits []string) ([]storage.Patch, er
 	return out, nil
 }
 
+func (t *tx) PrimaryRefs(ctx context.Context, root string) ([]storage.Ref, error) {
+	args, err := uuidArgs(root)
+	if err != nil {
+		return nil, err
+	}
+	return t.refs(ctx, `SELECT `+refColumns+` FROM `+t.a.refTable+
+		` WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id`, args[0])
+}
+
+func (t *tx) EntityPatches(ctx context.Context, commits []string, kindName, entityKey string) ([]storage.Patch, error) {
+	if len(commits) == 0 {
+		return nil, nil
+	}
+	if _, err := t.kind(kindName); err != nil {
+		return nil, err
+	}
+	ids, err := uuidTexts(commits)
+	if err != nil {
+		return nil, err
+	}
+	key, err := uuidArgs(entityKey)
+	if err != nil {
+		return nil, err
+	}
+	var out []storage.Patch
+	sql := `SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation ` +
+		`FROM ` + t.a.patchTable + ` WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid`
+	err = t.conn.Query(ctx, sql, []any{ids, kindName, key[0]}, func(scan func(dest ...any) error) error {
+		var p storage.Patch
+		if err := scan(&p.Commit, &p.Kind, &p.EntityKey, &p.EntityID, &p.EntityVersion, &p.Operation); err != nil {
+			return err
+		}
+		var err error
+		for _, id := range []*string{&p.Commit, &p.EntityKey, &p.EntityID} {
+			if *id, err = canonicalUUID(*id); err != nil {
+				return err
+			}
+		}
+		out = append(out, p)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read an entity's patches: %w", err)
+	}
+	return out, nil
+}
+
 func (t *tx) NextSequence(ctx context.Context, root string) (int64, error) {
 	text, err := uuidText(root)
 	if err != nil {

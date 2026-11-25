@@ -2547,6 +2547,172 @@ behavior declares on a namespace as a whole (Comments') is not served,
 and the build warns of it, and neither is one a table leaves out
 (Dependencies' `listDependents`, D104's step 4, an engine type's alone).
 
+## A version graph's operations
+
+A DB table marked `@versionGraph` is the root of a
+[version graph](/superschematic/reference/version-graphs/): change sets
+that hold edits of its member rows, commits, merges and releases. The
+graph's operations reach an application through its generated facade, a
+library. An API serves them as routes with no code of yours (D138): a
+class with no members, marked `@graphOperations` with the root, which it
+imports from its database, its `authDb` or its one DB dependency.
+
+```ts
+// cookbook-api
+import { graphOperations, requirePermission } from "@superschematic/api";
+import { Recipe } from "@acme/cookbook-db";
+
+@graphOperations(Recipe, {
+  permissions: { release: ["recipes.release"] },
+  by: ["createdBy"],
+  overridePermission: "recipes.admin"
+})
+@requirePermission(["recipes.write"])
+export abstract class RecipeOperations {}
+```
+
+The build adds one operation to the set for each operation of the graph,
+under the root's plural and its key. `{id}` is the root's key, `{ref}` a
+ref of that root and `{commit}` a commit of it.
+
+| Operation | Route | Body or query | Answers |
+| --- | --- | --- | --- |
+| `branch` | `POST /api/recipes/{id}/refs` | `{ from?, name }` | the new change set, a `RecipeGraphRef` |
+| `save` | `PUT /api/recipes/{id}/refs/{ref}/edits` | `{ version, edits }` | `RecipeGraphSaveResult`: the ref and the rows written |
+| `arrange` | `POST /api/recipes/{id}/refs/{ref}/arrange` | `{ version, kind, parent?, keys }` | `RecipeGraphSaveResult` |
+| `commit` | `POST /api/recipes/{id}/refs/{ref}/commit` | `{ version, message?, tag? }` | `RecipeGraphCommitResult`: the ref and the commit |
+| `seal` | `POST /api/recipes/{id}/refs/{ref}/seal` | `{ version }` | `RecipeGraphCommitResult` |
+| `merge` | `POST /api/recipes/{id}/refs/{ref}/merge` | `{ into?, version, resolutions?, message?, tag? }` | `RecipeGraphMergeResult`: the ref merged into, the commit and the conflicts |
+| `rebase` | `POST /api/recipes/{id}/refs/{ref}/rebase` | `{ version, resolutions? }` | `RecipeGraphMergeResult` |
+| `revert` | `POST /api/recipes/{id}/refs/{ref}/revert` | `{ version, toCommit }` | `RecipeGraphCommitResult` |
+| `discard` | `POST /api/recipes/{id}/refs/{ref}/discard` | `{ version }` | `true` |
+| `history` | `GET /api/recipes/{id}/refs/{ref}/history` | | the ref's commits, newest first |
+| `compose` | `GET /api/recipes/{id}/refs/{ref}/tree` | | the ref's tree, a `RecipeGraphTree` |
+| `release` | `POST /api/recipes/{id}/release` | `{ commit, version }` | the release pointer, a `RecipeGraphRelease` |
+| `released` | `GET /api/recipes/{id}/released` | | `RecipeGraphReleased`: the pointer and the released tree |
+| `materialize` | `GET /api/recipes/{id}/commits/{commit}` | | the commit's tree |
+| `diff` | `GET /api/recipes/{id}/diff` | `?from=&to=`, two commits | the entities the two trees differ on |
+| `entityHistory` | `GET /api/recipes/{id}/entities/{kind}/{key}/history` | | the commits of the primary line that changed the entity |
+
+In `merge`, `{ref}` is the change set merged, `into` the ref it is merged
+into, the source's parent unless given, and `version` that ref's. Every
+`version` is the version of the ref the operation writes, as the caller
+read it, and a release's is the release pointer's, 0 for a root's first
+release.
+
+Two things here are not in D138's list of routes:
+
+- `compose` reads a ref's tree with its content hash and the problems
+  found in it. Without it a client that edits a change set could not read
+  it back.
+- `branch` with no `from` branches the root's primary line, and for a root
+  that has none it makes one first, named `main`, as the caller. No route
+  makes a primary line on its own.
+
+No route lists a root's refs. The graph's ref table is a table of the
+database, `RecipeRef`, so a list of them is a
+[`@tableOperation`](#operations-the-build-serves) over a `@source` view
+of it.
+
+`operations` narrows the set to the operations it lists. A graph none of
+whose members orders by a string key has no `arrange`, and a set that
+lists it there is refused.
+
+### The generated types
+
+The inputs and the results are types the build adds to the API, each named
+from the graph, so two sets over two graphs share none. They are in the
+OpenAPI document and in every SDK as any type of yours is.
+
+| Type | Holds |
+| --- | --- |
+| `RecipeGraphRef`, `RecipeGraphCommit`, `RecipeGraphRelease` | a ref, a commit and a release pointer, as the facade returns them |
+| `RecipeGraphStepRow` | one member's row: its `entityKey` and its content fields, the ones the facade's typed upsert writes |
+| `RecipeGraphStepRowInput`, `RecipeGraphStepRowEdits` | the row an upsert writes, its `entityKey` optional, and the member's edits: `upsert`, `delete` and `unset` |
+| `RecipeGraphEdits`, `RecipeGraphRows`, `RecipeGraphTree` | the edits, the rows and the tree, one member per kind (`step`, `ingredient`), the tree with its `contentHash` and `findings` |
+| `RecipeGraphConflict`, `RecipeGraphResolution` | a conflict, with its kind, entity key, path, `base`, `ours` and `theirs` as JSON text and both authors, and what settles one: `take` a side or give a `value` |
+| `RecipeGraphChange`, `RecipeGraphEntityChange` | one entity two commits differ on, and one commit that changed an entity |
+| `RecipeGraphKind`, `RecipeGraphChangeOperation`, `RecipeGraphTake` | the graph's kinds, `ADD`, `UPDATE` and `DELETE`, and `base`, `ours` and `theirs` |
+| `RecipeGraph<Op>Input`, `RecipeGraphSaveResult`, `RecipeGraphCommitResult`, `RecipeGraphMergeResult`, `RecipeGraphReleased` | each operation's body and result |
+
+A row's field is typed as the member's: a scalar as it is, an enum of the
+database as a copy of it (`RecipeGraphVerdict`), a to-one relation as the
+key it holds under `<field>Id`, and a struct of the database as JSON. The
+row leaves out what the engine writes: the row id, the ref, the root, the
+version and the audit fields. The build refuses a set one of whose names
+your API already declares or imports, and one whose route an operation of
+yours also matches.
+
+### Who may call
+
+A route runs every step a route of yours runs. The class's `@auth`,
+`@requirePermission` and `@publicRoute`, its service clause and its
+traffic controls guard every route of the set. `permissions` names a
+permission list for an operation, which replaces the class's for that
+operation: above, a release needs `recipes.release`, and `recipes.write`
+does not release.
+
+`by: ["createdBy"]` is the row rule. It keeps the operations that write a
+change set, `save`, `arrange`, `commit`, `seal`, `rebase`, `revert` and
+`discard`, to the caller who branched it: another caller's change set is the 404 of one
+that is not there. A holder of `overridePermission` writes every change
+set. `by` takes `createdBy` alone for now.
+
+The actor of every write is the caller's subject, which the graph records
+as a UUID. A write by a request with no caller, or by one whose subject is
+no UUID, is 403 `no_actor`. A calling service that stands in for a user
+(`@allowService`) reads, and does not write.
+
+### What a route answers
+
+The handler reads the root through its repository first, then the ref or
+the commit the path names, then calls the facade.
+
+| Status | Code | When |
+| --- | --- | --- |
+| 404 | `not_found` | no live row of the root holds the key, a soft-deleted one among them; the ref or the commit does not exist, is discarded, or belongs to another root; the row rule keeps the change set from the caller; the root was never released |
+| 409 | `version_conflict`, `ref_sealed`, `primary_merge_only`, `schema_epoch`, `name_taken`, `nothing_to_commit`, `not_tagged`, `no_parent`, `merge_into_itself`, `root_mismatch` | the engine refuses the write: a stale `version`, a sealed ref, a write to a primary line, a commit from a newer schema epoch and the rest, each under its own code |
+| 422 | `invalid_tree`, `invalid_row`, `entity_not_found`, `invalid_arrangement`, `order_not_a_key`, `invalid_resolution`, `unmatched_resolution` | the engine or its core refuses the input; `invalid_tree` carries the core's findings in `details.findings` |
+| 403 | `no_actor` | a write whose caller has no subject that is a UUID |
+
+A `merge` or a `rebase` that finds conflicts answers 200 with them in
+`conflicts`, and has written nothing: send it again with a resolution for
+each. Any other failure is a 500 that says nothing of the server.
+
+A save that needs code of yours, such as one that parses an uploaded file
+into rows, stays an operation you write, which calls the facade.
+
+### Which servers serve it
+
+The TypeScript server serves the set. Its router takes the repositories
+and each graph's facade, and the generated entrypoint builds both over the
+database's pool:
+
+```ts
+buildRouter(implementations, {
+  authenticate,
+  orm: deps.orm,
+  graphs: { recipe: new RecipeGraph(pgPool(pool)) }
+});
+```
+
+`RecipeGraph` is the facade the database's types package exports from
+`./versiongraph`, and `pgPool` is `@superschematic/versiongraph/postgres`'s.
+The database lists Postgres first: the facade runs on Postgres alone. A
+generated image does not build the version-graph core's WebAssembly
+module yet, so a stack's build writes this server no Dockerfile and says
+so; run it from the checkout or build its image from a Dockerfile of your
+own.
+
+The Go and the Rust servers do not serve the set yet. Each operation
+stays a method of your implementation's interface, with the same route and
+types, to write over the graph's facade, and the build warns once for the
+set.
+
+Each operation is an MCP tool, `recipe_branch`, `recipe_save` and the rest,
+with the title and the description the build gives it; a set whose
+`@requireService` admits only services hides them.
+
 ## OpenAPI
 
 The build writes `api/<service>/openapi.json`, and every server serves it

@@ -183,7 +183,8 @@ export interface PartReleased {
 }
 
 /**
- * Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
+ * Recipe - A recipe: the stable identity its steps and ingredients are versioned
+ * under. Its commits and its releases each enqueue a message.
  */
 export interface Recipe {
   id?: IdentityUUID | null;
@@ -209,6 +210,17 @@ export interface RecipeCommit {
 }
 
 /**
+ * RecipeCommitted - Sent for each commit of a recipe's graph, in the transaction that wrote
+ * it: a worker handles one recipe's commits at a time.
+ */
+export interface RecipeCommitted {
+  root: IdentityUUID;
+  ref?: IdentityUUID | null;
+  commit: IdentityUUID;
+  sequence?: GenericInt64 | null;
+}
+
+/**
  * RecipePatch - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
  */
 export interface RecipePatch {
@@ -219,6 +231,14 @@ export interface RecipePatch {
   entityId: IdentityUUID;
   entityVersion: GenericInt64;
   operation: RecipePatchOperation;
+}
+
+/**
+ * RecipePublished - Sent when a recipe's release moves to another commit.
+ */
+export interface RecipePublished {
+  root: IdentityUUID;
+  commit: IdentityUUID;
 }
 
 /**

@@ -4,8 +4,8 @@
 //! operation through `Engine::run_on` over a storage bound for the call,
 //! inside the host's transaction, and the host's commit keeps the call's
 //! writes and its rollback undoes them. The layout's released rows (D139)
-//! are held to the cases every adapter takes, in both dialects. The
-//! Postgres tests read
+//! and the reads an entity's history is built from (D138) are held to the
+//! cases every adapter takes, in both dialects. The Postgres tests read
 //! SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL and skip without it.
 //!
 //! The synchronous `postgres` client blocks on a runtime of its own, so
@@ -414,6 +414,77 @@ fn write_released_rewrites_one_roots_rows_of_a_kind_on_the_fixed_layout_on_postg
     }
     let mut tx = client.transaction().expect("the host's transaction");
     released_rows(
+        Dialect::Postgres,
+        &mut PostgresHost {
+            transaction: &mut tx,
+        },
+    );
+    tx.commit().expect("commit");
+}
+
+/// The fixed layout's two reads an entity's history is built from (D138),
+/// inside a host's transaction: the cases every adapter is held to, over an
+/// adapter whose clock moves at each read, so the refs it writes were
+/// created at different times. They run in another graph of the same
+/// tables first, whose lines of the same roots the second run does not
+/// read.
+fn entity_reads(dialect: Dialect, host: &mut dyn HostTx) {
+    for graph in ["menu", "recipe"] {
+        let now = std::sync::atomic::AtomicI64::new(1_800_000_000_000_000);
+        let options = Options {
+            graph: graph.to_owned(),
+            clock: Some(Arc::new(move || {
+                now.fetch_add(1_000_000, std::sync::atomic::Ordering::SeqCst)
+            })),
+            ..Options::default()
+        };
+        let adapter = Arc::new(
+            FixedLayout::with_dialect(dialect, &support::descriptor(), options)
+                .expect("the fixture's adapter"),
+        );
+        let storage = adapter.bind(HostClient::new(&mut *host));
+        ready(support::check_entity_reads(&storage)).expect("one poll");
+    }
+}
+
+#[cfg(feature = "rusqlite")]
+#[test]
+fn primary_refs_and_entity_patches_read_an_entitys_history_on_sqlite() {
+    use superschematic_versiongraph_engine::sqlite;
+    use support::hosts::RusqliteHost;
+
+    let mut connection = rusqlite::Connection::open_in_memory().expect("open a database");
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .expect("foreign keys on");
+    for statement in sqlite::layout(&fixed::default_table_name).expect("the layout") {
+        connection
+            .execute_batch(&statement)
+            .expect("create the layout");
+    }
+    let tx = connection.transaction().expect("the host's transaction");
+    entity_reads(Dialect::Sqlite, &mut RusqliteHost { connection: &tx });
+    tx.commit().expect("commit");
+}
+
+#[test]
+fn primary_refs_and_entity_patches_read_an_entitys_history_on_the_fixed_layout_on_postgres() {
+    let Some(dsn) = support::database(
+        "primary_refs_and_entity_patches_read_an_entitys_history_on_the_fixed_layout_on_postgres",
+    ) else {
+        return;
+    };
+    let schema = PostgresSchema::create(&dsn, "vg_rust_host");
+    let mut client = schema.connect();
+    let mut tx = client.transaction().expect("a transaction");
+    for statement in
+        fixed::layout(Dialect::Postgres, &fixed::default_table_name).expect("the layout")
+    {
+        tx.batch_execute(&statement).expect("create the layout");
+    }
+    tx.commit().expect("commit the layout");
+    let mut tx = client.transaction().expect("the host's transaction");
+    entity_reads(
         Dialect::Postgres,
         &mut PostgresHost {
             transaction: &mut tx,

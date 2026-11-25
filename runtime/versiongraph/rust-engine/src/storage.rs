@@ -94,6 +94,17 @@ pub trait Tx: Send {
         head: &str,
         limit: usize,
     ) -> Result<Vec<Commit>, Error>;
+    /// Reads a root's primary lines: its refs with no parent that are not
+    /// discarded, in the order they were created.
+    async fn primary_refs(&mut self, root: &str) -> Result<Vec<Ref>, Error>;
+    /// Reads the patches of one entity among `commits`, in no particular
+    /// order: at most one a commit.
+    async fn entity_patches(
+        &mut self,
+        commits: &[String],
+        kind: &str,
+        entity_key: &str,
+    ) -> Result<Vec<Patch>, Error>;
     /// Reads every patch of the commits.
     async fn patches(&mut self, commits: &[String]) -> Result<Vec<Patch>, Error>;
     /// Locks the root against other taggers until the transaction ends, and

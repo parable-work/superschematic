@@ -98,7 +98,7 @@ func TestWriterRefusesAFilledBehaviorOperationsSet(t *testing.T) {
 			&ir.OperationSet{Name: "Ping", Auth: true, Operations: []*ir.FieldDef{
 				{Name: "ping", TypeRef: ir.TypeRef{Name: "boolean"}, HTTPMethod: "GET"},
 			}},
-			"operation set Ping: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations set",
+			"operation set Ping: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations or @graphOperations set",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -550,6 +550,13 @@ pub struct RecipeReleased {
     pub tree: RecipeTree,
 }
 
+/// One commit that changed an entity, and what it did to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecipeEntityChange {
+    pub commit: engine::Commit,
+    pub operation: RecipePatchOperation,
+}
+
 /// One entity two commits differ on. `row` is the entity's canonical row in
 /// the later tree, its tombstone or `None` for a `DELETE`.
 #[derive(Debug, Clone, PartialEq)]
@@ -775,6 +782,26 @@ impl RecipeGraph {
     /// Lists the commits a ref wrote, newest first.
     pub async fn history(&self, ref_: &IdentityUUID) -> Result<Vec<engine::Commit>, engine::Error> {
         self.engine.history(&id(ref_)?).await
+    }
+
+    /// Lists the commits of `root`'s primary line that changed the entity
+    /// `key` of `kind`, newest first, each with what it did to the entity:
+    /// the commit that added it, each that updated it, one that deleted
+    /// it. It reads the line's commits and the entity's patches among
+    /// them, and no tree. An entity no commit changed, and a root with no
+    /// primary line, list nothing.
+    pub async fn entity_history(&self, root: &IdentityUUID, kind: &RecipeEntityKind, key: &IdentityUUID) -> Result<Vec<RecipeEntityChange>, engine::Error> {
+        let kind = facade::text("entity kind", kind)?;
+        let changes = self.engine.entity_history(&id(root)?, &kind, &id(key)?).await?;
+        changes
+            .into_iter()
+            .map(|change| {
+                Ok(RecipeEntityChange {
+                    commit: change.commit,
+                    operation: facade::parse("patch operation", &change.operation)?,
+                })
+            })
+            .collect()
     }
 
     /// Soft-deletes a ref at `version`, which frees its name.

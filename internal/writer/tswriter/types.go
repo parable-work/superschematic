@@ -280,7 +280,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
 	if def.VersionGraph != nil {
-		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), e.versionGraphArgs(def.VersionGraph))
 	}
 	if def.GraphMember != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("graphMember"), e.graphMemberArgs(def.GraphMember))
@@ -500,8 +500,9 @@ func versionedConfigArgs(cfg *ir.VersionedConfig) string {
 }
 
 // versionGraphArgs renders the @versionGraph config, or nothing for the
-// zero config.
-func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
+// zero config. enqueueOnCommit and enqueueOnRelease name classes as values,
+// imported when a sibling file declares them.
+func (e *emitter) versionGraphArgs(cfg *ir.VersionGraphConfig) string {
 	var parts []string
 	if cfg.Name != "" {
 		parts = append(parts, "name: "+quote(cfg.Name))
@@ -511,6 +512,14 @@ func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
 	}
 	if cfg.SnapshotEvery != nil {
 		parts = append(parts, fmt.Sprintf("snapshotEvery: %d", *cfg.SnapshotEvery))
+	}
+	if cfg.EnqueueOnCommit != "" {
+		e.recordHeritageImports(cfg.EnqueueOnCommit)
+		parts = append(parts, "enqueueOnCommit: "+cfg.EnqueueOnCommit)
+	}
+	if cfg.EnqueueOnRelease != "" {
+		e.recordHeritageImports(cfg.EnqueueOnRelease)
+		parts = append(parts, "enqueueOnRelease: "+cfg.EnqueueOnRelease)
 	}
 	if len(parts) == 0 {
 		return ""

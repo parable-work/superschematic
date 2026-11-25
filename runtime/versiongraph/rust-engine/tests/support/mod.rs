@@ -1,7 +1,9 @@
 //! What the Postgres tests share: the database they run against, a schema of
 //! their own that holds the fixture's DDL, and the fixture's descriptor; the
 //! test hosts of the fixed layout's synchronous seam ([`hosts`]); and the
-//! writes of released rows every adapter is held to ([`released_cases`]).
+//! cases every adapter is held to: the writes of released rows
+//! ([`released_cases`]) and the reads an entity's history is built from
+//! ([`check_entity_reads`]).
 
 #![allow(dead_code)]
 
@@ -14,7 +16,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use superschematic_versiongraph_engine::postgres::{self, TokioPostgres};
-use superschematic_versiongraph_engine::storage::{NewCommit, NewRef, ReleasedWrite, Storage};
+use superschematic_versiongraph_engine::storage::{
+    NewCommit, NewRef, Patch, Ref, ReleasedWrite, Storage, Tx,
+};
 use superschematic_versiongraph_engine::Error;
 use tokio_postgres::{Client, Config, NoTls};
 
@@ -457,4 +461,233 @@ pub fn check_released(case: &ReleasedCase, result: Result<(), Error>, mut rows: 
     }
     rows.sort();
     assert_eq!(rows, case.rows, "{what}");
+}
+
+/// Writes a ref of `root` in a transaction of its own, so the refs a test
+/// writes one after another were created at different times: a primary
+/// line when `parent` is `None`.
+async fn a_ref(storage: &dyn Storage, root: &str, parent: Option<&Ref>, name: &str) -> Ref {
+    let mut tx = storage.begin().await.expect("begin");
+    let written = tx
+        .create_ref(NewRef {
+            root: root.to_owned(),
+            parent: parent.map(|parent| parent.id.clone()),
+            name: name.to_owned(),
+            actor: DEFAULT_ACTOR.to_owned(),
+            ..NewRef::default()
+        })
+        .await
+        .unwrap_or_else(|e| panic!("create the ref {name} of {root}: {e}"));
+    tx.commit().await.expect("commit");
+    written
+}
+
+/// What [`check_entity_reads`] writes: the live primary lines of Bread in
+/// the order they were created, Soup's, and the commits, two of Bread's
+/// first line, one of a change set of it and one of Soup's line.
+struct EntityReads {
+    lines: [String; 3],
+    soup: String,
+    first: String,
+    second: String,
+    drafted: String,
+    stock: String,
+}
+
+/// Holds an adapter to the two reads an entity's history is built from
+/// (D138), over the roots Bread and Soup, whose rows are there first on
+/// Postgres.
+///
+/// `primary_refs` gives a root's refs with no parent that are not
+/// discarded, in the order they were created: not a change set, not a
+/// discarded line, not another root's. `entity_patches` gives the patches
+/// of one entity among the commits it is given, whatever ref wrote them: not
+/// a patch of another commit, of another entity, or of another kind's
+/// entity with the same key. No commits read as no patches, and an unknown
+/// kind is refused.
+pub async fn check_entity_reads(storage: &dyn Storage) {
+    let written = entity_reads(storage).await;
+    let mut tx = storage.begin().await.expect("begin");
+    check_primary_refs(&mut *tx, &written).await;
+    check_entity_patches(&mut *tx, &written).await;
+    tx.commit().await.expect("commit");
+}
+
+/// Writes the lines, the commits and the patches the reads are held to: a
+/// discarded primary line and a change set beside Bread's live lines, and
+/// patches of two kinds' entities with one key.
+async fn entity_reads(storage: &dyn Storage) -> EntityReads {
+    let main = a_ref(storage, "Bread", None, "main").await;
+    let old = a_ref(storage, "Bread", None, "old").await;
+    let later = a_ref(storage, "Bread", None, "later").await;
+    let last = a_ref(storage, "Bread", None, "last").await;
+    let draft = a_ref(storage, "Bread", Some(&main), "draft").await;
+    let soup = a_ref(storage, "Soup", None, "main").await;
+
+    let mut tx = storage.begin().await.expect("begin");
+    let commit = |line: &Ref, parent: Option<&str>| NewCommit {
+        root: line.root.clone(),
+        ref_id: line.id.clone(),
+        parent: parent.map(str::to_owned),
+        content_hash: "h".to_owned(),
+        actor: DEFAULT_ACTOR.to_owned(),
+        ..NewCommit::default()
+    };
+    let first = tx
+        .insert_commit(commit(&main, None))
+        .await
+        .expect("the line's first commit")
+        .id;
+    let second = tx
+        .insert_commit(commit(&main, Some(&first)))
+        .await
+        .expect("the line's second commit")
+        .id;
+    let drafted = tx
+        .insert_commit(commit(&draft, Some(&second)))
+        .await
+        .expect("the change set's commit")
+        .id;
+    let stock = tx
+        .insert_commit(commit(&soup, None))
+        .await
+        .expect("another root's commit")
+        .id;
+    let patch = |kind: &str, key: &str, operation: &str| Patch {
+        kind: kind.to_owned(),
+        entity_key: key.to_owned(),
+        entity_id: format!("Row{kind}{key}"),
+        entity_version: 1,
+        operation: operation.to_owned(),
+        ..Patch::default()
+    };
+    for (commit, patches) in [
+        (
+            &first,
+            vec![
+                patch("part", "Mix", "ADD"),
+                patch("part", "Bake", "ADD"),
+                patch("step", "Mix", "ADD"),
+            ],
+        ),
+        (&second, vec![patch("part", "Mix", "UPDATE")]),
+        (&drafted, vec![patch("part", "Mix", "DELETE")]),
+        (&stock, vec![patch("part", "Mix", "ADD")]),
+    ] {
+        tx.insert_patches(commit, &patches)
+            .await
+            .expect("write the patches");
+    }
+    tx.discard_ref(&old.id, old.version, DEFAULT_ACTOR)
+        .await
+        .expect("discard a primary line");
+    tx.commit().await.expect("commit");
+    EntityReads {
+        lines: [main.id, later.id, last.id],
+        soup: soup.id,
+        first,
+        second,
+        drafted,
+        stock,
+    }
+}
+
+async fn check_primary_refs(tx: &mut dyn Tx, written: &EntityReads) {
+    for (what, root, want) in [
+        (
+            "a root's primary lines, in the order they were created, less a discarded one \
+             and a change set",
+            "Bread",
+            written.lines.iter().collect::<Vec<_>>(),
+        ),
+        ("another root's primary line", "Soup", vec![&written.soup]),
+        ("a root with no ref", "Stew", vec![]),
+    ] {
+        let lines = tx.primary_refs(root).await.expect("read the primary lines");
+        let got: Vec<&String> = lines.iter().map(|line| &line.id).collect();
+        assert_eq!(got, want, "{what}");
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.root == root && line.parent.is_none() && !line.discarded),
+            "{what}: {lines:?}"
+        );
+    }
+}
+
+async fn check_entity_patches(tx: &mut dyn Tx, written: &EntityReads) {
+    let EntityReads {
+        first,
+        second,
+        drafted,
+        stock,
+        ..
+    } = written;
+    let every = vec![
+        first.clone(),
+        second.clone(),
+        drafted.clone(),
+        stock.clone(),
+    ];
+    let line = vec![first.clone(), second.clone()];
+    for (what, commits, kind, key, want) in [
+        (
+            "an entity's patches among every commit, whatever ref or root wrote them",
+            &every,
+            "part",
+            "Mix",
+            vec![
+                (first, "ADD"),
+                (second, "UPDATE"),
+                (drafted, "DELETE"),
+                (stock, "ADD"),
+            ],
+        ),
+        (
+            "an entity's patches among a line's commits alone",
+            &line,
+            "part",
+            "Mix",
+            vec![(first, "ADD"), (second, "UPDATE")],
+        ),
+        (
+            "another kind's entity with the same key",
+            &line,
+            "step",
+            "Mix",
+            vec![(first, "ADD")],
+        ),
+        (
+            "another entity of the kind",
+            &line,
+            "part",
+            "Bake",
+            vec![(first, "ADD")],
+        ),
+        ("an entity no commit changed", &line, "part", "Rest", vec![]),
+        ("no commits", &Vec::new(), "part", "Mix", vec![]),
+    ] {
+        let patches = tx
+            .entity_patches(commits, kind, key)
+            .await
+            .unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert!(
+            patches.iter().all(|p| p.kind == kind
+                && p.entity_key == key
+                && p.entity_id == format!("Row{kind}{key}")
+                && p.entity_version == 1),
+            "{what}: {patches:?}"
+        );
+        // In no particular order: by the order the commits were given.
+        let mut got: Vec<(&String, &str)> = patches
+            .iter()
+            .map(|p| (&p.commit, p.operation.as_str()))
+            .collect();
+        got.sort_by_key(|(commit, _)| commits.iter().position(|id| id == *commit));
+        assert_eq!(got, want, "{what}");
+    }
+    match tx.entity_patches(&line, "garnish", "Mix").await {
+        Err(error) => assert!(error.to_string().contains("unknown kind"), "{error}"),
+        Ok(patches) => panic!("an unknown kind's patches read as {patches:?}"),
+    }
 }

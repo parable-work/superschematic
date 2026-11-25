@@ -295,6 +295,16 @@ class Tx(Protocol):
         most limit of them."""
         ...
 
+    def primary_refs(self, root: str) -> List[Ref]:
+        """Reads a root's primary lines: its refs with no parent that are not
+        discarded, in the order they were created."""
+        ...
+
+    def entity_patches(self, commits: Sequence[str], kind: str, entity_key: str) -> List[Patch]:
+        """Reads the patches of one entity among commits, in no particular
+        order: at most one a commit."""
+        ...
+
     def patches(self, commits: Sequence[str]) -> List[Patch]:
         """Reads every patch of the commits."""
         ...

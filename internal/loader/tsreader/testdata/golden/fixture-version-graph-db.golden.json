@@ -277,7 +277,7 @@
     "Recipe": {
       "name": "Recipe",
       "owner": "src/recipe.schema.ts",
-      "comment": "A recipe: the stable identity its steps and ingredients are versioned under.",
+      "comment": "A recipe: the stable identity its steps and ingredients are versioned\nunder. Its commits and its releases each enqueue a message.",
       "role": "DBTable",
       "fields": [
         {
@@ -313,7 +313,73 @@
       ],
       "versionGraph": {
         "schemaEpoch": 1,
-        "snapshotEvery": 3
+        "snapshotEvery": 3,
+        "enqueueOnCommit": "RecipeCommitted",
+        "enqueueOnRelease": "RecipePublished"
+      }
+    },
+    "RecipeCommitted": {
+      "name": "RecipeCommitted",
+      "owner": "src/recipe.schema.ts",
+      "comment": "Sent for each commit of a recipe's graph, in the transaction that wrote\nit: a worker handles one recipe's commits at a time.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "root",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "ref",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "commit",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "sequence",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "queue": {
+        "key": "root",
+        "serialize": true
+      }
+    },
+    "RecipePublished": {
+      "name": "RecipePublished",
+      "owner": "src/recipe.schema.ts",
+      "comment": "Sent when a recipe's release moves to another commit.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "root",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "commit",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        }
+      ],
+      "queue": {
+        "key": "root",
+        "serialize": true
       }
     },
     "Step": {

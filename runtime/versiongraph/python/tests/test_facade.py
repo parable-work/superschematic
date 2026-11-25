@@ -4,8 +4,8 @@ ref, which the engine writes, so no generated upsert writes a relation. This
 facade's graph is built here over the fixture's descriptor, with the
 ingredient's step_key as a writable to-one relation to the step, keyed by
 the step's entity key, and plain mappings as its typed values. It also holds
-the facade's arrange and order_keys to the engine's, over the fixture's part,
-the kind ordered by a string key."""
+the facade's arrange, order_keys and entity_history to the engine's, over the
+fixture's part, the kind ordered by a string key."""
 
 import json
 from dataclasses import dataclass, field
@@ -108,6 +108,10 @@ def test_a_write_without_an_actor_is_refused_before_the_client() -> None:
         graph.arrange(ROOT, 1, "part", None, [])
     with pytest.raises(ValueError, match="unknown kind"):
         graph.with_actor(ACTOR).arrange(ROOT, 1, "stew", None, [])
+    # A read takes no actor, and an unknown kind is refused before the
+    # client too.
+    with pytest.raises(ValueError, match="unknown kind"):
+        graph.entity_history(ROOT, "stew", ROOT)
 
 
 def test_the_facades_order_keys_are_the_cores() -> None:
@@ -209,3 +213,43 @@ def test_the_facade_arranges_a_parents_children(scratch_schema: Callable[[str], 
         assert error_code(refused.value) == code
     assert graph.compose(draft.id).findings == []
     assert connection.execute("SELECT _version FROM recipe_ref WHERE name = 'write'").fetchall() == [(still.ref.version,)]
+
+
+@requires_database
+def test_the_facade_lists_an_entitys_history(scratch_schema: Callable[[str], Scratch]) -> None:
+    # The commits of the root's primary line that changed a part, newest
+    # first, each the engine's commit with what it did to the part. The kind
+    # is named as the descriptor names it; a change set's own commit, and a
+    # commit that changed another part, are not in it.
+    scratch = scratch_schema("vg_facade_py")
+    connection = scratch.connect()
+    connection.execute("INSERT INTO recipe (id, title, created_by) VALUES (%s::uuid, 'Bread', %s::uuid)", [ROOT, ACTOR])
+    graph: VersionGraphFacade[Tree, Edits] = VersionGraphFacade(GRAPH, psycopg_client(connection), actor=ACTOR)
+    main = graph.create_primary(ROOT, "main")
+    line = [main]
+
+    def change(name: str, parts: List[Dict[str, Any]]) -> Any:
+        # Merges a change set's parts into the primary line: the parts as
+        # saved, and the commit the merge wrote.
+        draft = graph.branch(main.id, name)
+        saved = graph.save(draft.id, draft.version, Edits(part=TypedKindEdits(upsert=parts)))
+        graph.commit(saved.ref.id, saved.ref.version)
+        merged = graph.merge(draft.id, main.id, line[0].version)
+        assert merged.commit is not None
+        line[0] = merged.ref
+        return saved.saved.part, merged.commit
+
+    written, added = change("write", [{"rank": "F", "heading": "Mix"}, {"rank": "k", "heading": "Bake"}])
+    mix, bake = [p["entityKey"] for p in written]
+    _, edited = change("edit", [{"entityKey": mix, "rank": "F", "heading": "Mix well"}])
+    _, baked = change("bake", [{"entityKey": bake, "rank": "k", "heading": "Bake hot"}])
+
+    history = graph.entity_history(ROOT, "part", mix)
+    assert [(c.commit.id, c.operation) for c in history] == [(edited.id, "UPDATE"), (added.id, "ADD")]
+    assert history[0].commit == graph.history(main.id)[1]
+    assert [(c.commit.id, c.operation) for c in graph.entity_history(ROOT, "part", hyphenated(bake))] == [
+        (baked.id, "UPDATE"),
+        (added.id, "ADD"),
+    ]
+    assert graph.entity_history(ROOT, "step", mix) == []
+    assert graph.entity_history(ACTOR, "part", mix) == []

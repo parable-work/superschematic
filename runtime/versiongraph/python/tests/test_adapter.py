@@ -1,7 +1,8 @@
 """The Postgres adapter's own rules, which the scenarios do not reach: what
 its constructor refuses, a row with more members than a table has columns,
 what write_released writes into a kind's released table and what it
-refuses, a prune that keeps pinned images, a sweep lock that
+refuses, a root's primary lines and an entity's patches, a prune that keeps
+pinned images, a sweep lock that
 one transaction holds at a time, a ref lock another transaction waits for,
 the version fences of update_ref and discard_ref, and the psycopg client's
 savepoint over a transaction the caller holds, its one transaction at a time
@@ -208,6 +209,65 @@ def test_write_released_replaces_upserts_and_deletes_a_roots_rows(scratch_schema
         write_step = ReleasedWrite("1", first, 1, True, ['{"entity_key": "Mix", "position": 1}'])
         storage.transact(lambda tx: tx.write_released("step", write_step))
     assert released() == soup_rows
+
+
+@requires_database
+def test_primary_refs_and_entity_patches(scratch_schema: Callable[[str], Scratch]) -> None:
+    # primary_refs reads a root's refs with no parent that are not
+    # discarded, in the order they were created: a change set, a discarded
+    # line and another root's line are left out. entity_patches reads the
+    # patches of one entity of one kind among the commits it is given:
+    # another kind's entity of the same key, another entity of the kind and
+    # a commit it is not given are left out.
+    scratch = scratch_schema("vg_adapter_py")
+    connection = scratch.connect()
+    connection.execute(INSERT_ROOT)
+    connection.execute(INSERT_ROOT.replace(ROOT, ROOT[:-1] + "3").replace("Bread", "Soup"))
+    storage = PostgresAdapter(DESCRIPTOR).storage(psycopg_client(connection))
+
+    def line(name: str, root: str = "1") -> Any:
+        # A transaction each, so each line has a later created_at.
+        return storage.transact(lambda tx: tx.create_ref(NewRef(root, None, None, name, ACTOR)))
+
+    main, second, dropped, soup = line("main"), line("second"), line("dropped"), line("main", "3")
+    storage.transact(lambda tx: tx.create_ref(NewRef("1", main.id, None, "draft", ACTOR)))
+    storage.transact(lambda tx: tx.discard_ref(dropped.id, dropped.version, ACTOR))
+    assert [ref.id for ref in storage.transact(lambda tx: tx.primary_refs("1"))] == [main.id, second.id]
+    assert storage.transact(lambda tx: tx.primary_refs("3")) == [soup]
+    assert storage.transact(lambda tx: tx.primary_refs("4")) == []
+
+    def write(tx: Tx) -> Any:
+        first = tx.insert_commit(NewCommit("1", main.id, None, "", 0, "h", None, ACTOR))
+        later = tx.insert_commit(NewCommit("1", main.id, first.id, "", 0, "h", None, ACTOR))
+        tx.insert_patches(
+            first.id,
+            [
+                Patch("", "step", "Mix", "StepRow", 1, "ADD"),
+                Patch("", "part", "Mix", "PartRow", 1, "ADD"),
+                Patch("", "step", "Bake", "BakeRow", 1, "ADD"),
+            ],
+        )
+        tx.insert_patches(later.id, [Patch("", "step", "Mix", "StepRow", 2, "UPDATE")])
+        return first.id, later.id
+
+    first, later = storage.transact(write)
+
+    def patches(commits: List[str], kind: str, key: str) -> List[Patch]:
+        return sorted(storage.transact(lambda tx: tx.entity_patches(commits, kind, key)), key=lambda p: p.entity_version)
+
+    assert patches([first, later], "step", "Mix") == [
+        Patch(first, "step", "Mix", "StepRow", 1, "ADD"),
+        Patch(later, "step", "Mix", "StepRow", 2, "UPDATE"),
+    ]
+    assert patches([later, first], "part", "Mix") == [Patch(first, "part", "Mix", "PartRow", 1, "ADD")]
+    assert patches([later], "part", "Mix") == []
+    assert patches([first, later], "part", "Bake") == []
+    # No commits read as no patches, without a statement; an unknown kind
+    # is refused.
+    none = PostgresAdapter(DESCRIPTOR).storage(_NoStatements())
+    assert none.transact(lambda tx: tx.entity_patches([], "step", "Mix")) == []
+    with pytest.raises(ValueError, match='postgres: unknown kind "stew"'):
+        none.transact(lambda tx: tx.entity_patches([first], "stew", "Mix"))
 
 
 @requires_database

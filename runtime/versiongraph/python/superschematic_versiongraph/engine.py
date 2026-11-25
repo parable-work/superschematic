@@ -25,8 +25,9 @@ releasedTable (D139), release also rewrites the root's rows in that table,
 in its transaction, from the diff between the tree released before and the
 new one. A commit is snapshotted, its full pin set stored, when it is tagged,
 released, or snapshot_every commits past the nearest snapshot on its chain,
-and materialize stops at the nearest snapshot. sweep and run_sweeper are the
-graph's maintenance.
+and materialize stops at the nearest snapshot. entity_history lists the
+commits of a root's primary line that changed one entity (D138). sweep and
+run_sweeper are the graph's maintenance.
 
 A kind whose order is a string key (D137) is put in order by arrange, which
 keeps the longest run of a parent's children already in order and writes new
@@ -96,6 +97,7 @@ __all__ = [
     "TreeResult",
     "ReleasedResult",
     "Change",
+    "EntityChange",
     "SweepOptions",
     "SweepReport",
     "Engine",
@@ -233,6 +235,15 @@ class Change:
     entity_key: str
     operation: str
     row: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class EntityChange:
+    """One commit that changed an entity, and what it did to it: operation
+    is ADD, UPDATE or DELETE."""
+
+    commit: Commit
+    operation: str
 
 
 @dataclass(frozen=True)
@@ -722,6 +733,30 @@ class Engine:
             if r.head is None:
                 return []
             return tx.ref_commits(r.id, r.head, self._walk_ceiling)
+
+        return self._storage.transact(run)
+
+    def entity_history(self, root: str, kind: str, key: str) -> List[EntityChange]:
+        """Lists the commits of root's primary line that changed the entity
+        key of kind, newest first, each with what it did to the entity
+        (D138). It reads the line's commits and the entity's patches among
+        them, and no tree. A root with several primary lines lists each
+        line's in the order the lines were created; one with none, or an
+        entity no commit changed, lists nothing. It walks at most the
+        engine's ceiling of commits a line."""
+        root = _id("id", root)
+        self._kind(kind)
+        key = _id("entity key", key)
+
+        def run(tx: Tx) -> List[EntityChange]:
+            changes: List[EntityChange] = []
+            for line in tx.primary_refs(root):
+                if line.head is None:
+                    continue
+                commits = tx.ref_commits(line.id, line.head, self._walk_ceiling)
+                operations = {p.commit: p.operation for p in tx.entity_patches([c.id for c in commits], kind, key)}
+                changes.extend(EntityChange(c, operations[c.id]) for c in commits if c.id in operations)
+            return changes
 
         return self._storage.transact(run)
 

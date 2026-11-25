@@ -16,14 +16,14 @@ them all.
 | `src/lib.rs` | The crate `superschematic-versiongraph-python`: the extension module `superschematic_versiongraph._native`, whose `run(operation, input)` takes the JSON input as bytes and returns `(ok, output)` with the core's output or error document. It calls the core natively, with the GIL released. PyO3 is its dependency, not the core's. |
 | `superschematic_versiongraph/__init__.py` | `VersionGraph`, the module-level operations, `run` and `VersionGraphError`. |
 | `superschematic_versiongraph/contract.py` | The contract's types, as `TypedDict`s and `Literal`s, every member named as the contract names it. |
-| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, arrange, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes; and `order_keys`, the Go engine's `OrderKeys`. |
+| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, arrange, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, entity_history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes; and `order_keys`, the Go engine's `OrderKeys`. |
 | `superschematic_versiongraph/storage.py` | The storage protocol the engine runs over (`Storage`, `Tx`) and the values it takes and returns, `ReleasedWrite` among them: what a release hands `Tx.write_released` for a kind that keeps its released rows (D139). |
 | `superschematic_versiongraph/errors.py` | The named errors, each with its stable `code`, and `error_code`. |
 | `superschematic_versiongraph/canonical.py` | The canonical row rules, ported from the Go module's package `canonical`. |
 | `superschematic_versiongraph/exactjson.py` | The JSON reader and writer rows travel through, which keep every number's digits. |
 | `superschematic_versiongraph/postgres.py` | `PostgresAdapter`, which builds its statements from the descriptor at run time, a kind's released table's among them, its `Client` protocol, and `psycopg_client`, the psycopg 3 binding. |
 | `superschematic_versiongraph/sqlite.py` | `SqliteAdapter`, which holds every graph in one fixed layout of tables, `sqlite_layout`, `released_layout` for the table of released rows, its `Client` protocol, `is_unique_violation`, and `sqlite_client`, the binding over the standard library's `sqlite3`. |
-| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends: the engine's operations with typed trees and edits, `arrange` and `order_keys` among them, and the types it returns. |
+| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends: the engine's operations with typed trees and edits, `arrange`, `order_keys` and `entity_history` among them, and the types it returns. |
 | `tests/` | Every core vector through the package, the binding's own tests, every scenario and canonical vector through the engine and each adapter, and the adapters', the sweeper's and the facade's own tests. |
 
 ## Use the core
@@ -94,6 +94,13 @@ committed = engine.commit(actor, draft.id, saved.ref.version)
   `order_keys(before, after, count)`, a function of the module, makes the
   keys a save places new rows with: `count` keys strictly between two
   others, `None` for the start or the end.
+- `entity_history(root, kind, key)` lists the commits of a root's primary
+  line that changed one entity, newest first, each an `EntityChange`: the
+  commit and what it did to the entity (`ADD`, `UPDATE` or `DELETE`)
+  (D138). It reads the line's commits, at most the walk ceiling of them,
+  and the entity's patches among them, and no tree. A root with several
+  primary lines lists each line's, in the order the lines were created; a
+  change set's own commits are not in it.
 - `release(actor, root, commit, version)` moves a root's release pointer
   to a tagged commit. For each kind whose descriptor names a
   `releasedTable` (D139) it also rewrites the root's rows in that table, in
@@ -218,8 +225,9 @@ loss. It also checks every vector's input and output against the types
 in `contract.py` and fails when a member or literal there appears in no
 vector. `tests/test_binding.py` checks the errors, that many calls do not
 grow the process, and that the core runs with the GIL released.
-`tests/test_engine.py` checks the engine's rules that need no database
-and that `order_keys` makes the core's keys,
+`tests/test_engine.py` checks the engine's rules that need no database,
+that `order_keys` makes the core's keys and what `entity_history` reads
+of storage,
 and `tests/test_scenarios.py` reads every scenario file and checks the
 scenario format's rules without one. The SQLite tests need no database
 server and run everywhere the others do, on Python 3.9 too:
@@ -230,8 +238,8 @@ writes, `STRICT` tables and foreign keys, two graphs in one file, the name
 function, the clock, its ids, a second connection's wait for the write
 lock, savepoints and the caller's transaction, a number's digits end to
 end, every canonical vector as a round trip, the released table and what
-`write_released` writes into it and refuses, and what the binding
-refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
+`write_released` writes into it and refuses, a root's primary lines and
+an entity's patches and history, and what the binding refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
 SQLite vectors (`runtime/versiongraph/testdata/sqlite`): its layout and
 its released table are `layout.json`'s, the database the TypeScript
 adapter wrote reads back as `typescript.json` byte for byte, one graph
@@ -249,7 +257,8 @@ checks each rendering against Postgres. `tests/test_adapter.py`,
 `tests/test_sweeper.py` and `tests/test_facade.py` hold the adapter's, the
 sweeper's and the facade's own rules: a ref lock another transaction waits
 for, the version fences, the sweep lock, a prune that keeps pinned images,
-the rows `write_released` writes into a kind's released table,
+the rows `write_released` writes into a kind's released table, a root's
+primary lines and an entity's patches and history,
 the psycopg client's savepoint and pool, a pass skipped while the lock is
 held, an idle draft written during a pass, a relation written as its
 target's key, and a parent's children arranged through the facade.

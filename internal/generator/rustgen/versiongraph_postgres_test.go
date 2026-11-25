@@ -347,6 +347,12 @@ async fn facade_arranges_a_kind_ordered_by_a_string_key() {
     let root_text = root.to_uuid().to_string();
     assert!(sql.query(released, &[&root_text]).await.expect("read part_released").is_empty());
     graph.release(&cook(), &root, &uuid(&commit.id), 0).await.expect("release");
+    // An entity's history is the primary line's commits that changed it
+    // (D138): the merge added Bake.
+    let history = graph.entity_history(&root, &RecipeEntityKind::Part, &bake).await.expect("entity history");
+    assert_eq!(history.len(), 1, "{history:?}");
+    assert_eq!((history[0].commit.id.as_str(), history[0].operation.clone()), (commit.id.as_str(), RecipePatchOperation::Add));
+    assert!(graph.entity_history(&root, &RecipeEntityKind::Step, &bake).await.expect("another kind's history").is_empty());
     let rows = sql.query(released, &[&root_text]).await.expect("read part_released");
     let got: Vec<(String, String, String, String)> = rows.iter().map(|r| (r.get(0), r.get(1), r.get(2), r.get(3))).collect();
     let commit_text = uuid(&commit.id).to_uuid().to_string();

@@ -371,6 +371,17 @@ function scanCommit(row: (string | null)[]): Commit {
   };
 }
 
+function scanPatch(row: (string | null)[]): Patch {
+  return {
+    commit: requiredID(row[0]),
+    kind: text(row[1]),
+    entityKey: requiredID(row[2]),
+    entityId: requiredID(row[3]),
+    entityVersion: int(row[4]),
+    operation: text(row[5]) as Patch["operation"],
+  };
+}
+
 function scanRelease(row: (string | null)[]): Release {
   return { id: requiredID(row[0]), root: requiredID(row[1]), commit: requiredID(row[2]), version: int(row[3]) };
 }
@@ -786,6 +797,30 @@ class PostgresTx implements Tx {
     }
   }
 
+  primaryRefs(root: string): Promise<Ref[]> {
+    return this.#refs(
+      `SELECT ${refColumns} FROM ${this.#a.refTable} ` +
+        `WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id`,
+      [uuidArg(root)],
+    );
+  }
+
+  async entityPatches(commits: readonly string[], kindName: string, entityKey: string): Promise<Patch[]> {
+    if (commits.length === 0) {
+      return [];
+    }
+    const k = this.#kind(kindName);
+    const sql =
+      `SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation ` +
+      `FROM ${this.#a.patchTable} WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid`;
+    try {
+      const result = await this.#query(sql, [commits.map(uuidHyphenated), k.name, uuidArg(entityKey)]);
+      return result.rows.map(scanPatch);
+    } catch (err) {
+      throw withContext("read an entity's patches", err);
+    }
+  }
+
   async patches(commits: readonly string[]): Promise<Patch[]> {
     if (commits.length === 0) {
       return [];
@@ -795,14 +830,7 @@ class PostgresTx implements Tx {
       `FROM ${this.#a.patchTable} WHERE commit_id = ANY($1::text[]::uuid[])`;
     try {
       const result = await this.#query(sql, [commits.map(uuidHyphenated)]);
-      return result.rows.map((row) => ({
-        commit: requiredID(row[0]),
-        kind: text(row[1]),
-        entityKey: requiredID(row[2]),
-        entityId: requiredID(row[3]),
-        entityVersion: int(row[4]),
-        operation: text(row[5]) as Patch["operation"],
-      }));
+      return result.rows.map(scanPatch);
     } catch (err) {
       throw withContext("read patches", err);
     }

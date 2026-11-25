@@ -5027,6 +5027,10 @@
         "parent": {
           "$ref": "#/$defs/GraphParent"
         },
+        "released": {
+          "default": false,
+          "type": "boolean"
+        },
         "singleton": {
           "default": false,
           "type": "boolean"
@@ -5034,6 +5038,46 @@
       },
       "required": [
         "graph"
+      ],
+      "type": "object"
+    },
+    "GraphOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "operations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "overridePermission": {
+          "default": "",
+          "type": "string"
+        },
+        "permissions": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
       ],
       "type": "object"
     },
@@ -5629,6 +5673,9 @@
           },
           "type": "object"
         },
+        "graphOperations": {
+          "$ref": "#/$defs/GraphOperationsConfig"
+        },
         "middleware": {
           "$ref": "#/$defs/MiddlewareConfig"
         },
@@ -5713,6 +5760,9 @@
             }
           },
           "type": "object"
+        },
+        "graphOperations": {
+          "$ref": "#/$defs/GraphOperationsConfig"
         },
         "kind": {
           "const": "OperationSet"
@@ -7231,6 +7281,14 @@
     "VersionGraphConfig": {
       "additionalProperties": false,
       "properties": {
+        "enqueueOnCommit": {
+          "default": "",
+          "type": "string"
+        },
+        "enqueueOnRelease": {
+          "default": "",
+          "type": "string"
+        },
         "name": {
           "default": "",
           "type": "string"

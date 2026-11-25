@@ -542,3 +542,17 @@ async fn write_released_writes_each_value_as_a_member_rows_is_written() {
         "the adapter writes the root, the key, the content columns, the commit and the sequence"
     );
 }
+
+/// `primary_refs` and `entity_patches`, the two reads an entity's history is
+/// built from (D138): the cases every adapter is held to.
+#[tokio::test]
+async fn primary_refs_and_entity_patches_read_an_entitys_history() {
+    let Some(dsn) = support::database("primary_refs_and_entity_patches_read_an_entitys_history")
+    else {
+        return;
+    };
+    let schema = support::Schema::create(&dsn, "vg_rust_adapter").await;
+    let store = schema.storage(&support::adapter()).await;
+    seed_roots(&schema.connect().await).await;
+    support::check_entity_reads(store.as_ref()).await;
+}

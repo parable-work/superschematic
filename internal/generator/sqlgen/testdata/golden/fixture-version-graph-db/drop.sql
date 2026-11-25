@@ -2,7 +2,23 @@
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
 
+-- Drop the triggers and functions that enqueue on a write
+DROP TRIGGER IF EXISTS trg_recipe_commit_enqueue_recipe_committed ON recipe_commit;
+DROP FUNCTION IF EXISTS recipe_commit_enqueue_recipe_committed();
+DROP TRIGGER IF EXISTS trg_recipe_release_enqueue_recipe_published ON recipe_release;
+DROP FUNCTION IF EXISTS recipe_release_enqueue_recipe_published();
+
 -- Drop indexes
+DROP INDEX IF EXISTS idx_recipe_published_queue_due_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_published_queue_claim_expires_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_published_queue_updated_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_published_queue_ready_key CASCADE;
+DROP INDEX IF EXISTS uq_recipe_published_queue_claimed_key CASCADE;
+DROP INDEX IF EXISTS idx_recipe_committed_queue_due_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_committed_queue_claim_expires_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_committed_queue_updated_at CASCADE;
+DROP INDEX IF EXISTS idx_recipe_committed_queue_ready_key CASCADE;
+DROP INDEX IF EXISTS uq_recipe_committed_queue_claimed_key CASCADE;
 DROP INDEX IF EXISTS uq_utensil_entity_ref CASCADE;
 DROP INDEX IF EXISTS uq_tasting_entity_ref CASCADE;
 DROP INDEX IF EXISTS uq_step_entity_ref CASCADE;
@@ -95,6 +111,8 @@ DROP TABLE IF EXISTS cover_history CASCADE;
 -- Drop join tables first
 
 -- Drop tables in reverse order (to handle foreign key dependencies)
+DROP TABLE IF EXISTS recipe_published_queue CASCADE;
+DROP TABLE IF EXISTS recipe_committed_queue CASCADE;
 DROP TABLE IF EXISTS utensil CASCADE;
 DROP TABLE IF EXISTS tasting CASCADE;
 DROP TABLE IF EXISTS step CASCADE;

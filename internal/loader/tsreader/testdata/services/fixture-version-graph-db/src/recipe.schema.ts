@@ -9,12 +9,31 @@ import {
   index,
   jsonField,
   key,
+  queue,
   versionGraph,
   versioned
 } from "@superschematic/db";
 
-// A recipe: the stable identity its steps and ingredients are versioned under.
-@versionGraph({ schemaEpoch: 1, snapshotEvery: 3 })
+// Sent for each commit of a recipe's graph, in the transaction that wrote
+// it: a worker handles one recipe's commits at a time.
+@queue({ key: "root", serialize: true })
+export abstract class RecipeCommitted {
+  root: Identity.UUID;
+  ref: Nullable<Identity.UUID>;
+  commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
+}
+
+// Sent when a recipe's release moves to another commit.
+@queue({ key: "root", serialize: true })
+export abstract class RecipePublished {
+  root: Identity.UUID;
+  commit: Identity.UUID;
+}
+
+// A recipe: the stable identity its steps and ingredients are versioned
+// under. Its commits and its releases each enqueue a message.
+@versionGraph({ schemaEpoch: 1, snapshotEvery: 3, enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })
 export abstract class Recipe {
   @key
   id: AutoGenerate<Identity.UUID>;

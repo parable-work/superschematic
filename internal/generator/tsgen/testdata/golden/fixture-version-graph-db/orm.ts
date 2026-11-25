@@ -752,7 +752,8 @@ export const partReleasedTable: TableDefinition = {
 };
 
 /**
- * A row of Recipe, the recipe table: A recipe: the stable identity its steps and ingredients are versioned under.
+ * A row of Recipe, the recipe table: A recipe: the stable identity its steps and ingredients are versioned
+ * under. Its commits and its releases each enqueue a message.
  */
 export interface RecipeRow {
   id: T.IdentityUUID;

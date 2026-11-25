@@ -194,7 +194,8 @@ pub struct PartReleased {
     pub sequence: GenericInt64,
 }
 
-/// A recipe: the stable identity its steps and ingredients are versioned under.
+/// A recipe: the stable identity its steps and ingredients are versioned
+/// under. Its commits and its releases each enqueue a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recipe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,6 +232,18 @@ pub struct RecipeCommit {
     pub created_by: IdentityUUID,
 }
 
+/// Sent for each commit of a recipe's graph, in the transaction that wrote
+/// it: a worker handles one recipe's commits at a time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeCommitted {
+    pub root: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<IdentityUUID>,
+    pub commit: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<GenericInt64>,
+}
+
 /// One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipePatch {
@@ -247,6 +260,13 @@ pub struct RecipePatch {
     #[serde(rename = "entityVersion")]
     pub entity_version: GenericInt64,
     pub operation: RecipePatchOperation,
+}
+
+/// Sent when a recipe's release moves to another commit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipePublished {
+    pub root: IdentityUUID,
+    pub commit: IdentityUUID,
 }
 
 /// A line of the Recipe version graph: a primary line when parentRef is null, else a change set.

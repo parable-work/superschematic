@@ -497,7 +497,8 @@ pub struct PartReleasedFilter {
 
 /// A row of `Recipe`.
 ///
-/// A recipe: the stable identity its steps and ingredients are versioned under.
+/// A recipe: the stable identity its steps and ingredients are versioned
+/// under. Its commits and its releases each enqueue a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeRow {
     pub id: IdentityUUID,

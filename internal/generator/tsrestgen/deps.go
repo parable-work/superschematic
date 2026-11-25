@@ -230,6 +230,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkTableDeps(deps); err != nil {
 		return err
 	}
+	if err := o.checkGraphDeps(deps); err != nil {
+		return err
+	}
 	if err := o.checkBehaviorWorkers(deps); err != nil {
 		return err
 	}

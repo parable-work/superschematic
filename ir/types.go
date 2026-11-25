@@ -649,6 +649,13 @@ type FieldDef struct {
 	// [BehaviorOperation].
 	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
 
+	// GraphOperation marks an operation the loader added for a
+	// @graphOperations set (D138): a server whose generator writes graph
+	// handlers routes it to one that runs it through the graph's facade.
+	// Nil for every authored operation. The data forms have no key for
+	// it. See [GraphOperation].
+	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
+
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
 	// writes and no implementation method. Nil for every other operation.

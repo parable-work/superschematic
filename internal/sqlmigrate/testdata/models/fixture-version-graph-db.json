@@ -31,6 +31,11 @@
       "origin": "Part"
     },
     {
+      "definition": "CREATE OR REPLACE FUNCTION recipe_commit_enqueue_recipe_committed() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of RecipeCommitted after a write to recipe_commit (D80).\n  INSERT INTO recipe_committed_queue (root, ref, \"commit\", \"sequence\") VALUES (NEW.root_id, NEW.ref_id, NEW.id, NEW.\"sequence\");\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "recipe_commit_enqueue_recipe_committed",
+      "origin": "RecipeCommit"
+    },
+    {
       "definition": "CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its deleted_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO recipe_ref_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'deleted_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.deleted_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO recipe_ref_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
       "name": "recipe_ref_capture_history",
       "origin": "RecipeRef"
@@ -38,6 +43,11 @@
     {
       "definition": "CREATE OR REPLACE FUNCTION recipe_release_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its updated_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO recipe_release_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'updated_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.updated_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO recipe_release_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
       "name": "recipe_release_capture_history",
+      "origin": "RecipeRelease"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION recipe_release_enqueue_recipe_published() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of RecipePublished after a write to recipe_release (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN\n    RETURN NULL;\n  END IF;\n  INSERT INTO recipe_published_queue (root, \"commit\") VALUES (NEW.root_id, NEW.commit_id);\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "recipe_release_enqueue_recipe_published",
       "origin": "RecipeRelease"
     },
     {
@@ -887,7 +897,7 @@
           "type": "UUID"
         }
       ],
-      "comment": "A recipe: the stable identity its steps and ingredients are versioned under.",
+      "comment": "A recipe: the stable identity its steps and ingredients are versioned\nunder. Its commits and its releases each enqueue a message.",
       "kind": "entity",
       "name": "recipe",
       "origin": "Recipe",
@@ -1014,6 +1024,134 @@
       }
     },
     {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "root",
+          "origin": "RecipeCommitted.root",
+          "type": "UUID"
+        },
+        {
+          "name": "ref",
+          "nullable": true,
+          "origin": "RecipeCommitted.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "commit",
+          "origin": "RecipeCommitted.commit",
+          "type": "UUID"
+        },
+        {
+          "name": "sequence",
+          "nullable": true,
+          "origin": "RecipeCommitted.sequence",
+          "type": "BIGINT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent for each commit of a recipe's graph, in the transaction that wrote\nit: a worker handles one recipe's commits at a time.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_committed_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_committed_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "root"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_committed_queue_ready_key",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_committed_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "root"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_committed_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_committed_queue",
+      "origin": "RecipeCommitted",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_committed_queue_pkey"
+      },
+      "queue": {
+        "key": "root",
+        "serialize": true
+      }
+    },
+    {
       "checks": [
         {
           "column": "entity_kind",
@@ -1118,6 +1256,122 @@
           "id"
         ],
         "name": "recipe_patch_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "root",
+          "origin": "RecipePublished.root",
+          "type": "UUID"
+        },
+        {
+          "name": "commit",
+          "origin": "RecipePublished.commit",
+          "type": "UUID"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when a recipe's release moves to another commit.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_published_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_published_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "root"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_published_queue_ready_key",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_published_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "root"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_published_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_published_queue",
+      "origin": "RecipePublished",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_published_queue_pkey"
+      },
+      "queue": {
+        "key": "root",
+        "serialize": true
       }
     },
     {
@@ -2212,6 +2466,12 @@
       "table": "part"
     },
     {
+      "definition": "CREATE TRIGGER trg_recipe_commit_enqueue_recipe_committed\n  AFTER INSERT ON recipe_commit\n  FOR EACH ROW EXECUTE FUNCTION recipe_commit_enqueue_recipe_committed()",
+      "name": "trg_recipe_commit_enqueue_recipe_committed",
+      "origin": "RecipeCommit",
+      "table": "recipe_commit"
+    },
+    {
       "definition": "CREATE TRIGGER trg_recipe_ref_bump_version\n  BEFORE UPDATE ON recipe_ref\n  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history()",
       "name": "trg_recipe_ref_bump_version",
       "origin": "RecipeRef",
@@ -2244,6 +2504,12 @@
     {
       "definition": "CREATE TRIGGER trg_recipe_release_capture_history_write\n  AFTER INSERT OR UPDATE ON recipe_release\n  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history()",
       "name": "trg_recipe_release_capture_history_write",
+      "origin": "RecipeRelease",
+      "table": "recipe_release"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_release_enqueue_recipe_published\n  AFTER INSERT OR UPDATE ON recipe_release\n  FOR EACH ROW EXECUTE FUNCTION recipe_release_enqueue_recipe_published()",
+      "name": "trg_recipe_release_enqueue_recipe_published",
       "origin": "RecipeRelease",
       "table": "recipe_release"
     },

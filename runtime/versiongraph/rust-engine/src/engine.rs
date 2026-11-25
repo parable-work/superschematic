@@ -213,6 +213,14 @@ pub struct TreeResult {
     pub findings: Vec<Finding>,
 }
 
+/// One commit that changed an entity, and what it did to it: `operation`
+/// is `ADD`, `UPDATE` or `DELETE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityChange {
+    pub commit: Commit,
+    pub operation: String,
+}
+
 /// A root's release pointer and the tree of the commit it names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReleasedResult {
@@ -715,6 +723,24 @@ impl Engine {
     /// Lists the commits a ref wrote, newest first.
     pub async fn history(&self, ref_id: &str) -> Result<Vec<Commit>, Error> {
         self.on(&*self.storage).history(ref_id).await
+    }
+
+    /// Lists the commits of `root`'s primary line that changed the entity
+    /// `key` of `kind`, newest first, each with what it did to the entity
+    /// (D138). It reads the line's commits and the entity's patches among
+    /// them, and no tree. A root with several primary lines lists each
+    /// line's in the order the lines were created; one with none, or an
+    /// entity no commit changed, lists nothing. It walks at most the
+    /// engine's ceiling of commits a line.
+    pub async fn entity_history(
+        &self,
+        root: &str,
+        kind: &str,
+        key: &str,
+    ) -> Result<Vec<EntityChange>, Error> {
+        self.on(&*self.storage)
+            .entity_history(root, kind, key)
+            .await
     }
 
     /// Soft-deletes a ref at `version`, which frees its name.
@@ -1751,6 +1777,46 @@ impl<'a> EngineOn<'a> {
                 None => Ok(Vec::new()),
                 Some(head) => tx.ref_commits(&r.id, head, self.engine.walk_ceiling).await,
             }
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::entity_history`], over the borrowed storage.
+    pub async fn entity_history(
+        self,
+        root: &str,
+        kind: &str,
+        key: &str,
+    ) -> Result<Vec<EntityChange>, Error> {
+        let root = id("root", root)?;
+        self.engine.kind(kind)?;
+        let key = id("entity key", key)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let mut changes = Vec::new();
+            for line in tx.primary_refs(&root).await? {
+                let Some(head) = &line.head else {
+                    continue;
+                };
+                let commits = tx
+                    .ref_commits(&line.id, head, self.engine.walk_ceiling)
+                    .await?;
+                let ids: Vec<String> = commits.iter().map(|c| c.id.clone()).collect();
+                let mut operations: HashMap<String, String> = tx
+                    .entity_patches(&ids, kind, &key)
+                    .await?
+                    .into_iter()
+                    .map(|p| (p.commit, p.operation))
+                    .collect();
+                for commit in commits {
+                    if let Some(operation) = operations.remove(&commit.id) {
+                        changes.push(EntityChange { commit, operation });
+                    }
+                }
+            }
+            Ok(changes)
         }
         .await;
         finish(tx, result).await

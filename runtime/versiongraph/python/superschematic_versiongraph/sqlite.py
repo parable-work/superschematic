@@ -759,6 +759,21 @@ def _scan_commit(row: Row) -> Commit:
     )
 
 
+# A patch's columns, in the layout's names.
+_PATCH_COLUMNS = "commit_id, entity_kind, entity_key, entity_id, entity_version, operation"
+
+
+def _scan_patch(row: Row) -> Patch:
+    return Patch(
+        commit=_text(row["commit_id"], "commit_id"),
+        kind=_text(row["entity_kind"], "entity_kind"),
+        entity_key=_text(row["entity_key"], "entity_key"),
+        entity_id=_text(row["entity_id"], "entity_id"),
+        entity_version=_int(row["entity_version"], "entity_version"),
+        operation=_text(row["operation"], "operation"),
+    )
+
+
 def _scan_release(row: Row) -> Release:
     return Release(
         id=_text(row["id"], "id"),
@@ -1266,18 +1281,33 @@ class _SqliteTx:
             return []
         with _context("read patches"):
             return [
-                Patch(
-                    commit=_text(row["commit_id"], "commit_id"),
-                    kind=_text(row["entity_kind"], "entity_kind"),
-                    entity_key=_text(row["entity_key"], "entity_key"),
-                    entity_id=_text(row["entity_id"], "entity_id"),
-                    entity_version=_int(row["entity_version"], "entity_version"),
-                    operation=_text(row["operation"], "operation"),
-                )
+                _scan_patch(row)
                 for row in self._all(
-                    "SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation "
-                    f"FROM {self._a.tables.patch} WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))",
+                    f"SELECT {_PATCH_COLUMNS} FROM {self._a.tables.patch} "
+                    "WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))",
                     [self._a.graph, "[" + ",".join(write_string(c) for c in commits) + "]"],
+                )
+            ]
+
+    def primary_refs(self, root: str) -> List[Ref]:
+        return self._refs(
+            f"SELECT {_REF_COLUMNS} FROM {self._a.tables.ref} "
+            "WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            [self._a.graph, root],
+        )
+
+    def entity_patches(self, commits: Sequence[str], kind: str, entity_key: str) -> List[Patch]:
+        if not commits:
+            return []
+        k = self._kind(kind)
+        with _context("read an entity's patches"):
+            return [
+                _scan_patch(row)
+                for row in self._all(
+                    f"SELECT {_PATCH_COLUMNS} FROM {self._a.tables.patch} "
+                    "WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2)) "
+                    "AND entity_kind = ?3 AND entity_key = ?4",
+                    [self._a.graph, "[" + ",".join(write_string(c) for c in commits) + "]", k.name, entity_key],
                 )
             ]
 

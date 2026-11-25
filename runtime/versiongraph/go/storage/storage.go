@@ -91,6 +91,12 @@ type Tx interface {
 	// RefCommits reads head and the parents of it that ref wrote, nearest
 	// first, at most limit of them.
 	RefCommits(ctx context.Context, ref, head string, limit int) ([]Commit, error)
+	// PrimaryRefs reads a root's primary lines: its refs with no parent
+	// that are not discarded, in the order they were created.
+	PrimaryRefs(ctx context.Context, root string) ([]Ref, error)
+	// EntityPatches reads the patches of one entity among commits, in no
+	// particular order: at most one a commit.
+	EntityPatches(ctx context.Context, commits []string, kind, entityKey string) ([]Patch, error)
 	// Patches reads every patch of the commits.
 	Patches(ctx context.Context, commits []string) ([]Patch, error)
 	// NextSequence locks the root against other taggers until the

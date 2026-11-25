@@ -33,6 +33,7 @@ from .engine import (
     CommitResult,
     Conflict,
     Engine,
+    EntityChange,
     KindEdits,
     MergeResult,
     Resolution,
@@ -61,6 +62,7 @@ __all__ = [
     "CommitOptions",
     "CommitResult",
     "Conflict",
+    "EntityChange",
     "Finding",
     "MergeResult",
     "Ref",
@@ -338,6 +340,15 @@ class VersionGraphFacade(Generic[TreeT, EditsT]):
     def history(self, ref: str) -> List[Commit]:
         """Lists the commits a ref wrote, newest first."""
         return self._engine.history(ref)
+
+    def entity_history(self, root: str, kind: str, key: str) -> List[EntityChange]:
+        """Lists the commits of root's primary line that changed the entity
+        key of kind, named as the descriptor names it, newest first, each
+        with what it did to the entity: ADD, UPDATE or DELETE. It reads the
+        line's commits and the entity's patches among them, and no tree. A
+        root with no primary line, or an entity no commit changed, lists
+        nothing."""
+        return self._engine.entity_history(root, kind, key)
 
     def discard(self, ref: str, version: int) -> None:
         """Soft-deletes a ref at version, which frees its name."""

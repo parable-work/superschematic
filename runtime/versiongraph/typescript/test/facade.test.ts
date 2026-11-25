@@ -5,7 +5,8 @@
 // descriptor, with the ingredient's step_key as a writable to-one relation
 // to the step, keyed by the step's entity key, and the part's parent_key as
 // one to its parent part. It also holds the base's arrange and orderKeys
-// over the fixture's part, the kind a string key orders.
+// over the fixture's part, the kind a string key orders, and its
+// entityHistory.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { errorCode, orderKeys, VersionGraphFacade, type Descriptor, type FacadeGraph } from "../dist/facade.js";
 import { pgPool } from "../dist/postgres.js";
@@ -83,6 +84,7 @@ class RecipeGraph extends VersionGraphFacade<Kinds, string, "ADD" | "UPDATE" | "
 const actor = "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90";
 const root = "00000000-0000-4000-8000-000000000001";
 const arrangedRoot = "00000000-0000-4000-8000-000000000002";
+const historyRoot = "00000000-0000-4000-8000-000000000003";
 let scratch: Scratch | undefined;
 
 beforeAll(async () => {
@@ -91,8 +93,8 @@ beforeAll(async () => {
   }
   scratch = await scratchSchema("vg_facade_ts");
   await scratch.pool.query(
-    "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $3::uuid), ($2::uuid, 'Rolls', $3::uuid)",
-    [root, arrangedRoot, actor],
+    "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $4::uuid), ($2::uuid, 'Rolls', $4::uuid), ($3::uuid, 'Buns', $4::uuid)",
+    [root, arrangedRoot, historyRoot, actor],
   );
 });
 
@@ -182,4 +184,36 @@ test.skipIf(dsn === "")("the facade arranges a parent's children and makes order
   expect(await code(g.orderKeys(ranks[1], ranks[0], 1))).toBe("no_order_key");
   // @ts-expect-error arrange takes the kinds a string key orders; the core refuses another too.
   expect(await code(g.arrange(draft.id, still.ref.version, "step", null, []))).toBe("order_not_a_key");
+});
+
+// entityHistory lists the commits of the root's primary line that changed
+// an entity, newest first, each with what it did; the change set's own
+// commits, and another kind's entity of the same key, are not in it.
+test.skipIf(dsn === "")("the facade lists an entity's history on its root's primary line", async () => {
+  const g = new RecipeGraph(graph, pgPool(scratch!.pool), { actor });
+  expect(await g.entityHistory(historyRoot, "part", "00000000-0000-4000-8000-00000000000a")).toEqual([]);
+  let main = await g.createPrimary(historyRoot, "main");
+  const merges = [];
+  let key = "";
+  for (const heading of ["Shape", "Shape the buns"]) {
+    const draft = await g.branch(main.id, heading);
+    const saved = await g.save(draft.id, draft.version, {
+      part: { upsert: [{ ...(key === "" ? {} : { entityKey: key }), parent: null, rank: "V", heading }] },
+    });
+    key = saved.saved.part[0]!.entityKey!;
+    await g.commit(draft.id, saved.ref.version);
+    const merged = await g.merge(draft.id, main.id, main.version);
+    main = merged.ref;
+    merges.push(merged.commit!);
+  }
+  const history = await g.entityHistory(historyRoot, "part", key);
+  expect(history.map((change) => [change.commit.id, change.operation])).toEqual([
+    [merges[1]!.id, "UPDATE"],
+    [merges[0]!.id, "ADD"],
+  ]);
+  // Each commit is the commit history gives: the line wrote both.
+  expect(history.map((change) => change.commit)).toEqual(await g.history(main.id));
+  expect(await g.entityHistory(historyRoot, "step", key)).toEqual([]);
+  expect(await g.entityHistory(root, "part", key)).toEqual([]);
+  await expect(g.entityHistory(historyRoot, "crumb", key)).rejects.toThrow('engine: unknown kind "crumb"');
 });

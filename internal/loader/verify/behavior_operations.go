@@ -48,14 +48,14 @@ func BehaviorOperationsMessage(set *ir.OperationSet, problem BehaviorOperationsP
 }
 
 // SetClauseMessage words the refusal of decorator (@auth,
-// @requirePermission or @publicRoute) on the class of set, which is not
-// @behaviorOperations: on every other set the user clause is each
-// operation's (D103).
+// @requirePermission or @publicRoute) on the class of set, which is
+// neither @behaviorOperations nor @graphOperations: on every other set the
+// user clause is each operation's (D103, D138).
 func SetClauseMessage(set *ir.OperationSet, decorator string) string {
 	if decorator == "@auth" {
-		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
+		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations or @graphOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
 	}
-	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations set; put it on each method of %s", set.Name, decorator, set.Name)
+	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of %s", set.Name, decorator, set.Name)
 }
 
 // CheckBehaviorOperations runs the checks of the API's @behaviorOperations
@@ -87,6 +87,11 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 		}
 		if set.IsBehaviorOperations() {
 			sets = append(sets, set)
+			continue
+		}
+		if set.IsGraphOperations() {
+			// A @graphOperations set takes the clause too (D138), and
+			// its own checks hold it (checkGraphOperations).
 			continue
 		}
 		if set.Auth {

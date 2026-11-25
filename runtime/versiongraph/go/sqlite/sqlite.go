@@ -1319,6 +1319,43 @@ func (t *tx) Patches(ctx context.Context, commits []string) ([]storage.Patch, er
 
 // NextSequence is the root's highest sequence plus one: the file's one
 // writer orders every tagger, so the root needs no lock of its own.
+func (t *tx) PrimaryRefs(ctx context.Context, root string) ([]storage.Ref, error) {
+	return t.refs(ctx, `SELECT `+refColumns+` FROM `+t.a.t.ref+
+		` WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id`,
+		t.a.graph, root)
+}
+
+func (t *tx) EntityPatches(ctx context.Context, commits []string, kindName, entityKey string) ([]storage.Patch, error) {
+	if len(commits) == 0 {
+		return nil, nil
+	}
+	if _, err := t.kind(kindName); err != nil {
+		return nil, err
+	}
+	list := make([]string, len(commits))
+	for i, commit := range commits {
+		list[i] = jsonString(commit)
+	}
+	var out []storage.Patch
+	err := t.conn.Query(ctx, `SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM `+t.a.t.patch+` `+
+		`WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2)) AND entity_kind = ?3 AND entity_key = ?4`,
+		[]any{t.a.graph, "[" + strings.Join(list, ",") + "]", kindName, entityKey}, func(scan func(dest ...any) error) error {
+			var p storage.Patch
+			if err := scan(&p.Commit, &p.Kind, &p.EntityKey, &p.EntityID, &p.EntityVersion, &p.Operation); err != nil {
+				return err
+			}
+			if err := exactInt(p.EntityVersion, "entity_version"); err != nil {
+				return err
+			}
+			out = append(out, p)
+			return nil
+		})
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: read an entity's patches: %w", err)
+	}
+	return out, nil
+}
+
 func (t *tx) NextSequence(ctx context.Context, root string) (int64, error) {
 	var next int64
 	if _, err := t.queryRow(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM `+t.a.t.commit+` WHERE graph = ?1 AND root_id = ?2`,

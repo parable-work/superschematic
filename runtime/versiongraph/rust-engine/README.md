@@ -13,8 +13,8 @@ format.
 ```
 src/engine.rs      Engine: create_primary, branch, save, arrange, commit, seal, merge,
                    rebase, revert, release, released, materialize, compose, diff, history,
-                   discard; EngineOn, the same over a storage it borrows; Engine::run_on and
-                   ready
+                   entity_history, discard; EngineOn, the same over a storage it borrows;
+                   Engine::run_on and ready
 src/sweep.rs       Engine::sweep and Engine::run_sweeper
 src/storage.rs     the Storage and Tx traits an adapter implements
 src/postgres/      the Postgres adapter, its Client seam and the tokio-postgres binding
@@ -72,6 +72,13 @@ such kind's part to the adapter (`Tx::write_released`), the rows added or
 changed and the keys deleted. A root's first release, and a release of the
 commit already released, write the whole tree over the root's rows. For a
 graph with no such kind a release reads and writes what it did before.
+
+`engine.entity_history(root, kind, key)` lists the commits of the root's
+primary line that changed one entity, newest first, each an `EntityChange`:
+the commit and what it did, `ADD`, `UPDATE` or `DELETE` (D138). It reads
+the line's commits and the entity's patches among them
+(`Tx::primary_refs`, `Tx::entity_patches`) and no tree, takes no actor, and
+walks at most the engine's ceiling of commits a line.
 
 `engine.on(&storage)` runs the same operations over a storage the caller
 lends, which need not be `'static`: it may borrow a transaction the

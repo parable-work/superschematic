@@ -137,6 +137,12 @@ export interface TypedChange<KindName extends string, Operation extends string> 
   row?: string;
 }
 
+/** One commit that changed an entity, and what it did to it: its operation is ADD, UPDATE or DELETE. */
+export interface TypedEntityChange<Operation extends string> {
+  commit: Commit;
+  operation: Operation;
+}
+
 /**
  * A saved ref at its new version and the rows save upserted, in edit order
  * per kind. arrange returns one too: the rows it gave a new order key, in
@@ -462,6 +468,18 @@ export class VersionGraphFacade<
   /** Lists the commits a ref wrote, newest first. */
   async history(ref: string): Promise<Commit[]> {
     return (await this.#run()).history(ref);
+  }
+
+  /**
+   * Lists the commits of root's primary line that changed the entity key of
+   * kind, newest first, each with what it did to the entity: ADD, UPDATE or
+   * DELETE. It reads the line's commits and the entity's patches among
+   * them, and no tree. A root with no primary line, or an entity no commit
+   * changed, lists nothing.
+   */
+  async entityHistory(root: string, kind: KindName, key: string): Promise<TypedEntityChange<Operation>[]> {
+    const changes = await (await this.#run()).entityHistory(root, kind, key);
+    return changes as unknown as TypedEntityChange<Operation>[];
   }
 
   /** Soft-deletes a ref at version, which frees its name. */

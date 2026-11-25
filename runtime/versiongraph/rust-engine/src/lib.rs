@@ -16,7 +16,10 @@
 //! [`Engine::release`] moves and [`Engine::released`] reads. A commit is
 //! snapshotted, its full pin set stored, when it is tagged, released, or
 //! [`Options::snapshot_every`] commits past the nearest snapshot on its
-//! chain, and a read stops at the nearest snapshot. [`Engine::sweep`] and
+//! chain, and a read stops at the nearest snapshot. [`Engine::history`]
+//! lists the commits a ref wrote, and [`Engine::entity_history`] the
+//! commits of a root's primary line that changed one entity (D138), each
+//! with what it did, from the commits' patches alone. [`Engine::sweep`] and
 //! [`Engine::run_sweeper`] are the graph's maintenance.
 //!
 //! A kind whose descriptor names a `releasedTable` keeps the rows of each
@@ -76,8 +79,9 @@ mod sweep;
 
 pub use crate::core::{order_keys, Change, Conflict, Finding, Resolution, Take, Tree};
 pub use crate::engine::{
-    ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, KindEdits, MergeResult, Options,
-    ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY, DEFAULT_WALK_CEILING,
+    ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, EntityChange, KindEdits,
+    MergeResult, Options, ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY,
+    DEFAULT_WALK_CEILING,
 };
 pub use crate::error::Error;
 pub use crate::storage::{Commit, Ref, Release, Storage};

@@ -46,6 +46,19 @@ type VersionGraphConfig struct {
 	// value is positive. Verification enforces that, not the data form's
 	// JSON Schema, whose subset has no numeric bounds.
 	SnapshotEvery *int64 `json:"snapshotEvery,omitempty" yaml:"snapshotEvery,omitempty"`
+
+	// EnqueueOnCommit names a `@queue` class of the schema: a commit
+	// written to the graph's commit table enqueues its message, by a
+	// trigger, in the transaction that wrote it (D138). The message's
+	// root and commit fields take the commit's root and id, and its ref
+	// and sequence fields, when it declares them, the commit's.
+	EnqueueOnCommit string `json:"enqueueOnCommit,omitempty" yaml:"enqueueOnCommit,omitempty"`
+
+	// EnqueueOnRelease names a `@queue` class of the schema: a root's
+	// release pointer written or moved to another commit enqueues its
+	// message, by a trigger, in the transaction that moved it (D138). The
+	// message's root and commit fields take the pointer's.
+	EnqueueOnRelease string `json:"enqueueOnRelease,omitempty" yaml:"enqueueOnRelease,omitempty"`
 }
 
 // DefaultSnapshotEvery is a version graph's snapshot interval when

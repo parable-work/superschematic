@@ -1,0 +1,52 @@
+{
+  "name": "enqueue",
+  "description": "A graph whose root names a queue for its commits and one for its releases: on the generated tables, which are Postgres's, each commit written, a change set's and a merge's alike, enqueues the commit queue's message with its root, ref, commit and sequence, null on a commit that is not tagged; a root's first release and each move of it to another commit enqueue the release queue's message, and a release of the commit already released does not. The fixed layout has no trigger, so its steps read no queue.",
+  "roots": ["Bread"],
+  "steps": [
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "write", "as": "write"},
+    {"op": "save", "ref": "write", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": "Mix"}
+    ]}}},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT count(*)::text AS messages FROM recipe_committed_queue WHERE root = $1::uuid"},
+      "args": [{"uuid": "Bread"}], "expect": {"rows": [{"messages": "0"}]}},
+    {"op": "commit", "ref": "write", "as": "d1"},
+    {"op": "merge", "source": "write", "target": "main", "tag": true, "as": "c1"},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'd1' WHEN $3::uuid THEN 'c1' ELSE 'other' END AS \"commit\", CASE ref WHEN $4::uuid THEN 'write' WHEN $5::uuid THEN 'main' ELSE 'other' END AS ref, COALESCE(\"sequence\"::text, 'none') AS \"sequence\", state FROM recipe_committed_queue WHERE root = $1::uuid ORDER BY created_at, \"sequence\" NULLS FIRST"},
+      "args": [{"uuid": "Bread"}, {"commit": "d1"}, {"commit": "c1"}, {"ref": "write"}, {"ref": "main"}],
+      "expect": {"rows": [
+        {"commit": "d1", "ref": "write", "sequence": "none", "state": "ready"},
+        {"commit": "c1", "ref": "main", "sequence": "1", "state": "ready"}
+      ]}},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT count(*)::text AS messages FROM recipe_published_queue WHERE root = $1::uuid"},
+      "args": [{"uuid": "Bread"}], "expect": {"rows": [{"messages": "0"}]}},
+
+    {"op": "release", "root": "Bread", "commit": "c1"},
+    {"op": "release", "root": "Bread", "commit": "c1", "expect": {"release": {"commit": "c1", "version": 2}}},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' ELSE 'other' END AS \"commit\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
+      "args": [{"uuid": "Bread"}, {"commit": "c1"}],
+      "expect": {"rows": [{"commit": "c1"}]}},
+
+    {"op": "branch", "from": "main", "name": "edit", "as": "edit"},
+    {"op": "save", "ref": "edit", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": "Mix well"}
+    ]}}},
+    {"op": "commit", "ref": "edit", "as": "d2"},
+    {"op": "merge", "source": "edit", "target": "main", "tag": true, "as": "c2"},
+    {"op": "release", "root": "Bread", "commit": "c2"},
+    {"op": "release", "root": "Bread", "commit": "c1"},
+    {"op": "release", "root": "Bread", "commit": "c1", "version": 1, "expect": {"error": "version_conflict"}},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' WHEN $3::uuid THEN 'c2' ELSE 'other' END AS \"commit\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
+      "args": [{"uuid": "Bread"}, {"commit": "c1"}, {"commit": "c2"}],
+      "expect": {"rows": [{"commit": "c1"}, {"commit": "c2"}, {"commit": "c1"}]}},
+    {"op": "sql", "backends": ["postgres"],
+      "statement": {"postgres": "SELECT count(*)::text AS messages FROM recipe_committed_queue WHERE root = $1::uuid"},
+      "args": [{"uuid": "Bread"}], "expect": {"rows": [{"messages": "4"}]}},
+    {"op": "history", "ref": "main", "expect": {"commits": ["c2", "c1"]}}
+  ]
+}

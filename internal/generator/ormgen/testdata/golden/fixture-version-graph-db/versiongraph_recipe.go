@@ -424,6 +424,13 @@ type RecipeChange struct {
 	Row       json.RawMessage
 }
 
+// RecipeEntityChange is one commit that changed an entity, and what it
+// did to it.
+type RecipeEntityChange struct {
+	Commit    *types.RecipeCommit
+	Operation types.RecipePatchOperation
+}
+
 // CreatePrimary creates a primary line of root: a ref with no parent.
 func (g *RecipeGraph) CreatePrimary(ctx context.Context, root types.IdentityUUID, name string) (*types.RecipeRef, error) {
 	var result *types.RecipeRef
@@ -751,6 +758,31 @@ func (g *RecipeGraph) History(ctx context.Context, ref types.IdentityUUID) ([]*t
 				return err
 			}
 			result = append(result, commit)
+		}
+		return nil
+	})
+	return result, err
+}
+
+// EntityHistory lists the commits of root's primary line that changed the
+// entity key of kind, newest first, each with what it did to the entity:
+// the commit that added it, each that updated it, one that deleted it. It
+// reads the line's commits and the entity's patches among them, and no
+// tree. An entity no commit changed, and a root with no primary line, list
+// nothing.
+func (g *RecipeGraph) EntityHistory(ctx context.Context, root types.IdentityUUID, kind types.RecipeEntityKind, key types.IdentityUUID) ([]RecipeEntityChange, error) {
+	var result []RecipeEntityChange
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		changes, err := e.EntityHistory(ctx, uuidText(root), string(kind), uuidText(key))
+		if err != nil {
+			return err
+		}
+		for _, change := range changes {
+			commit, err := g.commitRow(ctx, tx, change.Commit.ID)
+			if err != nil {
+				return err
+			}
+			result = append(result, RecipeEntityChange{Commit: commit, Operation: types.RecipePatchOperation(change.Operation)})
 		}
 		return nil
 	})

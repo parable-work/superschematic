@@ -39,8 +39,12 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 		e.emitBehaviorOperationsSet(set, owner)
 		return
 	}
+	if set.IsGraphOperations() {
+		e.emitGraphOperationsSet(set, owner)
+		return
+	}
 	if set.Auth || len(set.Permissions) > 0 || set.Public {
-		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations set", owner)
+		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations or @graphOperations set", owner)
 	}
 
 	auth := false
@@ -161,6 +165,70 @@ func (e *emitter) emitBehaviorOperationsSet(set *ir.OperationSet, owner string) 
 	e.body.WriteString("\n")
 	e.comment("", set.Comment)
 	fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("behaviorOperations"), e.ident(table, "table"))
+	if set.Auth {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
+	}
+	if len(set.Permissions) > 0 {
+		fmt.Fprintf(&e.body, "@%s([%s])\n", e.use("requirePermission"), quotedList(set.Permissions))
+	}
+	if set.Public {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("publicRoute"))
+	}
+	e.emitServiceCallersDecorator("", set.ServiceCallers)
+	e.emitMiddlewareDecorators("", set.Middleware)
+	fmt.Fprintf(&e.body, "export abstract class %s {}\n", e.ident(set.Name, "operation set"))
+}
+
+// emitGraphOperationsSet renders a version graph's operations (D138):
+// @graphOperations with the root, which the document's imports name, and
+// the options the set writes, and the set's clause, service clause and
+// middleware, on an abstract class with no members. Its operations are the
+// loader's, which the writer leaves out (withoutExpansion), so the reader
+// expands it again.
+func (e *emitter) emitGraphOperationsSet(set *ir.OperationSet, owner string) {
+	if len(set.Operations) > 0 {
+		e.failf("%s: a @graphOperations class has no members; write the set the loader has not filled", owner)
+	}
+	if set.Encrypted {
+		e.failf("%s: a @graphOperations class is not Encrypted", owner)
+	}
+	cfg := set.GraphOperations
+	imported := false
+	for _, imp := range e.doc.Imports {
+		if slices.Contains(imp.Types, cfg.Type) {
+			e.importSymbol(imp.Package, cfg.Type)
+			imported = true
+			break
+		}
+	}
+	if !imported {
+		e.failf("%s: the root %s is not covered by the document's imports", owner, cfg.Type)
+	}
+	var options []string
+	if len(cfg.Operations) > 0 {
+		options = append(options, "operations: ["+quotedList(cfg.Operations)+"]")
+	}
+	if len(cfg.Permissions) > 0 {
+		var entries []string
+		for _, operation := range sortedKeys(cfg.Permissions) {
+			entries = append(entries, operation+": ["+quotedList(cfg.Permissions[operation])+"]")
+		}
+		options = append(options, "permissions: { "+strings.Join(entries, ", ")+" }")
+	}
+	if len(cfg.By) > 0 {
+		options = append(options, "by: ["+quotedList(cfg.By)+"]")
+	}
+	if cfg.OverridePermission != "" {
+		options = append(options, "overridePermission: "+quote(cfg.OverridePermission))
+	}
+
+	e.body.WriteString("\n")
+	e.comment("", set.Comment)
+	if literal := optionalObjectLiteral(options); literal != "" {
+		fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("graphOperations"), e.ident(cfg.Type, "table"), literal)
+	} else {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("graphOperations"), e.ident(cfg.Type, "table"))
+	}
 	if set.Auth {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
 	}

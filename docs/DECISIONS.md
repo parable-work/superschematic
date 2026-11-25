@@ -1440,31 +1440,34 @@ decision.
 
 ## D138. `@graphOperations(Root)` serves a version graph's operations as routes with no implementation method, and a graph's commits and releases can enqueue (D17, D103, D106 amended)
 
-A graph's operations reach an application through the generated facade,
-which is a library. Every route over them is written by hand: load the
-root, check who may, call the facade, map its refusals to answers. A
-behavior's operations do not ask that: `@behaviorOperations(Table)` adds
-their routes.
+Built: `@graphOperations(Root, { operations?, permissions?, by?,
+overridePermission? })`, which the loader expands into a route per
+operation with generated inputs and results, in the OpenAPI, the SDKs and
+the MCP tools, served by the generated TypeScript server
+(`runtime/http/typescript/src/graph-routes.ts`); the root read first, a
+ref or a commit held to its root, the row rule and the engine's refusals
+as problems (`docs/src/content/docs/guides/api-routes.mdx`, "A version
+graph's operations"); `EntityHistory` in the four engines and facades,
+with the scenario `entity_history`; and `@versionGraph({ enqueueOnCommit,
+enqueueOnRelease })`, as `@enqueueOnChange` triggers on the commit and
+release tables, with the scenario `enqueue`. Past the text: a sixteenth
+route, `compose` (`GET {roots}/{id}/refs/{ref}/tree`), since a client that
+edits a change set must read it; `branch` with no `from` branches the
+root's primary line and creates it, named `main`, for a root that has
+none, since no route creates one; `revert` is under the row rule with the
+six the text lists, since it writes a change set too; and every operation
+is an MCP tool without `@mcp` on the class, as a behavior set's are. The
+commit that built it names D138.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A class of an API schema decorated `@graphOperations(Root, { operations?, permissions?, by?, overridePermission? })` declares a set, as `@behaviorOperations` does. The loader adds a route per operation: `branch`, `save`, `arrange`, `commit`, `seal`, `merge`, `rebase`, `revert`, `discard`, `release`, `released`, `materialize`, `diff`, `history` and `entityHistory`. `operations` narrows the set to those it lists. | A route per operation declared by hand, each a method with no body; a route for every graph of a database unasked |
-| The paths sit under the root's plural, named for its key: `POST {roots}/{id}/refs` (branch), `PUT {roots}/{id}/refs/{ref}/edits` (save), `POST {roots}/{id}/refs/{ref}/{arrange,commit,seal,merge,rebase,revert,discard}`, `GET {roots}/{id}/refs/{ref}/history`, `POST {roots}/{id}/release`, `GET {roots}/{id}/released`, `GET {roots}/{id}/commits/{commit}` (materialize), `GET {roots}/{id}/diff` with `from` and `to`, and `GET {roots}/{id}/entities/{kind}/{key}/history`. | Paths the declaration writes out, which every set would repeat |
-| The inputs and results are generated types: each kind's edits and rows are typed from the member's content columns, as the facade's are, and the rest are the facade's own (a ref, a commit, a conflict with its base, ours, theirs and authors, a resolution). They are in the OpenAPI and in every SDK. | An untyped JSON body |
-| A route runs every step an implemented route runs. The class's `@requirePermission` covers the set, and `permissions` names a permission list per operation that replaces it. `by: ["createdBy"]` keeps the operations that write a change set (save, arrange, commit, seal, rebase, discard) to the ref's creator, and `overridePermission` admits a holder past it, as a table operation's row rule does. The actor of the graph's writes is the caller's subject. | The application's policy written in a handler |
-| A route reads the root through its repository first: an absent root, or one that is soft-deleted, is 404. | Operating on a deleted root's graph |
-| A refusal of the engine is a problem: not found is 404; a stale `version`, a sealed ref, a write to a primary line and a newer schema epoch are 409, each with its code; a refused input is 422 with the core's findings. A merge or a rebase that finds conflicts answers 200 with them and writes nothing, as the facade returns them. | One status for every refusal |
-| Each engine gains `EntityHistory(root, kind, key)`: the commits of the primary line that changed the entity, newest first, each with the change's operation. | Walking `History` and `Diff` per commit in the application |
-| `@versionGraph({ enqueueOnCommit?, enqueueOnRelease? })` names a `@queue` class each. A row written to the graph's commit table, or a release pointer moved, enqueues `{root, ref?, commit, sequence?}` by the trigger `@enqueueOnChange` writes, in the transaction that made it. | An enqueue the application remembers to make after each call |
-| `@mcp` on the set makes each operation a tool. | |
-| A save that needs the application's code, such as one that parses an uploaded file into rows, stays a hand-written operation that calls the facade. | A hook inside the generated route |
-| Built for the TypeScript server first. The entry keeps the Rust and Go servers until they serve the set. | Waiting for three servers |
-
-Build: the registry and the loader (the set's expansion beside
-`@behaviorOperations`), `ir`, `apigen`, `tsrestgen`,
-`runtime/http/typescript` (a `graph-routes.ts` beside
-`behavior-routes.ts`), the OpenAPI, the four engines (`EntityHistory`),
-`sqlgen` (the two triggers), the API routes guide and the reference.
+Left: the Go and Rust servers do not serve the set: each operation stays
+a method of the implementation to write by hand, with the same route and
+types, and the build says so. A TypeScript server that serves a set gets
+no Dockerfile from a stack's build, since no stage of the image builds
+the version-graph core's wasm module. The Workers entry takes the same
+options and is untested. The generated types are not compiled in the
+Python and Rust SDKs. A release's message carries no sequence, which the
+release pointer does not hold, and the SQLite layout, which has no
+trigger, enqueues nothing.
 
 ## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
 

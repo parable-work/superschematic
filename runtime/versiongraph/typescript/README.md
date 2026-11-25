@@ -69,8 +69,8 @@ const main = await engine.createPrimary(actor, root, "main");
 The engine ports the Go engine (`runtime/versiongraph/go/engine`)
 operation for operation: `createPrimary`, `branch`, `save`, `arrange`,
 `commit`, `seal`, `merge`, `rebase`, `revert`, `release`, `released`,
-`materialize`, `compose`, `diff`, `history`, `discard`, `sweep` and
-`runSweeper`, with the walk ceiling, the snapshots, the schema-epoch check
+`materialize`, `compose`, `diff`, `history`, `entityHistory`, `discard`,
+`sweep` and `runSweeper`, with the walk ceiling, the snapshots, the schema-epoch check
 and the named errors and their stable codes. A canonical row is JSON text,
 so a number keeps its digits; durations are milliseconds; `runSweeper`
 stops when its `AbortSignal` aborts, runs no pass when it has already
@@ -89,6 +89,15 @@ the end. It takes a core and no storage. The facade has both, as
 graph's tree does and returns typed rows, and as
 `orderKeys(before, after, count)`, a method and a function of the entry,
 on the core every facade shares.
+
+`entityHistory(root, kind, key)` lists the commits of the root's primary
+line that changed one entity, newest first, each as `{ commit, operation }`
+with the operation `ADD`, `UPDATE` or `DELETE` (D138). It reads the line's
+commits (`refCommits`, up to the walk ceiling) and the entity's patches
+among them (the storage's `primaryRefs` and `entityPatches`), and no tree.
+A root with several primary lines lists each line's in the order the lines
+were created. The facade has it too, naming the kind as the descriptor
+does.
 
 `release` also keeps the released rows of each kind whose descriptor names
 a `releasedTable` (D139; `runtime/versiongraph/README.md`, "Released

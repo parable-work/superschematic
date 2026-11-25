@@ -76,6 +76,8 @@ func checkGraphRoot(schema *ir.Schema, td *ir.TypeDef, memberCount int, generate
 	if memberCount == 0 {
 		r.errorf(td.Owner, "%s: @versionGraph needs at least one @graphMember type", td.Name)
 	}
+	checkGraphQueue(schema, td, "enqueueOnCommit", td.VersionGraph.EnqueueOnCommit, true, r)
+	checkGraphQueue(schema, td, "enqueueOnRelease", td.VersionGraph.EnqueueOnRelease, false, r)
 	graphName := td.VersionGraphName()
 	for _, suffix := range versiongraph.TypeSuffixes {
 		generatedName := graphName + suffix
@@ -86,6 +88,60 @@ func checkGraphRoot(schema *ir.Schema, td *ir.TypeDef, memberCount int, generate
 		generated[generatedName] = graphName
 		if definedName(schema, generatedName) {
 			r.errorf(td.Owner, "%s: version graph %q generates %s, which the schema already defines; rename it or set @versionGraph({ name })", td.Name, graphName, generatedName)
+		}
+	}
+}
+
+// checkGraphQueue holds the queue a graph enqueues on a commit or on a
+// release (D138) to what the trigger can set: a @queue class of the
+// schema whose message has a root and a commit, each a required field of
+// the root key's scalar; a ref of that scalar and an Int64 sequence when
+// it declares them, each nullable where the write has none (a release has
+// neither, and a commit that is not tagged no sequence); and no other
+// field the trigger would have to set.
+func checkGraphQueue(schema *ir.Schema, td *ir.TypeDef, option, queue string, commit bool, r *Result) {
+	if queue == "" {
+		return
+	}
+	message := schema.Types[queue]
+	if message == nil || message.Queue == nil {
+		r.errorf(td.Owner, "%s: @versionGraph %s names %s, which is not a @queue class of this schema", td.Name, option, queue)
+		return
+	}
+	uuid := ""
+	for _, fd := range td.Fields {
+		if fd.Key {
+			uuid = fd.TypeRef.Name
+		}
+	}
+	single := func(fd *ir.FieldDef, scalar string) bool {
+		return fd.TypeRef.Name == scalar && !fd.TypeRef.IsArray && !fd.TypeRef.IsMap && fd.Relation == nil
+	}
+	seen := map[string]bool{}
+	for _, fd := range message.Fields {
+		seen[fd.Name] = true
+		switch fd.Name {
+		case "root", "commit":
+			if !fd.Required || !single(fd, uuid) {
+				r.errorf(td.Owner, "%s: @versionGraph %s: %s.%s must be a required %s, the %s the trigger sets it from", td.Name, option, queue, fd.Name, uuid, map[bool]string{true: "commit's", false: "release pointer's"}[commit])
+			}
+		case "ref":
+			if !single(fd, uuid) || (!commit && fd.Required) {
+				r.errorf(td.Owner, "%s: @versionGraph %s: %s.ref must be a %s, and Nullable for a release, which has no ref", td.Name, option, queue, uuid)
+			}
+		case "sequence":
+			if !single(fd, "Generic.Int64") || fd.Required {
+				r.errorf(td.Owner, "%s: @versionGraph %s: %s.sequence must be a Nullable<Generic.Int64>: a commit that is not tagged has none, and a release sets none", td.Name, option, queue)
+			}
+		default:
+			if fd.Required && fd.Default == nil {
+				r.errorf(td.Owner, "%s: @versionGraph %s: %s.%s is required and has no default, and the trigger sets root, commit, ref and sequence alone", td.Name, option, queue, fd.Name)
+			}
+		}
+	}
+	for _, name := range []string{"root", "commit"} {
+		if !seen[name] {
+			r.errorf(td.Owner, "%s: @versionGraph %s: %s has no %s field, which says what was written", td.Name, option, queue, name)
 		}
 	}
 }

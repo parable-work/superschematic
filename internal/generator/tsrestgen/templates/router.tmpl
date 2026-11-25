@@ -88,6 +88,18 @@
 // holds 409 conflict, and a relation's key that names no row 400 at the
 // body's member.
 {{- end }}
+{{- if .HasGraphs }}
+//
+// The operations of its @graphOperations sets (D138) are each an operation
+// of a version graph of {{ .Deps.Database }} and have no implementation method: the
+// route runs the runtime's handler of the operation, with its entry of
+// graphOperations, which reads the root, and the ref or the commit the
+// path names, through options.orm, the database's repositories, and runs
+// the operation through the graph's facade in options.graphs, a write as
+// the request's caller. A root, a ref or a commit that is not there is 404
+// not_found, and so is a change set the set's row rule keeps from the
+// caller; a refusal of the graph's engine is the problem of its code.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -155,6 +167,9 @@ import {
 {{- end }}
 {{- if .RouterNeedsORM }}
 import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
+{{- end }}
+{{- if .HasGraphs }}
+import type { {{ join .GraphFacades ", " }} } from '{{ .GraphFacadeModule }}';
 {{- end }}
 import type { Implementations{{ range .FilterTypeNames }}, {{ . }}{{ end }} } from './interfaces';
 {{- if .MCP }}
@@ -244,6 +259,31 @@ export const tableOperations = {
 {{- end }}
 } as const satisfies Partial<Record<OperationName, TableOperation>>;
 {{- end }}
+{{- range .GraphSets }}
+
+/**
+ * The {{ .Graph }} version graph (D138) as the runtime's handlers read it:
+ * its root, the members of the repositories that hold the root's, the
+ * graph's ref and the graph's commit tables, and each member kind with the
+ * members of its row, the content a typed upsert writes.
+ */
+export const {{ .Var }} = {{ .Literal }} as const satisfies GraphSet;
+{{- end }}
+{{- if .HasGraphs }}
+
+/**
+ * What each graph operation runs (D138): the graph, the operation, and for
+ * one that writes a change set the set's row rule, the members of the ref
+ * that name who may write it and the permission that lifts it.
+ */
+export const graphOperations = {
+{{- range .Endpoints }}
+{{- if .Graph }}
+  {{ .Key }}: {{ .Graph.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, GraphOperation>>;
+{{- end }}
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
@@ -289,6 +329,25 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * operations (D106): each in one transaction, as the request's caller.
    */
   orm: {{ .Deps.ORM }};
+{{- else if .HasGraphs }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), through which the graph
+   * operations (D138) read the root and the graph's refs and commits.
+   */
+  orm: {{ .Deps.ORM }};
+{{- end }}
+{{- if .HasGraphs }}
+  /**
+   * The facade of each version graph the graph operations run through
+   * (D138), as {{ .GraphFacadeModule }} exports it, built over a
+   * client of {{ .Deps.Database }}: new <Name>Graph(pgPool(pool)). A write runs
+   * as the request's caller, through its withActor.
+   */
+  graphs: {
+{{- range .GraphSets }}
+    {{ .Member }}: {{ .Facade }};
+{{- end }}
+  };
 {{- end }}
 {{- if .MCP }}
   /**
@@ -355,6 +414,9 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
 {{- if .RouterNeedsORM }}
  * Throws without options.orm, the repositories {{ .ORMRuns }} run through ({{ .ORMDecisions }}).
 {{- end }}
+{{- if .HasGraphs }}
+ * Throws without the facade of each version graph in options.graphs (D138).
+{{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
 {{- end }}
@@ -367,6 +429,9 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
 {{- if .RouterNeedsORM }}
  * Throws without options.orm, the repositories {{ .ORMRuns }} run through ({{ .ORMDecisions }}).
+{{- end }}
+{{- if .HasGraphs }}
+ * Throws without the facade of each version graph in options.graphs (D138).
 {{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
@@ -391,6 +456,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .RouterNeedsORM }}
   if (!options.orm) {
     throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs %s of %s (%s)" .ORMRuns .SchemaName .ORMDecisions) }});
+  }
+{{- end }}
+{{- range .GraphSets }}
+  if (!options.graphs?.{{ .Member }}) {
+    throw new Error({{ tsString (printf "RouterOptions.graphs.%s is required: the facade of the %s version graph, which runs the graph operations of %s (D138)" .Member .Graph .Set) }});
   }
 {{- end }}
 {{- if .WebhookProviders }}
@@ -481,6 +551,21 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
+    }
+  );
+{{- else if .Graph }}
+  // {{ .Graph.Graph }}'s {{ .Graph.Operation }} (D138): the runtime's handler reads the root through
+  // the repositories and runs the operation through the graph's facade,
+  // and a refusal of the graph's engine is the problem of its code.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+    (ctx, request) => {{ .Graph.Handler }}(options.orm, options.graphs.{{ .Graph.Member }}, graphOperations.{{ .Key }}, ctx, request),
+    {{ $runtime }},
+    {
+      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+      timeoutSeconds: options.timeouts?.{{ .Key }},
     }
   );
 {{- else if .Table }}

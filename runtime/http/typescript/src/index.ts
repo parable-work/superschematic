@@ -16,7 +16,9 @@ router's behavior operations (behavior-routes.ts, D103), which build the
 behaviors' core's caller and answer its refusals, importing nothing of the
 repositories, and the handlers of its table operations (table-routes.ts,
 D106), which read and write a table's rows through the repositories they
-are handed. It also holds what a generated server's
+are handed, and the handlers of its graph operations (graph-routes.ts,
+D138), which run a version graph's operations through the graph's facade
+they are handed. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
@@ -162,6 +164,26 @@ export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPrecondition
 export type { BehaviorCaller } from './behavior-routes.js';
 export { tableCreate, tableDelete, tableFilter, tableList, tableRead, tableUpdate } from './table-routes.js';
 export type { TableOperation, TableOperationKind, TableRequest } from './table-routes.js';
+export {
+  GRAPH_PRIMARY_NAME,
+  graphArrange,
+  graphBranch,
+  graphCommit,
+  graphCompose,
+  graphDiff,
+  graphDiscard,
+  graphEntityHistory,
+  graphHistory,
+  graphMaterialize,
+  graphMerge,
+  graphRebase,
+  graphRelease,
+  graphReleased,
+  graphRevert,
+  graphSave,
+  graphSeal,
+} from './graph-routes.js';
+export type { GraphFacade, GraphKind, GraphOperation, GraphOperationName, GraphRelation, GraphRequest, GraphSet } from './graph-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

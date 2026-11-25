@@ -46,6 +46,20 @@ func recipeGraph() *ir.Schema {
 	return schema
 }
 
+// graphQueue is a queue a graph may enqueue on: root, commit, and a
+// nullable ref and sequence.
+func graphQueue() *ir.TypeDef {
+	return &ir.TypeDef{
+		Name: "RecipeChanged", Role: ir.RoleEmbeddedStruct, Owner: "src/recipe.schema.ts", Queue: &ir.QueueDef{},
+		Fields: []*ir.FieldDef{
+			{Name: "root", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "commit", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "ref", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+			{Name: "sequence", TypeRef: ir.TypeRef{Name: "Generic.Int64"}},
+		},
+	}
+}
+
 // TestVersionGraphDeclarations runs every version graph rule once where it
 // holds and once where it breaks. A case with no want must verify clean.
 func TestVersionGraphDeclarations(t *testing.T) {
@@ -348,6 +362,59 @@ func TestVersionGraphDeclarations(t *testing.T) {
 				s.Types["Step"].Fields[2].TypeRef.IsArray = true
 			},
 			want: `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
+		},
+		{
+			name: "a graph that enqueues on a commit and on a release",
+			mutate: func(s *ir.Schema) {
+				s.Types["RecipeChanged"] = graphQueue()
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+				s.Types["Recipe"].VersionGraph.EnqueueOnRelease = "RecipeChanged"
+			},
+		},
+		{
+			name:   "enqueueOnCommit that names no queue",
+			mutate: func(s *ir.Schema) { s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "Step" },
+			want:   `Recipe: @versionGraph enqueueOnCommit names Step, which is not a @queue class of this schema`,
+		},
+		{
+			name: "a queue whose message has no commit",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields = q.Fields[:1]
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged has no commit field`,
+		},
+		{
+			name: "a release's queue with a required ref",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields[2].Required = true
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnRelease = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnRelease: RecipeChanged.ref must be a Identity.UUID, and Nullable for a release`,
+		},
+		{
+			name: "a queue with a required sequence",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields[3].Required = true
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged.sequence must be a Nullable<Generic.Int64>`,
+		},
+		{
+			name: "a queue with a field the trigger cannot set",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields = append(q.Fields, &ir.FieldDef{Name: "reason", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged.reason is required and has no default`,
 		},
 		{
 			name:   "a member that keeps its released rows",

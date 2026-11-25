@@ -332,6 +332,16 @@ def _scan_commit(row: List[Optional[str]]) -> Commit:
     )
 
 
+# A patch's columns, as text.
+_PATCH_COLUMNS = "commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation"
+
+
+def _scan_patch(row: List[Optional[str]]) -> Patch:
+    return Patch(
+        _required_id(row[0]), _text(row[1]), _required_id(row[2]), _required_id(row[3]), _int(row[4]), _text(row[5])
+    )
+
+
 def _scan_release(row: List[Optional[str]]) -> Release:
     return Release(_required_id(row[0]), _required_id(row[1]), _required_id(row[2]), _int(row[3]))
 
@@ -651,18 +661,29 @@ class _PostgresTx:
     def patches(self, commits: Sequence[str]) -> List[Patch]:
         if not commits:
             return []
-        sql = (
-            "SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation "
-            f"FROM {self._a.patch_table} WHERE commit_id = ANY($1::text[]::uuid[])"
-        )
+        sql = f"SELECT {_PATCH_COLUMNS} FROM {self._a.patch_table} WHERE commit_id = ANY($1::text[]::uuid[])"
         with _context("read patches"):
             result = self._conn.query(sql, [[uuid_hyphenated(c) for c in commits]])
-            return [
-                Patch(
-                    _required_id(row[0]), _text(row[1]), _required_id(row[2]), _required_id(row[3]), _int(row[4]), _text(row[5])
-                )
-                for row in result.rows
-            ]
+            return [_scan_patch(row) for row in result.rows]
+
+    def primary_refs(self, root: str) -> List[Ref]:
+        return self._refs(
+            f"SELECT {_REF_COLUMNS} FROM {self._a.ref_table} "
+            "WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            [_uuid_arg(root)],
+        )
+
+    def entity_patches(self, commits: Sequence[str], kind: str, entity_key: str) -> List[Patch]:
+        if not commits:
+            return []
+        k = self._kind(kind)
+        sql = (
+            f"SELECT {_PATCH_COLUMNS} FROM {self._a.patch_table} "
+            "WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid"
+        )
+        with _context("read an entity's patches"):
+            result = self._conn.query(sql, [[uuid_hyphenated(c) for c in commits], k.name, _uuid_arg(entity_key)])
+            return [_scan_patch(row) for row in result.rows]
 
     def next_sequence(self, root: str) -> int:
         arg = _uuid_arg(root)

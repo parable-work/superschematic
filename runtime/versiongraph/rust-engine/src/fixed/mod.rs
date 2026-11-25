@@ -983,6 +983,18 @@ impl FixedLayout {
     fn json_list(&self, placeholder: &str) -> String {
         format!("CAST(CAST({placeholder} AS TEXT) AS JSONB)")
     }
+
+    /// The subquery that reads a placeholder's JSON array of strings, one
+    /// row a string: the commits of a patch read.
+    fn text_list(&self, placeholder: &str) -> String {
+        match self.dialect {
+            Dialect::Sqlite => format!("SELECT value FROM json_each({placeholder})"),
+            Dialect::Postgres => format!(
+                "SELECT jsonb_array_elements_text({})",
+                self.json_list(placeholder)
+            ),
+        }
+    }
 }
 
 /// A [`FixedLayout`] bound to a [`Client`]: the graph's [`Storage`].
@@ -1044,6 +1056,8 @@ const COMMIT_COLUMNS: &str =
      c.sequence, c.created_at, c.created_by";
 const RELEASE_COLUMNS: &str =
     "id, root_id, commit_id, created_at, created_by, updated_at, updated_by, _version";
+const PATCH_COLUMNS: &str =
+    "commit_id, entity_kind, entity_key, entity_id, entity_version, operation";
 const MEMBER_COLUMNS: &str = "id, entity_key, ref_id, root_id, tombstone, _version, data";
 
 /// Reads one row's columns, by position.
@@ -1298,6 +1312,27 @@ fn scan_commit(d: Dialect, row: &[SqlValue]) -> Result<Commit, Error> {
         created_at: date_time(d, c.int()?)?,
         created_by: c.text()?,
         snapshot: c.int()? == 1,
+    })
+}
+
+const PATCH_NAMES: [&str; 6] = [
+    "commit_id",
+    "entity_kind",
+    "entity_key",
+    "entity_id",
+    "entity_version",
+    "operation",
+];
+
+fn scan_patch(d: Dialect, row: &[SqlValue]) -> Result<Patch, Error> {
+    let mut c = Cells::new(d, row, &PATCH_NAMES);
+    Ok(Patch {
+        commit: c.text()?,
+        kind: c.text()?,
+        entity_key: c.text()?,
+        entity_id: c.text()?,
+        entity_version: c.int()?,
+        operation: c.text()?,
     })
 }
 
@@ -2236,44 +2271,57 @@ impl Tx for FixedTx<'_> {
         self.commits_of("list commits", &sql, &args).await
     }
 
+    async fn primary_refs(&mut self, root: &str) -> Result<Vec<Ref>, Error> {
+        let sql = format!(
+            "SELECT {REF_COLUMNS} FROM {} \
+             WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            self.a.tables.ref_
+        );
+        let args = [self.graph(), root.into()];
+        self.refs(&sql, &args).await
+    }
+
+    async fn entity_patches(
+        &mut self,
+        commits: &[String],
+        kind: &str,
+        entity_key: &str,
+    ) -> Result<Vec<Patch>, Error> {
+        if commits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let k = self.a.kind(kind)?;
+        let sql = format!(
+            "SELECT {PATCH_COLUMNS} FROM {} \
+             WHERE graph = ?1 AND commit_id IN ({}) AND entity_kind = ?3 AND entity_key = ?4",
+            self.a.tables.patch,
+            self.a.text_list("?2")
+        );
+        let args = [
+            self.graph(),
+            string_list(commits).into(),
+            k.name.as_str().into(),
+            entity_key.into(),
+        ];
+        let rows = self.query("read an entity's patches", &sql, &args).await?;
+        rows.iter()
+            .map(|row| scan_patch(self.a.dialect, row))
+            .collect()
+    }
+
     async fn patches(&mut self, commits: &[String]) -> Result<Vec<Patch>, Error> {
         if commits.is_empty() {
             return Ok(Vec::new());
         }
-        let list = match self.a.dialect {
-            Dialect::Sqlite => "SELECT value FROM json_each(?2)".to_owned(),
-            Dialect::Postgres => format!(
-                "SELECT jsonb_array_elements_text({})",
-                self.a.json_list("?2")
-            ),
-        };
         let sql = format!(
-            "SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM {} \
-             WHERE graph = ?1 AND commit_id IN ({list})",
-            self.a.tables.patch
+            "SELECT {PATCH_COLUMNS} FROM {} WHERE graph = ?1 AND commit_id IN ({})",
+            self.a.tables.patch,
+            self.a.text_list("?2")
         );
         let args = [self.graph(), string_list(commits).into()];
         let rows = self.query("read patches", &sql, &args).await?;
-        let names = [
-            "commit_id",
-            "entity_kind",
-            "entity_key",
-            "entity_id",
-            "entity_version",
-            "operation",
-        ];
         rows.iter()
-            .map(|row| {
-                let mut c = Cells::new(self.a.dialect, row, &names);
-                Ok(Patch {
-                    commit: c.text()?,
-                    kind: c.text()?,
-                    entity_key: c.text()?,
-                    entity_id: c.text()?,
-                    entity_version: c.int()?,
-                    operation: c.text()?,
-                })
-            })
+            .map(|row| scan_patch(self.a.dialect, row))
             .collect()
     }
 

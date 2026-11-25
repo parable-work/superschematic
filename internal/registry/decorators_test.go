@@ -16,7 +16,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	want := map[DecoratorTarget][]string{
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker", "enqueueOnChange", "stateMachine", "fenced", "query", "seedRoles", "deriver", "channel", "key", "app", "behaviorWorker"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "decrypted", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "auth", "publicRoute", "requirePermission"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "graphOperations", "auth", "publicRoute", "requirePermission"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "tableOperation", "docs", "mcp", "icon"},
 	}
 	total := 0
@@ -500,6 +500,106 @@ func TestIdentityRoutesApply(t *testing.T) {
 	}
 	if err := apply("userSessions", &ir.OperationSet{}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@userSessions takes at most one config object" {
 		t.Errorf("two configs: %v", err)
+	}
+}
+
+// TestGraphOperationsApply: @graphOperations(Root, options) records the
+// root a set serves and its options (D138), once per class and not beside
+// another set decorator, and refuses an option it has no member for or
+// whose value is not the shape it reads. The names inside the options are
+// the verification pass's to check.
+func TestGraphOperationsApply(t *testing.T) {
+	reg := New(naming.Naming{})
+	apply := func(name string, set *ir.OperationSet, args ...any) error {
+		spec, ok := reg.Decorator(name, TargetOperationSet)
+		if !ok {
+			t.Fatalf("no core decorator @%s for an operation set", name)
+		}
+		if spec.Args != nil || !spec.DeclaredIn("@superschematic/api") {
+			t.Errorf("@%s: Args must stay nil and the package be @superschematic/api: %+v", name, spec)
+		}
+		return spec.Apply(Node{OperationSet: set}, args, Site{})
+	}
+	root := map[string]any{"class": "Recipe"}
+
+	set := &ir.OperationSet{}
+	if err := apply("graphOperations", set, root); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.GraphOperationsConfig{Type: "Recipe"}); !reflect.DeepEqual(set.GraphOperations, want) || !set.IsGraphOperations() {
+		t.Errorf("graphOperations(Recipe) = %+v, want %+v", set.GraphOperations, want)
+	}
+	if err := apply("graphOperations", set, root); err == nil || err.Error() != "@graphOperations appears twice on the class: a set serves one graph" {
+		t.Errorf("twice on one class: %v", err)
+	}
+	for _, other := range []string{"userSessions", "userAdministration", "behaviorOperations"} {
+		args := []any{}
+		if other == "behaviorOperations" {
+			args = append(args, map[string]any{"class": "Order"})
+		}
+		want := "@" + other + " contradicts @graphOperations on the same class: a class takes one of them"
+		if err := apply(other, set, args...); err == nil || err.Error() != want {
+			t.Errorf("@%s beside it: %v, want %q", other, err, want)
+		}
+		taken := &ir.OperationSet{}
+		if err := apply(other, taken, args...); err != nil {
+			t.Fatal(err)
+		}
+		want = "@graphOperations contradicts @" + other + " on the same class: a class takes one of them"
+		if err := apply("graphOperations", taken, root); err == nil || err.Error() != want {
+			t.Errorf("after @%s: %v, want %q", other, err, want)
+		}
+	}
+
+	full := &ir.OperationSet{}
+	err := apply("graphOperations", full, root, map[string]any{
+		"operations":         []any{"branch", "save", "release"},
+		"permissions":        map[string]any{"release": []any{"recipes.release"}},
+		"by":                 []any{"createdBy"},
+		"overridePermission": "recipes.admin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &ir.GraphOperationsConfig{
+		Type:               "Recipe",
+		Operations:         []string{"branch", "save", "release"},
+		Permissions:        map[string][]string{"release": {"recipes.release"}},
+		By:                 []string{"createdBy"},
+		OverridePermission: "recipes.admin",
+	}
+	if !reflect.DeepEqual(full.GraphOperations, want) {
+		t.Errorf("graphOperations(Recipe, options) = %+v, want %+v", full.GraphOperations, want)
+	}
+
+	for _, args := range [][]any{nil, {root, map[string]any{}, map[string]any{}}} {
+		err := apply("graphOperations", &ir.OperationSet{}, args...)
+		if err == nil || !strings.HasPrefix(err.Error(), "@graphOperations takes the root of the version graph the set serves") {
+			t.Errorf("graphOperations(%v): %v", args, err)
+		}
+	}
+	var argErr *ArgError
+	err = apply("graphOperations", &ir.OperationSet{}, "Recipe")
+	if !errors.As(err, &argErr) || argErr.Index != 0 || !strings.HasPrefix(argErr.Msg, "@graphOperations takes the graph's root as a class, imported from the API's database: want a class") {
+		t.Errorf("graphOperations(\"Recipe\") = %v, want the class error", err)
+	}
+	for _, c := range []struct {
+		options any
+		want    string
+	}{
+		{"all", "@graphOperations takes its options as an object, { operations?, permissions?, by?, overridePermission? }"},
+		{map[string]any{"paths": true}, "@graphOperations takes operations, permissions, by and overridePermission, not paths"},
+		{map[string]any{"operations": []any{}}, "@graphOperations: operations lists the operations the set serves by name, such as \"branch\" or \"save\", at least one"},
+		{map[string]any{"operations": "save"}, "@graphOperations: operations lists the operations the set serves by name, such as \"branch\" or \"save\", at least one"},
+		{map[string]any{"permissions": []any{"recipes.release"}}, "@graphOperations: permissions names a permission list per operation, { release: [\"recipes.release\"] }"},
+		{map[string]any{"permissions": map[string]any{"release": "recipes.release"}}, "@graphOperations: permissions.release lists the permissions the operation needs, at least one"},
+		{map[string]any{"by": "createdBy"}, "@graphOperations: by lists the members of a change set's ref that name who may write it: [\"createdBy\"]"},
+		{map[string]any{"overridePermission": 3.0}, "@graphOperations: overridePermission names one permission, whose holder writes every change set"},
+	} {
+		err := apply("graphOperations", &ir.OperationSet{}, root, c.options)
+		if !errors.As(err, &argErr) || argErr.Index != 1 || argErr.Msg != c.want {
+			t.Errorf("graphOperations(Recipe, %v) = %v, want %q at the options", c.options, err, c.want)
+		}
 	}
 }
 

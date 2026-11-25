@@ -290,6 +290,7 @@ const refusals: Record<string, { args: unknown[]; error: string }> = {
   compose: { args: ["not a uuid!"], error: "CanonicalError" },
   diff: { args: ["Tagged", "not a uuid!"], error: "CanonicalError" },
   history: { args: ["not a uuid!"], error: "CanonicalError" },
+  entityHistory: { args: ["Bread", "part", "not a uuid!"], error: "CanonicalError" },
   discard: { args: ["", "Draft", 1], error: "NoActorError" },
   sweep: { args: [{ actor: "" }], error: "NoActorError" },
 };

@@ -79,7 +79,7 @@ the core.
 
 | Decorator | Meaning |
 | --- | --- |
-| `@versionGraph({ name?, schemaEpoch?, snapshotEvery? })` | Marks the root. The root is never overlaid and is in no commit. `name` prefixes the generated types (PascalCase) and tables (snake_case) and defaults to the root's name. `schemaEpoch`, default 0, is recorded on every commit. `snapshotEvery`, default 64, is how many commits past the nearest snapshot on its chain a commit is snapshotted at ([Snapshots](#snapshots)). |
+| `@versionGraph({ name?, schemaEpoch?, snapshotEvery?, enqueueOnCommit?, enqueueOnRelease? })` | Marks the root. `enqueueOnCommit` and `enqueueOnRelease` each name a `@queue` class ([Queues](#queues-on-a-commit-and-on-a-release)). The root is never overlaid and is in no commit. `name` prefixes the generated types (PascalCase) and tables (snake_case) and defaults to the root's name. `schemaEpoch`, default 0, is recorded on every commit. `snapshotEvery`, default 64, is how many commits past the nearest snapshot on its chain a commit is snapshotted at ([Snapshots](#snapshots)). |
 | `@graphMember({ graph, parent?, order?, singleton?, released? })` | Marks an entity kind of the graph. `graph` is the root class. |
 | `parent: { key, of }` | Containment: the UUID field `key` holds the parent row's entity key, and `of` is a member of the same graph, the member itself included. Deleting a parent removes its descendants. |
 | `order` | The field that orders siblings: a `Generic.Int64`, or a `string` that holds an order key ([Order keys](#order-keys)). |
@@ -245,6 +245,53 @@ core does not read and each storage adapter does. On SQLite, whose layout
 has no table per kind, released rows live in one more table of the fixed
 layout, `released`, created for a graph that has such a kind
 ([the contract](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#released-rows)).
+
+## Queues on a commit and on a release
+
+Work that follows a commit or a release, such as rendering what was
+published or telling a search index, belongs to a worker, and an enqueue
+the application makes after each call is one it can forget. A graph names
+the queues instead:
+
+```ts
+@queue({ key: "root", serialize: true })
+export abstract class RecipeCommitted {
+  root: Identity.UUID;
+  ref: Nullable<Identity.UUID>;
+  commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
+}
+
+@queue({ key: "root", serialize: true })
+export abstract class RecipePublished {
+  root: Identity.UUID;
+  commit: Identity.UUID;
+}
+
+@versionGraph({ enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })
+export abstract class Recipe {
+  // ...
+}
+```
+
+Each is a trigger, the one `@enqueueOnChange` writes
+([Queues](/superschematic/guides/queues/)), on a table the graph
+generates, so the message is enqueued in the transaction that made the
+write, whatever made it:
+
+| Option | Enqueues | Sets |
+| --- | --- | --- |
+| `enqueueOnCommit` | For every row written to the commit table: a change set's commit and a merge's alike, tagged or not. | `root` and `commit`, and `ref` and `sequence` when the message declares them. `sequence` is null on a commit that is not tagged. |
+| `enqueueOnRelease` | When a root's release pointer is first written, and when it moves to another commit, a rollback included. A release of the commit it already names enqueues nothing. | `root` and `commit`. |
+
+Verification refuses a queue that is not a `@queue` class of the schema,
+one whose message has no required `root` and `commit` of the root key's
+scalar, a `ref` of another type or, for a release, a required one, a
+`sequence` that is not a `Nullable<Generic.Int64>`, and any other required
+field without a default, since the trigger sets those four alone. The
+queue's own options decide what a duplicate does and how workers claim.
+The triggers are the generated tables', so the SQLite layout, which has
+none, enqueues nothing.
 
 ## Conflict units
 
@@ -711,6 +758,7 @@ released, err := g.Released(ctx, *recipe.Id)                    // the pointer a
 | `Compose(ctx, ref)` | Reads a ref's tree: its base commit's tree with its own rows laid over it. |
 | `Diff(ctx, from, to)` | The `[]RecipeChange` between two commits' trees. |
 | `History(ctx, ref)` | The commits the ref wrote, newest first. |
+| `EntityHistory(ctx, root, kind, key)` | The commits of the root's primary line that changed one entity, newest first, as `[]RecipeEntityChange`: each commit and what it did to the entity (`ADD`, `UPDATE` or `DELETE`). It reads the line's commits and the entity's patches among them, at most the walk ceiling of commits, and no tree. An entity no commit changed lists nothing. |
 | `Discard(ctx, ref, version)` | Soft-deletes the ref, which frees its name. |
 | `Sweep(ctx, GraphSweepOptions)` | One maintenance pass ([Sweep](#sweep)) in a transaction of its own; returns a `GraphSweepReport`. `ErrNoActor` without an actor. |
 | `RunSweeper(ctx, interval, GraphSweepOptions, onPass)` | Runs `Sweep` at once and every `interval` until `ctx` is done, and returns `ctx`'s error. |
@@ -1346,6 +1394,10 @@ SQLite ones among them, on the default Python and on 3.9.
 - The generated facades bind the Postgres adapter, except Rust's, whose
   `new` takes any storage. On SQLite, run the engine over the SQLite
   adapter directly.
+- A graph's operations are served as routes, with no handler to write, by
+  `@graphOperations(Root)` in an API schema
+  ([API routes](/superschematic/guides/api-routes/#a-version-graphs-operations));
+  the TypeScript server serves them.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
   unless a service calls it or `RunSweeper`, or the engine's runner does

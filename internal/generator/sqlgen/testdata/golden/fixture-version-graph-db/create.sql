@@ -85,7 +85,8 @@ CREATE TABLE recipe (
   created_by UUID NOT NULL
 );
 
-COMMENT ON TABLE recipe IS 'A recipe: the stable identity its steps and ingredients are versioned under.';
+COMMENT ON TABLE recipe IS 'A recipe: the stable identity its steps and ingredients are versioned
+under. Its commits and its releases each enqueue a message.';
 
 CREATE TABLE recipe_commit (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -217,6 +218,41 @@ CREATE TABLE utensil (
 
 COMMENT ON TABLE utensil IS 'A utensil the recipe needs, keyed by a plain UUID rather than an
 AutoGenerate one.';
+
+CREATE TABLE recipe_committed_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  root UUID NOT NULL,
+  ref UUID,
+  "commit" UUID NOT NULL,
+  "sequence" BIGINT,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE recipe_committed_queue IS 'Sent for each commit of a recipe''s graph, in the transaction that wrote
+it: a worker handles one recipe''s commits at a time.';
+
+CREATE TABLE recipe_published_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  root UUID NOT NULL,
+  "commit" UUID NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE recipe_published_queue IS 'Sent when a recipe''s release moves to another commit.';
 
 -- Create history tables for versioned entities
 
@@ -553,6 +589,26 @@ CREATE UNIQUE INDEX uq_step_entity_ref ON step USING BTREE (entity_key, ref_id);
 CREATE UNIQUE INDEX uq_tasting_entity_ref ON tasting USING BTREE (entity_key, ref_id);
 
 CREATE UNIQUE INDEX uq_utensil_entity_ref ON utensil USING BTREE (entity_key, ref_id);
+
+CREATE INDEX idx_recipe_committed_queue_due_at ON recipe_committed_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_recipe_committed_queue_claim_expires_at ON recipe_committed_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_committed_queue_updated_at ON recipe_committed_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE INDEX idx_recipe_committed_queue_ready_key ON recipe_committed_queue USING BTREE (root) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_recipe_committed_queue_claimed_key ON recipe_committed_queue USING BTREE (root) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_published_queue_due_at ON recipe_published_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_recipe_published_queue_claim_expires_at ON recipe_published_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_published_queue_updated_at ON recipe_published_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE INDEX idx_recipe_published_queue_ready_key ON recipe_published_queue USING BTREE (root) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_recipe_published_queue_claimed_key ON recipe_published_queue USING BTREE (root) WHERE state = 'claimed';
 
 -- Create history capture functions and triggers
 
@@ -1044,3 +1100,33 @@ CREATE TRIGGER trg_utensil_capture_history_write
 CREATE TRIGGER trg_utensil_capture_history_delete
   AFTER DELETE ON utensil
   FOR EACH ROW EXECUTE FUNCTION utensil_capture_history();
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+
+CREATE OR REPLACE FUNCTION recipe_commit_enqueue_recipe_committed() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of RecipeCommitted after a write to recipe_commit (D80).
+  INSERT INTO recipe_committed_queue (root, ref, "commit", "sequence") VALUES (NEW.root_id, NEW.ref_id, NEW.id, NEW."sequence");
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_recipe_commit_enqueue_recipe_committed
+  AFTER INSERT ON recipe_commit
+  FOR EACH ROW EXECUTE FUNCTION recipe_commit_enqueue_recipe_committed();
+
+CREATE OR REPLACE FUNCTION recipe_release_enqueue_recipe_published() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of RecipePublished after a write to recipe_release (D80).
+  IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO recipe_published_queue (root, "commit") VALUES (NEW.root_id, NEW.commit_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_recipe_release_enqueue_recipe_published
+  AFTER INSERT OR UPDATE ON recipe_release
+  FOR EACH ROW EXECUTE FUNCTION recipe_release_enqueue_recipe_published();
