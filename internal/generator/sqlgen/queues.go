@@ -2,6 +2,7 @@ package sqlgen
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -146,8 +147,8 @@ func QueueReadyKeyIndex(table string) string {
 // ready messages' by key, unique when the queue keeps one per key, and the
 // claimed messages', unique, when it serializes its keys.
 func queueKeyIndexes(table string, td *ir.TypeDef) ([]Index, error) {
-	key := sqlutil.QueueKeyColumn(td)
-	if key == "" {
+	keys := sqlutil.QueueKeyColumns(td)
+	if len(keys) == 0 {
 		return nil, nil
 	}
 	def := td.Queue
@@ -158,7 +159,7 @@ func queueKeyIndexes(table string, td *ir.TypeDef) ([]Index, error) {
 		if err != nil {
 			return err
 		}
-		out = append(out, Index{Name: name, Columns: []string{key}, Type: "BTREE", Unique: unique, Where: where})
+		out = append(out, Index{Name: name, Columns: slices.Clone(keys), Type: "BTREE", Unique: unique, Where: where})
 		return nil
 	}
 	if def.Dedupes() || def.Serializes() {

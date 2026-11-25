@@ -509,6 +509,7 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	if err := prov.Render(env, program); err != nil {
 		return err
 	}
+	printImageNotice(out, env)
 	_, _ = fmt.Fprintf(out, "\nRunning stack %s environment %s (program %s)\n", env.Stack, env.Environment, program)
 
 	// From here on Ctrl-C stops what runs, rather than the command.
@@ -537,6 +538,34 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	}
 	_, _ = fmt.Fprintf(out, "\nStopping stack %s environment %s\n", env.Stack, env.Environment)
 	return errors.Join(runErr, cleanup())
+}
+
+// printImageNotice says once, as stack dev starts, what the stack adds to
+// the image of each deployable it runs (D144): stack dev runs each as a
+// process on this machine and installs nothing, so the packages an image
+// would hold, and whatever the Dockerfile that extends it adds, are the
+// developer's to have. It prints nothing when the stack adds nothing.
+func printImageNotice(w io.Writer, env *ir.ResolvedEnvironment) {
+	var lines []string
+	for _, d := range env.Deployables {
+		if d.Image == nil {
+			continue
+		}
+		var parts []string
+		if len(d.Image.Packages) > 0 {
+			parts = append(parts, "packages "+strings.Join(d.Image.Packages, ", "))
+		}
+		if d.Image.Extend != "" {
+			parts = append(parts, "extended with "+d.Image.Extend)
+		}
+		lines = append(lines, fmt.Sprintf("  %-8s %-24s %s", d.Kind, d.Name, strings.Join(parts, "; ")))
+	}
+	if len(lines) == 0 {
+		return
+	}
+	sort.Strings(lines)
+	_, _ = fmt.Fprintf(w, "\nStack %s adds to these images, and stack dev runs each deployable as a process on this machine and installs nothing.\n"+
+		"Install what each needs here to run it as its image does (D144):\n%s\n", env.Stack, strings.Join(lines, "\n"))
 }
 
 // printLocalSummary prints where each server, site and database of a

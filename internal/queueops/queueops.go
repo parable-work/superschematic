@@ -59,10 +59,10 @@ type Request struct {
 	IDs []string
 	All bool
 
-	// Key is the quoted key column of a queue that keeps one ready message
-	// per key (D80), whose retry leaves each key one ready message; empty
-	// for every other queue.
-	Key string
+	// Keys are the quoted key columns of a queue that keeps one ready
+	// message per key (D80), one or several, whose retry leaves each key
+	// one ready message; none for every other queue.
+	Keys []string
 
 	// Table is the queue's table, unquoted, as sqlutil.QueueTableName
 	// names it, @table's name among them (D85); empty takes the name of a
@@ -136,7 +136,7 @@ func Document(req Request) ([]byte, error) {
 	if table == "" {
 		table = sqlgen.QueueTableName(&ir.TypeDef{Name: req.Queue})
 	}
-	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Key)
+	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Keys...)
 	doc := document{
 		Version:   Version,
 		Service:   req.Service,

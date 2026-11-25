@@ -82,6 +82,19 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	// What the stack adds to each deployable's image (D144), which each
+	// entrypoint's Dockerfile installs and is extended with.
+	images, err := stack.Images(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	withImages := func(deployables []*ir.ResolvedDeployable) {
+		for _, d := range deployables {
+			d.Image = images[d.Name]
+		}
+	}
+	withImages(apps)
+	withImages(servers)
 	facts, err := environmentFacts(r.GenerateContext, st, services)
 	if err != nil {
 		return err
@@ -149,6 +162,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	withImages(jobs)
 	if err := r.checkJobs(st.Name, jobs, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
@@ -183,6 +197,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	withImages(workers)
 	if err := r.checkWorkers(st.Name, workers, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
@@ -190,6 +205,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	withImages(runners)
 	for _, rn := range runners {
 		switch rn.Language {
 		case APILanguageGo:
@@ -246,6 +262,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	withImages(derivers)
 	if err := r.checkDerivers(st.Name, derivers, services, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
@@ -391,6 +408,21 @@ func (r run) generateServers() error {
 	}
 	r.Done(serverGenerator, dir)
 	return nil
+}
+
+// imageInput is what the stack adds to d's image (D144), for its
+// entrypoint's plan: the packages, and the Dockerfile that extends the
+// image, which the stack names relative to the repository root. Nil when
+// the stack adds nothing.
+func (r run) imageInput(d *ir.ResolvedDeployable) *servergen.ImageInput {
+	if d.Image == nil {
+		return nil
+	}
+	in := &servergen.ImageInput{Packages: d.Image.Packages, Extend: d.Image.Extend}
+	if in.Extend != "" {
+		in.ExtendFile = filepath.Join(r.Options.RepositoryRoot, filepath.FromSlash(in.Extend))
+	}
+	return in
 }
 
 // writeRustMirrors brings the mirror of each implementation the stack's
@@ -1118,6 +1150,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		ScalarGo:       r.Options.Paths.ScalarGo,
 		Release:        r.Options.ReleaseInfo(),
 		CloudSQL:       cloudSQL,
+		Image:          r.imageInput(s),
 	}
 	if s.Job != nil {
 		in.Job = &servergen.JobInput{Name: s.Job.Name}
@@ -1213,6 +1246,7 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		PackageDirs:        map[string]string{},
 		Paths:              r.Options.Paths,
 		CloudSQL:           cloudSQL,
+		Image:              r.imageInput(s),
 		Workers:            bundle,
 	}
 	if s.Job != nil {
@@ -1339,6 +1373,7 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 		ImplementationRoot: r.Options.RepositoryRoot,
 		SDKDirs:            map[string]string{},
 		Paths:              r.Options.Paths,
+		Image:              r.imageInput(s),
 	}
 	if s.Job != nil {
 		in.Job = &servergen.JobInput{Name: s.Job.Name}
@@ -1762,6 +1797,7 @@ func (r run) planRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []
 		EngineGo:       paths.EngineGo,
 		EngineProject:  project,
 		CloudSQL:       slices.Contains(cloudSQL, db),
+		Image:          r.imageInput(rn),
 	}
 	if versionGraph {
 		in.VersionGraphGo = paths.VersionGraphGo
@@ -1848,6 +1884,7 @@ func (r run) planRustRunner(stackName string, rn *ir.ResolvedDeployable) (*serve
 		RepositoryRoot: r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
 		Paths:          r.Options.Paths,
 		EngineProject:  project,
+		Image:          r.imageInput(rn),
 	})
 }
 
@@ -1954,6 +1991,7 @@ func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, c
 		CloudSQL:           cloudSQL,
 		Runner:             &servergen.TypeScriptRunnerInput{Database: db, Field: field, Engine: routes.Engine},
 		EngineProject:      project,
+		Image:              r.imageInput(rn),
 	})
 }
 

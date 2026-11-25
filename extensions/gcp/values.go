@@ -130,19 +130,37 @@ const siteSettings = `{
   "additionalProperties": false
 }`
 
-// cloudRunWorkerSettings is the schema of a worker's settings on a Cloud
-// Run worker pool (D53): the resources of each instance's container. A
-// worker pool's CPU is always allocated, which Cloud Run gives as one CPU
+// cloudRunPoolSettings is the schema of the settings of what runs as a
+// Cloud Run worker pool (D53): the resources of each instance's container.
+// A worker pool's CPU is always allocated, which Cloud Run gives as one CPU
 // or more, so a fraction of one is refused here rather than by the deploy.
 // How many instances run, and how many messages each handles, are the
-// core's settings (ir.ResolvedWorker). telemetry turns the worker's trace
-// export on or off over its environment's (D67, amended).
-const cloudRunWorkerSettings = `{
+// core's settings (ir.ResolvedWorker). telemetry turns the trace export on
+// or off over its environment's (D67, amended). An engine's runner and a
+// deriver take these.
+const cloudRunPoolSettings = `{
   "type": "object",
   "properties": {
     "cpu": {"type": "string", "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|[1-9][0-9]{3,}m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
     "telemetry": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}`
+
+// cloudRunWorkerSettings is the schema of a worker's settings on Cloud
+// Run: a pool's (cloudRunPoolSettings), and tick, how often Cloud
+// Scheduler runs the job of a worker in drain mode (D145), a duration
+// drainTick reads, five minutes unless set. A worker whose mode is not
+// drain takes no tick. Its mode, its idle time and how many of it run are
+// the core's settings (ir.ResolvedWorker).
+const cloudRunWorkerSettings = `{
+  "type": "object",
+  "properties": {
+    "cpu": {"type": "string", "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|[1-9][0-9]{3,}m)$"},
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+    "telemetry": {"type": "boolean"},
+    "tick": {"type": "string", "pattern": "^[0-9]+(m|h)$"}
   },
   "additionalProperties": false
 }`
@@ -161,13 +179,16 @@ const cloudSQLSettings = `{
 }`
 
 // storageSettings is the schema of a bucket's settings on Cloud Storage
-// (D54): object versioning, off unless set, and the age in days at which
-// a lifecycle rule deletes an object.
+// (D54): object versioning, off unless set, the age in days at which
+// a lifecycle rule deletes an object, and the CORS rules the bucket
+// answers a browser with (D148), in the shape every bucket platform takes
+// (registry.BucketCORSSchema).
 const storageSettings = `{
   "type": "object",
   "properties": {
     "versioning": {"type": "boolean"},
-    "deleteAfterDays": {"type": "integer", "minimum": 1}
+    "deleteAfterDays": {"type": "integer", "minimum": 1},
+    "cors": ` + registry.BucketCORSSchema + `
   },
   "additionalProperties": false
 }`

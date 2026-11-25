@@ -64,6 +64,20 @@ func (s Sources) Dockerfile(stack, server string) string {
 	return filepath.Join(servergen.ServerDir(s.OutputRoot, stack, server), servergen.DockerFile)
 }
 
+// Extension returns the path on disk of the Dockerfile the stack extends
+// d's image with (D144), which the stack names relative to the repository
+// root, or "" when it extends it with none.
+func (s Sources) Extension(d *ir.ResolvedDeployable) string {
+	if d.Image == nil || d.Image.Extend == "" {
+		return ""
+	}
+	root := s.ImplementationRoot
+	if root == "" {
+		root = s.RepositoryRoot
+	}
+	return filepath.Join(root, filepath.FromSlash(d.Image.Extend))
+}
+
 // serverBuild is one image a deploy or a build builds.
 type serverBuild struct {
 	server  string
@@ -180,9 +194,14 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 			}
 			archive = filepath.Join(p.dir, d.Name+".tar.gz")
 			var err error
-			if c, err = writeContextFile(archive, src.RepositoryRoot, dockerfile); err != nil {
+			if c, err = writeContextFile(archive, src.RepositoryRoot, dockerfile, src.Extension(d)); err != nil {
 				return p, fmt.Errorf("%s: %w", what, err)
 			}
+		}
+		if d.Image != nil && d.Image.Extend != "" && c.Extend == "" {
+			// A context `stack prepare` wrote before the stack extended
+			// the image would build it unextended.
+			return p, fmt.Errorf("%s: the stack extends its image with %s, and its build context names no Dockerfile that extends it; run `superschematic build-all` and `superschematic stack prepare` again (D144)", what, d.Image.Extend)
 		}
 		if !force && p.images[d.Name] != "" && p.contexts[d.Name] == c.Digest {
 			s.logf("%s: context %s is the one %s was built from; keeping it", what, shortDigest(c.Digest), p.images[d.Name])
@@ -195,13 +214,14 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 	return p, nil
 }
 
-// writeContextFile writes a build context's archive to path.
-func writeContextFile(path, root, dockerfile string) (*Context, error) {
+// writeContextFile writes a build context's archive to path, with the
+// Dockerfile at extend in it when one extends the image (D144).
+func writeContextFile(path, root, dockerfile, extend string) (*Context, error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, err
 	}
-	c, err := WriteContext(f, root, dockerfile)
+	c, err := WriteContext(f, root, dockerfile, extend)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -218,12 +238,17 @@ func (s *session) runBuilds(ctx context.Context, p *imagePlan) error {
 			Context:       b.archive,
 			ContextDigest: b.context.Digest,
 			Dockerfile:    b.context.Dockerfile,
+			Extend:        b.context.Extend,
 			Log:           s.log,
 		}
 		if err := req.Check(); err != nil {
 			return err
 		}
-		s.logf("build %s from %s", b.server, b.context.Dockerfile)
+		if req.Extend != "" {
+			s.logf("build %s from %s, extended with %s", b.server, b.context.Dockerfile, req.Extend)
+		} else {
+			s.logf("build %s from %s", b.server, b.context.Dockerfile)
+		}
 		image, err := s.target.Builder.Build(ctx, req)
 		if err != nil {
 			return fmt.Errorf("build the image of %s: %w", b.server, err)

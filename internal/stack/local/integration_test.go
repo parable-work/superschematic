@@ -147,7 +147,7 @@ func TestLocalStackRuns(t *testing.T) {
 		Environments: []*ir.Environment{{
 			Name:   "Dev",
 			Target: local.Target,
-			Values: map[string]any{"postgresPort": float64(pgPort), "storagePort": float64(storagePort)},
+			Values: map[string]any{"postgresPort": float64(pgPort), "storagePort": float64(storagePort), "storageCorsHeaders": []any{"x-goog-meta-owner"}},
 			Settings: []*ir.DeployableSettings{
 				{Of: ir.DeployableRef{Service: &api}, Values: map[string]any{"port": float64(apiPort)}},
 				{Of: ir.DeployableRef{Service: &worker}, Values: map[string]any{"port": float64(workerPort)}},
@@ -298,6 +298,36 @@ func TestLocalStackRuns(t *testing.T) {
 	_ = upload.Body.Close()
 	if upload.StatusCode != http.StatusOK {
 		t.Fatalf("upload to ledger-files: %s", upload.Status)
+	}
+
+	// The emulator answers a browser's preflight of a PUT to the bucket
+	// from a local site's origin (D148): any origin, the content type every
+	// upload names, and the header the environment's storageCorsHeaders
+	// adds. A header it does not name is refused, as a bucket whose cors
+	// lists no such header refuses it.
+	preflight := func(headers string) *http.Response {
+		t.Helper()
+		ask, err := http.NewRequest(http.MethodOptions, emulator+"/ledger-files/upload.png", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ask.Header.Set("Origin", "http://127.0.0.1:5173")
+		ask.Header.Set("Access-Control-Request-Method", http.MethodPut)
+		ask.Header.Set("Access-Control-Request-Headers", headers)
+		res, err := http.DefaultClient.Do(ask)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res
+	}
+	if res := preflight("content-type,x-goog-meta-owner"); res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") == "" ||
+		!strings.Contains(res.Header.Get("Access-Control-Allow-Methods"), http.MethodPut) {
+		t.Errorf("the emulator answers a page's preflight %s, allowing origin %q and methods %q; want 200, the origin and PUT",
+			res.Status, res.Header.Get("Access-Control-Allow-Origin"), res.Header.Get("Access-Control-Allow-Methods"))
+	}
+	if res := preflight("content-type,x-goog-meta-other"); res.StatusCode != http.StatusForbidden {
+		t.Errorf("the emulator answers a preflight that names a header storageCorsHeaders does not %s, want 403", res.Status)
 	}
 
 	// Destroy stops the server and the containers, which keep their data;

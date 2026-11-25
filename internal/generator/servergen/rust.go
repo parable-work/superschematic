@@ -155,6 +155,10 @@ type RustInput struct {
 	// root, the parent of the schemas root.
 	ImplementationRoot string
 
+	// Image is what the stack adds to the entrypoint's image, nil when it
+	// adds nothing (D144).
+	Image *ImageInput
+
 	// SDKDirs are the directories of the Rust SDK of each API the served
 	// APIs call, by service.
 	SDKDirs map[string]string
@@ -707,6 +711,10 @@ type RustDocker struct {
 	// server the member is: the generated crates and the implementations'
 	// mirrors under the output root, and the runtimes' checkouts.
 	Include []string
+
+	// Image is what the stack adds to the image, nil when it adds
+	// nothing (D144).
+	Image *Image
 }
 
 // rustBinaryName is the shape of a binary's name cargo builds, which the
@@ -1149,6 +1157,11 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	s.Docker, s.NoDocker, err = planRustDocker(in, s, dir)
 	if err != nil {
 		return nil, err
+	}
+	if s.Docker != nil {
+		if s.Docker.Image, s.Docker.Include, err = planImage(in.Image, s.Kind, s.Name, in.RepositoryRoot, s.Docker.Include); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", in.Stack, err)
+		}
 	}
 	return s, nil
 }

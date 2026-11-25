@@ -21,6 +21,9 @@ exactly as a server does.
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/telemetry"
+{{- if anyQueues .Databases }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/wake"
+{{- end }}
 {{- if .Worker }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/worker"
 {{- end }}
@@ -70,6 +73,16 @@ exactly as a server does.
 {{- else }}
 	// and /readyz reports it.
 {{- end }}
+{{- if anyQueues .Databases }}
+	// The wakes of the workers in drain mode, which the environment holds
+	// where their platform gives one (QUEUE_WAKES, D145): an enqueue sends
+	// its queue's, at most once in five seconds, and waits for none.
+	wakes, err := wake.FromEnv(logger)
+	if err != nil {
+		return err
+	}
+	defer wakes.Wait()
+{{- end }}
 {{- range .Databases }}
 	{{ .Var }}Pool, err := connect(ctx, {{ quote .Field }}, {{ .From }})
 	if err != nil {
@@ -80,6 +93,9 @@ exactly as a server does.
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
+{{- if .Queues }}
+	{{ .Package }}.OnEnqueue(wakes.Enqueued)
+{{- end }}
 {{- if .Identity }}
 	// The identity store of the user model in {{ .Service }} (D50), over the
 	// same pool, for every API that authenticates its users against it.

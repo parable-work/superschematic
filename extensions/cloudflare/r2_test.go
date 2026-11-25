@@ -24,8 +24,9 @@ import (
 //
 //   - Staging's bucket is `calls-stack-staging-shop-media`, in western Europe, and
 //     its lifecycle deletes each object 30 days after it was written;
-//     Production's stores new objects as infrequently accessed and has no
-//     lifecycle;
+//     its CORS rules are an r2BucketCors of their own, which names the
+//     bucket (D148); Production's stores new objects as infrequently
+//     accessed and has no lifecycle and no CORS;
 //   - the edge mints an account token holding Workers R2 Storage Bucket
 //     Item Write on that bucket's objects alone;
 //   - the storefront's value is the bucket's name, its r2_bucket binding
@@ -51,6 +52,14 @@ func TestR2Bucket(t *testing.T) {
 	}
 	if got := jsonOf(t, lifecycle.Properties["bucketName"]); got != `{"$output":{"resource":"shop-media.bucket","name":"name"}}` {
 		t.Errorf("the lifecycle names bucket %s", got)
+	}
+	cors := node(t, env, "shop-media.cors")
+	if cors.Type != cloudflare.TypeR2BucketCors || cors.Phase != ir.PhaseInfrastructure {
+		t.Errorf("the CORS rules are %s in %s", cors.Type, cors.Phase)
+	}
+	if got, want := jsonOf(t, cors.Properties), `{"accountId":"`+accountID+`","bucketName":{"$output":{"resource":"shop-media.bucket","name":"name"}},`+
+		`"rules":[{"allowed":{"headers":["content-type"],"methods":["GET","PUT"],"origins":["https://staging.acme.dev"]},"exposeHeaders":["etag"],"id":"cors-1","maxAgeSeconds":3600}]}`; got != want {
+		t.Errorf("the CORS rules are\n%s, want\n%s", got, want)
 	}
 
 	token := node(t, env, "shop-storefront.r2.shop-media.token")
@@ -90,6 +99,9 @@ func TestR2Bucket(t *testing.T) {
 	if production.Resources.Resource("shop-media.lifecycle") != nil {
 		t.Error("Production's bucket, with no deleteAfterDays, has a lifecycle")
 	}
+	if production.Resources.Resource("shop-media.cors") != nil {
+		t.Error("Production's bucket, with no cors, has CORS rules")
+	}
 
 	preview := resolveCalls(t, reg, "Preview")
 	if got := jsonOf(t, node(t, preview, "shop-media.bucket").Properties["name"]); got != `{"$concat":["calls-stack-preview-shop-media-pr",{"$parameter":"pr"}]}` {
@@ -128,6 +140,18 @@ func TestR2Refusals(t *testing.T) {
 			refusedWith(t, errs, stack.CodeInvalidSettings, "settings of shop-media on platform cloudflare.r2")
 		})
 	}
+	t.Run("a CORS rule that admits PUT from any origin", func(t *testing.T) {
+		s := callsStack()
+		s.Environments[1].Settings[0].Values = map[string]any{"cors": []any{map[string]any{"origins": []any{"*"}, "methods": []any{"PUT"}}}}
+		_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
+		refusedWith(t, errs, stack.CodeLowering, "cors rule 1 of bucket shop-media admits PUT from the origin *")
+	})
+	t.Run("a CORS rule with a method no bucket takes", func(t *testing.T) {
+		s := callsStack()
+		s.Environments[1].Settings[0].Values = map[string]any{"cors": []any{map[string]any{"origins": []any{"https://staging.acme.dev"}, "methods": []any{"OPTIONS"}}}}
+		_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
+		refusedWith(t, errs, stack.CodeInvalidSettings, "settings of shop-media on platform cloudflare.r2")
+	})
 	t.Run("a jurisdiction beside a location hint", func(t *testing.T) {
 		s := callsStack()
 		s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu", "locationHint": "weur"}
@@ -144,7 +168,8 @@ func TestR2Refusals(t *testing.T) {
 func TestR2BucketInAJurisdiction(t *testing.T) {
 	reg := assemble(t)
 	s := callsStack()
-	s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu", "deleteAfterDays": 30}
+	s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu", "deleteAfterDays": 30,
+		"cors": []any{map[string]any{"origins": []any{"https://staging.acme.dev"}, "methods": []any{"PUT"}}}}
 	env, errs := resolveOver(t, reg, s, callsServices(), "Staging")
 	if errs != nil {
 		t.Fatal(errs)
@@ -154,6 +179,9 @@ func TestR2BucketInAJurisdiction(t *testing.T) {
 	}
 	if got := node(t, env, "shop-media.lifecycle").Properties["jurisdiction"]; got != "eu" {
 		t.Errorf("the lifecycle's jurisdiction is %v", got)
+	}
+	if got := node(t, env, "shop-media.cors").Properties["jurisdiction"]; got != "eu" {
+		t.Errorf("the CORS rules' jurisdiction is %v", got)
 	}
 	want := `[{"effect":"allow","permissionGroups":[{"id":"` + cloudflare.R2ObjectsWriteGroup + `"}],` +
 		`"resources":{"$concat":["{\"com.cloudflare.edge.r2.bucket.` + accountID + `_eu_",{"$output":{"resource":"shop-media.bucket","name":"name"}},"\":\"*\"}"]}}]`

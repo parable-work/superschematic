@@ -19,6 +19,30 @@ resources:
     options:
       version: 6.22.0
   # phase infrastructure; owners shop-media
+  shop-media-cors:
+    name: shop-media.cors
+    type: cloudflare:index/r2BucketCors:R2BucketCors
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      bucketName: ${shop-media-bucket.name}
+      rules:
+        - allowed:
+            headers:
+              - content-type
+            methods:
+              - GET
+              - PUT
+            origins:
+              - https://staging.acme.dev
+          exposeHeaders:
+            - etag
+          id: cors-1
+          maxAgeSeconds: 3600
+    options:
+      dependsOn:
+        - ${shop-media-bucket}
+      version: 6.22.0
+  # phase infrastructure; owners shop-media
   shop-media-lifecycle:
     name: shop-media.lifecycle
     type: cloudflare:index/r2BucketLifecycle:R2BucketLifecycle
@@ -274,6 +298,7 @@ resources:
 outputs:
   shop-media.bucket.id: ${shop-media-bucket.id}
   shop-media.bucket.name: ${shop-media-bucket.name}
+  shop-media.cors.id: ${shop-media-cors.id}
   shop-media.lifecycle.id: ${shop-media-lifecycle.id}
   shop-pricing.deployment.id: ${shop-pricing-deployment.id}
   shop-pricing.version.id: ${shop-pricing-version.id}

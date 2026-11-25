@@ -713,6 +713,45 @@ func TestMigrationJobNeedsARelease(t *testing.T) {
 	}
 }
 
+// TestBuilderExtendsAnImage (D144): the stack extends shop-api's image
+// with a Dockerfile of the project's, so its Cloud Build names both: the
+// generated Dockerfile, and the extending one, which the context holds.
+// The other images build from their one Dockerfile.
+func TestBuilderExtendsAnImage(t *testing.T) {
+	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
+	f.ready(t)
+	s := shop()
+	s.Images = []*ir.DeployableImage{{Of: stacktest.Of(stacktest.ShopAPI), Packages: []string{"chromium"}, Extend: "docker/shop-api.Dockerfile"}}
+	env := resolve(t, f.reg, s, stacktest.AcmeShop(), "Staging")
+	wantJSON(t, "shop-api's image", env.Deployable("shop-api").Image, `{"packages":["chromium"],"extend":"docker/shop-api.Dockerfile"}`)
+	src := shopSources(t)
+	src.ImplementationRoot = src.RepositoryRoot
+	if err := os.MkdirAll(filepath.Join(src.RepositoryRoot, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src.RepositoryRoot, "docker", "shop-api.Dockerfile"), []byte("ARG BASE\nFROM ${BASE}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	built, err := stack.Build(context.Background(), stack.BuildOptions{
+		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()}, Sources: *src,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.cloud.builds) != 4 || len(built.Images) != 4 {
+		t.Fatalf("stack build ran %d builds of %d images", len(f.cloud.builds), len(built.Images))
+	}
+	for _, build := range f.cloud.builds {
+		api := strings.HasPrefix(build.Image, shopRepo+"shop-api:context-")
+		switch {
+		case api && (build.Dockerfile != "schemas/dist/server/Shop/shop-api/Dockerfile" || build.Extend != "docker/shop-api.Dockerfile"):
+			t.Errorf("shop-api builds from %s, extended with %q", build.Dockerfile, build.Extend)
+		case !api && build.Extend != "":
+			t.Errorf("%s, which nothing extends, builds with %s", build.Image, build.Extend)
+		}
+	}
+}
+
 // TestBuilder: the builder finds an image built from the same context
 // without building it, and a build that fails stops the deploy before it
 // changes anything.

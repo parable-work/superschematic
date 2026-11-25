@@ -51,6 +51,16 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 			}
 			parts = append(parts, "origins: ["+strings.Join(origins, ", ")+"]")
 		}
+		if len(s.Images) > 0 {
+			// What the stack adds to its deployables' images (D144).
+			images := make([]string, 0, len(s.Images))
+			for i, image := range s.Images {
+				if image != nil {
+					images = append(images, e.imageLiteral(fmt.Sprintf("type %s: @stack images[%d]", def.Name, i), image))
+				}
+			}
+			parts = append(parts, "images: ["+strings.Join(images, ", ")+"]")
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("stack"), objectLiteral(parts))
 	}
 	if s := def.Server; s != nil {
@@ -62,6 +72,36 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 	if env := def.Environment; env != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("environment"), e.environmentLiteral(def.Name, env))
 	}
+}
+
+// imageLiteral renders one images element (D144): of, a job's, a worker's,
+// a deriver's or an app's name beside its API's handle, or runner: true
+// beside a DB's, as a settings element names one, then packages and
+// extend.
+func (e *emitter) imageLiteral(owner string, image *ir.DeployableImage) string {
+	parts := []string{"of: " + e.deployableRef(owner+" of", image.Of)}
+	if image.Of.Job != "" {
+		parts = append(parts, "job: "+quote(image.Of.Job))
+	}
+	if image.Of.Worker != "" {
+		parts = append(parts, "worker: "+quote(image.Of.Worker))
+	}
+	if image.Of.Deriver != "" {
+		parts = append(parts, "deriver: "+quote(image.Of.Deriver))
+	}
+	if image.Of.App != "" {
+		parts = append(parts, "app: "+quote(image.Of.App))
+	}
+	if image.Of.Runner {
+		parts = append(parts, "runner: true")
+	}
+	if len(image.Packages) > 0 {
+		parts = append(parts, "packages: "+stringListLiteral(image.Packages))
+	}
+	if image.Extend != "" {
+		parts = append(parts, "extend: "+quote(image.Extend))
+	}
+	return objectLiteral(parts)
 }
 
 // environmentLiteral renders @environment's argument: the target's values
@@ -141,6 +181,15 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if settings.Concurrency != nil {
 		parts = append(parts, fmt.Sprintf("concurrency: %d", *settings.Concurrency))
+	}
+	if settings.MaxInstances != nil {
+		parts = append(parts, fmt.Sprintf("maxInstances: %d", *settings.MaxInstances))
+	}
+	if settings.Mode != "" {
+		parts = append(parts, "mode: "+quote(settings.Mode))
+	}
+	if settings.Idle != "" {
+		parts = append(parts, "idle: "+quote(settings.Idle))
 	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {

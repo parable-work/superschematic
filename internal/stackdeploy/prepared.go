@@ -120,10 +120,13 @@ type PreparedDocument struct {
 }
 
 // PreparedContext is an image's build context, as WriteContext wrote it.
+// Extend is the path in it of the Dockerfile that extends the image
+// (D144), when the stack names one.
 type PreparedContext struct {
 	Archive    string `json:"archive"`
 	Digest     string `json:"digest"`
 	Dockerfile string `json:"dockerfile"`
+	Extend     string `json:"extend,omitempty"`
 	Files      int    `json:"files"`
 	Size       int64  `json:"size"`
 }
@@ -313,7 +316,7 @@ func (p *Prepared) context(pc *PreparedContext) (string, *Context, error) {
 	if got := "sha256:" + hex.EncodeToString(sum.Sum(nil)); got != pc.Digest {
 		return "", nil, fmt.Errorf("the prepared build context %s has digest %s, not %s", archive, got, pc.Digest)
 	}
-	return archive, &Context{Digest: pc.Digest, Dockerfile: pc.Dockerfile, Files: pc.Files, Size: pc.Size}, nil
+	return archive, &Context{Digest: pc.Digest, Dockerfile: pc.Dockerfile, Extend: pc.Extend, Files: pc.Files, Size: pc.Size}, nil
 }
 
 // extract checks the archive of a, a site's files or a bundle, what,
@@ -491,7 +494,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 			return err
 		}
 		rel := "contexts/" + name + ".tar.gz"
-		c, err := writeContextFile(filepath.Join(p.Dir, filepath.FromSlash(rel)), src.RepositoryRoot, dockerfile)
+		c, err := writeContextFile(filepath.Join(p.Dir, filepath.FromSlash(rel)), src.RepositoryRoot, dockerfile, src.Extension(d))
 		if err != nil {
 			return fmt.Errorf("%s: %w", what, err)
 		}
@@ -499,7 +502,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 		if p.Contexts == nil {
 			p.Contexts = map[string]*PreparedContext{}
 		}
-		p.Contexts[name] = &PreparedContext{Archive: rel, Digest: c.Digest, Dockerfile: c.Dockerfile, Files: c.Files, Size: c.Size}
+		p.Contexts[name] = &PreparedContext{Archive: rel, Digest: c.Digest, Dockerfile: c.Dockerfile, Extend: c.Extend, Files: c.Files, Size: c.Size}
 	}
 	for _, name := range sortedKeys(sites) {
 		s.env = envOf(envs, name)

@@ -1,6 +1,6 @@
 ---
 title: Buckets
-description: Keep files in a private bucket a Bucket service declares. List it in an API's config, use it from Deps in Go, TypeScript or Rust, hand a browser a signed URL to upload or download an object, and run it locally on fake-gcs-server.
+description: Keep files in a private bucket a Bucket service declares. List it in an API's config, use it from Deps in Go, TypeScript or Rust, hand a browser a signed URL to upload or download an object, name the origins whose pages may do so with CORS rules, and run it locally on fake-gcs-server.
 sidebar:
   order: 5.6
 ---
@@ -23,7 +23,8 @@ and D54 in the [decision log](https://github.com/parable-work/superschematic/blo
 | signed URLs to upload or download an object directly | |
 | `stack dev` runs fake-gcs-server with a bucket per Bucket service | |
 | on gcp, a private Cloud Storage bucket per Bucket service, with its grants | |
-| on cloudflare, a private R2 bucket per Bucket service, with a token of its own per edge ([buckets on R2](/superschematic/guides/stacks/#buckets-on-r2)) | a bucket's CORS, which a browser's upload to a signed URL needs, on either target |
+| on cloudflare, a private R2 bucket per Bucket service, with a token of its own per edge ([buckets on R2](/superschematic/guides/stacks/#buckets-on-r2)) | |
+| a bucket's [CORS rules](#let-a-page-reach-the-bucket) on gcp and on cloudflare, which a browser's upload to a signed URL needs | CORS rules per bucket on `stack dev`'s emulator, which answers every origin |
 
 ## Declare a bucket
 
@@ -115,6 +116,56 @@ The browser then sends the file with the content type it asked for:
 curl -X PUT -H 'Content-Type: image/png' --data-binary @tea.png "$UPLOAD_URL"
 ```
 
+## Let a page reach the bucket
+
+A page's script that sends that `PUT`, or reads an object with `fetch`,
+is a cross-origin request: the browser first asks the bucket whether the
+page's origin may send it, and sends nothing when the bucket does not
+answer. So a bucket's settings in an environment take `cors`, a list of
+rules, the same on gcp and on cloudflare (D148):
+
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-prod", region: "us-east1", production: true },
+  settings: [
+    {
+      of: ShopMedia,
+      cors: [
+        {
+          origins: ["https://shop.acme.dev"],
+          methods: ["GET", "PUT"],
+          headers: ["content-type"],
+          exposeHeaders: ["etag"],
+          maxAge: "1h"
+        }
+      ]
+    }
+  ]
+})
+export abstract class Production {}
+```
+
+| Key | Holds |
+| --- | --- |
+| `origins` | the origins the rule answers, each a scheme and a host with no path (`https://shop.acme.dev`, `http://localhost:5173`), or `*` alone for any origin |
+| `methods` | the methods it admits from them: `GET`, `HEAD`, `PUT`, `POST` and `DELETE` |
+| `headers` | the request headers a page may send, `content-type` for an upload that names its type; `*` is any |
+| `exposeHeaders` | the response headers the page's script may read beside the ones every browser exposes, `etag` say |
+| `maxAge` | how long a browser may keep the bucket's answer before it asks again, a duration of whole seconds (`10m`, `1h`), a day at most |
+
+A rule that admits `PUT` from `*` is refused. The bucket is private, and a
+page writes to it only through a URL an API signed, so the rule names the
+origins of the pages that upload. `*` is taken for `GET` and `HEAD`, as
+for a signed download any page may fetch. A bucket with no `cors` answers
+no preflight, which is right for one only servers reach.
+
+gcp writes the rules as the Cloud Storage bucket's `cors`. Cloud Storage
+keeps one list of headers per rule, which it both allows in a request and
+exposes in the response, so a rule's `headers` and `exposeHeaders` are
+joined there. cloudflare writes them as the R2 bucket's CORS rules, a node
+of their own beside the bucket.
+
 ## Run it locally
 
 `superschematic stack dev` runs
@@ -137,6 +188,19 @@ environment, shifted by the checkout
 
 ```ts
 @environment({ target: "local", local: { storagePort: 54443 } })
+export abstract class Dev {}
+```
+
+The emulator answers a browser's preflight for every bucket alike, from
+any origin, so a page of a local site uploads to a signed URL with no
+`cors` setting, and a local bucket takes none. It allows the request
+headers `Content-Type`, `Content-Encoding`, `Range` and `Content-Range`.
+A page that sends another, an `x-goog-meta-` header say, names it in the
+environment's `storageCorsHeaders` value, as it names it in `headers` on
+gcp and cloudflare:
+
+```ts
+@environment({ target: "local", local: { storageCorsHeaders: ["x-goog-meta-owner"] } })
 export abstract class Dev {}
 ```
 
@@ -176,6 +240,7 @@ that holds some fails.
 | --- | --- |
 | `versioning` | false: an object's earlier versions are not kept |
 | `deleteAfterDays` | none: an object stays until it is deleted |
+| `cors` | none: the bucket answers no browser's preflight ([Let a page reach the bucket](#let-a-page-reach-the-bucket)) |
 
 ```ts
 @environment({

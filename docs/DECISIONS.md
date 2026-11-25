@@ -202,9 +202,10 @@ the prebuilt families published and pinned (every key and digest in
   (L 11280).
 - `SET DEFAULT` as an `onDelete`.
 
-**D80** (L 11332). A queue key over several fields; a delay on enqueue (a
-`due_at` after now) for `replace` to take from the new message; `when`
-rules beyond the literal ones.
+**D80** (L 11332). `when` rules of `@enqueueOnChange` beyond the literal
+ones (`isNull`, `notNull`, `equals`). A delay in an `@enqueueOnChange`
+trigger's message: a delay is an enqueue's, in Go, TypeScript and Rust,
+and a trigger enqueues due at once.
 
 **D81** (L 11425).
 - Password reset and email verification, which D50 keeps out of the core
@@ -414,7 +415,17 @@ release tag exists.
   (D75, L 10405); a deriver (D74); D91's origin: the browser's Host through
   a serverless NEG, `fullPathMatch` with `pathPrefixRewrite`, the route
   rules' error response serving the fallback and passing the API's 404,
-  and `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`.
+  and `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`; a bucket's CORS rules,
+  and a browser's preflight and upload from a page against them (D148);
+  an image the stack adds packages to or extends: a Cloud Build of two
+  steps whose second reads the first's image from the build's daemon, a
+  Go and a Rust binary on `debian:trixie-slim` as `nonroot`, and Bun's
+  image taking `apt-get install` (D144); a worker in drain mode: its
+  Cloud Run job, an execution a wake starts with the metadata server's
+  token and `roles/run.invoker` on the job alone, a wake the job refuses
+  before the worker's wave has rolled out, the Cloud Scheduler tick, a
+  session's advisory lock held through the Cloud SQL connector for a
+  task's life, and a task stopped at its day's limit (D145).
 - **Cloudflare.** The storefront on Workers and a D1-backed TypeScript API,
   the target's own done line (D64, L 7086); `TestRealD1`, which the D1
   migration driver waits for (D27, L 3012); destroy order, the bucket
@@ -432,7 +443,9 @@ release tag exists.
   invocation, node-postgres on the runtime, and a destroy that leaves the
   config and origin (D92); argon2id's CPU at the default cost (D92);
   the engineer's token reading the Hyperdrive config and TLS from the
-  deploying machine (D96).
+  deploying machine (D96); an R2 bucket's CORS rules, the `r2BucketCors`
+  node a plan refreshes with the planner's token, and a browser's
+  preflight and upload from a page against them (D148).
 - **GitHub Actions.** A generated workflow (D47), one against an engine
   checkout (D58), and `release.yml` with the archive fetch from a
   published release (D47); the provider mapping of D69 and its CEL.
@@ -485,6 +498,11 @@ Pulumi field that the next deploy would reset; and a minute's scheduled
 job per environment, a running cost for every stack with a range, where
 the fakes would prove only the arithmetic. The setting is built so a stack
 can state its range, and gcp says why it cannot run one.
+
+What is built in its place for a queue that is empty most of the day is
+D145's drain mode: on gcp a worker whose `mode` is `drain` runs as a Cloud
+Run job that an enqueue wakes and a tick runs, and exits once its queue is
+idle, so it needs no scaler.
 
 ## D103. A behavior adds fields, sub-tables, operations and rules to a table that stays a table, its rules run in a pure Rust core every language embeds, and a project defines its types at build time or at run time, never both (D16, D27, D50, D58, D64, D70 amended)
 
@@ -1567,46 +1585,59 @@ client it is in, and nothing in a server asks.
 Build: the service config, `envgen`, the three HTTP runtimes, the four
 SDK generators and the client SDKs guide.
 
-## D144. A deployable's image takes system packages, and a project may extend the generated image (D30 amended)
-
-A generated Dockerfile is written whole and never edited. A workload that
-needs a program beside its runtime, a headless browser or a PDF tool or
-fonts, has no place to ask for it.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A stack names an image's additions once for a deployable, not per environment, since one image serves every environment: `image: { packages?, extend? }`. | A setting per environment, which makes an image per environment |
-| `packages` are Debian package names. The final stage installs them with `apt-get install --no-install-recommends`, sorted, and removes the package lists. A stage whose base has no `apt-get` is given the Debian base the TypeScript image uses when a deployable names packages. | An arbitrary `RUN` line, which is a Dockerfile by another name |
-| `extend` is the path of a Dockerfile the project owns. The deploy builds the generated image, then builds this file with `BASE` set to it, and deploys the result. It is the escape hatch, and the docs say what belongs in `packages` first. | No way past the generator |
-| The image's identity, which decides whether a deploy rebuilds, includes the packages and the digest of the extension file. | |
-| `stack dev` runs processes on the host and installs nothing. It prints once, at the start, the packages each deployable names. | Installing on a developer's machine |
-| A platform with no image, Cloudflare's, refuses the setting as unrealizable. | Ignoring it |
-
-Build: the stack's schema and resolver, `servergen`'s three Dockerfile
-templates, `internal/stackdeploy/images.go`, `stack dev`, the targets'
-checks and the stacks guide.
-
 ## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
 
-On gcp a worker is a worker pool at a fixed count, so a queue that is
-empty most of the day still pays for an instance. The scaler that would
-change the count is designed and not built, for three reasons the section
-above gives: a grant that lets its holder redeploy the worker, a field the
-next deploy resets, and a scheduled run a minute for ever.
+Built: a worker's `mode` and `idle` settings and what resolution refuses of
+them (`internal/stack/workers.go`); the drain worker's entrypoint in Go and
+TypeScript, which takes one of `instances` advisory locks named for its
+queue as it starts and exits 0 once no message was ready or held for
+`idle` and none falls due within five minutes, which it waits for, and
+exits with an error once every claim has failed for `idle`
+(`runtime/http/go/worker`, the TypeScript runtime's `./worker`,
+`sqlutil`'s `slot` and `nextDue` statements); the wake a queue client sends after an
+enqueue, at most once per queue in five seconds per process, which fails
+no enqueue (`runtime/http/go/wake` behind the Go ORM's `OnEnqueue`, the
+TypeScript runtime's `queue-wake.ts`); and on gcp the Cloud Run job in the
+worker pool's place, `roles/run.invoker` on that job alone and
+`QUEUE_WAKES` for each deployable that may enqueue to its queue, and the
+Cloud Scheduler tick, an hour at most, since it bounds how late a retry
+or a delayed message due past that horizon runs
+(`extensions/gcp/cloudrunworker.go`). `stack dev`
+runs a drain worker as it runs any worker. The stacks and queues guides
+and section 8.8 of `docs/stack-model.md` describe it. The commit that
+built it names D145, and says where it departs from the decision's text.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A worker's settings take `mode`: `pool`, the default, or `drain`. In drain mode the worker's entrypoint claims as it does now and exits 0 once no message was ready or held for `idle` (`30s` when absent). | The scaler; Pub/Sub push or Cloud Tasks to a service, a second delivery system beside the queue's table whose HTTP time limit bounds a message's handling |
-| gcp lowers a drain worker as a Cloud Run job with the worker's image, account, config and connections, and no worker pool. `instances` is how many tasks may run at once, one when absent; `maxInstances` is refused beside it. | |
-| Each deployable that enqueues to the queue gets the job's name in its config and `roles/run.invoker` on that job alone. Its queue client runs the job after an enqueue, at most once per queue in five seconds per process, and logs a failure without failing the enqueue. | A grant on the project; a wake that can fail the write |
-| A drain worker takes one of `instances` advisory locks named for its queue as it starts, and exits at once when none is free, so wakes that overlap cost a start and nothing else. | Asking the platform what is running before each wake |
-| A Cloud Scheduler job runs the drain job every `tick` (`5m` when absent) with `roles/run.invoker`, as a scheduled job's does. It covers a message a trigger enqueued, a retry that is due later, a delayed message (D80) and a wake that was lost. | Trusting the wake alone |
-| `stack dev` runs a drain worker as it runs any worker. Cloudflare's drainer already drains at each Cron firing; waking it before the next one (D92) can use the same seam and is left. | |
+Left:
 
-Build: `internal/stack/workers.go`, `extensions/gcp` (the worker's
-lowering, the job, the connector and its grant, the scheduler job, the
-settings schema), the workers' entrypoints in `servergen`, the three queue
-clients and the stacks and queues guides.
+- A Rust worker in drain mode. The Rust runtime's worker loop does not
+  exit when its queue is idle and takes no slot, so gcp refuses a Rust
+  worker whose mode is drain; and the Rust queue client sends no wake, so
+  a message a Rust API enqueues waits for the tick. Its queue descriptor
+  holds the `slot` statement already.
+- A behavior worker in drain mode, which resolution refuses: triggers and
+  the clock fill its queues, so no enqueue's wake hears them, and its
+  claim loops take no slot.
+- The wake on Cloudflare: waking a worker's Worker before its next Cron
+  firing (D92) through the same seam, `ir.ResolvedDeployable.Wakes` and
+  `QUEUE_WAKES`. `mode: "drain"` changes nothing there.
+- A wake from an enqueue on SQLite (`Enqueue<Queue>SQLite`,
+  `enqueueStatement`), and a slot there: no target runs a drain worker
+  over a SQLite file.
+- A TypeScript entrypoint that waits for the wakes it has sent before it
+  exits, as a Go one does: a job that exits right after its one enqueue
+  may end before its wake goes out, and the tick finds the message.
+- A bound on a task's life shorter than a day, and a setting for it.
+- Holding wakes back while the worker holds its slots. A process sends a
+  queue's wake whenever five seconds have passed since its last, so on a
+  busy queue each enqueuing process starts up to twelve executions a
+  minute that find no slot and exit at once, each a Cloud Run Admin API
+  call against the project's quota. A wake could be held back for the
+  worker's idle time after a `:run` that succeeded, which `QUEUE_WAKES`
+  would then have to carry.
+- `QUEUE_WAKES` keyed by the database as well as the queue's class. It is
+  keyed by the class alone, so two databases that each declare a queue
+  class of one name wake each other's drain workers: starts wasted, no
+  message lost.
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 
@@ -1643,19 +1674,6 @@ at one points at the other.
 Build: the behaviors' core and its declarations, `behaviorlayout`,
 `ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
 guide.
-
-## D148. A bucket's settings take CORS rules (D54 amended)
-
-A browser that uploads to a signed URL needs the bucket to answer its
-preflight. The buckets guide lists this as not built on either target.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A bucket's settings in an environment take `cors`, a list of `{ origins, methods, headers?, exposeHeaders?, maxAge? }`. gcp writes it as the bucket's `cors`, and cloudflare as the R2 bucket's CORS rules. An origin of `*` is refused beside a private bucket's signed `PUT`; the rule names its origins. | A wildcard by default |
-| `stack dev`'s fake-gcs-server allows the local sites' origins, as the servers' CORS does. | |
-
-Build: `extensions/gcp/storage.go`, the cloudflare target's bucket, their
-settings schemas, `stack dev` and the buckets guide.
 
 ## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
 
