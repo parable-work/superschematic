@@ -11,8 +11,9 @@ Loaded schema shop-storefront (kind API): 5 types, 1 enums, 3 scalars, 3 operati
   - sentinel up to date
   + types-typescript written to .../schemas/dist/types/typescript/shop-storefront
   + api-typescript written to .../schemas/dist/api/shop-storefront
+  + env-values-schema written to .../schemas/dist/api/shop-storefront
   + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-storefront
-Build complete: 3 outputs generated, 0 skipped
+Build complete: 4 outputs generated, 0 skipped
   OK: shop-storefront (built)
 
 Built 2 schema services for shop-storefront

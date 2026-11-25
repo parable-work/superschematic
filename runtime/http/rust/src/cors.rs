@@ -42,10 +42,23 @@ use crate::stackconfig;
 use crate::OperationInfo;
 
 /// The request headers a site's browser may send an API: what the generated
-/// SDKs send, the end user's token in `Authorization` among them. A service
-/// credential never travels from a browser, so `Service-Authorization` is
-/// not one.
-pub const ALLOWED_HEADERS: [&str; 3] = ["Accept", "Authorization", "Content-Type"];
+/// SDKs send, the end user's token in `Authorization` among them, the key of
+/// an `@idempotent` operation (D140) and the client's name and version
+/// (D143). A service credential never travels from a browser, so
+/// `Service-Authorization` is not one.
+pub const ALLOWED_HEADERS: [&str; 5] = [
+    "Accept",
+    "Authorization",
+    "Content-Type",
+    "Idempotency-Key",
+    "X-Client-Version",
+];
+
+/// The answer headers a site's script may read beyond those a browser always
+/// shows it: `Idempotent-Replay`, which says an `@idempotent` operation's
+/// answer is the kept one, and `Retry-After`, which the 409 of a call still
+/// running and a 429 carry (D140).
+pub const EXPOSED_HEADERS: [&str; 2] = ["Idempotent-Replay", "Retry-After"];
 
 /// How long, in seconds, a browser may keep a preflight's answer.
 pub const MAX_AGE: u32 = 600;
@@ -113,7 +126,8 @@ impl Policy {
     /// with no `Origin` gets no header. One with an `Origin` the policy
     /// lists gets `Access-Control-Allow-Origin` with that origin and
     /// `Access-Control-Allow-Credentials`; its preflight is the server's to
-    /// answer, and gets the methods, the headers and the max age too. One
+    /// answer, and gets the methods, the headers and the max age too, and
+    /// any other request of it gets `Access-Control-Expose-Headers`. One
     /// with an `Origin` the policy does not list gets `Vary` alone and is
     /// not the server's to answer, a preflight included: the API answers
     /// it, and unless a CORS check of its own allows the origin, the
@@ -141,6 +155,8 @@ impl Policy {
             headers.insert("Access-Control-Allow-Methods", self.methods.join(", "));
             headers.insert("Access-Control-Allow-Headers", ALLOWED_HEADERS.join(", "));
             headers.insert("Access-Control-Max-Age", MAX_AGE.to_string());
+        } else {
+            headers.insert("Access-Control-Expose-Headers", EXPOSED_HEADERS.join(", "));
         }
         decision
     }
@@ -641,7 +657,7 @@ mod tests {
         );
         assert_eq!(
             header(&response, "access-control-allow-headers").as_deref(),
-            Some("Accept, Authorization, Content-Type")
+            Some("Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version")
         );
 
         let response = preflight(TRUSTED).await;

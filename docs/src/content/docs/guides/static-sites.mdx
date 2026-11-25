@@ -203,10 +203,13 @@ API's CORS field and answers CORS for those origins only, in Go and in
 TypeScript alike:
 
 - a preflight from a listed origin is answered 204 with the origin,
-  credentials, the `Accept`, `Authorization` and `Content-Type` headers,
-  the methods of the API's operations and a max age of ten minutes;
+  credentials, the `Accept`, `Authorization`, `Content-Type`,
+  `Idempotency-Key` and `X-Client-Version` headers (what a generated SDK
+  sends), the methods of the API's operations and a max age of ten
+  minutes;
 - any other request from a listed origin carries the origin and
-  credentials;
+  credentials, and exposes `Idempotent-Replay` and `Retry-After` to the
+  site's script;
 - any other origin gets `Vary: Origin` alone, and its preflight goes on to
   the API, which answers it as it would with no site.
 

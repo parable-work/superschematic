@@ -141,7 +141,7 @@ describe('corsHandler around an identity API', () => {
       origin: SITE,
       credentials: 'true',
       methods: 'GET, POST',
-      headers: 'Accept, Authorization, Content-Type',
+      headers: 'Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version',
     });
   });
 

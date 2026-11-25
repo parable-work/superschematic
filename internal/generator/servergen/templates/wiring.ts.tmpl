@@ -21,7 +21,11 @@ APIs.
     {{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range .Buckets }}
+{{- if .ContentAddressed }}
+    {{ .Field }}: contentBucket({{ .Bucket.Var }}, { maxBytes: {{ .MaxBytes }} }),
+{{- else }}
     {{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
 {{- end }}
 {{- range .MemoryStores }}
     {{ .Field }}: {{ .Store.Var }},

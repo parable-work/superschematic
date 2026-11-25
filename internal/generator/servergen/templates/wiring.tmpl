@@ -10,8 +10,13 @@ exactly as a server does.
 {{- if .Databases }}
 	"github.com/jackc/pgx/v5/pgxpool"
 {{- end }}
-{{- if anyIdentity .APIs }}
+{{- if or (anyIdentity .APIs) (anyIdempotent .APIs) }}
 	"github.com/jackc/pgx/v5/stdlib"
+{{- end }}
+{{- if anyIdempotent .APIs }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/idempotency"
+{{- end }}
+{{- if anyIdentity .APIs }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/identity"
 {{- end }}
 {{- if .Clients }}
@@ -95,6 +100,12 @@ exactly as a server does.
 	}
 {{- if .Queues }}
 	{{ .Package }}.OnEnqueue(wakes.Enqueued)
+{{- end }}
+{{- if and .Idempotency (not .Identity) }}
+	// The handle the idempotency keys in {{ .Service }} are read and written
+	// through (D140), over the same pool.
+	{{ .Var }}SQL := stdlib.OpenDBFromPool({{ .Var }}Pool)
+	defer {{ .Var }}SQL.Close()
 {{- end }}
 {{- if .Identity }}
 	// The identity store of the user model in {{ .Service }} (D50), over the
@@ -182,7 +193,11 @@ exactly as a server does.
 		{{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range .Buckets }}
+{{- if .ContentAddressed }}
+		{{ .Field }}: contentBucket({{ .Bucket.Var }}, {{ .MaxBytes }}),
+{{- else }}
 		{{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
 {{- end }}
 {{- range .MemoryStores }}
 		{{ .Field }}: {{ .Store.Var }},

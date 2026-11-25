@@ -50,6 +50,13 @@ pub struct RouterOptions {
     /// the store of its confirmations (D93). A router of an API with it
     /// off reads none of it.
     pub mcp: EndpointOptions,
+    /// The oldest version of each client the API serves (D143): a request
+    /// whose `X-Client-Version` names a listed client at a lower version
+    /// is answered 426 `client_too_old`, before any other step of its
+    /// route. None by default, which serves every client. A generated
+    /// EnvConfig reads it from `MIN_CLIENT_VERSIONS` for an API whose
+    /// config says `clientVersions`.
+    pub min_client_versions: crate::client_version::Minimums,
 }
 
 impl Default for RouterOptions {
@@ -61,6 +68,7 @@ impl Default for RouterOptions {
             rate_limits: RateLimits::new(),
             transport: true,
             mcp: EndpointOptions::default(),
+            min_client_versions: crate::client_version::Minimums::default(),
         }
     }
 }

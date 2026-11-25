@@ -1,0 +1,62 @@
+{
+  "description": "A content bucket (D142), which names each object sha256/<hex> by the SHA-256 of its bytes. `puts`: bodies put in order into one empty bucket of `maxBytes`, each as UTF-8 text, or as `bytes`, a list of byte values: the `hash` and `size` it answers, whether it `created` the object, and the `object` it wrote, or `tooLarge` for a body past maxBytes, which writes nothing. `hashes`: what a content hash is, `valid` ones and `invalid` ones, which every method refuses. `missing`: for the hashes a bucket `holds` and the ones `asked` about, the ones it lacks, each once, in the order asked. The Go runtime's bucket.ContentBucket, the TypeScript runtime's contentBucket and the Rust runtime's bucket::ContentBucket answer each vector alike, over a bucket each test keeps in memory.",
+  "maxBytes": 32,
+  "puts": [
+    { "name": "text", "text": "hello", "hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", "size": 5, "created": true, "object": "sha256/2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" },
+    { "name": "the same text again", "text": "hello", "hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", "size": 5, "created": false, "object": "sha256/2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" },
+    { "name": "no bytes", "text": "", "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "size": 0, "created": true, "object": "sha256/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+    { "name": "text outside ASCII, hashed as UTF-8", "text": "März", "hash": "86ac4d6762519c9df9013bd7b54723d595b624740f764430f963cdbd6bbcd292", "size": 5, "created": true, "object": "sha256/86ac4d6762519c9df9013bd7b54723d595b624740f764430f963cdbd6bbcd292" },
+    { "name": "25 bytes", "text": "date,amount\n2026-03-01,1\n", "hash": "db00f96b0549e4e268980bddcd450e559704cfd1e6b475cc3454323c2693d28f", "size": 25, "created": true, "object": "sha256/db00f96b0549e4e268980bddcd450e559704cfd1e6b475cc3454323c2693d28f" },
+    { "name": "bytes that are no text", "bytes": [0, 255, 128, 10, 13], "hash": "037e68ac6512d2c57a0d7247a76b3ab486a7f7e9c05ea50cae197782c80b63d4", "size": 5, "created": true, "object": "sha256/037e68ac6512d2c57a0d7247a76b3ab486a7f7e9c05ea50cae197782c80b63d4" },
+    { "name": "exactly maxBytes", "text": "0123456789abcdef0123456789abcdef", "hash": "3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9", "size": 32, "created": true, "object": "sha256/3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9" },
+    { "name": "one byte past maxBytes", "text": "0123456789abcdef0123456789abcdefX", "tooLarge": true }
+  ],
+  "hashes": {
+    "valid": [
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ],
+    "invalid": [
+      "",
+      "2cf24dba",
+      "2CF24DBA5FB0A30E26E83B2AC5B9E29E1B161E5C1FA7425E73043362938B9824",
+      "sha256/2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b98245",
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b982g",
+      "../../etc/passwd/0000000000000000000000000000000000000000000000000",
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b982\n"
+    ]
+  },
+  "missing": [
+    {
+      "name": "some held, some not, in the order asked",
+      "holds": ["hello", ""],
+      "asked": [
+        "86ac4d6762519c9df9013bd7b54723d595b624740f764430f963cdbd6bbcd292",
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "missing": [
+        "86ac4d6762519c9df9013bd7b54723d595b624740f764430f963cdbd6bbcd292",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ]
+    },
+    {
+      "name": "a hash asked twice is answered once",
+      "holds": [],
+      "asked": [
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "missing": [
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ]
+    },
+    { "name": "all held", "holds": ["hello"], "asked": ["2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"], "missing": [] },
+    { "name": "none asked", "holds": ["hello"], "asked": [], "missing": [] }
+  ]
+}

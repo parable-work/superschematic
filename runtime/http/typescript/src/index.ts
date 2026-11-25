@@ -184,8 +184,53 @@ export {
   uploadBodyLimitBytes,
 } from './upload.js';
 export type { UploadInput, UploadedFiles } from './upload.js';
-export { contentDisposition, downloadFilename, downloadResponse } from './download.js';
-export type { FileDownload } from './download.js';
+export {
+  contentDisposition,
+  downloadFilename,
+  downloadResponse,
+  entityTag,
+  ifNoneMatchNames,
+  notModified,
+  parseHttpDate,
+  sandboxPolicy,
+} from './download.js';
+export type { DownloadRequest, FileDownload } from './download.js';
+export {
+  CLIENT_TOO_OLD,
+  CLIENT_VERSION_HEADER,
+  MIN_CLIENT_VERSIONS_SETTING,
+  clientTooOld,
+  clientTooOldProblem,
+  compareVersions,
+  loadMinClientVersions,
+  parseMinClientVersions,
+} from './client-version.js';
+export type { ClientTooOld, MinClientVersions } from './client-version.js';
+export {
+  DEFAULT_IDEMPOTENCY_IN_FLIGHT_SECONDS,
+  DEFAULT_IDEMPOTENCY_TTL_SECONDS,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENT_REPLAY_HEADER,
+  IdempotencyCode,
+  idempotencyLookup,
+  idempotencyRequestHash,
+  isIdempotencyKey,
+  memoryIdempotencyStore,
+  postgresIdempotencyStore,
+  runIdempotent,
+  sqlIdempotencyStore,
+  sqliteIdempotencyStore,
+} from './idempotency.js';
+export type {
+  IdempotencyAttempt,
+  IdempotencyBegin,
+  IdempotencyPgQueryable,
+  IdempotencySql,
+  IdempotencyStore,
+  IdempotencyTable,
+  IdempotentRequest,
+  OperationIdempotency,
+} from './idempotency.js';
 export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
@@ -203,6 +248,7 @@ export {
 } from './stackconfig.js';
 export {
   CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   CORS_MAX_AGE,
   CORS_PREFLIGHT_VARY,
   CORS_VARY,
@@ -231,15 +277,29 @@ export type {
   ServiceCredentialSource,
   StackEnv,
 } from './stackconfig.js';
-export { DEFAULT_PAGE_SIZE, MAX_SIGNED_URL_SECONDS, ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './bucket.js';
+export {
+  CONTENT_PREFIX,
+  ContentTooLargeError,
+  DEFAULT_CONTENT_MAX_BYTES,
+  DEFAULT_PAGE_SIZE,
+  MAX_SIGNED_URL_SECONDS,
+  ObjectNotFoundError,
+  checkObjectName,
+  checkSignedUrlOptions,
+  contentBucket,
+  contentObjectName,
+} from './bucket.js';
 export type {
   Bucket,
   BucketBody,
   BucketObject,
   BucketRead,
+  ContentBucket,
+  ContentPut,
   ListOptions,
   ListPage,
   PutOptions,
+  PutResult,
   SignedUrlMethod,
   SignedUrlOptions,
 } from './bucket.js';

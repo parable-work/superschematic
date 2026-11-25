@@ -59,6 +59,9 @@ func parityCorpus() parityFile {
 		{Name: "a preflight from a listed origin", Policy: shop, Request: parityRequest{Method: "OPTIONS", Headers: map[string]string{
 			"Origin": site, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization, content-type",
 		}}},
+		{Name: "a preflight that asks for an idempotency key and a client version", Policy: shop, Request: parityRequest{Method: "OPTIONS", Headers: map[string]string{
+			"Origin": site, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type, idempotency-key, x-client-version",
+		}}},
 		{Name: "a preflight from loopback", Policy: shop, Request: parityRequest{Method: "OPTIONS", Headers: map[string]string{
 			"Origin": "http://127.0.0.1:20441", "Access-Control-Request-Method": "GET",
 		}}},

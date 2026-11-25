@@ -4750,6 +4750,9 @@
           "default": "",
           "type": "string"
         },
+        "idempotent": {
+          "$ref": "#/$defs/IdempotentConfig"
+        },
         "inheritedFrom": {
           "default": "",
           "type": "string"
@@ -4978,17 +4981,48 @@
     "FileDownloadDef": {
       "additionalProperties": false,
       "properties": {
+        "cacheControl": {
+          "default": "",
+          "type": "string"
+        },
         "contentType": {
+          "type": "string"
+        },
+        "contentTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disposition": {
+          "default": "",
           "type": "string"
         },
         "filename": {
           "default": "",
           "type": "string"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/FileDownloadSandbox"
         }
       },
       "required": [
         "contentType"
       ],
+      "type": "object"
+    },
+    "FileDownloadSandbox": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "FileUploadConfig": {
@@ -5101,6 +5135,25 @@
       "required": [
         "contentType"
       ],
+      "type": "object"
+    },
+    "IdempotencyKeysTrait": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "IdempotentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "ttlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "IdentityFirstUser": {
@@ -6908,6 +6961,9 @@
         },
         "graphMember": {
           "$ref": "#/$defs/GraphMemberConfig"
+        },
+        "idempotencyKeys": {
+          "$ref": "#/$defs/IdempotencyKeysTrait"
         },
         "implements": {
           "default": [],

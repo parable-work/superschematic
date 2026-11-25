@@ -142,6 +142,12 @@ func (s *statements) OriginalStatement(_ context.Context, accountID types.Identi
 	return &api.FileDownload{Body: bytes.NewReader(s.last[accountID]), Filename: s.names[accountID]}, nil
 }
 
+// PreviewStatement answers the last statement inline, as the page the
+// schema's contentTypes lists (D141).
+func (s *statements) PreviewStatement(_ context.Context, accountID types.IdentityUUID) (*api.FileDownload, error) {
+	return &api.FileDownload{Body: strings.NewReader("<pre>" + string(s.last[accountID]) + "</pre>"), ContentType: "text/html; charset=utf-8", Filename: "statement.html", ETag: "v1"}, nil
+}
+
 func TestFilesThroughTheSDK(t *testing.T) {
 	impl := &statements{lines: map[types.IdentityUUID][]string{}, names: map[types.IdentityUUID]string{}, last: map[types.IdentityUUID][]byte{}}
 	router := chi.NewRouter()
@@ -186,6 +192,15 @@ func TestFilesThroughTheSDK(t *testing.T) {
 	}
 	if original.Filename != "M\u00e4rz.csv" || original.ContentType != "application/octet-stream" || string(original.Body) != string(statement.Reader) {
 		t.Errorf("OriginalStatement = %+v (%q)", original, original.Body)
+	}
+	// An inline file of a media type the schema lists (D141): the SDK
+	// hands over the name and the type the server answered.
+	preview, err := client.StatementsNamespace.PreviewStatement(ctx, "1VgEh72lXvTXkH")
+	if err != nil {
+		t.Fatalf("PreviewStatement: %v", err)
+	}
+	if preview.Filename != "statement.html" || preview.ContentType != "text/html; charset=utf-8" || string(preview.Body) != "<pre>"+string(statement.Reader)+"</pre>" {
+		t.Errorf("PreviewStatement = %+v (%q)", preview, preview.Body)
 	}
 
 	// A file its field does not admit is the SDK's error at its field.

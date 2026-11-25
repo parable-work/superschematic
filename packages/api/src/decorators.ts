@@ -27,6 +27,17 @@ export type TimeoutConfig = {
   readonly seconds: number;
 };
 
+/**
+ * What `@idempotent` takes (D140). `ttl` is how long a key's answer is
+ * kept, a duration such as "24h", "90m" or "30s", "24h" when absent.
+ * `required: true` answers a call without an Idempotency-Key header 400;
+ * without it such a call runs as any other.
+ */
+export type IdempotentConfig = {
+  readonly ttl?: string;
+  readonly required?: boolean;
+};
+
 export type HmacVerifiedConfig = {
   readonly provider: string;
 };
@@ -318,6 +329,17 @@ export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & Meth
 
 /** Bounds a route's requests per minute; on a class, each route of the set's. */
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
+}
+
+/**
+ * Makes a repeated call answer what the first one answered (D140): a
+ * caller sends an Idempotency-Key header, and the server keeps the key
+ * with the answer, in the table the API's database declares with
+ * `export abstract class IdempotencyKey implements IdempotencyKeys {}`. On
+ * a POST, PUT, PATCH or DELETE operation that answers the JSON envelope.
+ */
+export function idempotent(_cfg?: IdempotentConfig): MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 

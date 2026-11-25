@@ -615,10 +615,11 @@ export class CartQueries {
 ```
 
 - The implementation returns the file. In TypeScript it is
-  `{ body, filename?, headers? }`: the body is text, sent as UTF-8, bytes,
-  a `Blob`, or a `ReadableStream`, sent as the implementation writes it.
-  In Go it is `*FileDownload{Body, Filename, Header}`, whose `Body` the
-  route copies as it reads it and closes when it can.
+  `{ body, filename?, contentType?, etag?, lastModified?, headers? }`:
+  the body is text, sent as UTF-8, bytes, a `Blob`, or a
+  `ReadableStream`, sent as the implementation writes it. In Go it is
+  `*FileDownload{Body, Filename, ContentType, ETag, LastModified, Header}`,
+  whose `Body` the route copies as it reads it and closes when it can.
 - The server sets `Content-Type` to C's `contentType`, and
   `Content-Disposition` to an attachment under the implementation's
   filename, or C's `filename` when it names none (RFC 6266):
@@ -627,11 +628,11 @@ export class CartQueries {
   such letter, and each of `"`, `\` and `%`, as `_`, and `filename*` the
   name itself; a directory or a control character in the name is dropped.
   The Go and TypeScript servers write the same header for every name
-  (`runtime/http/testdata/content_disposition_parity.json`). Its
-  `Cache-Control` is `no-store` unless the implementation sets one, and a
-  refusal is still a problem body.
-- The OpenAPI document describes the 200 as C's media type, a binary
-  string, with its `Content-Disposition` header.
+  (`runtime/http/testdata/content_disposition_parity.json`). A refusal is
+  still a problem body.
+- Every file answer says `X-Content-Type-Options: nosniff`.
+- The OpenAPI document describes the 200 as each of C's media types, a
+  binary string, with the headers the answer carries, and a `GET`'s 304.
 - The TypeScript SDK returns `{ blob, filename, contentType }`, and the
   Go and Python SDKs a `DownloadedFile`
   ([Client SDKs](/superschematic/guides/client-sdks/#files)). The Rust SDK
@@ -640,6 +641,67 @@ export class CartQueries {
 - A file is no tool result: the [tool documents](/superschematic/reference/mcp-tools/)
   list the operation hidden, and the build refuses a visible `@mcp` on it.
   A `FileDownload` result is never null, encrypted or `@paginated`.
+
+### A file a page shows
+
+C takes four more members, for a file a browser renders in place, an
+image or a document in a frame, in place of saving it:
+
+```ts
+@rest(HttpMethod.GET, "statements/{accountId}/preview")
+previewStatement(accountId: Identity.UUID): FileDownload<{
+  contentType: "text/plain; charset=utf-8";
+  contentTypes: ["text/html; charset=utf-8"];
+  filename: "statement.txt";
+  disposition: "inline";
+  cacheControl: "private, no-cache";
+  sandbox: ["allow-popups"];
+}> {
+  throw new Error("schema declaration only");
+}
+```
+
+| Member | What it does |
+| --- | --- |
+| `disposition` | `"attachment"`, the default, or `"inline"`: `Content-Disposition` starts with that word |
+| `contentTypes` | The media types the implementation may answer in place of `contentType`. It names one as the file's `contentType` (Go: `ContentType`), written as the schema writes it. One outside the list is a 500, logged, so a route never serves a type its schema does not state |
+| `cacheControl` | The answer's `Cache-Control`, sent as written. Without it the answer says `no-store`. A `Cache-Control` among the implementation's headers replaces either |
+| `sandbox` | `true` adds `Content-Security-Policy: sandbox` and `Cross-Origin-Resource-Policy: same-origin`. A list adds its tokens to the policy: `["allow-scripts"]` answers `sandbox allow-scripts`. Each token starts `allow-` |
+
+An inline file that a person uploaded runs in the API's origin when it is
+HTML or SVG. Give such a route `sandbox`, which makes the document's
+origin opaque, or list only media types that cannot hold a script.
+`nosniff`, the sandbox and the resource policy are the route's: a header
+of the same name among the implementation's does not replace them.
+
+The implementation may return validators beside the body, and the route
+then answers a request that already holds the file with 304:
+
+```ts
+async previewStatement(args: PreviewStatementArgs): Promise<FileDownload> {
+  const statement = await deps.statements.last(args.accountId);
+  return { body: statement.stream(), etag: statement.hash, lastModified: statement.importedAt };
+}
+```
+
+| Member | What the route does |
+| --- | --- |
+| `etag` (Go: `ETag`) | Sends `ETag`. An opaque value is quoted, `v3` as `"v3"`; a value written as a tag, `"v3"` or `W/"v3"`, is sent as written. A value with a space, a quote or a character outside printable ASCII is a 500 |
+| `lastModified` (Go: `LastModified`) | Sends `Last-Modified`, to the second |
+
+A `GET` whose `If-None-Match` names the tag is answered 304 with no body:
+the tags are compared without their `W/`, and `*` names any tag. A request
+with no `If-None-Match` whose `If-Modified-Since` is at or after the
+file's time is answered 304 too. `If-Modified-Since` is not read when the
+request sends `If-None-Match` (RFC 9110, 13.1). The 304 carries the
+validators and the `Cache-Control`, and the route cancels a stream body,
+or closes a Go `Body`, without sending it. The implementation still runs
+on every request: it is what knows the file's tag. A browser only
+revalidates a file it was allowed to keep, so pair validators with a
+`cacheControl` such as `private, no-cache`.
+
+The Go and TypeScript servers answer each case alike
+(`runtime/http/testdata/file_answer_parity.json`).
 
 ## Errors
 
@@ -739,7 +801,9 @@ runs before all of them. On an
 [encrypted operation](#encrypted-payloads), the server's `PayloadDecryptor`
 runs after the permission check and before the timeout. A request the rate
 limit, the body limit or the permission check refuses never reaches the
-decryptor, which in a deployment calls a key service. On such a route
+decryptor, which in a deployment calls a key service. An
+[`@idempotent`](#a-call-that-runs-once) route keeps its request's key
+after the permission check and around the timeout. On such a route
 `@bodyLimit` counts the envelope, not the decrypted payload.
 
 <Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
@@ -796,6 +860,152 @@ Go routers count per, such as an organization: it registers the key with
 to `RateLimitKeys` in `@superschematic/api` by declaration merging. Its
 routes count in the same store. The TypeScript and Rust routers refuse
 such a key; they read only the core's principal.
+
+### A client too old for the API
+
+An API whose config says `clientVersions: true` answers a request whose
+`X-Client-Version` names a client under its minimum with 426 and the
+problem `client_too_old`, before any other step of the route, the rate
+limit included. The minimums are the setting `MIN_CLIENT_VERSIONS`, and a
+generated SDK sends the header when its caller names its client
+([Client SDKs](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+
+### A call that runs once
+
+A client that retries a write after a timeout runs it twice. `@idempotent`
+makes a repeat answer what the first call answered, and run nothing
+(D140). It marks a `POST`, `PUT`, `PATCH` or `DELETE` whose answer is the
+JSON envelope:
+
+```ts
+import { HttpMethod, auth, idempotent, rest, timeout } from "@superschematic/api";
+
+export class OrderMutations {
+  @auth
+  @idempotent({ ttl: "1h" })
+  @timeout({ seconds: 30 })
+  @rest(HttpMethod.POST, "orders")
+  placeOrder(input: PlaceOrderInput): Order {
+    throw new Error("schema declaration only");
+  }
+
+  @auth
+  @idempotent({ required: true })
+  @rest(HttpMethod.DELETE, "orders/{number}")
+  cancelOrder(number: number): Order {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+A caller sends the header `Idempotency-Key`, a key it makes, 1 to 255
+printable ASCII characters; a UUID does. `ttl` is how long a key's answer
+is kept, a duration such as `90s`, `10m` or `24h`, a day when absent and
+90 days at most. Without the header the call runs each time, unless
+`required: true`, which answers 400 `idempotency_key_required`.
+
+The keys live in a table of the API's database, which that DB schema
+declares with one reserved class, as it declares its user model:
+
+```ts
+import { IdempotencyKeys } from "@superschematic/db";
+
+/** The keys of the @idempotent operations over this database. */
+export abstract class IdempotencyKey implements IdempotencyKeys {}
+```
+
+The class declares no fields. The loader adds its key and its columns,
+and the table is in `create.sql` and the migration plan as any other.
+`check` refuses an API with an `@idempotent` operation over a database
+that does not declare it, with the line to add. In the JSON and YAML
+forms the type has `idempotencyKeys: {}` and an operation
+`idempotent: { ttlSeconds?, required? }`.
+
+A row is one caller's key on one operation: it is named by the operation,
+the caller and the key, so one caller never reads another's answer, and
+the same key on two operations is two keys. The caller is the principal
+the route's permission check admitted, a
+[service caller](/superschematic/guides/auth-and-permissions/#service-callers)'s
+deployable when it forwards no end user, and no one on a public route,
+where every caller shares the keys. It holds a SHA-256 of the
+request, its method, its path with the query, and the bytes of its body.
+The route then answers:
+
+| The request | The answer |
+| --- | --- |
+| The first under its key | the operation runs. An answer under 500 is kept, a refusal the implementation returns included, such as a 404 or a 409. A 500 or more keeps nothing, so a retry runs again |
+| A repeat, once the first has answered | the kept status and body, with `Idempotent-Replay: true`. The operation does not run. The envelope's `requestId` is the first request's |
+| The key with another method, path, query or body | 422 `idempotency_key_reused` |
+| A repeat while the first is still running | 409 `idempotency_in_flight`, with `Retry-After` in seconds |
+| A key that is no key: empty, over 255 characters, or not printable ASCII | 400 `idempotency_key_invalid` |
+| No key, on an operation that requires one | 400 `idempotency_key_required` |
+
+The step runs after the rate limit, the body limit and the permission
+check, and around the timeout, so a request the route refuses for its
+caller keeps no key, and a 504 keeps none either.
+
+The row is not in the implementation's transaction, which the runtime
+does not own. A first request counts as running for the route's
+`@timeout`, 60 seconds on a route without one. A repeat after that takes
+the key over and runs the operation. A row is kept at least that long,
+whatever its `ttl`, so a `ttl` shorter than the time limit never lets a
+repeat run the operation beside a first request that may still be
+running. So a server that stops after the
+implementation commits and before the answer is kept leaves the row
+running, and a repeat past the time limit runs the operation again: a key
+makes a call run once but for that window. An implementation that must
+not run twice even then checks its own state under the same key.
+
+A route with no `@timeout` has no time limit at all: its implementation
+may run for minutes, while its key counts as running for 60 seconds
+only. A repeat after those 60 seconds takes the key over and runs the
+operation a second time beside the first. Give an `@idempotent`
+operation that may run longer than a minute a `@timeout` at least as
+long as it may run.
+
+A server deletes expired rows itself: after it keeps a new key, at most
+once a minute, it deletes up to 100 rows past their time. No job is
+needed.
+
+The generated router takes the store, and refuses to start without one
+when a route is `@idempotent`. A generated entrypoint builds it over the
+pool of the API's database:
+
+| Language | The store | The generated table's names |
+| --- | --- | --- |
+| Go | `Config.IdempotencyStore`, an `idempotency.Store`: `idempotency.NewSQLStore(db, idempotency.Postgres, api.IdempotencyTable)`, over a `*sql.DB`; `idempotency.SQLite` for SQLite | `IdempotencyTable` in the API package |
+| TypeScript | `RouterOptions.idempotencyStore`, an `IdempotencyStore`: `postgresIdempotencyStore(pool, idempotencyTable)`, `sqliteIdempotencyStore(db, idempotencyTable)` for SQLite and D1, or `memoryIdempotencyStore()` in a test | `idempotencyTable` in the API package |
+| Rust | none yet: the build refuses to generate a Rust router for an API with an `@idempotent` operation | |
+
+The Go and TypeScript routers name a row and hash a request alike, and
+answer each case of the table above alike
+(`runtime/http/testdata/idempotency_parity.json`), so a Go server and a
+TypeScript server over one database share their keys.
+
+What the decorator is refused on, at `check`, each for the reason a
+repeat could not be answered as the first call was:
+
+- a `GET`, which a caller repeats freely;
+- a `FileDownload` or stream result, whose answer is not the envelope;
+- a `@manualRouteRegistration` operation, whose handler answers as it
+  likes: keep its keys in the handler;
+- an [encrypted operation](#encrypted-payloads), whose body each call
+  seals anew, so a repeat never sends the same request;
+- an operation that [uploads files](#uploads): a multipart body is
+  written with a new boundary each time. Upload the file to a
+  [bucket](/superschematic/guides/buckets/) through a signed URL and send
+  its name to an `@idempotent` operation.
+
+The OpenAPI document declares the header on each such operation,
+required where the operation requires it, the 409 and the 422, and the
+`Idempotent-Replay` header of each success it declares, whatever its
+status. A generated SDK's method sends a
+key for each call
+([Client SDKs](/superschematic/guides/client-sdks/#an-idempotency-key)).
+On the TypeScript server's MCP endpoint a tool call has no headers, so the
+tool of an `@idempotent` operation takes the key as an argument,
+`idempotencyKey`, which the endpoint sends to the route as the header
+([MCP tools](/superschematic/reference/mcp-tools/#a-key-for-a-call-that-runs-once)).
 
 ## Webhooks
 

@@ -1,0 +1,319 @@
+{
+  "description": "What a FileDownload result answers past its filename (D141). `etags`: the ETag header of the tag an implementation names, a quoted tag as written and any other value in quotes, or `refused` for a value no header can carry. `dates`: the seconds since the epoch an HTTP date names, in the fixed format and the two obsolete ones, or null for a value that is no HTTP date. `matches`: whether an If-None-Match header names an entity tag, by the weak comparison. `answers`: a route's answer for a schema's `download`, the `file` the implementation returns (`lastModified` is RFC 3339) and a request's `method` and `headers`: its `status` and each header of `headers`, null for one the answer does not carry. The TypeScript runtime's downloadResponse, entityTag, parseHttpDate and ifNoneMatchNames and the Go runtime's response.ServeFile, EntityTag, ParseHTTPDate and IfNoneMatchNames answer each vector alike.",
+  "etags": [
+    { "name": "an opaque value is quoted", "tag": "v3", "header": "\"v3\"" },
+    { "name": "a strong tag is sent as written", "tag": "\"v3\"", "header": "\"v3\"" },
+    { "name": "a weak tag is sent as written", "tag": "W/\"v3\"", "header": "W/\"v3\"" },
+    { "name": "a hash", "tag": "sha256:9f86d081884c7d65", "header": "\"sha256:9f86d081884c7d65\"" },
+    { "name": "an empty quoted tag", "tag": "\"\"", "header": "\"\"" },
+    { "name": "a W/ with no quotes is opaque", "tag": "W/v3", "header": "\"W/v3\"" },
+    { "name": "a comma", "tag": "a,b", "header": "\"a,b\"" },
+    { "name": "a space", "tag": "v 3", "refused": true },
+    { "name": "a quote inside", "tag": "v\"3", "refused": true },
+    { "name": "an unclosed quote", "tag": "\"v3", "refused": true },
+    { "name": "a letter outside ASCII", "tag": "vé", "refused": true },
+    { "name": "a control character", "tag": "v\n3", "refused": true }
+  ],
+  "dates": [
+    { "name": "the fixed format", "value": "Sun, 06 Nov 1994 08:49:37 GMT", "seconds": 784111777 },
+    { "name": "RFC 850", "value": "Sunday, 06-Nov-94 08:49:37 GMT", "seconds": 784111777 },
+    { "name": "asctime", "value": "Sun Nov  6 08:49:37 1994", "seconds": 784111777 },
+    { "name": "asctime with a two-digit day", "value": "Wed Nov 16 08:49:37 1994", "seconds": 784975777 },
+    { "name": "the epoch", "value": "Thu, 01 Jan 1970 00:00:00 GMT", "seconds": 0 },
+    { "name": "an RFC 850 year under 69 is 20xx", "value": "Sunday, 01-Mar-26 00:00:00 GMT", "seconds": 1772323200 },
+    { "name": "the day of the week is not checked", "value": "Mon, 06 Nov 1994 08:49:37 GMT", "seconds": 784111777 },
+    { "name": "a leap day", "value": "Thu, 29 Feb 2024 12:00:00 GMT", "seconds": 1709208000 },
+    { "name": "a day the month does not hold", "value": "Sat, 30 Feb 2024 12:00:00 GMT", "seconds": null },
+    { "name": "day zero", "value": "Sat, 00 Feb 2024 12:00:00 GMT", "seconds": null },
+    { "name": "hour 24", "value": "Sun, 06 Nov 1994 24:00:00 GMT", "seconds": null },
+    { "name": "second 60", "value": "Sun, 06 Nov 1994 08:49:60 GMT", "seconds": null },
+    { "name": "another zone", "value": "Sun, 06 Nov 1994 08:49:37 UTC", "seconds": null },
+    { "name": "an offset", "value": "Sun, 06 Nov 1994 08:49:37 +0000", "seconds": null },
+    { "name": "lowercase names", "value": "sun, 06 nov 1994 08:49:37 GMT", "seconds": null },
+    { "name": "a one-digit day", "value": "Sun, 6 Nov 1994 08:49:37 GMT", "seconds": null },
+    { "name": "RFC 3339", "value": "1994-11-06T08:49:37Z", "seconds": null },
+    { "name": "trailing space", "value": "Sun, 06 Nov 1994 08:49:37 GMT ", "seconds": null },
+    { "name": "empty", "value": "", "seconds": null }
+  ],
+  "matches": [
+    { "name": "the same strong tag", "header": "\"v3\"", "etag": "\"v3\"", "names": true },
+    { "name": "another tag", "header": "\"v2\"", "etag": "\"v3\"", "names": false },
+    { "name": "a weak header and a strong tag", "header": "W/\"v3\"", "etag": "\"v3\"", "names": true },
+    { "name": "a strong header and a weak tag", "header": "\"v3\"", "etag": "W/\"v3\"", "names": true },
+    { "name": "any", "header": "*", "etag": "\"v3\"", "names": true },
+    { "name": "any, with space", "header": " * ", "etag": "\"v3\"", "names": true },
+    { "name": "a list that holds it", "header": "\"v1\", W/\"v2\",\"v3\"", "etag": "\"v3\"", "names": true },
+    { "name": "a list that does not", "header": "\"v1\", \"v2\"", "etag": "\"v3\"", "names": false },
+    { "name": "empty elements", "header": "\"v1\",, ,\"v3\"", "etag": "\"v3\"", "names": true },
+    { "name": "a comma inside a tag", "header": "\"a,b\"", "etag": "\"a\"", "names": false },
+    { "name": "a tag with a comma", "header": "\"x\", \"a,b\"", "etag": "\"a,b\"", "names": true },
+    { "name": "an unquoted value", "header": "v3", "etag": "\"v3\"", "names": false },
+    { "name": "an unclosed tag", "header": "\"v3", "etag": "\"v3\"", "names": false },
+    { "name": "a list that stops parsing before the tag", "header": "\"v1\" \"v3\"", "etag": "\"v3\"", "names": false },
+    { "name": "a tag before the list stops parsing", "header": "\"v3\" junk", "etag": "\"v3\"", "names": true },
+    { "name": "a star in a list is no tag", "header": "\"v1\", *", "etag": "\"v3\"", "names": false },
+    { "name": "empty", "header": "", "etag": "\"v3\"", "names": false },
+    { "name": "case matters", "header": "\"V3\"", "etag": "\"v3\"", "names": false }
+  ],
+  "answers": [
+    {
+      "name": "an attachment with no option",
+      "download": { "contentType": "text/csv; charset=utf-8", "filename": "statement.csv" },
+      "file": {},
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": "attachment; filename=\"statement.csv\"; filename*=UTF-8''statement.csv",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": null,
+        "cross-origin-resource-policy": null,
+        "etag": null,
+        "last-modified": null
+      }
+    },
+    {
+      "name": "inline, with the implementation's name",
+      "download": { "contentType": "image/png", "disposition": "inline" },
+      "file": { "filename": "März.png" },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": {
+        "content-type": "image/png",
+        "content-disposition": "inline; filename=\"M_rz.png\"; filename*=UTF-8''M%C3%A4rz.png",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "name": "inline with no name",
+      "download": { "contentType": "image/png", "disposition": "inline" },
+      "file": {},
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "content-disposition": "inline" }
+    },
+    {
+      "name": "attachment written out",
+      "download": { "contentType": "image/png", "disposition": "attachment" },
+      "file": {},
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "content-disposition": "attachment" }
+    },
+    {
+      "name": "a media type the schema lists",
+      "download": { "contentType": "image/png", "contentTypes": ["image/jpeg", "image/webp"] },
+      "file": { "contentType": "image/jpeg" },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "content-type": "image/jpeg" }
+    },
+    {
+      "name": "the schema's own media type named",
+      "download": { "contentType": "image/png", "contentTypes": ["image/jpeg"] },
+      "file": { "contentType": "image/png" },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "content-type": "image/png" }
+    },
+    {
+      "name": "a media type the schema does not list",
+      "download": { "contentType": "image/png", "contentTypes": ["image/jpeg"] },
+      "file": { "contentType": "text/html" },
+      "method": "GET",
+      "request": {},
+      "status": 500,
+      "headers": { "content-type": "application/problem+json", "content-disposition": null }
+    },
+    {
+      "name": "a media type that differs by a parameter is not listed",
+      "download": { "contentType": "text/csv; charset=utf-8" },
+      "file": { "contentType": "text/csv" },
+      "method": "GET",
+      "request": {},
+      "status": 500,
+      "headers": { "content-type": "application/problem+json" }
+    },
+    {
+      "name": "the schema's Cache-Control",
+      "download": { "contentType": "image/png", "cacheControl": "private, max-age=60" },
+      "file": {},
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "cache-control": "private, max-age=60" }
+    },
+    {
+      "name": "the implementation's Cache-Control replaces the schema's",
+      "download": { "contentType": "image/png", "cacheControl": "private, max-age=60" },
+      "file": { "headers": { "Cache-Control": "public, max-age=31536000, immutable", "Vary": "Cookie" } },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "cache-control": "public, max-age=31536000, immutable", "vary": "Cookie" }
+    },
+    {
+      "name": "the implementation's headers do not replace the route's",
+      "download": { "contentType": "image/png", "sandbox": true },
+      "file": {
+        "headers": {
+          "Content-Type": "text/html",
+          "Content-Disposition": "inline",
+          "X-Content-Type-Options": "sniff",
+          "Content-Security-Policy": "default-src *",
+          "Cross-Origin-Resource-Policy": "cross-origin"
+        }
+      },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": {
+        "content-type": "image/png",
+        "content-disposition": "attachment",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "sandbox",
+        "cross-origin-resource-policy": "same-origin"
+      }
+    },
+    {
+      "name": "a sandbox with tokens",
+      "download": { "contentType": "text/html; charset=utf-8", "disposition": "inline", "sandbox": ["allow-scripts", "allow-popups"] },
+      "file": {},
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": {
+        "content-security-policy": "sandbox allow-scripts allow-popups",
+        "cross-origin-resource-policy": "same-origin",
+        "content-disposition": "inline"
+      }
+    },
+    {
+      "name": "validators are sent",
+      "download": { "contentType": "image/png", "cacheControl": "private, no-cache" },
+      "file": { "etag": "v3", "lastModified": "2026-03-01T00:00:00.900Z" },
+      "method": "GET",
+      "request": {},
+      "status": 200,
+      "headers": { "etag": "\"v3\"", "last-modified": "Sun, 01 Mar 2026 00:00:00 GMT", "content-type": "image/png" }
+    },
+    {
+      "name": "a matching If-None-Match is 304",
+      "download": { "contentType": "image/png", "cacheControl": "private, no-cache", "sandbox": true },
+      "file": { "etag": "v3", "lastModified": "2026-03-01T00:00:00Z", "headers": { "Vary": "Cookie" } },
+      "method": "GET",
+      "request": { "If-None-Match": "W/\"v3\"" },
+      "status": 304,
+      "body": "",
+      "headers": {
+        "etag": "\"v3\"",
+        "last-modified": "Sun, 01 Mar 2026 00:00:00 GMT",
+        "cache-control": "private, no-cache",
+        "vary": "Cookie",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "sandbox",
+        "content-type": null,
+        "content-disposition": null
+      }
+    },
+    {
+      "name": "another tag is 200",
+      "download": { "contentType": "image/png" },
+      "file": { "etag": "v3" },
+      "method": "GET",
+      "request": { "If-None-Match": "\"v2\"" },
+      "status": 200,
+      "headers": { "etag": "\"v3\"" }
+    },
+    {
+      "name": "If-None-Match that does not match hides If-Modified-Since",
+      "download": { "contentType": "image/png" },
+      "file": { "etag": "v3", "lastModified": "2026-03-01T00:00:00Z" },
+      "method": "GET",
+      "request": { "If-None-Match": "\"v2\"", "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT" },
+      "status": 200,
+      "headers": {}
+    },
+    {
+      "name": "If-None-Match on a file with no tag hides If-Modified-Since",
+      "download": { "contentType": "image/png" },
+      "file": { "lastModified": "2026-03-01T00:00:00Z" },
+      "method": "GET",
+      "request": { "If-None-Match": "*", "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT" },
+      "status": 200,
+      "headers": {}
+    },
+    {
+      "name": "If-Modified-Since at the file's time is 304",
+      "download": { "contentType": "image/png" },
+      "file": { "lastModified": "2026-03-01T00:00:00.900Z" },
+      "method": "GET",
+      "request": { "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT" },
+      "status": 304,
+      "body": "",
+      "headers": { "last-modified": "Sun, 01 Mar 2026 00:00:00 GMT", "content-type": null }
+    },
+    {
+      "name": "If-Modified-Since after the file's time is 304",
+      "download": { "contentType": "image/png" },
+      "file": { "lastModified": "2026-03-01T00:00:00Z" },
+      "method": "GET",
+      "request": { "If-Modified-Since": "Mon, 02 Mar 2026 00:00:00 GMT" },
+      "status": 304,
+      "body": "",
+      "headers": {}
+    },
+    {
+      "name": "If-Modified-Since before the file's time is 200",
+      "download": { "contentType": "image/png" },
+      "file": { "lastModified": "2026-03-01T00:00:01Z" },
+      "method": "GET",
+      "request": { "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT" },
+      "status": 200,
+      "headers": {}
+    },
+    {
+      "name": "If-Modified-Since that is no date is 200",
+      "download": { "contentType": "image/png" },
+      "file": { "lastModified": "2026-03-01T00:00:00Z" },
+      "method": "GET",
+      "request": { "If-Modified-Since": "2026-03-02T00:00:00Z" },
+      "status": 200,
+      "headers": {}
+    },
+    {
+      "name": "If-Modified-Since on a file with a tag alone is 200",
+      "download": { "contentType": "image/png" },
+      "file": { "etag": "v3" },
+      "method": "GET",
+      "request": { "If-Modified-Since": "Mon, 02 Mar 2026 00:00:00 GMT" },
+      "status": 200,
+      "headers": {}
+    },
+    {
+      "name": "a POST is never conditional",
+      "download": { "contentType": "image/png" },
+      "file": { "etag": "v3" },
+      "method": "POST",
+      "request": { "If-None-Match": "\"v3\"" },
+      "status": 200,
+      "headers": { "etag": "\"v3\"" }
+    },
+    {
+      "name": "an entity tag no header can carry",
+      "download": { "contentType": "image/png" },
+      "file": { "etag": "v 3" },
+      "method": "GET",
+      "request": {},
+      "status": 500,
+      "headers": { "content-type": "application/problem+json", "etag": null }
+    }
+  ]
+}

@@ -54,6 +54,51 @@ impl ServiceCredential {
     }
 }
 
+/// The application an SDK runs in, as it names itself to the API (D143):
+/// a command-line client, a desktop app. `name` is letters, digits, `.`,
+/// `_` and `-`, starting with a letter or a digit, 64 characters at most.
+/// `version` is the application's own version, a semantic version such as
+/// `0.5.0` for the API to compare it; any other version is sent and never
+/// refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientIdentity {
+    pub name: String,
+    pub version: String,
+}
+
+impl ClientIdentity {
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: version.into(),
+        }
+    }
+
+    /// The `X-Client-Version` header of the client, `<name>/<version>`. A
+    /// name or a version the header cannot carry is a config error, so a
+    /// typo is found where the SDK is built.
+    fn header(&self) -> Result<HeaderValue, SDKError> {
+        let starts = |text: &str| text.bytes().next().is_some_and(|byte| byte.is_ascii_alphanumeric());
+        let holds = |text: &str, others: &[u8]| {
+            text.bytes().all(|byte| byte.is_ascii_alphanumeric() || others.contains(&byte))
+        };
+        if !starts(&self.name) || self.name.len() > 64 || !holds(&self.name, b"._-") {
+            return Err(SDKError::config(format!(
+                "client.name {:?} must start with a letter or a digit and hold letters, digits, '.', '_' and '-', 64 characters at most",
+                self.name
+            )));
+        }
+        if !starts(&self.version) || self.version.len() > 128 || !holds(&self.version, b".+_-") {
+            return Err(SDKError::config(format!(
+                "client.version {:?} must start with a letter or a digit and hold letters, digits, '.', '+', '_' and '-', 128 characters at most",
+                self.version
+            )));
+        }
+        HeaderValue::from_str(&format!("{}/{}", self.name, self.version))
+            .map_err(|err| SDKError::config(format!("invalid client: {err}")))
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ClientConfig {
     pub base_url: String,
@@ -63,6 +108,12 @@ pub struct ClientConfig {
     pub refresh_auth_token: Option<RefreshTokenCallback>,
     pub auth_header: Option<String>,
     pub service_credential: Option<ServiceCredential>,
+    /// The client this SDK runs in (D143): every call then sends
+    /// `X-Client-Version: <name>/<version>`, and an API that lists the
+    /// client answers a version under its minimum with an error whose
+    /// [`SDKError::client_too_old`] holds the minimum. `None` sends no such
+    /// header.
+    pub client: Option<ClientIdentity>,
     /// Optional config-level interceptor applied to every outgoing request
     /// after the auth header is attached. Use for header injection that is
     /// constant for the lifetime of the SDK (eg. service identity, scope
@@ -100,6 +151,8 @@ pub struct HttpClient {
     service: Option<Arc<ServiceState>>,
     request_interceptor: Option<RequestInterceptor>,
     transport: Option<Transport>,
+    /// The `X-Client-Version` every call sends (D143).
+    client_version: Option<HeaderValue>,
 }
 
 struct AuthState {
@@ -192,6 +245,7 @@ impl HttpClient {
             }
             None => None,
         };
+        let client_version = config.client.as_ref().map(ClientIdentity::header).transpose()?;
 
         Ok(Self {
             client,
@@ -205,6 +259,7 @@ impl HttpClient {
             service,
             request_interceptor: config.request_interceptor,
             transport: config.transport,
+            client_version,
         })
     }
 
@@ -427,6 +482,9 @@ impl HttpClient {
         let mut request = self.client.request(parsed_method, url);
         if !query.is_empty() {
             request = request.query(query);
+        }
+        if let Some(client_version) = &self.client_version {
+            request = request.header("x-client-version", client_version.clone());
         }
 
         // A forwarded end user replaces the configured auth: its token, or no

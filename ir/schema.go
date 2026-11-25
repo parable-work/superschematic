@@ -116,6 +116,12 @@ type Schema struct {
 	// replica's own in-process budget.
 	RateLimitStore *ServiceRef `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
 
+	// ClientVersions is an API config's clientVersions (D143): its server
+	// reads the optional setting MinClientVersionsSetting and turns away a
+	// request whose X-Client-Version names a listed client at a lower
+	// version.
+	ClientVersions bool `json:"clientVersions,omitempty" yaml:"clientVersions,omitempty"`
+
 	// MemoryStoreDeclarations are a MemoryStore schema's channels and keys,
 	// each an @channel or @key class, sorted by name, with the core's
 	// reserved rate-limit declaration among them (D75). Such a class is no

@@ -10,6 +10,7 @@ import {
   type ListOptions,
   type ListPage,
   type PutOptions,
+  type PutResult,
   type SignedUrlOptions,
 } from './bucket.js';
 import type { BucketConnection, R2Credential } from './stackconfig.js';
@@ -56,7 +57,8 @@ export type R2PutValue = ReadableStream | ArrayBuffer | ArrayBufferView | string
 
 /** The part of an r2_bucket binding (R2Bucket) the Bucket calls. */
 export interface R2BucketBinding {
-  put(key: string, value: R2PutValue, options?: { httpMetadata?: { contentType?: string } }): Promise<R2ObjectLike | null>;
+  /** Resolves null when onlyIf's precondition fails, having written nothing. */
+  put(key: string, value: R2PutValue, options?: { httpMetadata?: { contentType?: string }; onlyIf?: Headers }): Promise<R2ObjectLike | null>;
   get(key: string): Promise<R2ObjectBodyLike | null>;
   head(key: string): Promise<R2ObjectLike | null>;
   delete(keys: string | string[]): Promise<void>;
@@ -107,14 +109,36 @@ class R2Bucket implements Bucket {
     private readonly now: () => Date
   ) {}
 
-  async put(name: string, body: BucketBody, options: PutOptions = {}): Promise<BucketObject> {
+  async put(name: string, body: BucketBody, options: PutOptions = {}): Promise<PutResult> {
     checkObjectName(name);
     // R2 takes a stream only when it knows its length, so a stream is read
     // whole first.
     const value = body instanceof ReadableStream ? await new Response(body).arrayBuffer() : body;
-    const stored = await this.binding.put(name, value, options.contentType ? { httpMetadata: { contentType: options.contentType } } : undefined);
-    if (stored === null) throw new Error(`bucket ${this.name}: R2 stored no object ${JSON.stringify(name)}`);
-    return objectOf(stored, options.contentType);
+    const stored = await this.binding.put(
+      name,
+      value,
+      options.contentType || options.ifAbsent
+        ? {
+            ...(options.contentType ? { httpMetadata: { contentType: options.contentType } } : {}),
+            // R2's conditional write: If-None-Match: * holds only when no
+            // object has the key, and put then resolves null (D142).
+            ...(options.ifAbsent ? { onlyIf: new Headers({ 'If-None-Match': '*' }) } : {}),
+          }
+        : undefined
+    );
+    if (stored !== null) return { ...objectOf(stored, options.contentType), created: true };
+    if (!options.ifAbsent) throw new Error(`bucket ${this.name}: R2 stored no object ${JSON.stringify(name)}`);
+    const held = await this.binding.head(name);
+    if (held === null) {
+      throw new Error(`bucket ${this.name}: object ${JSON.stringify(name)} was there when put looked and gone when it read it; put it again`);
+    }
+    return { ...objectOf(held), created: false };
+  }
+
+  async head(name: string): Promise<BucketObject | undefined> {
+    checkObjectName(name);
+    const object = await this.binding.head(name);
+    return object === null ? undefined : objectOf(object);
   }
 
   async get(name: string): Promise<BucketRead> {

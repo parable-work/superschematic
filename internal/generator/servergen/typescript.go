@@ -540,6 +540,18 @@ type TypeScriptAPI struct {
 	MemoryStores   []TypeScriptMemoryStoreUse
 	RateLimitStore *TypeScriptMemoryStore
 
+	// MinClientVersions is the expression of its config that holds the
+	// oldest version of each client it serves, which its router options
+	// carry (D143); empty for an API whose config does not say
+	// clientVersions.
+	MinClientVersions string
+
+	// IdempotencyStore is the expression that builds the store of its
+	// @idempotent operations' keys over its database, on the table the API
+	// package names, which its router options carry (D140); empty for an
+	// API with none.
+	IdempotencyStore string
+
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
 	Secrets []string
@@ -570,6 +582,11 @@ type TypeScriptCall struct {
 type TypeScriptBucketUse struct {
 	Field  string
 	Bucket *TypeScriptBucket
+
+	// ContentAddressed is true for a bucket Deps holds as a content
+	// bucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // TypeScriptBucket is a bucket main.ts opens once, for every API that
@@ -741,7 +758,7 @@ var tsReserved = []string{
 	"connectPostgres", "ping", "Pool", "Database", "Service", "DEFAULT_PORT", "SHUTDOWN_TIMEOUT_MS",
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
-	"server", "stopping", "shutdown", "port", "process", "openBucket",
+	"server", "stopping", "shutdown", "port", "process", "openBucket", "contentBucket",
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
@@ -951,6 +968,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
+		if a.Config != nil && a.Config.ClientVersions && api.Config != "" && !background {
+			// A job or a worker serves no request, so it turns no client
+			// away (D143).
+			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
+		}
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
 			// ask with the secret the API's config holds (D93).
@@ -996,6 +1018,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 			api.Database = d
+			if o.IdempotencyTable != nil && !background {
+				// A job or a worker serves no request, so it keeps no key.
+				store := "postgresIdempotencyStore"
+				if d.SQLite {
+					store = "sqliteIdempotencyStore"
+				}
+				api.IdempotencyStore = fmt.Sprintf("%s(%s, %s.idempotencyTable)", store, d.Var, api.Module)
+			}
 			if o.DepsORM() && !d.SQLite {
 				api.ORM = true
 				// orm.ts of a database whose fields are behaviors imports
@@ -1107,7 +1137,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			h := memoryStores[m.Service]
@@ -1236,6 +1266,14 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its MCP endpoint signs confirmations with the secret (D93).
 		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
 	}
+	if a.MinClientVersions != "" {
+		// Its routes turn away a client under its minimum (D143).
+		out = append(out, "minClientVersions: "+a.MinClientVersions)
+	}
+	if a.IdempotencyStore != "" {
+		// Its @idempotent routes keep their keys in its database (D140).
+		out = append(out, "idempotencyStore: "+a.IdempotencyStore)
+	}
 	if a.Behaviors {
 		// Its behavior operations (D103) and its table operations (D106)
 		// run through the repositories Deps holds.
@@ -1307,6 +1345,18 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.RateLimitStore != nil }) {
 		out = append(out, "memoryStoreRateLimitStore")
+	}
+	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool {
+		return slices.ContainsFunc(a.Buckets, func(b TypeScriptBucketUse) bool { return b.ContentAddressed })
+	}) {
+		// Deps holds a content bucket over the bucket main.ts opens (D142).
+		out = append(out, "contentBucket")
+	}
+	for _, store := range []string{"postgresIdempotencyStore", "sqliteIdempotencyStore"} {
+		// The store of an API's idempotency keys, over its database (D140).
+		if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return strings.HasPrefix(a.IdempotencyStore, store+"(") }) {
+			out = append(out, store)
+		}
 	}
 	return out
 }

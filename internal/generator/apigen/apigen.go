@@ -267,6 +267,11 @@ type EndpointInfo struct {
 	BodyLimit    *int
 	Timeout      *int
 
+	// Idempotent is the operation's @idempotent (D140), nil for every
+	// other: the route keeps a key a request sends and answers a repeat
+	// what the first request was.
+	Idempotent *ir.IdempotentConfig
+
 	Encrypted bool
 
 	// Filter is the operation's FilterBy (D106), nil for every other
@@ -467,6 +472,12 @@ type APIOutput struct {
 	// principal @rateLimit (D131): Config then takes a
 	// PrincipalRateLimitStore, and Validate refuses a nil one.
 	HasPrincipalRateLimit bool
+	// IdempotencyTable names the table of the API's database that keeps
+	// the keys of its @idempotent operations (Options.IdempotencyTable,
+	// D140), nil for an API with none: Config then takes an
+	// IdempotencyStore, and the package exports the names for the
+	// entrypoint's store.
+	IdempotencyTable *ir.IdempotencyTable `json:"-"`
 	// PrincipalRateLimitImports are the imports the routes' principal
 	// readers need, beyond the runtime's: those of the extension keys the
 	// routes use, sorted by path.
@@ -854,6 +865,12 @@ type Options struct {
 	// RateLimitKeys supplies them.
 	RateLimitKeys []RateLimitKey
 
+	// IdempotencyTable names the table of the API's database that keeps
+	// idempotency keys (D140), which the build reads from the DB schema's
+	// class that implements IdempotencyKeys. An API with an @idempotent
+	// operation needs it.
+	IdempotencyTable *ir.IdempotencyTable
+
 	// Engine is the API's engine database (D58), nil when its database
 	// holds no engine type. The generator package reads it from the
 	// database's IR and config.
@@ -917,6 +934,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		Provider:            opts.Provider,
 		ToolInvocation:      opts.ToolInvocation,
 		RateLimitKeys:       opts.RateLimitKeys,
+		IdempotencyTable:    opts.IdempotencyTable,
 		Endpoints:           []EndpointInfo{},
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
@@ -1085,6 +1103,9 @@ func (o *APIOutput) summarizeEndpoints() error {
 	if err := o.summarizeRateLimits(); err != nil {
 		return err
 	}
+	if err := o.checkIdempotency(); err != nil {
+		return err
+	}
 	for _, endpoint := range o.Endpoints {
 		o.summarizeRoute(endpoint)
 		if endpoint.HasFileUpload {
@@ -1143,7 +1164,7 @@ func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
 	if endpoint.RequiresAuth {
 		o.HasAuth = true
 	}
-	if endpoint.RateLimit != nil || endpoint.Timeout != nil {
+	if endpoint.RateLimit != nil || endpoint.Timeout != nil || endpoint.Idempotent != nil {
 		o.RoutesNeedTime = true
 	}
 	if len(endpoint.RequiredPerms) > 0 {
@@ -1382,6 +1403,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		RateLimitKey:                 rateLimitKey,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
+		Idempotent:                   op.Idempotent,
 		Encrypted:                    operationEncrypted(set, op),
 		Filter:                       filter,
 		Page:                         pageInfo(set, op),

@@ -40,7 +40,7 @@
 {{ if .DepsPool }}
 import type { Pool } from 'pg';
 {{- end }}
-import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger{{ if .Deps.MemoryStores }}, MemoryStore{{ end }} } from '{{ .RuntimePackage }}';
+import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.PlainBuckets }}Bucket, {{ end }}{{ if .Deps.ContentBuckets }}ContentBucket, {{ end }}Logger{{ if .Deps.MemoryStores }}, MemoryStore{{ end }} } from '{{ .RuntimePackage }}';
 {{- if .DepsSQLite }}
 import type { SqlDatabase } from '{{ .RuntimePackage }}/d1';
 {{- end }}
@@ -104,8 +104,13 @@ export interface Deps {
   readonly {{ .Field }}: {{ .Client }};
 {{- end }}
 {{- range .Deps.Buckets }}
+{{- if .ContentAddressed }}
+  /** {{ .Service }}, a bucket the API lists that names each object by its content (D142): put writes a body of at most {{ .MaxBytes }} bytes under the SHA-256 of its bytes if no object has that name, and has, missing, get and signedUrl read by hash. raw is the plain bucket. */
+  readonly {{ .Field }}: ContentBucket;
+{{- else }}
   /** {{ .Service }}, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly {{ .Field }}: Bucket;
+{{- end }}
 {{- end }}
 {{- range .Deps.MemoryStores }}
   /**

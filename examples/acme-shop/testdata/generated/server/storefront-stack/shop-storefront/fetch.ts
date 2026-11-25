@@ -34,7 +34,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { createLogger } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { perIsolate, requestIP } from '@superschematic/http-runtime/workers';
+import { perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import * as shopStorefrontApi from '@acme/shop-storefront-api';
 import * as shopStorefrontImpl from '@acme/shop-storefront-implementation';
@@ -53,8 +53,16 @@ interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+// Each API's config as Cloudflare loads the version, from the string
+// bindings: a refused config throws here, and Cloudflare refuses the version.
+configure('shop-storefront', () => shopStorefrontApi.loadEnvConfig(stackEnvOf(env)));
+
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
+  // The string bindings.
+  const values = stackEnvOf(env);
+  const shopStorefrontConfig = configure('shop-storefront', () => shopStorefrontApi.loadEnvConfig(values));
+
   const app = new Hono();
   app.use(telemetry.middleware());
   app.get('/healthz', c => c.json({ status: 'ok' }));
@@ -62,11 +70,12 @@ async function build(): Promise<Handle> {
 
   // shop-storefront: its implementation, built from its Deps, and its routes.
   const shopStorefrontDeps: shopStorefrontApi.Deps = {
+    config: shopStorefrontConfig,
     logger: logger.child({ api: 'shop-storefront' }),
   };
   const shopStorefrontImplementations = await construct('shop-storefront', 'implementation', () => shopStorefrontImpl.create(shopStorefrontDeps));
   const shopStorefrontAuthenticate = await construct('shop-storefront', 'authenticator', () => shopStorefrontImpl.authenticate(shopStorefrontDeps));
-  app.route('/', shopStorefrontApi.buildRouter(shopStorefrontImplementations, { authenticate: shopStorefrontAuthenticate }));
+  app.route('/', shopStorefrontApi.buildRouter(shopStorefrontImplementations, { authenticate: shopStorefrontAuthenticate, minClientVersions: shopStorefrontConfig.MIN_CLIENT_VERSIONS }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 

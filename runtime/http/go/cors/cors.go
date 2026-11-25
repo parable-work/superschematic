@@ -21,9 +21,16 @@ import (
 
 // AllowedHeaders are the request headers a site's browser may send an
 // API: what the generated SDKs send, the end user's token in
-// Authorization among them. A service credential never travels from a
-// browser, so Service-Authorization is not one.
-var AllowedHeaders = []string{"Accept", "Authorization", "Content-Type"}
+// Authorization among them, the key of an @idempotent operation (D140)
+// and the client's name and version (D143). A service credential never
+// travels from a browser, so Service-Authorization is not one.
+var AllowedHeaders = []string{"Accept", "Authorization", "Content-Type", "Idempotency-Key", "X-Client-Version"}
+
+// ExposedHeaders are the answer headers a site's script may read beyond
+// those a browser always shows it: Idempotent-Replay, which says an
+// @idempotent operation's answer is the kept one, and Retry-After, which
+// the 409 of a call still running and a 429 carry (D140).
+var ExposedHeaders = []string{"Idempotent-Replay", "Retry-After"}
 
 // MaxAge is how long, in seconds, a browser may keep a preflight's answer.
 const MaxAge = 600
@@ -78,7 +85,8 @@ func IsPreflight(method string, header http.Header) bool {
 // no header. One with an Origin p lists gets Access-Control-Allow-Origin
 // with that origin and Access-Control-Allow-Credentials; its preflight is
 // the server's to answer, and gets the methods, the headers and the max
-// age too. One with an Origin p does not list gets Vary alone and is not
+// age too, and any other request of it gets Access-Control-Expose-Headers.
+// One with an Origin p does not list gets Vary alone and is not
 // the server's to answer, a preflight included: the API answers it, and
 // unless a CORS check of its own allows the origin, the browser refuses
 // the answer.
@@ -102,6 +110,8 @@ func (p Policy) Decide(method string, header http.Header) Decision {
 		d.Headers["Access-Control-Allow-Methods"] = strings.Join(p.Methods, ", ")
 		d.Headers["Access-Control-Allow-Headers"] = strings.Join(AllowedHeaders, ", ")
 		d.Headers["Access-Control-Max-Age"] = strconv.Itoa(MaxAge)
+	} else {
+		d.Headers["Access-Control-Expose-Headers"] = strings.Join(ExposedHeaders, ", ")
 	}
 	return d
 }

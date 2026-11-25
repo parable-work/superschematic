@@ -671,7 +671,7 @@ func (r run) generateTypeScriptAPI() error {
 		}
 	}
 
-	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "") {
+	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "" && !envOutput.ClientVersions) {
 		return nil
 	}
 	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {
@@ -898,7 +898,8 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		})
 	}
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	for _, m := range r.Schema.MemoryStores {
 		store := tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)}
@@ -1108,6 +1109,10 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		return nil, err
 	}
 
+	idempotencyTable, err := r.idempotencyTable()
+	if err != nil {
+		return nil, err
+	}
 	output, err := apigen.Generate(r.Schema, apigen.Options{
 		SchemaName:         r.Config.Name,
 		ModulePath:         r.Options.Naming.GoAPIModule(r.Config.Name),
@@ -1123,6 +1128,7 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		OpenAPIHooks:       r.Registry.OpenAPIHooks(),
 		ToolHooks:          r.Registry.ToolHooks(),
 		RateLimitKeys:      r.Registry.RateLimitKeys(),
+		IdempotencyTable:   idempotencyTable,
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
 		Engine:             engine,
@@ -1360,7 +1366,8 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		})
 	}
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	stores, err := r.goMemoryStores()
 	if err != nil {
@@ -1436,6 +1443,49 @@ func (r run) memoryStoreDefinitions(store, lang string) (enabled, known bool, er
 		return false, false, fmt.Errorf("generator: schema config for %s: %w", store, err)
 	}
 	return outputs.TypesEnabled(lang), true, nil
+}
+
+// idempotencyTable names the table of the API's database that keeps the
+// keys of its @idempotent operations (D140), nil for an API with none. The
+// loader's check found the table in the database, which is read again
+// here for its names.
+func (r run) idempotencyTable() (*ir.IdempotencyTable, error) {
+	operations := r.Schema.IdempotentOperations()
+	if len(operations) == 0 {
+		return nil, nil
+	}
+	database, _, ok := r.Schema.Database()
+	if !ok {
+		return nil, fmt.Errorf("generator: %s has @idempotent operations (%s) and connects to no database, which keeps their keys (D140)", r.Config.Name, strings.Join(operations, ", "))
+	}
+	schema, err := r.LoadDependency(database)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load %s, the database of %s, which keeps the keys of its @idempotent operations (D140): %w", database, r.Config.Name, err)
+	}
+	table, err := sqlutil.IdempotencyTableOf(schema)
+	if err != nil {
+		return nil, fmt.Errorf("generator: the idempotency keys of %s: %w", r.Config.Name, err)
+	}
+	return table, nil
+}
+
+// contentBucket reports whether the Bucket service named bucket names its
+// objects by their content, and the largest it then puts (D142): what its
+// own config says, which the build reads as it reads a memory store's. A
+// config the build cannot read is a plain bucket's: the bucket's own build
+// reports why.
+func (r run) contentBucket(bucket string) (contentAddressed bool, maxBytes int64) {
+	var cfg *schemaconfig.SchemaConfig
+	if r.Options.DependencyConfig != nil {
+		cfg, _ = r.Options.DependencyConfig(bucket)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		cfg, _ = r.Options.LoadDependencyConfig(bucket)
+	}
+	if cfg == nil || !cfg.ContentAddressed {
+		return false, 0
+	}
+	return true, cfg.ContentMaxBytes()
 }
 
 // checkWorkerQueues refuses a worker of api whose queue is no @queue class
