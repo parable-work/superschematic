@@ -121,7 +121,8 @@ export function grantTokenHash(token: string): string {
 /** What issueGrant takes: the grant's row, but its key, its token's hash and its stamps. */
 export interface IssueGrantInput {
   readonly holder: string;
-  readonly holderKind: 'party' | 'agent';
+  /** party or agent; user for a calendar feed (D152), whose token reads its feed alone. */
+  readonly holderKind: 'party' | 'agent' | 'user';
   readonly role: string;
   readonly targetType: string;
   readonly targetId: string;
@@ -262,6 +263,9 @@ export function grantAuthenticator(options: GrantAuthenticatorOptions): Authenti
     if (!token.startsWith(GRANT_TOKEN_PREFIX)) return options.inner ? options.inner(ctx) : null;
     const grant = (await grants.findOne({ tokenHash: { eq: grantTokenHash(token) } })) as unknown as GrantRow | null;
     if (grant === null) throw unauthorized();
+    // A calendar feed's token reads its feed alone (D152): a leaked feed URL
+    // is no credential of any route.
+    if (grant.targetType === 'CalendarFeed' || grant.targetType.startsWith('CalendarFeed;')) throw unauthorized("A calendar feed's token reads its feed alone");
     const ended = await grantEnded(db, grant, options.now?.() ?? new Date());
     if (ended !== undefined) throw unauthorized(`The grant has ${ended === 'not started' ? 'not started' : 'ended'}`);
     const role = await roles.findOne({ name: { eq: grant.role } });

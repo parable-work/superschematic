@@ -8,6 +8,7 @@ import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
+import type { CalendarSourceDefinition } from './calendar.js';
 
 /*
 The generated repositories' runtime (D79): a DB service's TypeScript types
@@ -431,6 +432,8 @@ export interface TableDefinition {
    * the access log, or the UserRole table whose rows a grant's role names.
    */
   readonly access?: 'grants' | 'log' | 'roles';
+  /** The table's @calendarSource declarations (D152), which the calendar read and feed merge; absent for a table with none. */
+  readonly calendar?: readonly CalendarSourceDefinition[];
 }
 
 /**

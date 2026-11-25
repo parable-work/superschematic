@@ -277,6 +277,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkStateMachines(schema, in, r)
 	checkFences(schema, in, r)
 	checkAccess(schema, in, r)
+	checkCalendarSources(schema, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

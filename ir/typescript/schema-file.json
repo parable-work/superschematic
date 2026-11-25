@@ -2670,6 +2670,171 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Recurrence"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "adjust": {
+                    "description": "How a due date on a weekend day or a holiday moves when setRecurrence names none: before, after, or none (it stays); none when absent.",
+                    "enum": [
+                      "none",
+                      "before",
+                      "after"
+                    ]
+                  },
+                  "anchors": {
+                    "description": "The anchors a row's recurrence may take: calendar, an RRULE from a start; afterDone, an interval after the last completion; relative, an offset from the date relative names.",
+                    "items": {
+                      "enum": [
+                        "calendar",
+                        "afterDone",
+                        "relative"
+                      ]
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "historyDays": {
+                    "description": "How many days a finished occurrence (done, missed, skipped) is kept after its due before a write prunes it; 1100 when absent.",
+                    "maximum": 36500,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "holidays": {
+                    "additionalProperties": false,
+                    "description": "The holiday table: a table of the app's rows, each a date of a holiday calendar, and the field of this table that names a row's calendar.",
+                    "properties": {
+                      "calendarField": {
+                        "description": "The holiday table's field that names its calendar.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "dateField": {
+                        "description": "The holiday table's date field: a Temporal.Date, or a string of a wall date.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "field": {
+                        "description": "This table's field that names the calendar a row's due dates move off; a row with none moves off weekend days alone.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "table": {
+                        "description": "The holiday table's type.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "table",
+                      "calendarField",
+                      "dateField",
+                      "field"
+                    ],
+                    "type": "object"
+                  },
+                  "horizonDays": {
+                    "description": "How many days ahead the occurrences are kept materialised; 400 when absent.",
+                    "maximum": 1100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "managePermission": {
+                    "description": "The permission setRecurrence, skip and moveOne need; permission when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "opensBefore": {
+                    "description": "How long before its due an occurrence opens, an ISO 8601 duration (P14D); with none it opens when the occurrence before it falls due, the first when it is planned.",
+                    "minLength": 2,
+                    "type": "string"
+                  },
+                  "overdueAfter": {
+                    "description": "How long after its due an open occurrence is missed, an ISO 8601 duration (P1D); at its due when absent.",
+                    "minLength": 2,
+                    "type": "string"
+                  },
+                  "permission": {
+                    "description": "The permission complete and listOccurrences need; any caller when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "relative": {
+                    "additionalProperties": false,
+                    "description": "Where the relative anchor's date is: a to-one relation of this table and a date or date-time field of the table it points at.",
+                    "properties": {
+                      "field": {
+                        "description": "That type's date or date-time field.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": {
+                        "description": "The type the relation points at.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "via": {
+                        "description": "This table's to-one relation field.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "via",
+                      "type",
+                      "field"
+                    ],
+                    "type": "object"
+                  },
+                  "remindBefore": {
+                    "description": "How long before its due an occurrence reminds, an ISO 8601 duration (P3D): the deadline remind.",
+                    "minLength": 2,
+                    "type": "string"
+                  },
+                  "timeZone": {
+                    "description": "The IANA time zone a recurrence is read in when setRecurrence names none; UTC when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "weekendDays": {
+                    "description": "The days a due date moves off, by English name; saturday and sunday when absent.",
+                    "items": {
+                      "enum": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                        "saturday",
+                        "sunday"
+                      ]
+                    },
+                    "maxItems": 6,
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "anchors"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Retries"
               }
             }
@@ -3927,6 +4092,7 @@
             "Queue",
             "Reactions",
             "Reconcile",
+            "Recurrence",
             "Retries",
             "Revisions",
             "Rollups",
@@ -3963,6 +4129,46 @@
       },
       "required": [
         "type"
+      ],
+      "type": "object"
+    },
+    "CalendarSourceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "default": "",
+          "type": "string"
+        },
+        "end": {
+          "default": "",
+          "type": "string"
+        },
+        "field": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "occurrences": {
+          "default": false,
+          "type": "boolean"
+        },
+        "owner": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "kind"
       ],
       "type": "object"
     },
@@ -6721,6 +6927,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/BehaviorRef"
+          },
+          "type": "array"
+        },
+        "calendarSources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CalendarSourceDef"
           },
           "type": "array"
         },

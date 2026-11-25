@@ -633,6 +633,59 @@ export interface SchedulesOn<T> {
  */
 export type Schedules<T, C extends SchedulesOn<T>> = NonNullable<unknown>;
 
+/** A recurrence's anchor (D152): calendar, an RFC 5545 RRULE from a start; afterDone, an interval after the last completion; relative, an offset from a date a relation reaches. */
+export type RecurrenceAnchor = "calendar" | "afterDone" | "relative";
+
+/** A day of the week, as Recurrence's weekendDays names it (D152). */
+export type RecurrenceWeekday = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+
+/** Recurrence's config on a table (D152): the anchors a row's recurrence may take, the zone it is read in, how far ahead its occurrences are kept and how long finished ones stay, how a due date on a weekend day or a holiday moves, the holiday table and the field naming a row's calendar, the relation a relative recurrence reads its date through, the lead times, and the permissions its operations need. */
+export interface RecurrenceOn<T> {
+  /** The anchors a row's recurrence may take. */
+  readonly anchors: readonly RecurrenceAnchor[];
+  /** The IANA time zone a recurrence is read in when setRecurrence names none; UTC when absent. */
+  readonly timeZone?: string;
+  /** How many days ahead the occurrences are kept materialised, 1 to 1100; 400 when absent. */
+  readonly horizonDays?: number;
+  /** How many days a finished occurrence is kept after its due; 1100 when absent. */
+  readonly historyDays?: number;
+  /** How a due date on a weekend day or a holiday moves when setRecurrence names none; none when absent. */
+  readonly adjust?: "none" | "before" | "after";
+  /** The days a due date moves off; saturday and sunday when absent. */
+  readonly weekendDays?: readonly RecurrenceWeekday[];
+  /** The holiday table (rows the app fills, each a date of a calendar) and this table's field that names a row's calendar. */
+  readonly holidays?: { readonly table: string; readonly calendarField: string; readonly dateField: string; readonly field: Extract<keyof T, string> };
+  /** The relative anchor's date: this table's to-one relation, the type it points at, and that type's date field. */
+  readonly relative?: { readonly via: Extract<keyof T, string>; readonly type: string; readonly field: string };
+  /** How long before its due an occurrence opens (ISO 8601, P14D); with none it opens when the one before it falls due. */
+  readonly opensBefore?: string;
+  /** How long before its due an occurrence reminds (ISO 8601, P3D). */
+  readonly remindBefore?: string;
+  /** How long after its due an open occurrence is missed (ISO 8601, P1D); at its due when absent. */
+  readonly overdueAfter?: string;
+  /** The permission complete and listOccurrences need; any caller the route admits when absent. */
+  readonly permission?: string;
+  /** The permission setRecurrence, skip and moveOne need; permission when absent. */
+  readonly managePermission?: string;
+}
+
+/**
+ * A rule's dated occurrences on a table's rows (D152):
+ * `export abstract class Filing implements Recurrence<Filing, { anchors: ["calendar"], timeZone: "Europe/London" }>`.
+ * The type stays a table. Recurrence keeps the row's recurrence and its next
+ * due in owned fields and an occurrence per date in a sub-table
+ * (filing_recurrence_occurrences), each upcoming, open, done, missed or
+ * skipped, up to horizonDays ahead; it arms each occurrence's open, remind
+ * and overdue times as messages of the table's deadline queue, which the
+ * API's @behaviorWorker(Filing) runs; its operations (recurrence.setRecurrence,
+ * complete, skip, moveOne, listOccurrences) change and read them. A rule
+ * change replans the occurrences that have not opened. The behaviors' core
+ * alone implements it, and dates every language's occurrences alike. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
+ */
+export type Recurrence<T, C extends RecurrenceOn<T>> = NonNullable<unknown>;
+
 /** A Pool member's availability (D104): open, near its limit, or out. */
 export type PoolAvailability = "open" | "near" | "out";
 

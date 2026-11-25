@@ -107,6 +107,10 @@ export type {
   Rollups,
   RollupsOn,
   RollupSourceOn,
+  Recurrence,
+  RecurrenceAnchor,
+  RecurrenceOn,
+  RecurrenceWeekday,
   ScheduleKind,
   Schedules,
   SchedulesOn,
@@ -129,5 +133,5 @@ export type {
 export type { RoleSeed, User, UserConfig, UserRole } from "./user";
 export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";
-export { accessGrants, accessLog, audience } from "./access";
-export type { AgentAccessValue, AudienceOptions, AudienceValue } from "./access";
+export { accessGrants, accessLog, audience, calendarSource } from "./access";
+export type { AgentAccessValue, AudienceOptions, AudienceValue, CalendarSourceOptions } from "./access";

@@ -87,8 +87,8 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 			t.Errorf("behavior %s has no entry", beh.Name)
 		}
 	}
-	if coreOnly != 4 {
-		t.Errorf("%d behaviors no engine implements, want Seats, Reconcile, Schedules and Pool", coreOnly)
+	if coreOnly != 5 {
+		t.Errorf("%d behaviors no engine implements, want Seats, Reconcile, Schedules, Pool and Recurrence", coreOnly)
 	}
 	if !strings.Contains(catalog, "- Config: `WorkflowConfig`, required.\n") {
 		t.Error("Workflow's entry does not name its config type")

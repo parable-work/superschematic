@@ -111,6 +111,17 @@ export interface BehaviorWorkerConfig {
   type: string;
 }
 
+export interface CalendarSourceDef {
+  color?: string;
+  end?: string;
+  field?: string;
+  kind: string;
+  name: string;
+  occurrences?: boolean;
+  owner?: string;
+  title: string;
+}
+
 export interface DNSPlacement {
   platform: string;
   values?: { [key: string]: unknown };
@@ -830,6 +841,7 @@ export interface TypeDef {
    * implements, and its extensions'.
    */
   behaviors?: BehaviorRef[];
+  calendarSources?: CalendarSourceDef[];
   comment?: string;
   database?: DatabaseDecl;
   denyUnknownFields?: boolean;

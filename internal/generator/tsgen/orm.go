@@ -187,6 +187,10 @@ type ORMTable struct {
 	// (sqlutil.TableModel.Access, D156): grants, log or roles.
 	Access string
 
+	// Calendar are the table's @calendarSource declarations (D152), which
+	// the runtime's calendar read and feed merge; nil for a table with none.
+	Calendar []ORMCalendarSource
+
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
@@ -520,6 +524,11 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		}
 		if td := schema.Types[t.Type]; td != nil {
 			table.Doc = codegen.DocText(td.Description, td.Comment)
+			calendar, err := calendarSourcesOf(schema, td, tables)
+			if err != nil {
+				return nil, err
+			}
+			table.Calendar = calendar
 		}
 		if t.Search {
 			table.Search = t.SearchColumn

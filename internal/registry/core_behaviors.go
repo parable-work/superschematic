@@ -79,6 +79,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"reconcile", RulesPackage},
 	{"schedules", RulesPackage},
 	{"pool", RulesPackage},
+	{"recurrence", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -114,7 +115,8 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // after D104's, then Numbering and Revisions, its next, then Comments, the
 // wave after, then Derived and Provenance (D73), the wave after that, then
 // Stock and Holds (D70), the commerce wave's first, which meet through the
-// contract Supply, then Calendar, its timed supply. Of these, a table
+// contract Supply, then Calendar, its timed supply, then Recurrence
+// (D152), which the core alone implements, as Schedules is. Of these, a table
 // implements one that names no value field (implements Timers<T, C>, and
 // Constants, StateRules and Approvals since D104's step 2, Lease,
 // Presence, Budget and Retries since its second batch, Seats since its
@@ -131,6 +133,8 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	// D103's step 4, its later waves, in the order they were ported.
 	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
 	"Stock", "Holds", "Calendar", "Payments",
+	// D152: dated occurrences of a recurrence, the core's alone.
+	"Recurrence",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a
@@ -234,6 +238,39 @@ func TableLeavesOut(name, operation string) string {
 // (RulesBehaviors).
 func RunsOnTheCore(name string) bool {
 	return slices.Contains(RulesBehaviors, name)
+}
+
+// BehaviorReads are the tables a use of the behavior name with config
+// reads beside its own row's, which a table that composes no behavior may
+// be (D152): Recurrence's holiday table (holidays.table) and its relative
+// anchor's target (relative.type), in that order, each once; none for any
+// other behavior or a config that does not read. The behaviors' layout
+// carries each, read-only, so an adapter answers the core's reads of it.
+// Per-behavior code, as BehaviorListens is, until step 5 derives it from
+// the behavior's class (D103).
+func BehaviorReads(name string, config json.RawMessage) []string {
+	if name != "Recurrence" || len(config) == 0 {
+		return nil
+	}
+	var parsed struct {
+		Holidays *struct {
+			Table string `json:"table"`
+		} `json:"holidays"`
+		Relative *struct {
+			Type string `json:"type"`
+		} `json:"relative"`
+	}
+	if json.Unmarshal(config, &parsed) != nil {
+		return nil
+	}
+	var out []string
+	if parsed.Holidays != nil && parsed.Holidays.Table != "" {
+		out = append(out, parsed.Holidays.Table)
+	}
+	if parsed.Relative != nil && parsed.Relative.Type != "" && !slices.Contains(out, parsed.Relative.Type) {
+		out = append(out, parsed.Relative.Type)
+	}
+	return out
 }
 
 // BehaviorListen is a table whose writes a use of another table hears

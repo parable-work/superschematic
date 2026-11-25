@@ -176,6 +176,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// access log (core_access.go, D156).
 	specs = append(specs, accessDecorators()...)
 
+	// The dates of a table's rows, or its Recurrence's occurrences, that
+	// the calendar merges (core_calendar.go, D152).
+	specs = append(specs, calendarDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

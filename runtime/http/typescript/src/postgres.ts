@@ -364,6 +364,34 @@ export {
   type GrantRow,
   type IssueGrantInput,
 } from './access.js';
+// The calendar (D152): the read that merges every @calendarSource of a
+// database's tables as a caller reads them, its routes and MCP tool, and
+// the iCalendar feed, whose token is a grant that reads the feed alone.
+export {
+  CALENDAR_FEED,
+  CALENDAR_FEED_DAYS,
+  calendarFeedOf,
+  calendarIcs,
+  calendarMcpTool,
+  calendarReference,
+  calendarRoutes,
+  calendarSourcesOf,
+  callCalendarTool,
+  isCalendarFeed,
+  issueCalendarFeed,
+  readCalendar,
+  revokeCalendarFeed,
+  rotateCalendarFeed,
+  type CalendarDetail,
+  type CalendarEntry,
+  type CalendarFeedScope,
+  type CalendarOccurrencesDefinition,
+  type CalendarOptions,
+  type CalendarRead,
+  type CalendarRoutesOptions,
+  type CalendarSourceDefinition,
+  type IssueCalendarFeedInput,
+} from './calendar.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

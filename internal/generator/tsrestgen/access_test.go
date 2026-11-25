@@ -93,6 +93,7 @@ func TestAccessRoutesCarryTheirRulesAndReveals(t *testing.T) {
 // accessCases are the cases access_runtime.test.ts runs, by name: D156's
 // "done when" in the TypeScript server.
 var accessCases = []string{
+	"a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused",
 	"a private row never appears to another user in a list, a read or a search",
 	"a named row is visible to its owner and to the principals it names",
 	"a document inherits its folder's audience, and follows it when the folder's changes",
