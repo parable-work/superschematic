@@ -932,11 +932,14 @@ pool of one instance, and on `local` a process with no port.
 
 ## Derivers
 
-A deriver fills the [Derived](/superschematic/guides/engine-behaviors/#derived)
-fields of an engine database's types: a model outside the engine
-computes them, and the deriver hands each stale field to your code and
-settles the answer. Declare it on an empty class of an API that connects
-to the engine database:
+A deriver fills the Derived fields of a database's types: a model outside
+the framework computes them, and the deriver hands each stale field to
+your code and settles the answer. The types are tables that implement
+Derived
+([Database tables](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)),
+or an engine database's types that compose it
+([Engine behaviors](/superschematic/guides/engine-behaviors/#derived)).
+Declare it on an empty class of an API that connects to the database:
 
 ```ts
 @deriver({ schemas: ["Ticket"] })
@@ -959,14 +962,38 @@ export const createDerivers: DeriversConstructor = deps => ({
 });
 ```
 
-The deriver is a deployable of its own, `<api>-<deriver>`, on a
-TypeScript or a Rust API. It runs as the deployable's name, holding each
-derived type's name and its Derived `permission`, so a `{ rules }` policy
-needs a rule for it, which the build checks:
+`schemas` names the types by string, and every type of the database that
+composes Derived when it is absent. Nothing in `Derivers` says which
+store a deriver runs over: the methods of a deriver of tables and of one
+of engine types have the same shape, each typed by its field.
 
-```ts
-{ subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
-```
+The deriver is a deployable of its own, `<api>-<deriver>`. It runs as the
+deployable's name, and what it pulls from depends on its schemas:
+
+- **Tables** (D146). A TypeScript API's deriver opens the database's
+  repositories as itself, holding each Derived config's `permission`,
+  and runs the loop over each table's `derived.staleDerivations` and
+  `derived.settleDerivations`: read a page of stale fields, hand each to
+  its method, settle the answers by the hash it pulled. Every answer goes
+  through the behaviors' core, as the table's own operations do. When
+  a pass settles nothing it pulls again after five seconds, and each
+  pull scans the table. An answer of no shape a settle takes fails its
+  own field. A pull or a settle that fails for a reason time cures has
+  its table waited out, a second, doubling to thirty, while the other
+  tables go on; one the core refuses for good, a caller without the
+  permission among them, ends the deriver with the error. The
+  database lists `postgres` first, since the TypeScript repositories run
+  there. A Rust API's deriver of tables is refused until it follows.
+- **Engine types** (D74). A TypeScript or a Rust API's deriver opens the
+  engine and holds each derived type's name and its Derived `permission`,
+  so a `{ rules }` policy needs a rule for it, which the build checks:
+
+  ```ts
+  { subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
+  ```
+
+A deriver fills one kind. Over a database that has both, declare a
+deriver for each and name its schemas.
 
 An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
 

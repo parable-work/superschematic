@@ -495,7 +495,7 @@ var repositoryMethods = []string{
 	"GetOne", "GetManyByIDs", "FindOne", "FindMany", "FindPage",
 	"CreateOne", "CreateMany", "UpsertOne", "UpsertOneResult", "UpsertMany",
 	"UpdateOne", "UpdateOneIfVersion", "UpdateMany", "DeleteOne", "DeleteOneIfVersion",
-	"DeleteMany", "HardDeleteOne", "GetVersion", "ListVersions", "GetAsOf",
+	"DeleteMany", "HardDeleteOne", "MergeInto", "GetVersion", "ListVersions", "GetAsOf",
 	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline", "RunChange", "RunEvent",
 }
 

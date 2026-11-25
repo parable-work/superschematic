@@ -64,6 +64,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- if .HasSoftDelete }}
 	HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
 	{{- end }}
+	{{- if .Merge }}
+	MergeInto(ctx context.Context, from, into {{ .PrimaryKeyType }}) (*MergeResult, error)
+	{{- end }}
 	{{- if .EncryptedFields }}
 	Reencrypt(ctx context.Context, batch int) (int, error)
 	{{- end }}
@@ -391,6 +394,12 @@ func (r *NoOp{{ .Name }}) DeleteMany(_ context.Context, _ *{{ .TypeName }}Filter
 
 func (r *NoOp{{ .Name }}) HardDeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) error {
 	return nil
+}
+{{- end }}
+{{- if .Merge }}
+
+func (r *NoOp{{ .Name }}) MergeInto(_ context.Context, _, _ {{ .PrimaryKeyType }}) (*MergeResult, error) {
+	return &MergeResult{Repointed: map[string]int{}, Deleted: map[string]int{}}, nil
 }
 {{- end }}
 {{- if .EncryptedFields }}

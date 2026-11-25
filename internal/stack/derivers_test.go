@@ -32,6 +32,19 @@ func deriverShop() (*ir.Stack, []stack.Service) {
 	return s, services
 }
 
+// tableDeriverShop is shop with shop-db a database of tables, no engine
+// database, whose tables Ticket and Article implement Derived (D146), and
+// shop-orders a TypeScript API that declares the deriver TriageTickets of
+// Ticket and FillAll, which names no schema.
+func tableDeriverShop() (*ir.Stack, []stack.Service) {
+	s, services := shop()
+	service(services, "shop-db").DerivedTables = []string{"Article", "Ticket"}
+	orders := service(services, "shop-orders")
+	orders.Language = registry.APILanguageTypeScript
+	orders.Derivers = []ir.Deriver{{Name: "TriageTickets", Schemas: []string{"Ticket"}, Concurrency: 4}, {Name: "FillAll", BatchSize: 20}}
+	return s, services
+}
+
 const (
 	triageDeriver = "shop-orders-triage-tickets"
 	fillDeriver   = "shop-orders-fill-all"
@@ -87,6 +100,59 @@ func TestDeriverDeployable(t *testing.T) {
 		if step.Step == ir.StepRollout && slices.Contains(step.Deployables, triageDeriver) && step.Wave != 2 {
 			t.Errorf("the deriver rolls out in %+v, want wave 2, after shop-api, which it calls", step)
 		}
+	}
+}
+
+// TestTableDeriverDeployable: a deriver of tables that implement Derived
+// (D146) resolves as one of engine types does: a deployable of its own on
+// the target's deriver platform, with its API's edges, the tables it
+// fills, one instance, and its decorator's concurrency and batch size.
+// FillAll, which names no schema, fills every table that implements
+// Derived, and a mix of the two kinds resolves when each deriver names its
+// own: one fills the engine's Ticket and another the table Invoice.
+func TestTableDeriverDeployable(t *testing.T) {
+	s, services := tableDeriverShop()
+	env := mustResolve(t, assemble(t), s, services, "Staging")
+	d := env.Deployable(triageDeriver)
+	if d == nil {
+		t.Fatalf("no deriver %s among %v", triageDeriver, names(env))
+	}
+	if d.Kind != ir.DeployableDeriver || d.Platform != stacktest.DeriverPlatform || d.Language != registry.APILanguageTypeScript {
+		t.Errorf("deriver = %s %s on %s in %s", d.Kind, d.Name, d.Platform, d.Language)
+	}
+	want := ir.ResolvedDeriver{API: "shop-orders", Name: "TriageTickets", Database: "shop-db", Schemas: []string{"Ticket"}, Instances: 1, Concurrency: 4, BatchSize: ir.DefaultDeriverBatchSize}
+	if d.Deriver == nil || fmt.Sprint(*d.Deriver) != fmt.Sprint(want) {
+		t.Errorf("run = %+v, want %+v", d.Deriver, want)
+	}
+	var edges []string
+	for _, e := range env.Edges {
+		if e.From == d.Name {
+			edges = append(edges, e.ID)
+		}
+	}
+	if got, want := strings.Join(edges, "; "), "http:shop-orders-triage-tickets->shop-api; sql:shop-orders-triage-tickets->shop-db"; got != want {
+		t.Errorf("edges = %s\nwant    %s", got, want)
+	}
+	all := env.Deployable(fillDeriver)
+	if want := (ir.ResolvedDeriver{API: "shop-orders", Name: "FillAll", Database: "shop-db", Schemas: []string{"Article", "Ticket"}, Instances: 1, Concurrency: ir.DefaultDeriverConcurrency, BatchSize: 20}); all == nil || fmt.Sprint(*all.Deriver) != fmt.Sprint(want) {
+		t.Errorf("FillAll = %+v, want every table that implements Derived: %+v", all, want)
+	}
+	// No engine runs over a database of tables.
+	for _, name := range names(env) {
+		if d := env.Deployable(name); d != nil && d.Kind == ir.DeployableRunner {
+			t.Errorf("the stack runs %s, an engine's runner, over a database with no engine type", name)
+		}
+	}
+
+	s, services = deriverShop()
+	service(services, "shop-db").DerivedTables = []string{"Invoice"}
+	service(services, "shop-orders").Derivers = []ir.Deriver{{Name: "TriageTickets", Schemas: []string{"Ticket"}}, {Name: "FillInvoices", Schemas: []string{"Invoice"}}}
+	env = mustResolve(t, assemble(t), s, services, "Staging")
+	if d := env.Deployable("shop-orders-fill-invoices"); d == nil || !slices.Equal(d.Deriver.Schemas, []string{"Invoice"}) {
+		t.Errorf("FillInvoices = %+v, want the table Invoice", d)
+	}
+	if d := env.Deployable(triageDeriver); d == nil || !slices.Equal(d.Deriver.Schemas, []string{"Ticket"}) {
+		t.Errorf("TriageTickets = %+v, want the engine type Ticket", d)
 	}
 }
 
@@ -165,7 +231,7 @@ func TestDeriverRefusals(t *testing.T) {
 		s, services := deriverShop()
 		service(services, "shop-orders").Derivers[0].Schemas = []string{"Order"}
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidStack, "deriver TriageTickets of shop-orders fills the derived fields of Order, which is no engine type of shop-db that composes Derived (its types that do: Article, Ticket)")
+		mustFail(t, errs, stack.CodeInvalidStack, "deriver TriageTickets of shop-orders fills the derived fields of Order, which is no engine type or table of shop-db that composes Derived (its types that do: Article, Ticket)")
 	})
 	t.Run("a database where nothing composes Derived", func(t *testing.T) {
 		s, services := deriverShop()
@@ -174,11 +240,32 @@ func TestDeriverRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidStack, "deriver FillAll of shop-orders fills the derived fields of shop-db, and no type of shop-db composes Derived")
 	})
-	t.Run("an API on no engine database", func(t *testing.T) {
+	t.Run("an API on a database where nothing composes Derived", func(t *testing.T) {
 		s, services := deriverShop()
 		service(services, "shop-db").Engine = false
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidStack, "deriver TriageTickets of shop-orders fills Derived fields, and shop-orders connects to no engine database")
+		mustFail(t, errs, stack.CodeInvalidStack, "deriver TriageTickets of shop-orders fills Derived fields, and shop-orders connects to no database whose types compose Derived")
+	})
+	t.Run("engine types and tables in one deriver", func(t *testing.T) {
+		s, services := deriverShop()
+		service(services, "shop-db").DerivedTables = []string{"Invoice"}
+		service(services, "shop-orders").Derivers[0].Schemas = []string{"Ticket", "Invoice"}
+		service(services, "shop-orders").Derivers = service(services, "shop-orders").Derivers[:1]
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidStack, "deriver TriageTickets of shop-orders fills the derived fields of Ticket, engine types of shop-db, and of Invoice, tables of it; a deriver fills engine types through the engine or tables through their repositories, so declare a deriver for each and name its schemas (D146)")
+	})
+	t.Run("no schema named over engine types and tables", func(t *testing.T) {
+		s, services := deriverShop()
+		service(services, "shop-db").DerivedTables = []string{"Invoice"}
+		service(services, "shop-orders").Derivers = []ir.Deriver{{Name: "FillAll"}}
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidStack, "deriver FillAll of shop-orders fills the derived fields of Article, Ticket, engine types of shop-db, and of Invoice, tables of it")
+	})
+	t.Run("a Rust API's deriver of tables", func(t *testing.T) {
+		s, services := tableDeriverShop()
+		service(services, "shop-orders").Language = registry.APILanguageRust
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnrealizable, "deriver TriageTickets of shop-orders fills the derived fields of Ticket, tables of shop-db, and shop-orders is a RUST API; a deriver of tables runs on a TypeScript API, where a table's Derived operations are served; Rust and Go follow (D146)")
 	})
 	t.Run("a Go API", func(t *testing.T) {
 		s, services := deriverShop()

@@ -1,0 +1,13 @@
+# A TypeScript API over fixture-derived-provenance-db, a database of tables
+# that implement Derived, that declares two derivers (D146): TriageTickets,
+# which fills Ticket's derived fields eight at a time, and FillAll, which
+# names no schema and so fills every table of the database that implements
+# Derived. Each pulls and settles through the tables' repositories.
+name: derived-ts-api
+kind: API
+dependencies:
+  - { name: fixture-derived-provenance-db, kind: DB }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

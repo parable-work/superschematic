@@ -799,6 +799,122 @@ UUID, as a custom authenticator may give, is no acting user.
 of a table with `updatedBy` need an acting user too, so a nullable
 `updatedBy` is never left as it was by a write that forgot to name one.
 
+## Merging rows
+
+Registries of things people type, labels, customers, tags, collect rows
+that turn out to be one thing. A table that `implements Mergeable` gains
+`mergeInto` on its repository (D147), which folds one row into another:
+everything that pointed at one points at the other, and the row merged
+away is deleted.
+
+```ts
+import { AutoGenerate, Mergeable, Relation, index, key } from "@superschematic/db";
+
+export abstract class Label implements Mergeable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: string;
+  deletedAt: Nullable<Temporal.DateTime>;
+  deletedBy: Nullable<Identity.UUID>;
+}
+
+// A label on a document, once per document.
+@index<DocumentLabel>(["document", "label"], { unique: true })
+export abstract class DocumentLabel {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  document: Relation<Document>;
+  label: Relation<Label>;
+}
+```
+
+```ts
+const { repointed, deleted } = await orm.label.mergeInto({ from: defect, into: bug });
+// { repointed: { DocumentLabel: 2 }, deleted: { DocumentLabel: 1 } }
+```
+
+```go
+result, err := db.Label.MergeInto(ctx, defect, bug)
+// result.Repointed["DocumentLabel"] == 2, result.Deleted["DocumentLabel"] == 1
+```
+
+The build writes the merge from the schema: every foreign key of the
+schema that references the table, and every unique key of a referencing
+table that holds its column. The foreign keys are each to-one relation of
+a table, the table's own to itself among them; the two columns of a
+`ManyToMany`'s join table, whichever side the table is on; and the column
+a `HasMany` of the table adds to a target that declares no relation back. So a merge reaches the relations the schema has, not
+the ones a caller remembers, and a new relation is merged from the build
+that adds it. In one transaction, the repository's own when it runs in
+one, `mergeInto`:
+
+1. Locks the two rows, in key order. Each must be a live row. Two merges
+   of one pair wait for one another: of A into B against B into A, one
+   folds and the other finds its row gone.
+2. For each relation, deletes the rows that reference `from` and that a
+   unique key of their table would refuse once they referenced `into`: a
+   document that carries both labels keeps the one that pointed at
+   `into`. It checks the primary key, a `@unique` relation and each
+   unique `@index`, one over an `expression` that reads the relation's
+   column too, each with its `where` and its `nullsNotDistinct`. Where the
+   referencing table deletes softly and the index holds live rows alone,
+   the row is stamped deleted, with `deletedBy`, as its own delete would
+   stamp it. Anywhere else it is removed. A pair of a join table that
+   would repeat is removed.
+3. Repoints every other row that references `from` to `into`, deleted
+   rows among them, stamping `updatedAt`, and `updatedBy` when a user
+   acts, where the referencing table keeps them.
+4. Deletes `from` as `deleteOne` does: softly on a table with
+   `deletedAt`, and through the behaviors' core on a table that composes
+   behaviors, whose guards may refuse it.
+
+It answers how many rows of each table, by its type's name, it repointed
+and deleted. No row is in both: one stamped deleted is counted as
+deleted. The rows of a join table are under the declaring type and its
+field, dotted (`Board.labels`). `from` itself is in neither count. A merge that fails writes
+nothing: in a caller's transaction it runs in a savepoint, so the
+transaction goes on without it. It is refused when `from` and `into` are
+one row (`ErrMergeSelf`, a `MergeError` with code `self`), when either is
+no live row (`ErrNotFound`, `NotFoundError`), and when `into` references
+`from` through a relation of the table to itself, which the repoint would
+turn on itself (`ErrMergeSelfReference`, code `self_reference`): point
+`into` elsewhere first. A merge that stamps a row deleted, `from` on a
+soft-deletable table or a refused row of one, needs an acting user as a
+soft delete does, and fails before it writes without one
+(`ErrNoUserInContext`, `NoUserError`).
+
+What a merge does not do:
+
+- It checks no cycle longer than that one. With `C` under `from` and
+  `into` under `C`, the merge leaves `into` under `C` and `C` under
+  `into`: a tree kept in a relation of the table to itself is yours to
+  check before you merge.
+- A Derived field of a referencing table whose input is the repointed
+  relation is not hashed again by the merge: it is stale at its row's
+  next write through the core, as after any set-based write.
+
+- It copies no field of `from` onto `into`. Read `from` and update `into`
+  first, in the same transaction, for the values worth keeping.
+- Its writes of the referencing tables are set-based SQL, as
+  `updateMany`'s are: a referencing table that composes behaviors has its
+  rows repointed past the behaviors' core, and a table's change queue
+  hears them as it hears any write.
+- A behavior's sub-tables are the behavior's state of `from` and are not
+  repointed: they go with `from` when it is removed, and stay with it
+  when it is deleted softly.
+- A relation of another schema's table, or of a table outside the schema,
+  is not repointed. Its foreign key decides what the delete of `from`
+  does to it.
+
+The trait is for a DB table: the build refuses it on an engine type, a
+queue, a view and a version graph's table. It also refuses two shapes a
+merge could not carry out. A version graph's table that references the
+table: a commit made before a merge would still reference the row merged
+away. And a unique `@index` that lists no `keys` on a table that
+references it: the merge could not tell whether the index holds the
+relation's column, so list the fields its `expression` reads. The repositories run it on
+Postgres, in Go and in TypeScript.
+
 ## State machines
 
 An enum column's `CHECK` says which values the column holds. It does not
@@ -3416,10 +3532,12 @@ filters on it. A gate holds a move of the table's Workflow into its
 state while a field it lists is proposed, refused as
 `unreviewed_fields`.
 
-Neither runs a model or a schedule of its own. A stack's deriver
-deployable runs over an engine's types so far, not a table's
-([Engine behaviors](/superschematic/guides/engine-behaviors/#derived)):
-on a table, a worker of your own pulls and settles through the
+Neither runs a model or a schedule of its own. A `@deriver` of a
+TypeScript API runs that loop for you (D146): a deployable of a stack
+that pulls each table's stale fields through its repository, hands each
+to a method of your implementation's `Derivers`, typed by the field, and
+settles the answers ([Stacks](/superschematic/guides/stacks/#derivers)).
+In another language, a worker of your own pulls and settles through the
 repository's operations, as above. Each of Derived's pulls reads the
 table's rows a page at a time, a scan, since the core keeps no index of
 stale fields yet. Neither behavior can be removed from a table with rows.

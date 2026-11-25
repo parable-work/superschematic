@@ -394,14 +394,53 @@ func (w *TypeScriptWorker) Messages() string {
 }
 
 // TypeScriptDeriver is the deriver a TypeScript deriver's entrypoint runs
-// (D74): its @deriver class, the member of the API's Derivers that holds
-// its methods, and the engine it pulls from and settles to, the API's
-// Deps' engine, as the principal Subject and Permissions name.
+// (D74, D146): its @deriver class, the member of the API's Derivers that
+// holds its methods, and what it pulls from and settles to, as the
+// principal Subject and Permissions name: the engine of the API's Deps
+// for a deriver of engine types, or the repositories of the API's
+// database for a deriver of tables.
 type TypeScriptDeriver struct {
 	tsrestgen.DeriverInfo
 
-	// Engine is the engine of the API's engine database, which Deps holds.
+	// Engine is the engine of the API's engine database, which Deps holds;
+	// nil for a deriver of tables.
 	Engine *TypeScriptEngine
+
+	// Database is the database whose repositories a deriver of tables
+	// pulls and settles through; nil for a deriver of engine types.
+	Database *TypeScriptDatabase
+}
+
+// Sources are the tables a deriver of tables fills, each with the member
+// of the database's repositories that holds its repository.
+func (d *TypeScriptDeriver) Sources() []TypeScriptDerivedTable {
+	out := make([]TypeScriptDerivedTable, 0, len(d.Schemas))
+	for i, schema := range d.Schemas {
+		if i < len(d.Repositories) {
+			out = append(out, TypeScriptDerivedTable{Schema: schema, Repository: d.Repositories[i]})
+		}
+	}
+	return out
+}
+
+// DerivedPermissions are the permissions a deriver of tables holds as a
+// behavior caller: each Derived config's permission, which the core asks
+// of a pull and a settle. A table's name, which the engine's permission
+// policy asks of a deriver of engine types, is left out.
+func (d *TypeScriptDeriver) DerivedPermissions() []string {
+	var out []string
+	for _, permission := range d.Permissions {
+		if !slices.Contains(d.Schemas, permission) {
+			out = append(out, permission)
+		}
+	}
+	return out
+}
+
+// TypeScriptDerivedTable is a table a deriver of tables fills (D146).
+type TypeScriptDerivedTable struct {
+	Schema     string
+	Repository string
 }
 
 // Background reports whether the entrypoint is a job's, a worker's, a
@@ -723,8 +762,9 @@ var tsReserved = []string{
 	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
 	"EngineDocumentOf", "OpenedEngine", "EngineSetup", "EngineCallers", "ENGINE_TIMEOUT_SECONDS", "principal", "alive",
 	"stopped", "closeEngines",
-	// A deriver's (D74).
+	// A deriver's (D74), and a deriver's of tables (D146).
 	"derivers", "deriver", "runDeriver", "inProcess", "DerivationAnswer", "DerivationItem", "answer", "engine", "item",
+	"deriving", "DerivedTable", "table",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -994,7 +1034,15 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// with sqliteQueue (D53, amended).
 			s.Worker.Database = api.Database
 		}
-		if s.Deriver != nil {
+		if s.Deriver != nil && s.Deriver.Tables {
+			// A deriver of tables pulls and settles through the
+			// repositories, on Postgres alone (D146), as a behavior
+			// worker runs its queues.
+			if !api.ORM {
+				return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which fills the Derived fields of %s through the repositories %s's TypeScript types export for Postgres (D146), and %s has none: list postgres first in %s's outputs.sql.dialects and enable its TypeScript types", in.Stack, in.Server, s.Deriver.Name, o.SchemaName, strings.Join(s.Deriver.Schemas, ", "), o.Deps.Database, o.SchemaName, o.Deps.Database)
+			}
+			s.Deriver.Database = api.Database
+		} else if s.Deriver != nil {
 			if api.Engine == nil {
 				return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine on %s, whose Derived fields it fills (D74)", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
@@ -1745,6 +1793,8 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		main = "worker.ts.tmpl"
 	case s.Runner != nil:
 		main = "runner.ts.tmpl"
+	case s.Deriver != nil && s.Deriver.Tables:
+		main = "table_deriver.ts.tmpl"
 	case s.Deriver != nil:
 		main = "deriver.ts.tmpl"
 	}
