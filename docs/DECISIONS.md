@@ -499,6 +499,11 @@ job per environment, a running cost for every stack with a range, where
 the fakes would prove only the arithmetic. The setting is built so a stack
 can state its range, and gcp says why it cannot run one.
 
+What is built in its place for a queue that is empty most of the day is
+D145's drain mode: on gcp a worker whose `mode` is `drain` runs as a Cloud
+Run job that an enqueue wakes and a tick runs, and exits once its queue is
+idle, so it needs no scaler.
+
 ## D103. A behavior adds fields, sub-tables, operations and rules to a table that stays a table, its rules run in a pure Rust core every language embeds, and a project defines its types at build time or at run time, never both (D16, D27, D50, D58, D64, D70 amended)
 
 D16 ported a server that takes schemas as data: one table of instances
@@ -1605,14 +1610,18 @@ Built: a worker's `mode` and `idle` settings and what resolution refuses of
 them (`internal/stack/workers.go`); the drain worker's entrypoint in Go and
 TypeScript, which takes one of `instances` advisory locks named for its
 queue as it starts and exits 0 once no message was ready or held for
-`idle` (`runtime/http/go/worker`, the TypeScript runtime's `./worker`,
-`sqlutil`'s `slot` statement); the wake a queue client sends after an
+`idle` and none falls due within five minutes, which it waits for, and
+exits with an error once every claim has failed for `idle`
+(`runtime/http/go/worker`, the TypeScript runtime's `./worker`,
+`sqlutil`'s `slot` and `nextDue` statements); the wake a queue client sends after an
 enqueue, at most once per queue in five seconds per process, which fails
 no enqueue (`runtime/http/go/wake` behind the Go ORM's `OnEnqueue`, the
 TypeScript runtime's `queue-wake.ts`); and on gcp the Cloud Run job in the
 worker pool's place, `roles/run.invoker` on that job alone and
 `QUEUE_WAKES` for each deployable that may enqueue to its queue, and the
-Cloud Scheduler tick (`extensions/gcp/cloudrunworker.go`). `stack dev`
+Cloud Scheduler tick, an hour at most, since it bounds how late a retry
+or a delayed message due past that horizon runs
+(`extensions/gcp/cloudrunworker.go`). `stack dev`
 runs a drain worker as it runs any worker. The stacks and queues guides
 and section 8.8 of `docs/stack-model.md` describe it. The commit that
 built it names D145, and says where it departs from the decision's text.
@@ -1637,6 +1646,17 @@ Left:
   exits, as a Go one does: a job that exits right after its one enqueue
   may end before its wake goes out, and the tick finds the message.
 - A bound on a task's life shorter than a day, and a setting for it.
+- Holding wakes back while the worker holds its slots. A process sends a
+  queue's wake whenever five seconds have passed since its last, so on a
+  busy queue each enqueuing process starts up to twelve executions a
+  minute that find no slot and exit at once, each a Cloud Run Admin API
+  call against the project's quota. A wake could be held back for the
+  worker's idle time after a `:run` that succeeded, which `QUEUE_WAKES`
+  would then have to carry.
+- `QUEUE_WAKES` keyed by the database as well as the queue's class. It is
+  keyed by the class alone, so two databases that each declare a queue
+  class of one name wake each other's drain workers: starts wasted, no
+  message lost.
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 

@@ -861,6 +861,16 @@ of a process that exits before its wake has gone out: a Go entrypoint
 waits for the wakes it has sent before it exits, and a TypeScript one,
 which ends its process as soon as its pools have closed, may not.
 
+Two things a wake does not know cost starts and lose nothing. A process
+sends a queue's wake whenever five seconds have passed since its last,
+even while workers hold every slot: on a busy queue each enqueuing
+process starts an execution up to twelve times a minute that finds no
+slot and exits at once, and each is a call to the Cloud Run Admin API
+against the project's quota. And `QUEUE_WAKES` gives a deployable its
+wakes by the queue's class alone, so where two databases each declare a
+queue class of one name, an enqueue on either wakes the drain workers of
+both. Give the classes different names to keep the starts apart.
+
 The tick is a Cloud Scheduler job that starts the worker every `tick`,
 five minutes unless set, whatever its queue holds. It is what finds a
 message no wake announces: one an `@enqueueOnChange` trigger wrote, a

@@ -859,6 +859,14 @@ Three things make it work:
   TypeScript queue client send it, at most once per queue in five seconds
   per process. It is a hint and no part of the write: nothing waits for
   it, and one that fails is logged as a warning and fails nothing.
+  Nothing holds a wake back while workers already hold every slot, so on
+  a busy queue each process that enqueues starts an execution up to every
+  five seconds, which finds no slot and exits at once: with N such
+  processes, up to 12 times N starts a minute, each a call to the Cloud
+  Run Admin API that counts against the project's quota. And
+  `QUEUE_WAKES` gives wakes by the queue's class alone, so two databases
+  that each declare a queue class of the same name wake each other's
+  drain workers. Both cost starts and lose no message.
 - **A tick.** The platform also starts the worker on a schedule, every
   five minutes unless `tick` says. It finds what no wake announces: a
   message an `@enqueueOnChange` trigger wrote, a retry or a
