@@ -270,13 +270,16 @@ impl Core {
 }
 
 /// `count` order keys that sort strictly between `before` and `after`, the
-/// start and the end when absent: evenly spread, each as short as it can be
-/// (D137). The core makes them, so every language makes the same keys.
+/// start and the end when absent or empty, as the other languages take an
+/// empty bound: evenly spread, each as short as it can be (D137). The core
+/// makes them, so every language makes the same keys.
 pub fn order_keys(
     before: Option<&str>,
     after: Option<&str>,
     count: usize,
 ) -> Result<Vec<String>, Error> {
+    let before = before.filter(|bound| !bound.is_empty());
+    let after = after.filter(|bound| !bound.is_empty());
     let mut out = run(
         Op::OrderKeys,
         &json!({"before": before, "after": after, "count": count}),
@@ -294,6 +297,12 @@ mod tests {
     #[test]
     fn order_keys_are_the_cores() {
         assert_eq!(order_keys(None, None, 2).expect("keys"), ["K", "f"]);
+        // An empty bound is no bound, as Go, TypeScript and Python read it.
+        assert_eq!(order_keys(Some(""), Some(""), 2).expect("keys"), ["K", "f"]);
+        assert_eq!(
+            order_keys(Some(""), Some("W"), 1).expect("keys"),
+            order_keys(None, Some("W"), 1).expect("keys")
+        );
         assert_eq!(order_keys(Some("z"), None, 1).expect("keys"), ["zV"]);
         assert_eq!(order_keys(Some("V"), Some("W"), 1).expect("keys"), ["VV"]);
         assert!(order_keys(Some("V"), Some("W"), 0)
