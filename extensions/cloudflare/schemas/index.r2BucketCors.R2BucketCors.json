@@ -1,0 +1,85 @@
+{
+  "token": "cloudflare:index/r2BucketCors:R2BucketCors",
+  "terraform": {
+    "type": "cloudflare_r2_bucket_cors",
+    "renames": {
+      "accountId": "account_id",
+      "bucketName": "bucket_name",
+      "rules.exposeHeaders": "expose_headers",
+      "rules.maxAgeSeconds": "max_age_seconds"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "bucketName": {
+      "type": "string"
+    },
+    "jurisdiction": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/R2BucketCorsRule:R2BucketCorsRule"
+      }
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "bucketName"
+  ],
+  "types": {
+    "cloudflare:index/R2BucketCorsRule:R2BucketCorsRule": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "$ref": "#/types/cloudflare:index/R2BucketCorsRuleAllowed:R2BucketCorsRuleAllowed"
+        },
+        "exposeHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxAgeSeconds": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "allowed"
+      ]
+    },
+    "cloudflare:index/R2BucketCorsRuleAllowed:R2BucketCorsRuleAllowed": {
+      "type": "object",
+      "properties": {
+        "headers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "methods",
+        "origins"
+      ]
+    }
+  }
+}

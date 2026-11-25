@@ -19,7 +19,11 @@
 // retention. On SIGTERM or SIGINT it claims no more, lets the running methods
 // finish for {{ .Worker.GraceSeconds }}s, aborts the rest and gives their messages back, and
 // exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it{{ if not $db.SQLite }} takes
+// one of WORKER_SLOTS locks named for its queue as it starts, exiting 0 at
+// once when none is free, and{{ end }} exits 0 once no message was ready or held for
+// WORKER_IDLE_SECONDS.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -35,7 +39,7 @@ import { openSqlite, sqliteFile{{ if $db.SQLite }}, sqliteQueue{{ end }}, type S
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
-import { runWorker, workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
+import { runWorker, workerConcurrency, workerDrain } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
@@ -94,8 +98,12 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
       fail: (id, token, cause) => queue.fail(id, token, cause),
       release: (id, token) => queue.release(id, token),
       prune: limit => queue.prune(limit),
+{{- if not $db.SQLite }}
+      slot: slots => queue.slot(slots),
+      nextDue: () => queue.nextDue(),
+{{- end }}
     },
-    { signal, concurrency, graceMs: GRACE_MS, logger }
+    { signal, concurrency, graceMs: GRACE_MS, logger, drain: workerDrain() }
   );
 }
 {{ template "ts-background-main" . }}

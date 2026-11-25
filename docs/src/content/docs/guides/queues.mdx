@@ -23,12 +23,12 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
-| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
+| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite; a key over several fields; a [delay on enqueue](#enqueue-for-later) | `when` rules of `@enqueueOnChange` beyond the literal ones; a delay in an `@enqueueOnChange` trigger |
 | `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
+| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a Go or a TypeScript worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing; drain mode for a Rust worker and a behavior worker, and a wake from the Rust queue client |
 | `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
 D53, D68, D80, D88 and D96 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions, and section 8.8 of
@@ -53,7 +53,7 @@ Every argument is optional:
 | `maxBackoff` | the longest a failed message waits, however many times it failed; the backoff or more, and an hour unless set, or the backoff when that is longer. Set it to the backoff for a wait that never grows |
 | `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
 | `retain` | how long a done message stays in the table before a worker removes it, as `168h`; a week unless set. `0s` keeps none: completing a message deletes it |
-| `key` | the message's field that keys it, a required scalar or enum field; it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
+| `key` | the message's field that keys it, a required scalar or enum field, or a list of two or more such fields that key it together (`["warehouse", "sku"]`); it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
 | `onDuplicate` | what an enqueue does when a message of its key waits: `append` adds another, as a queue without a key does; `replace` overwrites the one that waits; `skip` keeps it and adds none. `append` unless set |
 | `serialize` | `true` holds the queue to one claim per key at a time |
 
@@ -115,9 +115,10 @@ one that runs read the row before the change.
 
 - `replace` overwrites the waiting message with the new one: every field
   but the key, one the new message leaves out taking its column's
-  default; it is due at once, with no attempts and no last error. It
-  keeps its ID and when it was first enqueued. A burst of changes leaves
-  one message, the latest.
+  default; it is due when the new message is, at once unless it was
+  [enqueued for later](#enqueue-for-later), with no attempts and no last
+  error. It keeps its ID and when it was first enqueued. A burst of
+  changes leaves one message, the latest.
 - `skip` keeps the waiting message as it is and adds none.
 - `append`, the default, adds every message, as a queue without a key
   does.
@@ -129,6 +130,28 @@ appends, so a message one language enqueues dedupes against another's. A
 claimed message that fails, or is given back by a stopping worker, while
 a newer message of its key waits gives way to it: it is `done`, its error
 kept in `last_error`, and the newer one runs in its place.
+
+A key may be several fields, a list of two or more, when no one field
+says what a message is about: a tenant and an order, a warehouse and a
+SKU.
+
+```ts
+@queue({ key: ["warehouse", "sku"], onDuplicate: "replace", serialize: true })
+export abstract class StockMoved {
+  warehouse: string;
+  sku: string;
+  quantity: Generic.Int64;
+}
+```
+
+Two messages share a key when they agree on every field of it, so a move
+of `SKU-1` in the north warehouse replaces the one that waits there, and
+`SKU-1` in the south warehouse waits beside it. Each field is held to
+what a single one is: required, and one scalar or enum value. The indexes
+and the conflict's target name every column of the key, in the order the
+list gives them, `ON CONFLICT (warehouse, sku) WHERE state = 'ready'`. A
+list of one field is that field's key. In a data form, a key of one field
+is `key` and one of several is `keys`.
 
 `serialize: true` holds a key to one claim at a time: a claim takes no
 message whose key another live claim holds, and of a key's waiting
@@ -243,6 +266,44 @@ and its lines, then enqueues the order's message in the same transaction:
 
 A field reaches its column as a table's field does through the ORM, and
 an optional field you leave unset takes its column's default.
+
+### Enqueue for later
+
+A message is due at once unless its enqueue gives it a delay (D80): it is
+then `ready`, with no attempts, and due that long after the database's
+clock, and no worker claims it before. A reminder an hour after an order,
+a retry of your own in ten minutes and a debounce are each a delay.
+
+| Language | On Postgres | On SQLite |
+| --- | --- | --- |
+| Go | `orm.Enqueue<Queue>In(ctx, tx, msg, time.Hour)` | `orm.Enqueue<Queue>SQLiteIn(ctx, tx, msg, time.Hour)` |
+| TypeScript | `enqueue(tx, queue, msg, { delaySeconds: 3600 })` | `enqueueStatement(db, queue, msg, { delaySeconds: 3600 })`, and `enqueueSqlite` the same |
+| Rust | `queue::enqueue_in(&tx, &queue, &msg, Duration::from_secs(3600))` | `queue::enqueue_sqlite_in(&connection, &queue, &msg, Duration::from_secs(3600))` |
+
+The delay may hold a fraction of a second. Zero is an enqueue with none,
+and a negative one is refused. The due time is the database's, not the
+caller's: the enqueue writes `due_at` as the queue's `dueIn` statement,
+`clock_timestamp() + make_interval(secs => $1)` on Postgres, which each
+language's client takes from the queue's definition as it takes the
+others, so the three write one due time. The delay counts from the
+enqueue's statement, not from the start of its transaction, which is what
+`now()` would give: an enqueue late in a long transaction is still due its
+whole delay later. SQLite's clock is the statement's already.
+
+On a queue that [replaces](#one-message-per-key) the waiting message of a
+key, that message takes the new one's due time with its fields. So an
+enqueue with a delay pushes back the message that waits, which is a
+debounce: each change in a burst moves the one message later, and it runs
+once the burst has been quiet for the delay. An enqueue with no delay
+makes it due at once. Under `skip` the waiting message keeps its own due
+time.
+
+A worker that polls claims a delayed message within its poll of the time
+it falls due. A worker in [drain mode](#drain-mode) that is running when
+it finds its queue idle waits for a message due within five minutes, and
+handles it as it falls due. One due later finds the worker gone, and its
+tick starts it: such a message is handled within a tick of its due
+time.
 
 ### From TypeScript
 
@@ -726,6 +787,8 @@ export abstract class Dev {}
 | `maxInstances` | the most instances a target may run as the queue's depth grows, `instances` then the fewest. No target scales a worker yet: gcp refuses a range, and `stack dev` runs one process |
 | `concurrency` | replaces the `@worker` decorator's |
 | `enabled` | `false` runs none, and the queue's messages wait |
+| `mode` | `"pool"`, the default, keeps the worker's instances running; `"drain"` runs it as a job that empties its queue and exits ([Drain mode](#drain-mode)) |
+| `idle` | how long a drain worker waits with no message ready or held before it exits; `30s` unless set |
 
 `worker` takes only a worker the API declares, which its handle names.
 The worker's entrypoint reads its concurrency from `WORKER_CONCURRENCY`,
@@ -758,6 +821,86 @@ worker pool takes `cpu` and `memory`, one CPU and `512Mi` unless set:
 ```ts
 settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }],
 ```
+
+### Drain mode
+
+A worker pool bills for its instances whether or not its queue holds
+anything. A worker in drain mode (D145) is a Cloud Run job instead, which
+runs only while there is something to handle:
+
+```ts
+settings: [{ of: ShopOrders, worker: "FulfilOrders", mode: "drain" }],
+```
+
+Its entrypoint is the pool's, told to drain by `WORKER_MODE`: it claims
+and handles as before, and exits 0 once no message was ready or held for
+`idle`, thirty seconds unless set. That is long enough for the
+transaction that enqueued to commit after its wake went out, and for the
+next message of a burst to find the worker still up. Before it exits it
+asks when the next ready message falls due, a retry after its backoff or
+a [delayed message](#enqueue-for-later): one due within five minutes, its
+horizon, it waits for and handles, so a retry or a short delay does not
+wait for the tick.
+
+An enqueue starts it. The Go ORM's `Enqueue<Queue>` and the TypeScript
+`enqueue` send the queue's wake once their statement has run, where the
+environment gives one in `QUEUE_WAKES`:
+
+| | |
+| --- | --- |
+| who is given a wake | every server, job, worker and app of the stack with a connection to the queue's database, but the worker itself. The resolver cannot see which code enqueues, so it takes all of them |
+| what it is | an HTTP `POST`, on gcp of the Cloud Run job's run method, with the access token the deployable's own metadata server gives it. The deployable's account holds `roles/run.invoker` on that job and no other |
+| how often | at most once per queue in five seconds per process, however many messages are enqueued |
+| when it fails | a warning in the deployable's log, `the wake of a queue's worker failed: its tick finds the message`. The enqueue has succeeded: a wake is sent after the statement, is awaited by nothing and is no part of your transaction |
+
+A wake goes out when the statement has run, which is before your
+transaction commits, so the worker may start, find nothing and wait: that
+is what `idle` is for. A transaction that stays open longer than the
+worker's start and its idle time is found by the tick. So is the message
+of a process that exits before its wake has gone out: a Go entrypoint
+waits for the wakes it has sent before it exits, and a TypeScript one,
+which ends its process as soon as its pools have closed, may not.
+
+Two things a wake does not know cost starts and lose nothing. A process
+sends a queue's wake whenever five seconds have passed since its last,
+even while workers hold every slot: on a busy queue each enqueuing
+process starts an execution up to twelve times a minute that finds no
+slot and exits at once, and each is a call to the Cloud Run Admin API
+against the project's quota. And `QUEUE_WAKES` gives a deployable its
+wakes by the queue's class alone, so where two databases each declare a
+queue class of one name, an enqueue on either wakes the drain workers of
+both. Give the classes different names to keep the starts apart.
+
+The tick is a Cloud Scheduler job that starts the worker every `tick`,
+five minutes unless set, whatever its queue holds. It is what finds a
+message no wake announces: one an `@enqueueOnChange` trigger wrote, a
+retry due after its backoff, a [delayed message](#enqueue-for-later), one
+a Rust API enqueued, and one whose wake was lost. So the longest a
+message waits for a worker that is not running is one tick, and the least
+a quiet queue costs is one start per tick, of a job that finds nothing
+and exits after `idle`. For a retry or a delayed message due past the
+worker's five-minute horizon, the tick is the bound on how late it runs,
+so a tick is an hour at most.
+
+`instances` is how many of the worker may run at once, one unless set.
+Each start is one task, which takes one of that many advisory locks named
+for the queue (`pg_try_advisory_lock`) and exits at once when none is
+free. A burst therefore brings up one more worker per wake, up to
+`instances`, and wakes beyond that cost a start and nothing else.
+`maxInstances` beside `mode: "drain"` does not resolve.
+
+| Setting | Default | |
+| --- | --- | --- |
+| `tick` | `5m` | `1m`, `2m`, `3m`, `4m`, `5m`, `6m`, `10m`, `12m`, `15m`, `20m`, `30m` or `1h`: Cloud Scheduler runs evenly spaced firings, and the tick bounds how late a retry or a delayed message due past the worker's horizon runs |
+| `cpu`, `memory` | `1`, `512Mi` | as a pool's |
+
+A task runs for a day at most, then Cloud Run stops it as it stops any
+instance, and the next wake or tick starts another. Cloud Run retries no
+task. A worker whose every claim fails for its `idle` time, with its
+database down or its queue's table not the one its build expects, logs
+`every claim failed for the idle time` and exits with an error, which
+gives its slot back, instead of retrying until the day is over. A drain worker in Rust does not resolve on gcp yet, and neither
+does a `@behaviorWorker` in drain mode on any target.
 
 ## On Cloudflare
 

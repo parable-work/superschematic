@@ -314,6 +314,126 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+// TestBuildExtendsAnImage (D144): the stack extends shop-api's image with
+// a Dockerfile of the project's, which it names relative to the repository
+// root. A build hands the builder the generated Dockerfile and the
+// extending one, and its context holds the extending file whatever the
+// ignore file says. The image's identity is the context's digest, so a
+// change to the extending file builds shop-api again and nothing else,
+// as a change to the packages, which the generated Dockerfile holds,
+// would. A context `stack prepare` wrote carries the extension too.
+func TestBuildExtendsAnImage(t *testing.T) {
+	f := newFixture(t)
+	s := stacktest.WithoutWorkerSettings(stacktest.Shop())
+	s.Images = []*ir.DeployableImage{{Of: stacktest.Of(stacktest.ShopAPI), Packages: []string{"chromium"}, Extend: "docker/shop-api/Dockerfile"}}
+	env := f.resolve(t, s, stacktest.WithoutWorkers(stacktest.AcmeShop()), "Staging")
+	f.ready(t, env)
+	ctx := context.Background()
+	src := sources(t, "shop-api", "Orders", stacktest.ShipOrdersJob)
+	src.ImplementationRoot = src.RepositoryRoot
+	extension := filepath.Join(src.RepositoryRoot, "docker", "shop-api", "Dockerfile")
+	write := func(content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(extension), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(extension, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	build := func() (*stackdeploy.BuildResult, error) {
+		return stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src})
+	}
+
+	// The stack names a file that is not there.
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "server shop-api: the Dockerfile that extends the image") {
+		t.Fatalf("a build with no extending Dockerfile: %v", err)
+	}
+
+	write("ARG BASE\nFROM ${BASE}\n")
+	from := len(f.calls(0))
+	r, err := build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Built, []string{"Orders", "shop-api", stacktest.ShipOrdersJob}) {
+		t.Fatalf("the first build built %v", r.Built)
+	}
+	want := []string{
+		"build Orders: schemas/dist/server/shop-stack/Orders/Dockerfile",
+		"build shop-api: schemas/dist/server/shop-stack/shop-api/Dockerfile, extended with docker/shop-api/Dockerfile",
+		"build " + stacktest.ShipOrdersJob + ": schemas/dist/server/shop-stack/" + stacktest.ShipOrdersJob + "/Dockerfile",
+	}
+	if got := builds(f.calls(from)); !slices.Equal(got, want) {
+		t.Errorf("the builds were\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// The ignore file takes in go/shop-api and the entrypoint alone, and
+	// the context holds the extending Dockerfile all the same.
+	if entries := f.ext.Builder.Context("shop-api"); !slices.Contains(entries, "docker/shop-api/Dockerfile") {
+		t.Errorf("shop-api's context holds no extending Dockerfile: %v", entries)
+	}
+	if entries := f.ext.Builder.Context("Orders"); slices.Contains(entries, "docker/shop-api/Dockerfile") {
+		t.Errorf("Orders' context, which nothing extends, holds shop-api's extending Dockerfile: %v", entries)
+	}
+	first := r.Images["shop-api"]
+
+	// A deploy records the context the image was built from, and a build
+	// after it changes nothing.
+	o := deployOptions(f, t, env, nil, &planner{to: 1}, nil)
+	o.Sources = src
+	if _, err := stackdeploy.Deploy(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := build(); err != nil || len(r.Built) > 0 {
+		t.Errorf("a build of an unchanged repository built %v: %v", r, err)
+	}
+
+	// The extending file is part of the image's identity.
+	write("ARG BASE\nFROM ${BASE}\nRUN fc-cache -f\n")
+	r, err = build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Built, []string{"shop-api"}) || !slices.Equal(r.Unchanged, []string{"Orders", stacktest.ShipOrdersJob}) {
+		t.Errorf("a build after the extending Dockerfile changed: built %v, unchanged %v", r.Built, r.Unchanged)
+	}
+	if r.Images["shop-api"] == first {
+		t.Errorf("the image of shop-api is %s before and after its extending Dockerfile changed", first)
+	}
+
+	// `stack prepare` writes the context with the extension in it, and a
+	// build from what it wrote hands the builder both Dockerfiles.
+	dir := filepath.Join(t.TempDir(), "prepared")
+	if _, err := stackdeploy.Prepare(ctx, stackdeploy.PrepareOptions{Stack: env.Stack, Environments: []*ir.ResolvedEnvironment{env}, Sources: src, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := stackdeploy.ReadPrepared(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pc := prepared.Contexts["shop-api"]; pc == nil || pc.Extend != "docker/shop-api/Dockerfile" {
+		t.Fatalf("the prepared context of shop-api is %+v, want one that names its extending Dockerfile", pc)
+	}
+	if pc := prepared.Contexts["Orders"]; pc == nil || pc.Extend != "" {
+		t.Errorf("the prepared context of Orders is %+v, want one with no extension", pc)
+	}
+	from = len(f.calls(0))
+	if _, err := stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: stackdeploy.Sources{Prepared: prepared}, Deployables: []string{"shop-api"}, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := builds(f.calls(from)), []string{"build shop-api: schemas/dist/server/shop-stack/shop-api/Dockerfile, extended with docker/shop-api/Dockerfile"}; !slices.Equal(got, want) {
+		t.Errorf("the build from the prepared context was %v, want %v", got, want)
+	}
+
+	// A context prepared before the stack extended the image is refused
+	// rather than built unextended.
+	prepared.Contexts["shop-api"].Extend = ""
+	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: stackdeploy.Sources{Prepared: prepared}, Deployables: []string{"shop-api"}, Force: true})
+	if err == nil || !strings.Contains(err.Error(), "the stack extends its image with docker/shop-api/Dockerfile, and its build context names no Dockerfile that extends it") {
+		t.Errorf("a build from a context prepared without the extension: %v", err)
+	}
+}
+
 // TestDeployGrantsNewServers: a deploy whose plan has no steps still runs
 // the expand phase of a DB service whose connecting servers changed since
 // the runner last ran, with the plan marked as having none, so the runner

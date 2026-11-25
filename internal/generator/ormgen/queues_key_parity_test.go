@@ -12,6 +12,8 @@ var queueKeyParitySubtests = []string{
 	"LostClaimRaceTakesNothing",
 	"FailRacingAnEnqueueGivesWay",
 	"TriggerEnqueuesOnChange",
+	"KeyOverSeveralFields",
+	"ReplaceTakesTheNewDueTime",
 }
 
 // queueKeyParityPostgresOnly are the subtests that race two transactions,
@@ -54,7 +56,16 @@ var queueKeyParityPostgresOnly = map[string]bool{
 //     messages, runs once more when it commits, and gives way to it;
 //   - TriggerEnqueuesOnChange: raw SQL that sets a line's product enqueues
 //     exactly one message, a change to an unrelated column none, and
-//     repeated changes, a delete among them, keep one ready message.
+//     repeated changes, a delete among them, keep one ready message;
+//   - KeyOverSeveralFields, on StockMoved, whose key is its warehouse and
+//     its SKU together (D80, amended): the three sides' moves of one SKU in
+//     one warehouse keep one ready message, the last; the same SKU in
+//     another warehouse, and another SKU in the same one, wait beside it;
+//     no side claims a pair's waiting message while a claim holds the pair,
+//     and a claimed one that fails while a newer waits gives way to it;
+//   - ReplaceTakesTheNewDueTime: on a queue that replaces, an enqueue with
+//     a delay moves when the ready message of its key is due, and one with
+//     none makes it due at once, from every side.
 const queueKeyParityORMTest = `package orm
 
 import (
@@ -81,6 +92,149 @@ func TestQueueKeyParity(t *testing.T) {
 	t.Run("LostClaimRaceTakesNothing", testLostClaimRaceTakesNothing)
 	t.Run("FailRacingAnEnqueueGivesWay", testFailRacingAnEnqueueGivesWay)
 	t.Run("TriggerEnqueuesOnChange", testTriggerEnqueuesOnChange)
+	t.Run("KeyOverSeveralFields", testKeyOverSeveralFields)
+	t.Run("ReplaceTakesTheNewDueTime", testReplaceTakesTheNewDueTime)
+}
+
+// movedJSON is a StockMoved message.
+func movedJSON(warehouse, sku string, quantity int) string {
+	return fmt.Sprintf("{\"warehouse\":%q,\"sku\":%q,\"quantity\":%d}", warehouse, sku, quantity)
+}
+
+// movedEnqueue has side enqueue a StockMoved message, due once delay has
+// passed, or at once for none.
+func (p *parity) movedEnqueue(side, message string, delay time.Duration) {
+	p.t.Helper()
+	if side != "Go" {
+		if delay > 0 {
+			p.must(side, "enqueue", message, fmt.Sprint(delay.Seconds()))
+		} else {
+			p.must(side, "enqueue", message)
+		}
+		return
+	}
+	p.inTx(func(tx TxInterface, file *sql.Tx) error {
+		var m types.StockMoved
+		if err := json.Unmarshal([]byte(message), &m); err != nil {
+			return err
+		}
+		if file != nil {
+			return EnqueueStockMovedSQLiteIn(p.ctx, file, &m, delay)
+		}
+		return EnqueueStockMovedIn(p.ctx, tx, &m, delay)
+	})
+}
+
+// movedRows are the state and quantity of each message of a warehouse's
+// SKU, the claimed before the done before the ready, each in the order
+// enqueued.
+func (p *parity) movedRows(warehouse, sku string) []string {
+	p.t.Helper()
+	return p.rows("stock_moved_queue", "(warehouse || '/' || sku)", warehouse+"/"+sku, "quantity")
+}
+
+// testKeyOverSeveralFields: StockMoved is keyed by its warehouse and its
+// SKU together, replaces and serializes.
+func testKeyOverSeveralFields(t *testing.T) {
+	p := newParity(t)
+	p.on = "StockMoved"
+	for i, side := range []string{"Go", "TypeScript", "Rust", "TypeScript", "Go"} {
+		p.movedEnqueue(side, movedJSON("north", "SKU-1", i+1), 0)
+	}
+	// One column of the key alike is another key.
+	p.movedEnqueue("Rust", movedJSON("south", "SKU-1", 10), 0)
+	p.movedEnqueue("TypeScript", movedJSON("north", "SKU-2", 20), 0)
+	wantRows(t, "five moves of SKU-1 in the north warehouse", p.movedRows("north", "SKU-1"), "ready:5")
+	wantRows(t, "SKU-1 in the south warehouse", p.movedRows("south", "SKU-1"), "ready:10")
+	wantRows(t, "SKU-2 in the north warehouse", p.movedRows("north", "SKU-2"), "ready:20")
+
+	// The three pairs are claimed beside each other, and while a claim
+	// holds a pair no side takes the message that waits for it.
+	claims := p.keyedClaims("TypeScript", 10)
+	if len(claims) != 3 {
+		t.Fatalf("TypeScript claimed %+v, want the three pairs' messages", claims)
+	}
+	var north keyedClaim
+	for _, c := range claims {
+		if c.Attempt != 1 {
+			t.Errorf("claim %+v is attempt %d, want 1", c, c.Attempt)
+		}
+		if c.Members["warehouse"] == "north" && c.Members["sku"] == "SKU-1" {
+			north = c
+		}
+	}
+	if north.ID == "" || north.Members["quantity"] != "5" {
+		t.Fatalf("the claims hold no north SKU-1 move of 5: %+v", claims)
+	}
+	p.movedEnqueue("Rust", movedJSON("north", "SKU-1", 6), 0)
+	p.movedEnqueue("Go", movedJSON("north", "SKU-1", 7), 0)
+	wantRows(t, "moves while one is claimed", p.movedRows("north", "SKU-1"), "claimed:5", "ready:7")
+	for _, side := range []string{"Go", "TypeScript", "Rust"} {
+		if got := p.keyedClaims(side, 10); len(got) != 0 {
+			t.Fatalf("%s claimed %+v while a claim holds each pair", side, got)
+		}
+	}
+	// The claimed move fails while a newer one of its pair waits: it gives
+	// way, done with its cause, and the newer one is claimed.
+	if dead := p.keyedChange("Rust", "fail", north); dead != "false" && dead != "" {
+		t.Fatalf("Rust's fail of a move that gives way says it is dead: %s", dead)
+	}
+	wantRows(t, "the failed move gives way", p.movedRows("north", "SKU-1"), "done:5", "ready:7")
+	next := p.keyedClaims("Go", 10)
+	if len(next) != 1 || next[0].Members["warehouse"] != "north" || next[0].Members["sku"] != "SKU-1" || next[0].Members["quantity"] != "7" {
+		t.Fatalf("Go claimed %+v, want the north SKU-1 move of 7", next)
+	}
+}
+
+// movedDueIn is how many seconds from the database's clock the ready
+// message of a warehouse's SKU is due in.
+func (p *parity) movedDueIn(warehouse, sku string) float64 {
+	p.t.Helper()
+	var seconds float64
+	p.queryRow(p.dialectSQL(
+		"SELECT extract(epoch FROM due_at - now())::float8 FROM stock_moved_queue WHERE warehouse = $1 AND sku = $2 AND state = 'ready'",
+		"SELECT round((julianday(due_at) - julianday('now')) * 86400, 3) FROM stock_moved_queue WHERE warehouse = ?1 AND sku = ?2 AND state = 'ready'",
+	), []any{warehouse, sku}, &seconds)
+	return seconds
+}
+
+// testReplaceTakesTheNewDueTime: for each side, a move enqueued with a
+// delay of five minutes waits; the same pair enqueued again with no delay
+// replaces it, due at once, and is claimed; enqueued again with a delay it
+// waits again, with the new message's quantity, and no side claims it.
+func testReplaceTakesTheNewDueTime(t *testing.T) {
+	for i, side := range []string{"Go", "TypeScript", "Rust"} {
+		t.Run(side, func(t *testing.T) {
+			p := newParity(t)
+			p.on = "StockMoved"
+			sku := fmt.Sprintf("SKU-%d", i+1)
+			p.movedEnqueue(side, movedJSON("north", sku, 1), 5*time.Minute)
+			if left := p.movedDueIn("north", sku); left > 300 || left < 295 {
+				t.Fatalf("%s's move, enqueued with a delay of 300s, is due in %.1fs", side, left)
+			}
+			if got := p.keyedClaims(side, 5); len(got) != 0 {
+				t.Fatalf("%s claimed %+v before the delay passed", side, got)
+			}
+			p.movedEnqueue(side, movedJSON("north", sku, 2), 0)
+			wantRows(t, "a replace with no delay", p.movedRows("north", sku), "ready:2")
+			if left := p.movedDueIn("north", sku); left > 0.5 {
+				t.Fatalf("%s's replace with no delay leaves the message due in %.1fs, want at once", side, left)
+			}
+			p.movedEnqueue(side, movedJSON("north", sku, 3), 5*time.Minute)
+			wantRows(t, "a replace with a delay", p.movedRows("north", sku), "ready:3")
+			if left := p.movedDueIn("north", sku); left > 300 || left < 295 {
+				t.Fatalf("%s's replace with a delay of 300s leaves the message due in %.1fs", side, left)
+			}
+			if got := p.keyedClaims(side, 5); len(got) != 0 {
+				t.Fatalf("%s claimed %+v before the new delay passed", side, got)
+			}
+			p.movedEnqueue(side, movedJSON("north", sku, 4), 0)
+			got := p.keyedClaims(side, 5)
+			if len(got) != 1 || got[0].Members["quantity"] != "4" || got[0].Attempt != 1 {
+				t.Fatalf("%s claimed %+v, want the move of 4 on its first attempt", side, got)
+			}
+		})
+	}
 }
 
 // waits runs call in a goroutine and waits until a backend waits on a lock
@@ -390,6 +544,20 @@ func (p *parity) keyedClaims(side string, n int) []keyedClaim {
 			claims, err = NewStockCheckedSQLiteQueue(p.file).Claim(p.ctx, n, time.Minute)
 		} else {
 			claims, err = p.db.StockCheckedQueue().Claim(p.ctx, n, time.Minute)
+		}
+		if err != nil {
+			p.t.Fatalf("Go's claim on %s: %v", p.on, err)
+		}
+		for _, c := range claims {
+			add(c.ID, c.Token, c.Attempt, c.Message)
+		}
+	case "StockMoved":
+		var claims []StockMovedClaim
+		var err error
+		if p.file != nil {
+			claims, err = NewStockMovedSQLiteQueue(p.file).Claim(p.ctx, n, time.Minute)
+		} else {
+			claims, err = p.db.StockMovedQueue().Claim(p.ctx, n, time.Minute)
 		}
 		if err != nil {
 			p.t.Fatalf("Go's claim on %s: %v", p.on, err)

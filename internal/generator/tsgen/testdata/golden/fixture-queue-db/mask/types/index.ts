@@ -7,4 +7,5 @@ export * from './orderplaced';
 export * from './ping';
 export * from './product';
 export * from './stockchecked';
+export * from './stockmoved';
 export * from './syncrequested';

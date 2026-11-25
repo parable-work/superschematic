@@ -37,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
 	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
+	"github.com/parable-work/superschematic/runtime/http/go/wake"
 	"go.uber.org/zap"
 
 	shopapi "example.com/schemas/api/shop-api"
@@ -94,6 +95,14 @@ func run(logger *zap.Logger) error {
 	// One pool per database, shared by every API on it. A pool connects when
 	// it is first used, so the server starts while its database is not up yet
 	// and /readyz reports it.
+	// The wakes of the workers in drain mode, which the environment holds
+	// where their platform gives one (QUEUE_WAKES, D145): an enqueue sends
+	// its queue's, at most once in five seconds, and waits for none.
+	wakes, err := wake.FromEnv(logger)
+	if err != nil {
+		return err
+	}
+	defer wakes.Wait()
 	shopDbPool, err := connect(ctx, "SHOP_DB_DATABASE", shopApiConfig.ShopDbDatabase)
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
@@ -103,6 +112,7 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("database shop-db: %w", err)
 	}
+	shopdborm.OnEnqueue(wakes.Enqueued)
 
 	// shop-api: its implementation, built from its Deps, and its routes.
 	shopApiLogger := logger.With(zap.String("api", "shop-api"))

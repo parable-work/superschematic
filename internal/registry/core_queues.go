@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -36,7 +37,7 @@ type queueArgs struct {
 	MaxBackoff  *string `json:"maxBackoff"`
 	Lease       *string `json:"lease"`
 	Retain      *string `json:"retain"`
-	Key         *string `json:"key"`
+	Key         *any    `json:"key"`
 	OnDuplicate *string `json:"onDuplicate"`
 	Serialize   *bool   `json:"serialize"`
 }
@@ -75,7 +76,7 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	}
 	var a queueArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, ArgErrorf(0, "@queue options: backoff, maxBackoff, lease, retain, key and onDuplicate are strings, retries a whole number and serialize a boolean: %v", err)
+		return nil, ArgErrorf(0, "@queue options: backoff, maxBackoff, lease, retain and onDuplicate are strings, key a string or a list of them, retries a whole number and serialize a boolean: %v", err)
 	}
 	if a.Retries != nil {
 		n, ok := (*a.Retries).(float64)
@@ -98,7 +99,28 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 		def.Retain = *a.Retain
 	}
 	if a.Key != nil {
-		def.Key = *a.Key
+		// A key is one field's name, or a list of them: a list of one is
+		// that field's key.
+		switch key := (*a.Key).(type) {
+		case string:
+			def.Key = key
+		case []any:
+			for _, k := range key {
+				name, ok := k.(string)
+				if !ok {
+					return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"warehouse\", \"sku\"]", *a.Key)
+				}
+				def.Keys = append(def.Keys, name)
+			}
+			switch len(def.Keys) {
+			case 0:
+				return nil, ArgErrorf(0, "@queue key is an empty list; name the fields that key a message, or leave the key out")
+			case 1:
+				def.Key, def.Keys = def.Keys[0], nil
+			}
+		default:
+			return nil, ArgErrorf(0, "@queue key is %v; it is a field's name, or a list of them, as key: [\"warehouse\", \"sku\"]", *a.Key)
+		}
 	}
 	if a.OnDuplicate != nil {
 		def.OnDuplicate = *a.OnDuplicate
@@ -117,7 +139,8 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 // the maximum no shorter than the backoff, a retention of whole seconds,
 // zero or more, and an onDuplicate of append, replace or skip, which with
 // serialize takes effect on a key alone, and a key that one of them uses
-// (D80). Whether the key is a field of the message, and of what type, is
+// (D80), of one field (key) or of two or more, each named once (keys).
+// Whether each is a field of the message, and of what type, is
 // verification's to check, which reads the message's fields.
 func CheckQueue(def *ir.QueueDef) error {
 	if def.Retries != nil && *def.Retries < 0 {
@@ -155,16 +178,42 @@ func CheckQueue(def *ir.QueueDef) error {
 	default:
 		return fmt.Errorf("onDuplicate is %q; it is %q, %q or %q", def.OnDuplicate, ir.QueueOnDuplicateAppend, ir.QueueOnDuplicateReplace, ir.QueueOnDuplicateSkip)
 	}
+	switch {
+	case def.Key != "" && len(def.Keys) > 0:
+		return fmt.Errorf("key is %q and keys are %s; a key of one field is key, and one of several is keys, so set one of them", def.Key, strings.Join(def.Keys, ", "))
+	case len(def.Keys) == 1:
+		return fmt.Errorf("keys names one field, %s; a key of one field is key: %q", def.Keys[0], def.Keys[0])
+	}
+	seen := map[string]bool{}
+	for _, k := range def.Keys {
+		switch {
+		case k == "":
+			return fmt.Errorf("the key names an empty field; it lists the names of the message's fields that key it")
+		case seen[k]:
+			return fmt.Errorf("the key names the field %s twice", k)
+		}
+		seen[k] = true
+	}
 	dedupes := def.OnDuplicate == ir.QueueOnDuplicateReplace || def.OnDuplicate == ir.QueueOnDuplicateSkip
 	switch {
-	case def.Key == "" && dedupes:
+	case !def.HasKey() && dedupes:
 		return fmt.Errorf("onDuplicate is %q, which needs a key: name the message's field that keys it, as key: \"orderId\"", def.OnDuplicate)
-	case def.Key == "" && def.Serialize:
+	case !def.HasKey() && def.Serialize:
 		return fmt.Errorf("serialize needs a key: name the message's field that keys it, as key: \"orderId\"")
-	case def.Key != "" && !dedupes && !def.Serialize:
-		return fmt.Errorf("key %q takes effect with onDuplicate \"replace\" or \"skip\", or with serialize; set one of them, or leave the key out", def.Key)
+	case def.HasKey() && !dedupes && !def.Serialize:
+		return fmt.Errorf("key %s takes effect with onDuplicate \"replace\" or \"skip\", or with serialize; set one of them, or leave the key out", quotedList(def.KeyFields()))
 	}
 	return nil
+}
+
+// quotedList is names, each quoted, joined with commas: a key's fields as
+// an error names them, one field as it always was.
+func quotedList(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // RetainSeconds reads a retention: a duration of whole seconds as Go

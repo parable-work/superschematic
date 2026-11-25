@@ -19,6 +19,17 @@ func TestQueueKeysRefusedInIR(t *testing.T) {
 	queue("Optional", "orderId", &ir.FieldDef{Name: "orderId", TypeRef: ir.TypeRef{Name: "string"}})
 	queue("Listed", "tags", &ir.FieldDef{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true})
 	queue("Good", "orderId", &ir.FieldDef{Name: "orderId", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
+	// A key over several fields holds each of them to the same (D80,
+	// amended).
+	several := func(name string, keys []string, fields ...*ir.FieldDef) {
+		schema.Types[name] = &ir.TypeDef{Name: name, Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{Keys: keys, OnDuplicate: "replace"}, Fields: fields}
+	}
+	several("SeveralGood", []string{"warehouse", "sku"},
+		&ir.FieldDef{Name: "warehouse", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		&ir.FieldDef{Name: "sku", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
+	several("SeveralBad", []string{"warehouse", "sku", "lot"},
+		&ir.FieldDef{Name: "warehouse", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		&ir.FieldDef{Name: "sku", TypeRef: ir.TypeRef{Name: "string"}})
 	r := &Result{}
 	checkQueues(schema, r)
 	var got []string
@@ -29,6 +40,8 @@ func TestQueueKeysRefusedInIR(t *testing.T) {
 		`queue Listed's key tags is a list, a map or a JSON value; a key is one scalar or enum value`,
 		`queue Missing's key "orderId" names no field of the message; name one of its fields, as key: "sku"`,
 		`queue Optional's key orderId is optional; a key is a required field, so every message has one`,
+		`queue SeveralBad's key sku is optional; a key is a required field, so every message has one`,
+		`queue SeveralBad's key "lot" names no field of the message; name one of its fields, as key: "warehouse"`,
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("errors =\n%q\nwant\n%q", got, want)

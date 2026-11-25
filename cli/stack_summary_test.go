@@ -29,6 +29,38 @@ func TestPrintLocalSummaryNamesTheSQLiteFile(t *testing.T) {
 	}
 }
 
+// TestPrintImageNotice (D144): stack dev runs processes on the host and
+// installs nothing, so as it starts it names, once, the packages each
+// deployable's image would hold and the Dockerfile that extends it, and
+// says nothing for a stack that adds nothing.
+func TestPrintImageNotice(t *testing.T) {
+	env := &ir.ResolvedEnvironment{Stack: "shop-stack", Environment: "Dev", Resources: &ir.ResourceGraph{}, Deployables: []*ir.ResolvedDeployable{
+		{Name: "shop-api", Kind: ir.DeployableServer, Image: &ir.ResolvedImage{Packages: []string{"chromium", "fonts-liberation"}}},
+		{Name: "shop-orders", Kind: ir.DeployableServer},
+		{Name: "shop-orders-print-invoices", Kind: ir.DeployableWorker, Image: &ir.ResolvedImage{Packages: []string{"poppler-utils"}, Extend: "docker/invoices/Dockerfile"}},
+		{Name: "shop-orders-expire-orders", Kind: ir.DeployableJob, Image: &ir.ResolvedImage{Extend: "docker/expire.Dockerfile"}},
+	}}
+	var out bytes.Buffer
+	printImageNotice(&out, env)
+	want := "\nStack shop-stack adds to these images, and stack dev runs each deployable as a process on this machine and installs nothing.\n" +
+		"Install what each needs here to run it as its image does (D144):\n" +
+		"  job      shop-orders-expire-orders extended with docker/expire.Dockerfile\n" +
+		"  server   shop-api                 packages chromium, fonts-liberation\n" +
+		"  worker   shop-orders-print-invoices packages poppler-utils; extended with docker/invoices/Dockerfile\n"
+	if out.String() != want {
+		t.Errorf("the notice is\n%s\nwant\n%s", out.String(), want)
+	}
+
+	out.Reset()
+	for _, d := range env.Deployables {
+		d.Image = nil
+	}
+	printImageNotice(&out, env)
+	if out.Len() != 0 {
+		t.Errorf("a stack that adds to no image prints %q", out.String())
+	}
+}
+
 // TestPrintLocalSummaryNamesTheDerivers: a deriver's line says which
 // schemas' derived fields it fills, and how many answers it runs at a
 // time, or that they wait when the environment turns it off (D74).

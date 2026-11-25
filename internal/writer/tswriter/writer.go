@@ -382,6 +382,10 @@ func queueArgs(def *ir.QueueDef) string {
 	if def.Key != "" {
 		parts = append(parts, "key: "+quote(def.Key))
 	}
+	if len(def.Keys) > 0 {
+		// A key over several fields is a list (D80).
+		parts = append(parts, "key: "+stringListLiteral(def.Keys))
+	}
 	if def.OnDuplicate != "" {
 		parts = append(parts, "onDuplicate: "+quote(def.OnDuplicate))
 	}

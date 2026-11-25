@@ -431,22 +431,43 @@ type BuildRequest struct {
 	// slash-separated (`schemas/dist/server/Shop/shop-api/Dockerfile`).
 	Dockerfile string
 
+	// Extend is the path inside the context of a Dockerfile of the
+	// project's that extends the image Dockerfile builds (D144), or empty.
+	// A builder builds Dockerfile, then builds Extend from the same
+	// context with the build argument ImageBaseArg naming the image the
+	// first build made, and returns the second image. One that cannot
+	// refuses the request rather than return the first.
+	Extend string
+
 	// Log receives progress.
 	Log io.Writer
 }
+
+// ImageBaseArg is the build argument a Dockerfile that extends a generated
+// image takes (D144): the image the generated Dockerfile built, which its
+// FROM names (`ARG BASE` and `FROM ${BASE}`).
+const ImageBaseArg = "BASE"
 
 // contextDigestPattern is the shape of a BuildRequest's ContextDigest.
 var contextDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // Check refuses a request with no valid run, no server or job of the run's
-// environment, no context archive or digest, or a Dockerfile path that is
-// not a relative, slash-separated path inside the context.
+// environment, no context archive or digest, or a Dockerfile path, or an
+// extending one, that is not a relative, slash-separated path inside the
+// context.
 func (r BuildRequest) Check() error {
 	if err := r.Run.Check(); err != nil {
 		return err
 	}
 	d := r.Run.Environment.Deployable(r.Deployable)
+	inContext := func(p string) bool {
+		return p != "" && !strings.HasPrefix(p, "/") && !strings.Contains(p, `\`) && path.Clean(p) == p && p != ".." && !strings.HasPrefix(p, "../")
+	}
 	switch {
+	case r.Extend != "" && !inContext(r.Extend):
+		return fmt.Errorf("build %s: the extending Dockerfile %q is not a slash-separated path inside the context", r.Deployable, r.Extend)
+	case r.Extend != "" && r.Extend == r.Dockerfile:
+		return fmt.Errorf("build %s: the Dockerfile %q extends itself", r.Deployable, r.Extend)
 	case d == nil || !d.HasImage():
 		return fmt.Errorf("build: environment %s has no server or job %q", r.Run.Environment.Environment, r.Deployable)
 	case r.Context == "":

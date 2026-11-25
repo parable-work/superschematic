@@ -28,8 +28,8 @@ const (
 // dead; and on StockChecked, which keeps one ready message per SKU (D80),
 // a retry of two dead messages of one SKU and of every dead message.
 var goldenRequests = map[string]Request{
-	"retry-keyed":     {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, IDs: []string{deadID, dead2ID}, Key: "sku"},
-	"retry-all-keyed": {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, All: true, Key: "sku"},
+	"retry-keyed":     {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, IDs: []string{deadID, dead2ID}, Keys: []string{"sku"}},
+	"retry-all-keyed": {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, All: true, Keys: []string{"sku"}},
 	"dead":            {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Dead, Limit: 1},
 	"retry":           {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, IDs: []string{deadID}},
 	"retry-all":       {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, All: true},
@@ -96,7 +96,7 @@ func TestBackfillDocument(t *testing.T) {
 		t.Fatalf("Order, which is no queue: %v", err)
 	}
 
-	got, err := Document(Request{Service: "fixture-queue-db", Queue: "OrderChanged", Operation: Backfill, Backfills: statements, Key: "order_id"})
+	got, err := Document(Request{Service: "fixture-queue-db", Queue: "OrderChanged", Operation: Backfill, Backfills: statements, Keys: []string{"order_id"}})
 	if err != nil {
 		t.Fatal(err)
 	}

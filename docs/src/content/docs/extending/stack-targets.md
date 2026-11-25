@@ -184,6 +184,24 @@ concurrency of each and the grace it gives running handlers when it
 stops. It sets `WORKER_CONCURRENCY` on the process to the concurrency,
 which the worker's entrypoint reads. A worker has a server's bindings,
 from its API's config and its own edges, and no callers field.
+
+A worker's `Mode` may be `ir.WorkerModeDrain` (D145): the environment asks
+that it run as a job that empties its queue and exits. A platform that
+has such a thing sets `WORKER_MODE=drain`, `WORKER_IDLE_SECONDS` to the
+run's `IdleSeconds` and `WORKER_SLOTS` to how many may run at once, its
+`Instances`, and the generated Go and TypeScript entrypoints do the rest;
+a platform that has none may run the worker as it runs any, as the local
+target does. Something must then start it. The deployable's `WokenBy`
+lists each deployable that may enqueue to its queue, with its platform,
+and each of those holds the worker in its `Wakes`, with the worker's
+platform and resource name. A platform that can start the worker gives
+those deployables the right to, and sets `QUEUE_WAKES` on each to a JSON
+object that maps the queue's class to a list of `ir.QueueWake`: a URL the
+queue client `POST`s an empty JSON object to, and where its bearer token
+comes from. The queue clients send it after an enqueue, and name no
+provider. A wake is a hint, sent before the enqueue's transaction
+commits and lost without a retry, so a platform that provides one also
+starts the worker on a schedule of its own.
 `stack/stacktest`'s `fake.worker` lowers one to a pool with its own
 account, the local target's `local.worker` to a process with no port,
 ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker
@@ -361,7 +379,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
 | `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`; cloudflare's `secretsStoreId` and `workersSubdomain`, beside `accountId`) |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
-| `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
+| `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which. When `BuildRequest.Extend` names a Dockerfile of the project's in the context, it builds that next, with the build argument `registry.ImageBaseArg` (`BASE`) naming the first image, and returns the second (D144) |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
 | `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, or for a job whose artifact is a bundle its digest (`Bundle`), and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 | `Queues` | `QueueRunner` | runs a queue document, `stack queue`'s operation on a queue's dead messages, on a deployed run's database where `superschematic-migrate` reaches it, and returns the runner's result; a `QueueRequest` names the run, the database, the DB service and the document. The result may hold personal data, so it never goes to a log (D68, amended) |

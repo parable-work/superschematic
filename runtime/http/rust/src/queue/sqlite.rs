@@ -132,8 +132,24 @@ pub fn enqueue_sqlite<M>(
 where
     M: Serialize + ?Sized,
 {
+    enqueue_sqlite_in(connection, queue, message, Duration::ZERO)
+}
+
+/// Writes `message` into `queue` as [`enqueue_sqlite`] does, due once
+/// `delay` has passed by the database's clock (D80), as
+/// [`enqueue_in`](super::enqueue_in) does on Postgres.
+pub fn enqueue_sqlite_in<M>(
+    connection: &Connection,
+    queue: &QueueDefinition,
+    message: &M,
+    delay: Duration,
+) -> Result<(), QueueError>
+where
+    M: Serialize + ?Sized,
+{
     let statements = sqlite_statements(queue)?;
     let context = || format!("enqueue on {}", queue.table);
+    let due = super::due_in(&queue.table, statements, delay)?;
     let members = match serde_json::to_value(message) {
         Ok(Value::Object(members)) => members,
         Ok(other) => {
@@ -145,7 +161,14 @@ where
         Err(err) => return Err(QueueError::failed(&context(), &err)),
     };
     let mut columns = Vec::new();
+    let mut placeholders = Vec::new();
     let mut values = Vec::new();
+    if let Some(due) = due {
+        // due_at goes first: the statement numbers the delay's seconds ?1.
+        columns.push("due_at");
+        placeholders.push(due.to_owned());
+        values.push(SqlValue::Real(delay.as_secs_f64()));
+    }
     for field in &queue.fields {
         let value = match members.get(&field.name) {
             Some(value) if !unset(Some(value), field) => value.clone(),
@@ -159,11 +182,11 @@ where
         })?;
         columns.push(field.column.as_str());
         values.push(column);
+        placeholders.push(format!("?{}", values.len()));
     }
     let sql = if columns.is_empty() {
         format!("{} DEFAULT VALUES", statements.insert)
     } else {
-        let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
         format!(
             "{} ({}) VALUES ({}){}",
             statements.insert,

@@ -242,14 +242,17 @@ credential, which `fetch.ts` generates within the isolate's build.
 `cloudflare.r2` lowers a bucket to `<bucket>.bucket`, an
 `r2Bucket` named `<stack>-<env>-<bucket>` with a suffix per parameter, and with
 `deleteAfterDays` to `<bucket>.lifecycle`, an `r2BucketLifecycle` whose
-rule deletes each object that many days after it was written.
+rule deletes each object that many days after it was written, and with
+`cors` to `<bucket>.cors`, an `r2BucketCors` with a rule per element of
+the setting (D148).
 
 | Setting | Type | |
 | --- | --- | --- |
 | `locationHint` | `wnam`, `enam`, `weur`, `eeur`, `apac`, `oc` | the bucket's `location` |
 | `storageClass` | `Standard`, `InfrequentAccess` | the class of new objects |
 | `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
-| `jurisdiction` | `eu`, `fedramp` | the bucket's and the lifecycle's `jurisdiction`; refused beside `locationHint`; a change replaces the bucket, which R2 refuses while it holds objects |
+| `jurisdiction` | `eu`, `fedramp` | the bucket's, the lifecycle's and the CORS rules' `jurisdiction`; refused beside `locationHint`; a change replaces the bucket, which R2 refuses while it holds objects |
+| `cors` | a list of `{ origins, methods, headers?, exposeHeaders?, maxAge? }` | the CORS rules: `allowed.origins`, `allowed.methods`, `allowed.headers`, `exposeHeaders` and `maxAgeSeconds`, each rule's `id` its place in the list (`cors-1`). A rule that admits `PUT` from `*` is refused |
 
 `cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
 `<caller>.r2.<bucket>.token`, an `accountToken` named
@@ -447,7 +450,8 @@ digest of each upstream file and the types the DNS platform and the
 target emit: the DNS record, the account token of bootstrap's graph and
 of a bucket edge, a Worker's `worker`, `workerVersion`,
 `workersDeployment`, `workersCustomDomain` and `workersCronTrigger`, a
-job's `workflow`, a bucket's `r2Bucket` and `r2BucketLifecycle`, and the
+job's `workflow`, a bucket's `r2Bucket`, `r2BucketLifecycle` and
+`r2BucketCors`, and the
 D1 database, `d1Database`. A call's key node is the core's `tls` type, which the
 generic connector pins.
 `schemas/` holds one file per type, with its Terraform name and renames

@@ -74,13 +74,15 @@ func (b imageBuilder) Build(ctx context.Context, req registry.BuildRequest) (str
 	if err != nil {
 		return "", err
 	}
-	return b.ext.build(ctx, v, env.Stack, repo, "context-"+hex, req.Dockerfile, object, data, log)
+	return b.ext.build(ctx, v, env.Stack, repo, "context-"+hex, req.Dockerfile, req.Extend, object, data, log)
 }
 
 // build runs a build of image repo:tag from a context's archive, which it
 // uploads to object in the state bucket, unless the tag exists, and
-// returns the image by digest.
-func (e Extension) build(ctx context.Context, v values, stack, repo, tag, dockerfile, object string, archive []byte, log io.Writer) (string, error) {
+// returns the image by digest. With extend, a Dockerfile of the project's
+// in the context (D144), the build makes the generated image first and
+// repo:tag from extend over it.
+func (e Extension) build(ctx context.Context, v values, stack, repo, tag, dockerfile, extend, object string, archive []byte, log io.Writer) (string, error) {
 	cloud := e.cloud()
 	logf := func(format string, args ...any) { _, _ = fmt.Fprintf(log, "  "+format+"\n", args...) }
 	image := repo + ":" + tag
@@ -100,6 +102,7 @@ func (e Extension) build(ctx context.Context, v values, stack, repo, tag, docker
 		Bucket:         bucket,
 		Object:         object,
 		Dockerfile:     dockerfile,
+		Extend:         extend,
 		Image:          image,
 		ServiceAccount: accountEmail(v, stack, "builder"),
 		Timeout:        buildTimeout,

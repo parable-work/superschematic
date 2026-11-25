@@ -121,6 +121,18 @@ export interface StockChecked {
 }
 
 /**
+ * StockMoved - Sent when stock moves within a warehouse: one waits per warehouse and SKU
+ * together, the two fields its key names (D80). A later move of that SKU
+ * there replaces the one that waits, the same SKU in another warehouse
+ * waits beside it, and a worker holds one claim per warehouse and SKU.
+ */
+export interface StockMoved {
+  warehouse: string;
+  sku: string;
+  quantity: GenericInt64;
+}
+
+/**
  * SyncRequested - Sent when an account's records are to be synced: every request is kept,
  * and the worker syncs one account at a time.
  */

@@ -92,23 +92,31 @@ func checkQueues(schema *ir.Schema, r *Result) {
 	}
 }
 
-// checkQueueKey checks a queue's key (D80): a field of its message that is
-// required, so every message has one, and a single scalar or enum, not a
-// list, a map or a JSON value, whose column an index compares by
-// equality, which a POINT and the PostGIS types are not.
+// checkQueueKey checks a queue's key (D80): each field it names, one or
+// several, is a field of its message that is required, so every message
+// has one, and a single scalar or enum, not a list, a map or a JSON value,
+// whose column an index compares by equality, which a POINT and the
+// PostGIS types are not.
 func checkQueueKey(schema *ir.Schema, td *ir.TypeDef, r *Result) {
-	if td.Queue == nil || td.Queue.Key == "" {
+	if td.Queue == nil {
 		return
 	}
+	for _, name := range td.Queue.KeyFields() {
+		checkQueueKeyField(schema, td, name, r)
+	}
+}
+
+// checkQueueKeyField checks one field of a queue's key.
+func checkQueueKeyField(schema *ir.Schema, td *ir.TypeDef, name string, r *Result) {
 	where := "queue " + td.Name
 	var key *ir.FieldDef
 	for _, f := range td.Fields {
-		if f != nil && f.Name == td.Queue.Key {
+		if f != nil && f.Name == name {
 			key = f
 		}
 	}
 	if key == nil {
-		r.errorf(td.Owner, "%s's key %q names no field of the message; name one of its fields, as key: %q", where, td.Queue.Key, firstFieldName(td))
+		r.errorf(td.Owner, "%s's key %q names no field of the message; name one of its fields, as key: %q", where, name, firstFieldName(td))
 		return
 	}
 	_, union := schema.Unions[key.TypeRef.Name]
