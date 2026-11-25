@@ -237,6 +237,15 @@ path for when the store is unavailable.
   write the repointing against the relations you remember: the build
   enumerates them. It copies no field of `from`, so update `into` first
   with what to keep.
+- **A link to a row of any table, or a file, is a declaration.** Put
+  `@references<T>({ tables?, cleared? })` or `@attachments<T>({ released })`
+  on the table and use `orm.references` (`add`, `of`, `referencedBy`) and
+  `orm.attachments` (`begin`, `complete`, `file`, `release`) (D154).
+  Don't add a `targetTable`/`targetKey` column pair or a files table by
+  hand: the build adds the sub-table, clears references to a deleted row,
+  keeps backlinks to what the reader may see, and releases an object once
+  no file names it. A browser uploads to the URL `begin` signs, never
+  through the API.
 - **Payloads you don't control gain keys.** A `@webhook`'s input drops the
   keys its type does not declare; mark any other such type
   `@allowUnknownFields`, rather than a manual route to read the body.
