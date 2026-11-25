@@ -1,6 +1,7 @@
 import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
+import { wakeAfterEnqueue } from './queue-wake.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
@@ -1064,11 +1065,36 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
     const { changes, reads } = settled;
     const statements = [...fencesOf(host, reads), ...(await statementsOf(host, type, run, changes, options, spend))];
     if (await host.store.apply(statements)) {
+      wakeQueues(host, changes);
       return { ran: true, result: { changes, result: changes.result ?? null, key: keyOfCommand(run), attempts: attempt } };
     }
     if (queue !== undefined && spending.claim !== undefined && !(await claimHeld(host, queue, spending.claim))) return { ran: false, why: 'claim lost' };
   }
   throw new RulesRefusal(busyRefusal(type, run, MAX_ATTEMPTS));
+}
+
+/**
+ * Tells the process's queue waker of what a command's unit left a behavior
+ * worker (D151): each event, on its table's event queue, due at once, and
+ * each deadline it armed, on its table's deadline queue, due at its time.
+ * A worker whose platform drains at a Cron Trigger's firings starts a run
+ * that waits for one due before the next firing, so an urgent deadline or
+ * an event does not wait for it. The wakes are sent once the statements
+ * have run, before the caller's transaction commits, as an enqueue's are
+ * (D145): the run's drain waits a while for what falls due, and the next
+ * firing finds what it missed. A host with no waker sends nothing, and a
+ * wake never fails the command.
+ */
+function wakeQueues(host: RulesHost, changes: CoreChangeSet): void {
+  for (const event of changes.events ?? []) {
+    const queue = host.layout.types[event.row.type]?.events?.queue;
+    if (queue !== undefined) wakeAfterEnqueue(queue);
+  }
+  for (const change of changes.deadlines ?? []) {
+    if (change.kind !== 'arm') continue;
+    const queue = host.layout.types[change.row.type]?.deadlines?.queue;
+    if (queue !== undefined) wakeAfterEnqueue(queue, change.at);
+  }
 }
 
 /**

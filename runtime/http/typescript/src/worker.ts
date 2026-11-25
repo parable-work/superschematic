@@ -266,9 +266,10 @@ const silent: Logger = {
  * Claims and handles queue's messages until options.signal aborts, then
  * stops as the module says: it claims no more, lets the running handlers
  * finish within the grace, and releases the messages of those that do not.
- * It resolves once it stopped, and rejects only for a queue it cannot run.
+ * It resolves once it stopped, to what it did (WorkerRun), and rejects only
+ * for a queue it cannot run.
  */
-export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Promise<void> {
+export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Promise<WorkerRun> {
   if (!(queue.leaseSeconds > 0)) throw new Error(`worker: queue ${queue.name} has a lease of ${queue.leaseSeconds}s; it is positive`);
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 1));
   const graceMs = options.graceMs !== undefined && options.graceMs > 0 ? options.graceMs : DEFAULT_GRACE_MS;
@@ -288,6 +289,13 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     wake?.();
     wake = undefined;
   };
+  // What the worker did, which it resolves to: how many handlers resolved
+  // and how many failed, and whether its last claim filled every free slot,
+  // which says the queue held more than it took.
+  let handled = 0;
+  let failedCount = 0;
+  let lastClaimFull = false;
+  let drained = false;
 
   // A worker in drain mode takes a slot of its queue first, and stops at
   // once when every one is taken.
@@ -299,7 +307,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     releaseSlot = await queue.slot(slots);
     if (releaseSlot === undefined) {
       logger.info('every slot of the queue is taken: the workers that hold them drain it', { slots });
-      return;
+      return { handled: 0, failed: 0, released: 0, backlog: false };
     }
   }
   // When the worker was last busy: a claim that found a message, a handler
@@ -347,6 +355,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       return;
     }
     if (!failed) {
+      handled++;
       try {
         await withTimeout(queue.complete(message.id, message.token));
         logger.info('message handled', fields);
@@ -355,6 +364,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       }
       return;
     }
+    failedCount++;
     const cause = causeOf(error).slice(0, MAX_CAUSE);
     try {
       const dead = await withTimeout(queue.fail(message.id, message.token, cause));
@@ -458,6 +468,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     }
     wait = idleMs;
     failingSince = undefined;
+    lastClaimFull = messages.length > 0 && messages.length >= free;
     for (const message of messages) start(message);
     if (drain !== undefined && messages.length === 0 && running.size === 0 && Date.now() - busy >= drainIdleMs) {
       // A message that falls due within the horizon, a delayed one or a
@@ -469,6 +480,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
         continue;
       }
       logger.info('drained: no message was ready or held', { idle: drainIdleMs / 1000 });
+      drained = true;
       stopper.abort();
       break;
     }
@@ -490,7 +502,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     await releaseSlot?.().catch(() => undefined);
     logger.info('worker stopped');
     if (failure !== undefined) throw claimsFailed(queue.name, drainIdleMs, failure.error);
-    return;
+    return { handled, failed: failedCount, released: 0, backlog: !drained && lastClaimFull };
   }
   const unfinished = [...running.values()];
   for (const h of unfinished) h.released = true;
@@ -508,6 +520,95 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
   await releaseSlot?.().catch(() => undefined);
   logger.info('worker stopped: the grace is over, and the unfinished messages are released', { released, unfinished: unfinished.length });
   if (failure !== undefined) throw claimsFailed(queue.name, drainIdleMs, failure.error);
+  return { handled, failed: failedCount, released, backlog: true };
+}
+
+/**
+ * What a worker did before it stopped (D151): how many messages its
+ * handlers handled and how many failed, how many it released at the end of
+ * its grace, and whether it left a backlog: it stopped at its signal, not
+ * drained, while its last claim filled every free slot, or with handlers
+ * it released.
+ */
+export interface WorkerRun {
+  readonly handled: number;
+  readonly failed: number;
+  readonly released: number;
+  readonly backlog: boolean;
+}
+
+/**
+ * How a firing of a worker on Cloudflare Workers runs its queues (D92,
+ * D151): for a window that ends before the CPU limit of the invocation,
+ * each with concurrency messages at a time, the batch a claim takes, as
+ * runWorker runs them.
+ */
+export interface FiringOptions {
+  /** How long the firing claims, after which it stops as at SIGTERM. */
+  readonly windowMs: number;
+  readonly concurrency: number;
+  readonly graceMs: number;
+  readonly logger?: Logger;
+  /**
+   * Set for a wake's run (D151): each queue drains, stopping once it held
+   * and found no message for idleMs and none falls due within horizonMs,
+   * so the run ends once the work it was started for is done. Unset, each
+   * queue claims for the whole window, as a firing of the Cron Trigger
+   * does.
+   */
+  readonly wake?: { readonly idleMs: number; readonly horizonMs: number };
+}
+
+/** What a firing did: each queue's WorkerRun, by queue, in the order given. */
+export interface Firing {
+  readonly queues: readonly { readonly name: string; readonly run: WorkerRun }[];
+  /** The queues it left a backlog on, which the next firing takes. */
+  readonly backlog: readonly string[];
+}
+
+/** How long a wake's run waits with no message before it stops, and how far ahead it waits for one. */
+export const WAKE_IDLE_MS = 2_000;
+export const WAKE_HORIZON_MS = 10_000;
+
+/**
+ * Runs one firing of a worker on Workers over its queues (D92, D151): every
+ * queue at once, each claiming batches of up to concurrency messages, until
+ * the window ends or, for a wake's run, until it drains. A queue's slot
+ * lock is not taken: a firing's connections go through Hyperdrive, whose
+ * pooled sessions hold no advisory lock, and two firings that overlap share
+ * the queue through its claims, which skip what the other holds. It logs,
+ * for each queue it left a backlog on, a warning that names the queue and
+ * how many messages the firing handled, so a queue that outgrows one
+ * firing shows in the Worker's logs, and resolves to what it did.
+ */
+export async function runFiring(queues: readonly WorkerQueue[], options: FiringOptions): Promise<Firing> {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), options.windowMs);
+  const logger = options.logger ?? silent;
+  try {
+    const runs = await Promise.all(
+      queues.map(async queue => {
+        const { slot: _slot, ...claims } = queue;
+        const run = await runWorker(claims, {
+          signal: stop.signal,
+          concurrency: options.concurrency,
+          graceMs: options.graceMs,
+          ...(options.logger ? { logger: options.logger } : {}),
+          ...(options.wake ? { drain: { idleMs: options.wake.idleMs }, drainHorizonMs: options.wake.horizonMs } : {}),
+        });
+        return { name: queue.name, run };
+      })
+    );
+    const backlog = runs.filter(r => r.run.backlog).map(r => r.name);
+    for (const { name, run } of runs) {
+      if (run.backlog) {
+        logger.warn('backlog left for the next firing: the queue held more than one firing handles', { queue: name, handled: run.handled, failed: run.failed, released: run.released, window: options.windowMs / 1000 });
+      }
+    }
+    return { queues: runs, backlog };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The error a worker in drain mode stops with once every claim failed for its idle time. */

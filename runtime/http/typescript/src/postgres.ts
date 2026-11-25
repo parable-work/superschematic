@@ -307,8 +307,8 @@ export { ClaimLostError, enqueue, parseArray, postgresQueue } from './queue.js';
 export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueuePool, QueueQueryable, QueueQueryConfig, QueueStatements } from './queue.js';
 // The wake an enqueue sends the worker of a queue that runs in drain mode
 // (D145), which a platform gives in QUEUE_WAKES.
-export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, setProcessQueueWaker, WAKE_INTERVAL_MS } from './queue.js';
-export type { QueueWake, QueueWakeHost, QueueWaker } from './queue.js';
+export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, queueWakesSettled, setProcessQueueWaker, WAKE_INTERVAL_MS, wakeRunId } from './queue.js';
+export type { QueueWake, QueueWakeBinding, QueueWakeHost, QueueWaker } from './queue.js';
 
 // The value codec (D79): a UUID's two forms, a row read as the types hold
 // it and a value bound as its column takes it, over the descriptors a DB's
