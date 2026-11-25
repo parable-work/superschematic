@@ -221,6 +221,11 @@ type FieldInfo struct {
 	// Validations contains validation rules derived from scalar and field constraints.
 	Validations []ValidationRule
 
+	// Limits are the field's effective limits (EffectiveLimits): each
+	// Validate<> limit merged with its scalar's, and each scalar limit the
+	// field does not declare.
+	Limits []FieldLimit
+
 	// Digits are the field's rules on a decimal's digits and a vector's
 	// length (D84), nil without any. They are not in Validations: every
 	// validator checks them on each value apart from the other rules.

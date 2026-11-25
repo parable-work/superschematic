@@ -980,6 +980,26 @@ Default: `{column} cannot move from % to %`
 The message the Postgres guard raises for a move the machine does not
 list, with the placeholders of `sql.state_guard_terminal`.
 
+## `[go]`
+
+Shapes of the generated Go types and ORM. The defaults are the core's
+output. A project whose hand-written Go code another compiler's output
+shaped sets these keys, so that code compiles and behaves the same.
+
+### `go.limit_constants`
+
+Default: `off`
+
+`on` writes, after each Go type, an untyped constant for each limit a
+field declares with `Validate<T, {...}>`: `<Type><Field>MinLength`,
+`MaxLength`, `Min`, `Max`, `ListMin` and `ListMax`, such as
+`OrderNotesMaxLength = 2000`. The value is the bound `Validate` checks:
+the field's limit merged with its scalar's, the larger minimum and the
+smaller maximum. A length counts Unicode code points. A module that
+aliases a dependency's type aliases its constants beside it. Two
+constants with one name, or a constant with the name of a type, enum or
+union, fail the build. `off` writes none. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

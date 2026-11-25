@@ -165,3 +165,9 @@ column_defaults = "on"
 now_defaults = "declared"
 state_guard_terminal = "{column} is terminal at %: it cannot move to %"
 state_guard_refused = "{column} cannot move from % to %"
+
+# Shapes of the generated Go types and ORM beyond the core's. A project
+# whose Go code another compiler's output shaped sets them, so that code
+# compiles and behaves the same.
+[go]
+limit_constants = "off"

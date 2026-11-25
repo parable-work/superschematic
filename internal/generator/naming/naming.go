@@ -234,6 +234,10 @@ type Naming struct {
 	// beyond its type, and the text of the errors its triggers raise.
 	SQL SQLConfig `toml:"sql"`
 
+	// Go is the [go] table: shapes of the generated Go types and ORM that
+	// a project whose Go code another compiler's output shaped can set.
+	Go GoConfig `toml:"go"`
+
 	// TypeComments is how the TypeScript reader reads the comment of a
 	// declaration: a class, an interface, a type alias or an enum.
 	// "attached" (default) reads the comments no blank line parts from
@@ -963,6 +967,7 @@ func Default() Naming {
 			StateGuardTerminal: DefaultGuardTerminal,
 			StateGuardRefused:  DefaultGuardRefused,
 		},
+		Go: defaultGoConfig(),
 		AuthoringPackages: []string{
 			"@superschematic/api",
 			"@superschematic/db",
@@ -1033,6 +1038,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SQL.NowDefaults, d.SQL.NowDefaults)
 	fill(&n.SQL.StateGuardTerminal, d.SQL.StateGuardTerminal)
 	fill(&n.SQL.StateGuardRefused, d.SQL.StateGuardRefused)
+	n.Go.fill(d.Go, fill)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -1408,6 +1414,9 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.SQL.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Go.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {

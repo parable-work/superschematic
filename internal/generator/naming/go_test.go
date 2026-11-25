@@ -1,0 +1,51 @@
+package naming
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestTheGoTableDefaultsToTheCore: a file without it, and a zero Naming
+// filled by OrDefault, carry the core's Go output.
+func TestTheGoTableDefaultsToTheCore(t *testing.T) {
+	n, err := Parse([]byte("npm_scope = \"@x\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]Naming{"a parsed file": n, "a zero Naming": (Naming{}).OrDefault()} {
+		if got.Go != defaultGoConfig() {
+			t.Errorf("%s: [go] = %+v, want %+v", name, got.Go, defaultGoConfig())
+		}
+	}
+}
+
+// TestParseReadsTheGoTable reads every key.
+func TestParseReadsTheGoTable(t *testing.T) {
+	n, err := Parse([]byte(`[go]
+limit_constants = "on"
+`), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultGoConfig()
+	want.LimitConstants = GoOn
+	if n.Go != want {
+		t.Errorf("[go] = %+v, want %+v", n.Go, want)
+	}
+	if !n.Go.WritesLimitConstants() {
+		t.Error("WritesLimitConstants() = false with limit_constants = \"on\"")
+	}
+}
+
+// TestParseRefusesAValueTheGoTableDoesNotTake names the key and the values
+// it takes.
+func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
+	for _, tc := range []struct{ file, want string }{
+		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
+	} {
+		_, err := Parse([]byte(tc.file), "superschematic.toml")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want it to hold %q", tc.file, err, tc.want)
+		}
+	}
+}

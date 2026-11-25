@@ -134,6 +134,10 @@ type FieldInfo struct {
 	// KeepsZeroValue drops omitempty from an optional bool whose default is
 	// true: an omitted false would decode back as true.
 	KeepsZeroValue bool
+
+	// LimitConsts are the constants of the limits the field declares with
+	// Validate<>, written with go.limit_constants = "on" (D160).
+	LimitConsts []LimitConst
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][].
@@ -245,6 +249,9 @@ type ImportedTypeInfo struct {
 	Doc         string
 	ImportAlias string
 	IsInput     bool
+	// LimitConsts name the dependency's limit constants of the type, which
+	// the module aliases beside it (go.limit_constants = "on", D160).
+	LimitConsts []string
 }
 
 // ImportedUnionInfo holds alias metadata for unions owned by a dependency module.
@@ -493,6 +500,13 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	unionNames := knownUnionNames(output.Unions, output.ImportedUnions)
 	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames)...)
+	if opts.Naming.Go.WritesLimitConstants() {
+		setLimitConsts(output.Types[:len(objectTypes)], objectTypes)
+		setLimitConsts(output.Types[len(objectTypes):], inputTypes)
+		if err := checkLimitConstNames(output); err != nil {
+			return nil, err
+		}
+	}
 	// A strict General type is a closed payload contract; give it its
 	// standalone OpenAPI schema so a Go program can hand the contract to a
 	// consumer that validates or documents it.
