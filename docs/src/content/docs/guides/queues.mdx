@@ -886,7 +886,10 @@ free. A burst therefore brings up one more worker per wake, up to
 
 A task runs for a day at most, then Cloud Run stops it as it stops any
 instance, and the next wake or tick starts another. Cloud Run retries no
-task. A drain worker in Rust does not resolve on gcp yet, and neither
+task. A worker whose every claim fails for its `idle` time, with its
+database down or its queue's table not the one its build expects, logs
+`every claim failed for the idle time` and exits with an error, which
+gives its slot back, instead of retrying until the day is over. A drain worker in Rust does not resolve on gcp yet, and neither
 does a `@behaviorWorker` in drain mode on any target.
 
 ## On Cloudflare

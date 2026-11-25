@@ -396,6 +396,34 @@ describe('runWorker in drain mode (D145)', () => {
     }
   });
 
+  test('a worker whose every claim fails for its idle time rejects and gives its slot back, and one whose claims recover keeps draining', async () => {
+    const locks = new Slots();
+    const failing = new FakeQueue(60);
+    failing.claimErrors = Number.POSITIVE_INFINITY;
+    const { lines, logger } = logs();
+    await expect(runWorker({ ...failing.queue(), slot: locks.slot }, { signal: never, idleMs: 5, logger, drain: { idleMs: 60 } })).rejects.toThrow(
+      'worker: every claim of queue Fake failed for 0.06s, so the worker in drain mode stops: the database is down'
+    );
+    expect(locks.held).toBe(0);
+    expect(lines.some(line => line.msg === 'every claim failed for the idle time: the worker stops with an error and gives its slot back')).toBe(true);
+
+    // Two failed claims, within the idle time, then the queue answers.
+    const recovering = new FakeQueue(60);
+    recovering.claimErrors = 2;
+    recovering.add('m', async () => {});
+    await runWorker(recovering.queue(), { signal: never, idleMs: 5, drain: { idleMs: 200 } });
+    expect(recovering.completed).toEqual(['m']);
+
+    // A worker in a pool keeps trying until it is stopped.
+    const pooled = new FakeQueue(60);
+    pooled.claimErrors = Number.POSITIVE_INFINITY;
+    const stop = new AbortController();
+    const done = runWorker(pooled.queue(), { signal: stop.signal, idleMs: 5 });
+    await sleep(100);
+    stop.abort();
+    await done;
+  });
+
   test('a signal stops a draining worker as it stops any, and its slot is given back', async () => {
     const locks = new Slots();
     const stop = new AbortController();

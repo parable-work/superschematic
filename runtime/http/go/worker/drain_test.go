@@ -360,3 +360,46 @@ func TestADrainWorkerWaitsForAMessageDueWithinItsHorizon(t *testing.T) {
 		}
 	}
 }
+
+// TestADrainWorkerWhoseClaimsFailStops (D145): a worker in drain mode
+// whose every claim fails for its idle time stops with an error, which
+// names the queue and the last failure, and gives its slot back, so a
+// job's task does not hold the slot until its time limit; one whose claims
+// fail and then recover within the idle time keeps draining; and a pool's
+// worker retries until it is stopped.
+func TestADrainWorkerWhoseClaimsFailStops(t *testing.T) {
+	locks := &slots{}
+	f := newFake()
+	f.claimErr, f.claimErrs = errors.New("the database is down"), 1<<30
+	q := f.queue(time.Minute)
+	q.Slot = locks.slot
+	core, logs := observer.New(zap.InfoLevel)
+	err := Run(context.Background(), q, Options{Idle: 5 * time.Millisecond, Logger: zap.New(core), Drain: &Drain{Idle: 60 * time.Millisecond}})
+	if err == nil || !strings.Contains(err.Error(), "every claim of queue Fake failed for 60ms, so the worker in drain mode stops: the database is down") {
+		t.Errorf("Run = %v", err)
+	}
+	if locks.holds() != 0 {
+		t.Errorf("the worker holds %d slots after it stopped", locks.holds())
+	}
+	if logs.FilterMessage("every claim failed for the idle time: the worker stops with an error and gives its slot back").Len() != 1 {
+		t.Errorf("the stop is not logged once: %v", logs.All())
+	}
+
+	recovering := newFake()
+	recovering.claimErr, recovering.claimErrs = errors.New("the database is down"), 2
+	recovering.add("m", func(context.Context) error { return nil })
+	if err := Run(context.Background(), recovering.queue(time.Minute), Options{Idle: 5 * time.Millisecond, Drain: &Drain{Idle: 200 * time.Millisecond}}); err != nil {
+		t.Errorf("Run of a queue whose claims recover = %v", err)
+	}
+	if len(recovering.completed) != 1 {
+		t.Errorf("the recovered worker completed %v", recovering.completed)
+	}
+
+	pooled := newFake()
+	pooled.claimErr, pooled.claimErrs = errors.New("the database is down"), 1<<30
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := Run(ctx, pooled.queue(time.Minute), Options{Idle: 5 * time.Millisecond}); err != nil {
+		t.Errorf("a pool's worker whose claims fail returns %v when stopped", err)
+	}
+}

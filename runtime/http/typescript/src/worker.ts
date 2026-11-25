@@ -199,8 +199,10 @@ export interface WorkerOptions {
   /**
    * Runs the worker in drain mode (D145): it takes a slot of the queue, and
    * resolves once no message was ready or held for the drain's idle time
-   * and none falls due within DRAIN_HORIZON_MS. Without it the worker
-   * polls until the signal aborts.
+   * and none falls due within DRAIN_HORIZON_MS. It rejects once every
+   * claim has failed for the idle time, so the process exits with an error
+   * and gives its slot back. Without it the worker polls until the signal
+   * aborts.
    */
   readonly drain?: WorkerDrain;
   /** How far ahead a worker in drain mode looks for a message that is not due yet; DRAIN_HORIZON_MS unless set, for a test. */
@@ -398,6 +400,11 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
 
   // Claims for the free slots until the signal aborts.
   let wait = idleMs;
+  // When the claims began to fail, in drain mode: a worker whose every
+  // claim fails for its idle time stops with an error, so a job's task
+  // does not hold its slot until its time limit.
+  let failingSince: number | undefined;
+  let failure: { readonly error: unknown } | undefined;
   const horizonMs = options.drainHorizonMs !== undefined && options.drainHorizonMs >= 0 ? options.drainHorizonMs : DRAIN_HORIZON_MS;
   // How long until a message that is not due yet falls due, within the
   // horizon, or undefined: the worker then stops.
@@ -437,12 +444,20 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       messages = await queue.claim(free, queue.leaseSeconds);
     } catch (error) {
       if (signal.aborted) break;
+      failingSince ??= Date.now();
+      if (drain !== undefined && Date.now() - failingSince >= drainIdleMs) {
+        logger.error('every claim failed for the idle time: the worker stops with an error and gives its slot back', { idle: drainIdleMs / 1000, error });
+        failure = { error };
+        stopper.abort();
+        break;
+      }
       logger.error('claim failed', { retryIn: wait / 1000, error });
       if (!(await sleep(wait, signal))) break;
       wait = Math.min(wait * 2, MAX_BACKOFF_MS);
       continue;
     }
     wait = idleMs;
+    failingSince = undefined;
     for (const message of messages) start(message);
     if (drain !== undefined && messages.length === 0 && running.size === 0 && Date.now() - busy >= drainIdleMs) {
       // A message that falls due within the horizon, a delayed one or a
@@ -474,6 +489,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     await pruning;
     await releaseSlot?.().catch(() => undefined);
     logger.info('worker stopped');
+    if (failure !== undefined) throw claimsFailed(queue.name, drainIdleMs, failure.error);
     return;
   }
   const unfinished = [...running.values()];
@@ -491,6 +507,12 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
   await pruning;
   await releaseSlot?.().catch(() => undefined);
   logger.info('worker stopped: the grace is over, and the unfinished messages are released', { released, unfinished: unfinished.length });
+  if (failure !== undefined) throw claimsFailed(queue.name, drainIdleMs, failure.error);
+}
+
+/** The error a worker in drain mode stops with once every claim failed for its idle time. */
+function claimsFailed(queue: string, idleMs: number, cause: unknown): Error {
+  return new Error(`worker: every claim of queue ${queue} failed for ${idleMs / 1000}s, so the worker in drain mode stops: ${causeOf(cause)}`, { cause });
 }
 
 /** What a failed handler's message records: its error's message, or what it threw. */

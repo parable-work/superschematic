@@ -880,7 +880,10 @@ enqueuer's account holds `roles/run.invoker` on that job alone, its wake
 is the job's run method with the token its own metadata server gives it,
 and the tick is a Cloud Scheduler job that runs the job as the worker's
 own account. Cloud Run retries no task of it, and stops one after a day;
-the next wake or tick starts another. A drain worker that is off keeps
+the next wake or tick starts another. A drain worker whose every claim
+fails for its `idle` time, its database unreachable or its queue's table
+not what it expects, exits with an error and gives its slot back rather
+than hold the slot for the day; the next wake or tick tries again. A drain worker that is off keeps
 its job, so its image stays pinned, and has no tick and no wake.
 
 `stack dev` runs a drain worker as it runs any worker, a process that

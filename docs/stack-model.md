@@ -3669,7 +3669,11 @@ export abstract class FulfilOrders {}
     delayed message or a retry, the loop waits for, logging `idle, and
     waiting for a message due soon`, and claims again; one due later it
     logs and leaves to the tick. It stops its prune, gives the slot back
-    and exits 0. A
+    and exits 0. Once every claim has failed for the idle time, the loop
+    stops too, `worker.Run` returns an error that names the queue and the
+    last failure, and the process gives its slot back and exits 1, so a
+    task whose database is down does not hold its slot until its day's
+    limit; a pool's worker retries until it is stopped, as before. A
     behavior worker's claim loops share one idle clock (`worker.RunAll`),
     so they stop together.
 

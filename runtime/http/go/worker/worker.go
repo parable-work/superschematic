@@ -88,7 +88,9 @@ const (
 // Drain is how a worker in drain mode runs (D145): it claims as any worker
 // does, and Run returns once no message was ready or held for Idle and
 // none falls due within Horizon, so the process exits 0 and a queue that
-// is empty runs nothing. Slots is how
+// is empty runs nothing. Once every claim has failed for Idle, Run returns
+// an error, so the process exits with one and gives its slot back rather
+// than hold it until the platform's time limit. Slots is how
 // many such workers may run at once: each takes one of that many locks
 // named for its queue as it starts (Queue.Slot), and one that finds none
 // free returns at once, so starts that overlap cost a start and nothing
@@ -403,10 +405,13 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 		defer close(pruned)
 		w.pruneLoop(pruning)
 	}()
-	w.claimLoop(ctx)
+	claimErr := w.claimLoop(ctx)
 	stopPruning()
 	err := w.stop()
 	<-pruned
+	if claimErr != nil {
+		return claimErr
+	}
 	return err
 }
 
@@ -436,15 +441,19 @@ type handling struct {
 }
 
 // claimLoop claims messages for the free slots until ctx ends, or, in
-// drain mode, until the worker has drained.
-func (w *loop) claimLoop(ctx context.Context) {
+// drain mode, until the worker has drained. It returns an error only in
+// drain mode, once every claim has failed for the drain's idle time.
+func (w *loop) claimLoop(ctx context.Context) error {
 	wait := w.opts.Idle
+	// When the claims began to fail: a worker in drain mode whose every
+	// claim fails for its idle time stops with an error.
+	var failingSince time.Time
 	for ctx.Err() == nil {
 		free := w.opts.Concurrency - w.count()
 		if free <= 0 {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case <-w.done:
 			}
 			continue
@@ -452,16 +461,24 @@ func (w *loop) claimLoop(ctx context.Context) {
 		msgs, err := w.q.Claim(ctx, free, w.q.Lease)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return nil
+			}
+			if failingSince.IsZero() {
+				failingSince = time.Now()
+			}
+			if d := w.opts.Drain; d != nil && time.Since(failingSince) >= d.Idle {
+				w.logger.Error("every claim failed for the idle time: the worker stops with an error and gives its slot back", zap.Duration("idle", d.Idle), zap.Error(err))
+				return fmt.Errorf("worker: every claim of queue %s failed for %s, so the worker in drain mode stops: %w", w.q.Name, d.Idle, err)
 			}
 			w.logger.Error("claim failed", zap.Duration("retryIn", wait), zap.Error(err))
 			if !sleep(ctx, wait) {
-				return
+				return nil
 			}
 			wait = min(wait*2, maxBackoff)
 			continue
 		}
 		wait = w.opts.Idle
+		failingSince = time.Time{}
 		for _, msg := range msgs {
 			w.start(msg)
 		}
@@ -471,18 +488,19 @@ func (w *loop) claimLoop(ctx context.Context) {
 			due, ok := w.nextDue(ctx)
 			if !ok {
 				w.logger.Info("drained: no message was ready or held", zap.Duration("idle", w.opts.Drain.Idle))
-				return
+				return nil
 			}
 			w.logger.Info("idle, and waiting for a message due soon", zap.Duration("dueIn", due))
 			if !sleep(ctx, max(due, w.opts.Idle)) {
-				return
+				return nil
 			}
 			continue
 		}
 		if len(msgs) < free && !w.idle(ctx) {
-			return
+			return nil
 		}
 	}
+	return nil
 }
 
 // nextDue reports how long until a message that is not due yet falls due,
