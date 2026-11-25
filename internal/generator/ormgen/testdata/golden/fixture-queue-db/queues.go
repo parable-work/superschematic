@@ -91,13 +91,14 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue, and conflict ends one on a queue that keeps one ready message
+// enqueue, dueIn is the due time of one with a delay, $1 seconds from now,
+// and conflict ends one on a queue that keeps one ready message
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -106,13 +107,25 @@ type queueStatements struct {
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none. On a queue that keeps one ready message per key, the conflict
-// clause replaces or keeps the ready message of the key.
-func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
+// clause replaces or keeps the ready message of the key. A message with a
+// delay is due that long after the database's clock: it writes due_at
+// first, as the statements' dueIn of the delay's seconds.
+func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
+	if delay > 0 {
+		columns = append([]string{"due_at"}, columns...)
+		values = append([]any{delay.Seconds()}, values...)
+	}
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		if delay > 0 {
+			placeholders[0] = t.statements.dueIn
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -239,6 +252,7 @@ var orderChangedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO order_changed_queue`,
+		dueIn:    `now() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
 		expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -287,6 +301,16 @@ const OrderChangedLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueOrderChanged(ctx context.Context, tx TxInterface, msg *types.OrderChanged) error {
+	return EnqueueOrderChangedIn(ctx, tx, msg, 0)
+}
+
+// EnqueueOrderChangedIn writes msg into the queue OrderChanged in tx as EnqueueOrderChanged
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused. On this queue, which keeps one ready message per
+// key, a ready message of msg's key takes what the queue's onDuplicate
+// gives it: under replace, msg's fields and this due time.
+func EnqueueOrderChangedIn(ctx context.Context, tx TxInterface, msg *types.OrderChanged, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `order_id`)
@@ -302,7 +326,7 @@ func EnqueueOrderChanged(ctx context.Context, tx TxInterface, msg *types.OrderCh
 	} else {
 		values = append(values, msg.Priority)
 	}
-	return orderChangedQueue.insert(ctx, tx, columns, values)
+	return orderChangedQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // OrderChangedQueue claims the messages of the queue OrderChanged for a worker. A
@@ -396,6 +420,7 @@ var orderPlacedQueue = queueTable{
 	retain:     3600 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO order_placed_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -440,6 +465,14 @@ const OrderPlacedLease = 120 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueOrderPlaced(ctx context.Context, tx TxInterface, msg *types.OrderPlaced) error {
+	return EnqueueOrderPlacedIn(ctx, tx, msg, 0)
+}
+
+// EnqueueOrderPlacedIn writes msg into the queue OrderPlaced in tx as EnqueueOrderPlaced
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueOrderPlacedIn(ctx context.Context, tx TxInterface, msg *types.OrderPlaced, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `order_id`)
@@ -472,7 +505,7 @@ func EnqueueOrderPlaced(ctx context.Context, tx TxInterface, msg *types.OrderPla
 		columns = append(columns, `tags`)
 		values = append(values, msg.Tags)
 	}
-	return orderPlacedQueue.insert(ctx, tx, columns, values)
+	return orderPlacedQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // OrderPlacedQueue claims the messages of the queue OrderPlaced for a worker. A
@@ -575,6 +608,7 @@ var pingQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ping_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -619,13 +653,21 @@ const PingLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueuePing(ctx context.Context, tx TxInterface, msg *types.Ping) error {
+	return EnqueuePingIn(ctx, tx, msg, 0)
+}
+
+// EnqueuePingIn writes msg into the queue Ping in tx as EnqueuePing
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueuePingIn(ctx context.Context, tx TxInterface, msg *types.Ping, delay time.Duration) error {
 	var columns []string
 	var values []any
 	if msg.SentAt != nil {
 		columns = append(columns, `sent_at`)
 		values = append(values, time.Time(*msg.SentAt))
 	}
-	return pingQueue.insert(ctx, tx, columns, values)
+	return pingQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // PingQueue claims the messages of the queue Ping for a worker. A
@@ -719,6 +761,7 @@ var stockCheckedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO stock_checked_queue`,
+		dueIn:    `now() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
 		expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -765,13 +808,23 @@ const StockCheckedLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueStockChecked(ctx context.Context, tx TxInterface, msg *types.StockChecked) error {
+	return EnqueueStockCheckedIn(ctx, tx, msg, 0)
+}
+
+// EnqueueStockCheckedIn writes msg into the queue StockChecked in tx as EnqueueStockChecked
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused. On this queue, which keeps one ready message per
+// key, a ready message of msg's key takes what the queue's onDuplicate
+// gives it: under replace, msg's fields and this due time.
+func EnqueueStockCheckedIn(ctx context.Context, tx TxInterface, msg *types.StockChecked, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `sku`)
 	values = append(values, msg.Sku)
 	columns = append(columns, `quantity`)
 	values = append(values, msg.Quantity)
-	return stockCheckedQueue.insert(ctx, tx, columns, values)
+	return stockCheckedQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // StockCheckedQueue claims the messages of the queue StockChecked for a worker. A
@@ -852,6 +905,165 @@ func (q *StockCheckedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return stockCheckedQueue.prune(ctx, q.pool, limit)
 }
 
+// stockMovedQueue is the table of the queue StockMoved.
+var stockMovedQueue = queueTable{
+	name:       `stock_moved_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	statements: queueStatements{
+		insert:   `INSERT INTO stock_moved_queue`,
+		dueIn:    `now() + make_interval(secs => $1)`,
+		conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
+		expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT m.id FROM stock_moved_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE stock_moved_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.warehouse, q.sku, q.quantity`,
+		complete: `UPDATE stock_moved_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE stock_moved_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 OR EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE stock_moved_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE stock_moved_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM stock_moved_queue WHERE id IN (
+  SELECT id FROM stock_moved_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// StockMovedLease is how long a claim on a message of StockMoved holds it: a
+// worker extends the claim while its handler runs.
+const StockMovedLease = 60 * time.Second
+
+// EnqueueStockMoved writes msg into the queue StockMoved in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueStockMoved(ctx context.Context, tx TxInterface, msg *types.StockMoved) error {
+	return EnqueueStockMovedIn(ctx, tx, msg, 0)
+}
+
+// EnqueueStockMovedIn writes msg into the queue StockMoved in tx as EnqueueStockMoved
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused. On this queue, which keeps one ready message per
+// key, a ready message of msg's key takes what the queue's onDuplicate
+// gives it: under replace, msg's fields and this due time.
+func EnqueueStockMovedIn(ctx context.Context, tx TxInterface, msg *types.StockMoved, delay time.Duration) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `warehouse`)
+	values = append(values, msg.Warehouse)
+	columns = append(columns, `sku`)
+	values = append(values, msg.Sku)
+	columns = append(columns, `quantity`)
+	values = append(values, msg.Quantity)
+	return stockMovedQueue.insert(ctx, tx, columns, values, delay)
+}
+
+// StockMovedQueue claims the messages of the queue StockMoved for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message stays 604800s, then Prune removes it.
+//
+// Sent when stock moves within a warehouse: one waits per warehouse and SKU
+// together, the two fields its key names (D80). A later move of that SKU
+// there replaces the one that waits, the same SKU in another warehouse
+// waits beside it, and a worker holds one claim per warehouse and SKU.
+type StockMovedQueue struct {
+	pool *pgxpool.Pool
+}
+
+// StockMovedQueue returns the queue StockMoved of the database.
+func (db *Database) StockMovedQueue() *StockMovedQueue {
+	return &StockMovedQueue{pool: db.pool}
+}
+
+// StockMovedClaim is a claimed message of StockMoved: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type StockMovedClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.StockMoved
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *StockMovedQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]StockMovedClaim, error) {
+	var claims []StockMovedClaim
+	err := stockMovedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim StockMovedClaim
+		msg := &claim.Message
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.Warehouse, &msg.Sku, &msg.Quantity); err != nil {
+			return err
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *StockMovedQueue) Complete(ctx context.Context, id, token string) error {
+	return stockMovedQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *StockMovedQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return stockMovedQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *StockMovedQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return stockMovedQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *StockMovedQueue) Release(ctx context.Context, id, token string) error {
+	return stockMovedQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit messages done 604800s ago or more, the oldest
+// first, and returns how many it deleted; a worker runs it again while it
+// deletes limit. It never deletes a dead message.
+func (q *StockMovedQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return stockMovedQueue.prune(ctx, q.pool, limit)
+}
+
 // syncRequestedQueue is the table of the queue SyncRequested.
 var syncRequestedQueue = queueTable{
 	name:       `sync_requested_queue`,
@@ -861,6 +1073,7 @@ var syncRequestedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO sync_requested_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -907,6 +1120,14 @@ const SyncRequestedLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueSyncRequested(ctx context.Context, tx TxInterface, msg *types.SyncRequested) error {
+	return EnqueueSyncRequestedIn(ctx, tx, msg, 0)
+}
+
+// EnqueueSyncRequestedIn writes msg into the queue SyncRequested in tx as EnqueueSyncRequested
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueSyncRequestedIn(ctx context.Context, tx TxInterface, msg *types.SyncRequested, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `account_id`)
@@ -915,7 +1136,7 @@ func EnqueueSyncRequested(ctx context.Context, tx TxInterface, msg *types.SyncRe
 		columns = append(columns, `reason`)
 		values = append(values, msg.Reason)
 	}
-	return syncRequestedQueue.insert(ctx, tx, columns, values)
+	return syncRequestedQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // SyncRequestedQueue claims the messages of the queue SyncRequested for a worker. A

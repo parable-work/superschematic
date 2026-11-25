@@ -135,6 +135,9 @@ type QueueField struct {
 // (sqlutil.QueueStatements), by the names queues.ts gives them.
 type QueueStatements struct {
 	Insert string `json:"insert"`
+	// DueIn is the due time of a message enqueued with a delay (D80): the
+	// database's clock plus the seconds of its parameter, $1.
+	DueIn string `json:"dueIn"`
 	// Conflict ends an enqueue on a queue that keeps one ready message per
 	// key (D80); other queues have none.
 	Conflict string `json:"conflict,omitempty"`
@@ -154,6 +157,7 @@ type QueueStatements struct {
 func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 	return QueueStatements{
 		Insert:   s.Insert,
+		DueIn:    s.DueIn,
 		Conflict: s.Conflict,
 		Expire:   s.Expire,
 		Claim:    s.Claim,

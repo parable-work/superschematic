@@ -645,6 +645,7 @@ export interface QueryPage {
 export interface QueueDef {
   backoff?: string;
   key?: string;
+  keys?: string[];
   lease?: string;
   maxBackoff?: string;
   onDuplicate?: string;

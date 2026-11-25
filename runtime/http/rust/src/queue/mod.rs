@@ -67,7 +67,7 @@ use crate::postgres::Pool;
 #[cfg(feature = "postgres")]
 use codec::{is_json, param_text, Column, Text};
 #[cfg(feature = "sqlite")]
-pub use sqlite::{enqueue_sqlite, SqliteQueue};
+pub use sqlite::{enqueue_sqlite, enqueue_sqlite_in, SqliteQueue};
 
 /// What a claim records, before the reason, on a message it took but could
 /// not read as its type: it fails that message alone, as a handler that
@@ -181,6 +181,13 @@ pub struct QueueField {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueStatements {
     pub insert: String,
+    /// The due time of a message enqueued with a delay (D80): the
+    /// database's clock plus the seconds of its one parameter, `$1` (`?1`
+    /// on SQLite). An enqueue with a delay writes `due_at` first, with
+    /// this value, and numbers the columns its message sets from `$2`.
+    /// Empty in a descriptor written before a delay existed.
+    #[serde(default, rename = "dueIn")]
+    pub due_in: String,
     /// Ends an enqueue on a queue that keeps one ready message per key
     /// (D80): what it does when a ready message holds the message's key,
     /// which replaces that message or keeps it. Empty for other queues.
@@ -386,7 +393,64 @@ where
     C: GenericClient,
     M: Serialize + ?Sized,
 {
+    enqueue_delayed(client, queue, message, Duration::ZERO).await
+}
+
+#[cfg(feature = "postgres")]
+/// Writes `message` into `queue` as [`enqueue`] does, due once `delay` has
+/// passed by the database's clock (D80): no worker claims it before. A
+/// delay of zero is due at once. On a queue that replaces the ready message
+/// of a key, the ready message takes this due time with the new message's
+/// fields.
+pub async fn enqueue_in<C, M>(
+    client: &C,
+    queue: &QueueDefinition,
+    message: &M,
+    delay: Duration,
+) -> Result<(), QueueError>
+where
+    C: GenericClient,
+    M: Serialize + ?Sized,
+{
+    enqueue_delayed(client, queue, message, delay).await
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+/// The statements' `dueIn` for an enqueue with `delay`, or `None` for one
+/// with none; an error for a delay on a queue whose descriptor was written
+/// before a delay existed.
+pub(crate) fn due_in<'a>(
+    table: &str,
+    statements: &'a QueueStatements,
+    delay: Duration,
+) -> Result<Option<&'a str>, QueueError> {
+    if delay.is_zero() {
+        return Ok(None);
+    }
+    if statements.due_in.is_empty() {
+        return Err(QueueError::Failed(format!(
+            "enqueue on {table}: the queue's descriptor holds no dueIn statement, so it cannot delay a message; build its DB service again to write one"
+        )));
+    }
+    Ok(Some(&statements.due_in))
+}
+
+#[cfg(feature = "postgres")]
+/// [`enqueue`], with the delay [`enqueue_in`] gives it.
+async fn enqueue_delayed<C, M>(
+    client: &C,
+    queue: &QueueDefinition,
+    message: &M,
+    delay: Duration,
+) -> Result<(), QueueError>
+where
+    C: GenericClient,
+    M: Serialize + ?Sized,
+{
     let context = || format!("enqueue on {}", queue.table);
+    let due = due_in(&queue.table, &queue.statements, delay)?;
+    // due_at goes first: the statement numbers the delay's seconds $1.
+    let offset = usize::from(due.is_some());
     let members = match serde_json::to_value(message) {
         Ok(Value::Object(members)) => members,
         Ok(other) => {
@@ -408,14 +472,19 @@ where
             }
         }
     }
-    let sql = if fields.is_empty() {
+    let sql = if fields.is_empty() && due.is_none() {
         format!("{} DEFAULT VALUES", queue.statements.insert)
     } else {
-        let columns: Vec<&str> = fields
-            .iter()
-            .map(|(field, _)| field.column.as_str())
-            .collect();
-        let placeholders: Vec<String> = (1..=fields.len()).map(|i| format!("${i}")).collect();
+        let mut columns: Vec<&str> = Vec::with_capacity(fields.len() + offset);
+        let mut placeholders: Vec<String> = Vec::with_capacity(fields.len() + offset);
+        if let Some(due) = due {
+            columns.push("due_at");
+            placeholders.push(due.to_owned());
+        }
+        for (i, (field, _)) in fields.iter().enumerate() {
+            columns.push(field.column.as_str());
+            placeholders.push(format!("${}", i + 1 + offset));
+        }
         format!(
             "{} ({}) VALUES ({}){}",
             queue.statements.insert,
@@ -428,16 +497,19 @@ where
         .prepare_cached(&sql)
         .await
         .map_err(|err| QueueError::failed(&context(), &err))?;
-    if statement.params().len() != fields.len() {
+    if statement.params().len() != fields.len() + offset {
         return Err(QueueError::Failed(format!(
             "{}: the insert takes {} values, and the message sets {}",
             context(),
             statement.params().len(),
-            fields.len()
+            fields.len() + offset
         )));
     }
-    let mut params = Vec::with_capacity(fields.len());
-    for ((field, value), ty) in fields.iter().zip(statement.params()) {
+    let mut params = Vec::with_capacity(fields.len() + offset);
+    if due.is_some() {
+        params.push(Text::of(delay.as_secs_f64()));
+    }
+    for ((field, value), ty) in fields.iter().zip(statement.params().iter().skip(offset)) {
         let text = param_text(value, ty, field.json).map_err(|err| {
             QueueError::Failed(format!("{}: field {}: {err}", context(), field.name))
         })?;

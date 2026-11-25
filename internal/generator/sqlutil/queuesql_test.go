@@ -1,6 +1,7 @@
 package sqlutil
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,12 +14,24 @@ import (
 func TestQueueSpecOfReadsTheKey(t *testing.T) {
 	td := &ir.TypeDef{Name: "OrderChanged", Queue: &ir.QueueDef{Key: "orderId", OnDuplicate: "replace", Serialize: true}}
 	spec := QueueSpecOf(td, "order_changed_queue", []string{"order_id", "note"}, true)
-	if spec.Key != "order_id" || !spec.Dedupes() || !spec.Serializes() {
+	if !slices.Equal(spec.Keys, []string{"order_id"}) || !spec.Dedupes() || !spec.Serializes() {
 		t.Errorf("QueueSpecOf = %+v", spec)
 	}
 	plain := QueueSpecOf(&ir.TypeDef{Name: "Ping", Queue: &ir.QueueDef{}}, "ping_queue", nil, false)
-	if plain.Key != "" || plain.Dedupes() || plain.Serializes() {
+	if len(plain.Keys) > 0 || plain.Dedupes() || plain.Serializes() {
 		t.Errorf("QueueSpecOf of a queue with no key = %+v", plain)
+	}
+	// A key over several fields is their columns, in the key's order,
+	// each named as its field's column is.
+	several := &ir.TypeDef{Name: "StockMoved", Queue: &ir.QueueDef{Keys: []string{"warehouse", "order"}, OnDuplicate: "replace"}, Fields: []*ir.FieldDef{
+		{Name: "order", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "warehouse", TypeRef: ir.TypeRef{Name: "string"}, Required: true, SQLName: "depot"},
+	}}
+	if spec := QueueSpecOf(several, "stock_moved_queue", []string{`"order"`, "depot"}, true); !slices.Equal(spec.Keys, []string{"depot", `"order"`}) || !spec.Dedupes() || spec.Serializes() {
+		t.Errorf("QueueSpecOf of a key over several fields = %+v", spec)
+	}
+	if got := QueueKeyColumnNames(several); !slices.Equal(got, []string{"depot", "order"}) {
+		t.Errorf("QueueKeyColumnNames = %v", got)
 	}
 	// A table's change queue keeps its lines in the order written (D103);
 	// its deadline queue, and a queue a schema declares, by due time.
@@ -40,8 +53,60 @@ func TestQueueSpecOfReadsTheKey(t *testing.T) {
 		t.Errorf("a queue a schema declares, or a deadline queue, keeps its lines in order")
 	}
 	keyword := &ir.TypeDef{Name: "Shipped", Queue: &ir.QueueDef{Key: "order"}, Fields: []*ir.FieldDef{{Name: "order", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
-	if got := QueueKeyColumn(keyword); got != `"order"` {
-		t.Errorf("QueueKeyColumn quotes a keyword as %s", got)
+	if got := QueueKeyColumns(keyword); !slices.Equal(got, []string{`"order"`}) {
+		t.Errorf("QueueKeyColumns quotes a keyword as %s", got)
+	}
+}
+
+// TestQueueStatementsOfAKeyOverSeveralFields (D80, amended): a queue keyed
+// by several fields names every column of its key wherever one keyed by a
+// single field names its one: the conflict's target, which a replace
+// overwrites every other column under; the ready message that a failed or
+// released one gives way to; and the head of a key's line, which no other
+// claim of the same key holds. Each dialect writes them alike.
+func TestQueueStatementsOfAKeyOverSeveralFields(t *testing.T) {
+	spec := QueueSpec{Table: "stock_moved_queue", Columns: []string{"tenant_id", "sku", "count"}, KeepDone: true, Keys: []string{"tenant_id", "sku"}, OnDuplicate: ir.QueueOnDuplicateReplace, Serialize: true}
+	for name, s := range map[string]QueueStatements{"postgres": PostgresQueueStatements(spec), "sqlite": SQLiteQueueStatements(spec)} {
+		now := "now()"
+		if name == "sqlite" {
+			now = SQLiteNow
+		}
+		if want := "ON CONFLICT (tenant_id, sku) WHERE state = 'ready' DO UPDATE SET count = excluded.count, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = " + now; s.Conflict != want {
+			t.Errorf("%s: conflict =\n%s\nwant\n%s", name, s.Conflict, want)
+		}
+		pending := "EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.tenant_id = stock_moved_queue.tenant_id AND p.sku = stock_moved_queue.sku AND p.state = 'ready')"
+		for _, statement := range []string{s.Fail, s.Release} {
+			if !strings.Contains(statement, pending) {
+				t.Errorf("%s: a fail or a release gives way without comparing both columns of the key:\n%s", name, statement)
+			}
+		}
+		head := "AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.tenant_id = m.tenant_id AND o.sku = m.sku AND o.id <> m.id"
+		if !strings.Contains(s.Claim, head) {
+			t.Errorf("%s: the claim takes the head of a line without comparing both columns of the key:\n%s", name, s.Claim)
+		}
+		if name == "sqlite" && !strings.Contains(s.Due, head) {
+			t.Errorf("sqlite: the due read does not compare both columns of the key:\n%s", s.Due)
+		}
+	}
+	skip := spec
+	skip.OnDuplicate, skip.Serialize = ir.QueueOnDuplicateSkip, false
+	if got, want := PostgresQueueStatements(skip).Conflict, "ON CONFLICT (tenant_id, sku) WHERE state = 'ready' DO NOTHING"; got != want {
+		t.Errorf("a skip's conflict = %s, want %s", got, want)
+	}
+
+	// An operator's retry leaves each key one ready message: the last to
+	// die of each pair of columns, and none whose pair a ready one holds.
+	ops := PostgresQueueOperatorStatements("stock_moved_queue", "tenant_id", "sku")
+	for _, want := range []string{
+		"AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.tenant_id = stock_moved_queue.tenant_id AND p.sku = stock_moved_queue.sku AND p.state = 'ready')",
+		"SELECT DISTINCT ON (tenant_id, sku) id FROM stock_moved_queue WHERE state = 'dead' ORDER BY tenant_id, sku, updated_at DESC, id",
+	} {
+		if !strings.Contains(ops.RetryAll, want) {
+			t.Errorf("the operator's retry of a key over several fields lacks %s:\n%s", want, ops.RetryAll)
+		}
+	}
+	if want := "EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.tenant_id = q.tenant_id AND p.sku = q.sku AND p.state = 'ready')"; !strings.Contains(ops.States, want) {
+		t.Errorf("the operator's states of a key over several fields lack %s:\n%s", want, ops.States)
 	}
 }
 
@@ -51,7 +116,7 @@ func TestQueueSpecOfReadsTheKey(t *testing.T) {
 func TestQueueStatementsWithoutAKeyAreUnchanged(t *testing.T) {
 	plain := QueueSpec{Table: "ping_queue", Columns: []string{"sent_at"}, KeepDone: true}
 	appends := plain
-	appends.Key, appends.OnDuplicate = "sent_at", ir.QueueOnDuplicateAppend
+	appends.Keys, appends.OnDuplicate = []string{"sent_at"}, ir.QueueOnDuplicateAppend
 	for _, dialect := range []func(QueueSpec) QueueStatements{PostgresQueueStatements, SQLiteQueueStatements} {
 		a, b := dialect(plain), dialect(appends)
 		if a != b || a.Conflict != "" {
@@ -70,7 +135,7 @@ func TestQueueStatementsWithoutAKeyAreUnchanged(t *testing.T) {
 // with no attempts and no last error; skip keeps it (D80). Both name the
 // partial index of the ready messages by key.
 func TestQueueConflictReplacesOrSkips(t *testing.T) {
-	spec := QueueSpec{Table: "order_changed_queue", Columns: []string{"order_id", "line_id", "priority"}, KeepDone: true, Key: "order_id", OnDuplicate: ir.QueueOnDuplicateReplace}
+	spec := QueueSpec{Table: "order_changed_queue", Columns: []string{"order_id", "line_id", "priority"}, KeepDone: true, Keys: []string{"order_id"}, OnDuplicate: ir.QueueOnDuplicateReplace}
 	want := "ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()"
 	if got := PostgresQueueStatements(spec).Conflict; got != want {
 		t.Errorf("Postgres replace:\n%s\nwant\n%s", got, want)
@@ -86,7 +151,7 @@ func TestQueueConflictReplacesOrSkips(t *testing.T) {
 	for _, s := range PostgresQueueStatements(spec).All() {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "insert,conflict,expire,claim,complete,fail,extend,release,prune" {
+	if strings.Join(names, ",") != "insert,dueIn,conflict,expire,claim,complete,fail,extend,release,prune" {
 		t.Errorf("All = %v", names)
 	}
 }
@@ -95,7 +160,7 @@ func TestQueueConflictReplacesOrSkips(t *testing.T) {
 // message whose key a ready message holds is done, and its due time stays;
 // the other states are as on any queue (D80).
 func TestQueueFailAndReleaseGiveWay(t *testing.T) {
-	spec := QueueSpec{Table: "q", Columns: []string{"k"}, KeepDone: true, Key: "k", OnDuplicate: ir.QueueOnDuplicateSkip}
+	spec := QueueSpec{Table: "q", Columns: []string{"k"}, KeepDone: true, Keys: []string{"k"}, OnDuplicate: ir.QueueOnDuplicateSkip}
 	pending := "EXISTS (SELECT 1 FROM q AS p WHERE p.k = q.k AND p.state = 'ready')"
 	for name, s := range map[string]QueueStatements{"postgres": PostgresQueueStatements(spec), "sqlite": SQLiteQueueStatements(spec)} {
 		for _, want := range []string{
@@ -121,7 +186,7 @@ func TestQueueFailAndReleaseGiveWay(t *testing.T) {
 // FOR UPDATE OF its row alone; SQLite's due read is the claim's condition
 // (D80).
 func TestQueueClaimTakesTheHeadOfEachKey(t *testing.T) {
-	spec := QueueSpec{Table: "sync_requested_queue", Columns: []string{"account_id"}, KeepDone: true, Key: "account_id", Serialize: true}
+	spec := QueueSpec{Table: "sync_requested_queue", Columns: []string{"account_id"}, KeepDone: true, Keys: []string{"account_id"}, Serialize: true}
 	head := lines(
 		"    AND NOT EXISTS (SELECT 1 FROM sync_requested_queue AS o WHERE o.account_id = m.account_id AND o.id <> m.id",
 		"      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))",
@@ -150,7 +215,7 @@ func TestQueueClaimTakesTheHeadOfEachKey(t *testing.T) {
 // waits a failure's backoff holds the key's later messages; a claim still
 // takes it only when it is due (D80, D68).
 func TestQueueClaimKeepsAChangeQueuesLinesInOrder(t *testing.T) {
-	spec := QueueSpec{Table: "task_change_queue", Columns: []string{"row_key"}, Key: "row_key", Serialize: true, InOrder: true}
+	spec := QueueSpec{Table: "task_change_queue", Columns: []string{"row_key"}, Keys: []string{"row_key"}, Serialize: true, InOrder: true}
 	head := lines(
 		"    AND NOT EXISTS (SELECT 1 FROM task_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id",
 		"      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))",
@@ -190,5 +255,36 @@ func TestQueueOperatorRetryLeavesAKeyOneReadyMessage(t *testing.T) {
 	plain := PostgresQueueOperatorStatements("q", "")
 	if strings.Contains(plain.Retry, "DISTINCT") || strings.Contains(plain.States, "CASE") {
 		t.Errorf("a queue without a key retries by key:\n%+v", plain)
+	}
+}
+
+// TestQueueDueIn (D80, amended): every queue carries the due time of a
+// message enqueued with a delay, its dialect's clock plus the seconds of
+// the enqueue's first parameter, whatever its key and whatever clock its
+// claims go by, and lists it beside its insert. A queue that replaces the
+// ready message of a key takes the new message's due time with its
+// columns, so a delayed enqueue moves when the ready one is due.
+func TestQueueDueIn(t *testing.T) {
+	plain := QueueSpec{Table: "ping_queue", Columns: []string{"sent_at"}, KeepDone: true}
+	keyed := QueueSpec{Table: "q", Columns: []string{"k", "v"}, KeepDone: true, Keys: []string{"k"}, OnDuplicate: ir.QueueOnDuplicateReplace}
+	for _, spec := range []QueueSpec{plain, keyed} {
+		if got, want := PostgresQueueStatements(spec).DueIn, "now() + make_interval(secs => $1)"; got != want {
+			t.Errorf("postgres dueIn = %s, want %s", got, want)
+		}
+		const sqlite = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')"
+		for name, s := range map[string]QueueStatements{"sqlite": SQLiteQueueStatements(spec), "sqlite at a given time": SQLiteQueueStatementsAt(spec)} {
+			if s.DueIn != sqlite {
+				t.Errorf("%s dueIn = %s, want %s", name, s.DueIn, sqlite)
+			}
+		}
+		all := PostgresQueueStatements(spec).All()
+		if all[0].Name != "insert" || all[1].Name != "dueIn" || all[1].SQL == "" {
+			t.Errorf("All begins %v, want the insert and then dueIn", all[:2])
+		}
+	}
+	for name, s := range map[string]QueueStatements{"postgres": PostgresQueueStatements(keyed), "sqlite": SQLiteQueueStatements(keyed)} {
+		if !strings.Contains(s.Conflict, "due_at = excluded.due_at") {
+			t.Errorf("%s: a replace does not take the new message's due time: %s", name, s.Conflict)
+		}
 	}
 }

@@ -202,9 +202,10 @@ the prebuilt families published and pinned (every key and digest in
   (L 11280).
 - `SET DEFAULT` as an `onDelete`.
 
-**D80** (L 11332). A queue key over several fields; a delay on enqueue (a
-`due_at` after now) for `replace` to take from the new message; `when`
-rules beyond the literal ones.
+**D80** (L 11332). `when` rules of `@enqueueOnChange` beyond the literal
+ones (`isNull`, `notNull`, `equals`). A delay in an `@enqueueOnChange`
+trigger's message: a delay is an enqueue's, in Go, TypeScript and Rust,
+and a trigger enqueues due at once.
 
 **D81** (L 11425).
 - Password reset and email verification, which D50 keeps out of the core

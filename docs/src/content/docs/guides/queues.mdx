@@ -23,7 +23,7 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
-| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
+| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite; a key over several fields; a [delay on enqueue](#enqueue-for-later) | `when` rules of `@enqueueOnChange` beyond the literal ones; a delay in an `@enqueueOnChange` trigger |
 | `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
@@ -53,7 +53,7 @@ Every argument is optional:
 | `maxBackoff` | the longest a failed message waits, however many times it failed; the backoff or more, and an hour unless set, or the backoff when that is longer. Set it to the backoff for a wait that never grows |
 | `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
 | `retain` | how long a done message stays in the table before a worker removes it, as `168h`; a week unless set. `0s` keeps none: completing a message deletes it |
-| `key` | the message's field that keys it, a required scalar or enum field; it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
+| `key` | the message's field that keys it, a required scalar or enum field, or a list of two or more such fields that key it together (`["tenantId", "orderId"]`); it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
 | `onDuplicate` | what an enqueue does when a message of its key waits: `append` adds another, as a queue without a key does; `replace` overwrites the one that waits; `skip` keeps it and adds none. `append` unless set |
 | `serialize` | `true` holds the queue to one claim per key at a time |
 
@@ -115,9 +115,10 @@ one that runs read the row before the change.
 
 - `replace` overwrites the waiting message with the new one: every field
   but the key, one the new message leaves out taking its column's
-  default; it is due at once, with no attempts and no last error. It
-  keeps its ID and when it was first enqueued. A burst of changes leaves
-  one message, the latest.
+  default; it is due when the new message is, at once unless it was
+  [enqueued for later](#enqueue-for-later), with no attempts and no last
+  error. It keeps its ID and when it was first enqueued. A burst of
+  changes leaves one message, the latest.
 - `skip` keeps the waiting message as it is and adds none.
 - `append`, the default, adds every message, as a queue without a key
   does.
@@ -129,6 +130,28 @@ appends, so a message one language enqueues dedupes against another's. A
 claimed message that fails, or is given back by a stopping worker, while
 a newer message of its key waits gives way to it: it is `done`, its error
 kept in `last_error`, and the newer one runs in its place.
+
+A key may be several fields, a list of two or more, when no one field
+says what a message is about: a tenant and an order, a warehouse and a
+SKU.
+
+```ts
+@queue({ key: ["warehouse", "sku"], onDuplicate: "replace", serialize: true })
+export abstract class StockMoved {
+  warehouse: string;
+  sku: string;
+  quantity: Generic.Int64;
+}
+```
+
+Two messages share a key when they agree on every field of it, so a move
+of `SKU-1` in the north warehouse replaces the one that waits there, and
+`SKU-1` in the south warehouse waits beside it. Each field is held to
+what a single one is: required, and one scalar or enum value. The indexes
+and the conflict's target name every column of the key, in the order the
+list gives them, `ON CONFLICT (warehouse, sku) WHERE state = 'ready'`. A
+list of one field is that field's key. In a data form, a key of one field
+is `key` and one of several is `keys`.
 
 `serialize: true` holds a key to one claim at a time: a claim takes no
 message whose key another live claim holds, and of a key's waiting
@@ -243,6 +266,37 @@ and its lines, then enqueues the order's message in the same transaction:
 
 A field reaches its column as a table's field does through the ORM, and
 an optional field you leave unset takes its column's default.
+
+### Enqueue for later
+
+A message is due at once unless its enqueue gives it a delay (D80): it is
+then `ready`, with no attempts, and due that long after the database's
+clock, and no worker claims it before. A reminder an hour after an order,
+a retry of your own in ten minutes and a debounce are each a delay.
+
+| Language | On Postgres | On SQLite |
+| --- | --- | --- |
+| Go | `orm.Enqueue<Queue>In(ctx, tx, msg, time.Hour)` | `orm.Enqueue<Queue>SQLiteIn(ctx, tx, msg, time.Hour)` |
+| TypeScript | `enqueue(tx, queue, msg, { delaySeconds: 3600 })` | `enqueueStatement(db, queue, msg, { delaySeconds: 3600 })`, and `enqueueSqlite` the same |
+| Rust | `queue::enqueue_in(&tx, &queue, &msg, Duration::from_secs(3600))` | `queue::enqueue_sqlite_in(&connection, &queue, &msg, Duration::from_secs(3600))` |
+
+The delay may hold a fraction of a second. Zero is an enqueue with none,
+and a negative one is refused. The due time is the database's, not the
+caller's: the enqueue writes `due_at` as the queue's `dueIn` statement,
+`now() + make_interval(secs => $1)` on Postgres, which each language's
+client takes from the queue's definition as it takes the others, so the
+three write one due time.
+
+On a queue that [replaces](#one-message-per-key) the waiting message of a
+key, that message takes the new one's due time with its fields. So an
+enqueue with a delay pushes back the message that waits, which is a
+debounce: each change in a burst moves the one message later, and it runs
+once the burst has been quiet for the delay. An enqueue with no delay
+makes it due at once. Under `skip` the waiting message keeps its own due
+time.
+
+A worker claims a delayed message within its poll of the time it falls
+due.
 
 ### From TypeScript
 

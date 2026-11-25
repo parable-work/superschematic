@@ -33,7 +33,7 @@ command of a table that composes behaviors on sqliteRulesStore, over the
 layout its database's generated orm.ts embeds.
 */
 
-export type { QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export type { EnqueueOptions, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
 export {
   MAX_ATTEMPTS,

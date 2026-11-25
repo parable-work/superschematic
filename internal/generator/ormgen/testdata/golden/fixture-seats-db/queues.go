@@ -89,13 +89,14 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue, and conflict ends one on a queue that keeps one ready message
+// enqueue, dueIn is the due time of one with a delay, $1 seconds from now,
+// and conflict ends one on a queue that keeps one ready message
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -104,13 +105,25 @@ type queueStatements struct {
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none. On a queue that keeps one ready message per key, the conflict
-// clause replaces or keeps the ready message of the key.
-func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
+// clause replaces or keeps the ready message of the key. A message with a
+// delay is due that long after the database's clock: it writes due_at
+// first, as the statements' dueIn of the delay's seconds.
+func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
+	if delay > 0 {
+		columns = append([]string{"due_at"}, columns...)
+		values = append([]any{delay.Seconds()}, values...)
+	}
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		if delay > 0 {
+			placeholders[0] = t.statements.dueIn
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -237,6 +250,7 @@ var sandboxDeadlineQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO sandbox_deadline_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE sandbox_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -281,6 +295,14 @@ const SandboxDeadlineLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueSandboxDeadline(ctx context.Context, tx TxInterface, msg *types.SandboxDeadline) error {
+	return EnqueueSandboxDeadlineIn(ctx, tx, msg, 0)
+}
+
+// EnqueueSandboxDeadlineIn writes msg into the queue SandboxDeadline in tx as EnqueueSandboxDeadline
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueSandboxDeadlineIn(ctx context.Context, tx TxInterface, msg *types.SandboxDeadline, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -299,7 +321,7 @@ func EnqueueSandboxDeadline(ctx context.Context, tx TxInterface, msg *types.Sand
 		}
 		values = append(values, value)
 	}
-	return sandboxDeadlineQueue.insert(ctx, tx, columns, values)
+	return sandboxDeadlineQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // SandboxDeadlineQueue claims the messages of the queue SandboxDeadline for a worker. A

@@ -566,10 +566,18 @@ func (r *databaseReader) table(t *InspectedTable) (*Table, error) {
 			columnNamed(table, key[0].Name).Nullable = false
 		}
 	}
-	if peer != nil && peer.Queue != nil && columnNamed(table, r.fileColumnNames(t.Name, []string{peer.Queue.Key})[0]) != nil {
-		queue := *peer.Queue
-		queue.Key = r.fileColumnNames(t.Name, []string{peer.Queue.Key})[0]
-		table.Queue = &queue
+	if peer != nil && peer.Queue != nil {
+		// The queue's key, when the file's table holds every column of it.
+		columns := r.fileColumnNames(t.Name, peer.Queue.Columns())
+		if !slices.ContainsFunc(columns, func(c string) bool { return columnNamed(table, c) == nil }) && len(columns) > 0 {
+			queue := *peer.Queue
+			if len(columns) == 1 {
+				queue.Key, queue.Keys = columns[0], nil
+			} else {
+				queue.Key, queue.Keys = "", columns
+			}
+			table.Queue = &queue
+		}
 	}
 
 	// A column has at most one check in the model; a second one, and one

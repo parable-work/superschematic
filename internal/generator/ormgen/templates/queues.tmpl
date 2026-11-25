@@ -98,13 +98,14 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue, and conflict ends one on a queue that keeps one ready message
+// enqueue, dueIn is the due time of one with a delay, $1 seconds from now,
+// and conflict ends one on a queue that keeps one ready message
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -113,13 +114,25 @@ type queueStatements struct {
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none. On a queue that keeps one ready message per key, the conflict
-// clause replaces or keeps the ready message of the key.
-func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
+// clause replaces or keeps the ready message of the key. A message with a
+// delay is due that long after the database's clock: it writes due_at
+// first, as the statements' dueIn of the delay's seconds.
+func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
+	if delay > 0 {
+		columns = append([]string{"due_at"}, columns...)
+		values = append([]any{delay.Seconds()}, values...)
+	}
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		if delay > 0 {
+			placeholders[0] = t.statements.dueIn
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -264,6 +277,18 @@ const {{ .Name }}Lease = {{ .LeaseSeconds }} * time.Second
 // which writes its microseconds
 {{- end }}.
 func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name }}) error {
+	return Enqueue{{ .Name }}In(ctx, tx, msg, 0)
+}
+
+// Enqueue{{ .Name }}In writes msg into the queue {{ .Name }} in tx as Enqueue{{ .Name }}
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+{{- if .Statements.Conflict }} On this queue, which keeps one ready message per
+// key, a ready message of msg's key takes what the queue's onDuplicate
+// gives it: under replace, msg's fields and this due time.
+{{- end }}
+func Enqueue{{ .Name }}In(ctx context.Context, tx TxInterface, msg *types.{{ .Name }}, delay time.Duration) error {
 	var columns []string
 	var values []any
 	{{- range .Fields }}
@@ -337,7 +362,7 @@ func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name
 	}
 	{{- end }}
 	{{- end }}
-	return {{ lowerFirst .Name }}Queue.insert(ctx, tx, columns, values)
+	return {{ lowerFirst .Name }}Queue.insert(ctx, tx, columns, values, delay)
 }
 
 // {{ .Name }}Queue claims the messages of the queue {{ .Name }} for a worker. A

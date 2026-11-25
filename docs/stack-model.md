@@ -3404,7 +3404,11 @@ export abstract class FulfilOrders {}
 - **Enqueue.** The DB's Go ORM writes `queues.go` with a typed
   `Enqueue<Queue>(ctx, tx, msg)` per queue, which takes the caller's
   `TxInterface`: the message commits with the writes that caused it, or
-  not at all. Each field reaches its column as a table's does through a
+  not at all. `Enqueue<Queue>In(ctx, tx, msg, delay)` writes one that is
+  due `delay` after the database's clock, which no worker claims before
+  (D80); the TypeScript `enqueue` takes `{ delaySeconds }` and the Rust
+  `enqueue_in` a `Duration` for the same, and all three write `due_at`
+  with the statements' `dueIn`. Each field reaches its column as a table's does through a
   repository's `CreateOne`, and an optional field that is unset, or a
   required list that is nil, takes its column's default. A location
   (`Geo.Location`) goes to its `POINT` column as a `pgtype.Point`, x the

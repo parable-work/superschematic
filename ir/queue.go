@@ -46,8 +46,14 @@ type QueueDef struct {
 
 	// Key names the field of the message that keys it (D80): a required
 	// scalar field, whose column holds the key. Empty for a queue whose
-	// messages have none.
+	// messages have none, or whose key is several fields (Keys).
 	Key string `json:"key,omitempty" yaml:"key,omitempty"`
+
+	// Keys names the fields of a key over several fields (D80, amended),
+	// two or more, each a required scalar field: two messages share a key
+	// when they agree on every one. Empty for a queue with no key, or with
+	// a key of one field, which Key names. KeyFields reads either.
+	Keys []string `json:"keys,omitempty" yaml:"keys,omitempty"`
 
 	// OnDuplicate is what an enqueue does when a ready message holds its
 	// key (D80): QueueOnDuplicateAppend adds another message, Replace
@@ -74,15 +80,33 @@ const (
 	QueueOnDuplicateSkip = "skip"
 )
 
+// KeyFields are the fields of the message that key it, in the order the
+// queue names them: Key alone, or Keys (D80). None for a queue with no key.
+func (q *QueueDef) KeyFields() []string {
+	switch {
+	case q == nil:
+		return nil
+	case q.Key != "":
+		return []string{q.Key}
+	}
+	return q.Keys
+}
+
+// HasKey reports whether the queue's messages have a key, of one field or
+// of several.
+func (q *QueueDef) HasKey() bool {
+	return len(q.KeyFields()) > 0
+}
+
 // Dedupes reports whether the queue keeps at most one ready message per
 // key: its onDuplicate is replace or skip.
 func (q *QueueDef) Dedupes() bool {
-	return q != nil && q.Key != "" && (q.OnDuplicate == QueueOnDuplicateReplace || q.OnDuplicate == QueueOnDuplicateSkip)
+	return q.HasKey() && (q.OnDuplicate == QueueOnDuplicateReplace || q.OnDuplicate == QueueOnDuplicateSkip)
 }
 
 // Serializes reports whether the queue holds one claim per key at a time.
 func (q *QueueDef) Serializes() bool {
-	return q != nil && q.Key != "" && q.Serialize
+	return q.HasKey() && q.Serialize
 }
 
 // The defaults of a queue and a worker that leave an argument out (D53).

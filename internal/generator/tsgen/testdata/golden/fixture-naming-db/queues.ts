@@ -52,6 +52,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** The due time of a message enqueued with a delay: the database's clock plus the seconds of its parameter, $1. */
+  readonly dueIn?: string;
   /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
   readonly conflict?: string;
   readonly expire: string;
@@ -113,6 +115,7 @@ export const linePostedQueue: QueueDefinition<LinePosted> = {
   ],
   statements: {
     insert: `INSERT INTO "linePosted"`,
+    dueIn: `now() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT ("lineId") WHERE state = 'ready' DO UPDATE SET "amountCents" = excluded."amountCents", due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
     expire: `UPDATE "linePosted" SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()

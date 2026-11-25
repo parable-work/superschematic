@@ -3,6 +3,7 @@ import {
   canonicalUUID,
   ClaimLostError,
   conflictOf,
+  delayOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
@@ -10,6 +11,7 @@ import {
   messageUUID,
   parseDuration,
   unset,
+  type EnqueueOptions,
   type Queue,
   type QueueClaim,
   type QueueDefinition,
@@ -67,12 +69,26 @@ function sqliteStatementsOf<M>(queue: QueueDefinition<M>): QueueStatements {
  * to the batch whose writes caused the message, so it commits with them, or
  * runs alone. Each member the message sets writes its column; one it leaves
  * unset takes the column's default, and an enum with a schema default
- * writes that default, as the Go ORM writes them.
+ * writes that default, as the Go ORM writes them. With options.delaySeconds
+ * the message is due that long after the database's clock (D80).
  */
-export function enqueueStatement<M>(db: SqlDatabase, queue: QueueDefinition<M>, message: M): SqlPreparedStatement {
+export function enqueueStatement<M>(
+  db: SqlDatabase,
+  queue: QueueDefinition<M>,
+  message: M,
+  options?: EnqueueOptions,
+): SqlPreparedStatement {
   const statements = sqliteStatementsOf(queue);
+  const delay = delayOf(queue.table, statements, options);
   const columns: string[] = [];
+  const placeholders: string[] = [];
   const values: SqlValue[] = [];
+  if (delay > 0) {
+    // due_at goes first: the statement numbers the delay's seconds ?1.
+    columns.push('due_at');
+    placeholders.push(statements.dueIn ?? '');
+    values.push(delay);
+  }
   const members = message as unknown as Readonly<Record<string, unknown>>;
   for (const field of queue.fields) {
     const value = members[field.name];
@@ -80,6 +96,7 @@ export function enqueueStatement<M>(db: SqlDatabase, queue: QueueDefinition<M>, 
       if (field.default === undefined) continue;
       columns.push(field.column);
       values.push(field.default);
+      placeholders.push(`?${values.length}`);
       continue;
     }
     columns.push(field.column);
@@ -88,17 +105,23 @@ export function enqueueStatement<M>(db: SqlDatabase, queue: QueueDefinition<M>, 
     } catch (error) {
       throw new Error(`enqueue on ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
     }
+    placeholders.push(`?${values.length}`);
   }
   const text =
     columns.length === 0
       ? `${statements.insert} DEFAULT VALUES`
-      : `${statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(', ')})${conflictOf(statements)}`;
+      : `${statements.insert} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})${conflictOf(statements)}`;
   return db.prepare(text).bind(...values);
 }
 
 /** Writes message into queue on db, in a statement of its own: enqueueStatement's statement, run alone. */
-export async function enqueueSqlite<M>(db: SqlDatabase, queue: QueueDefinition<M>, message: M): Promise<void> {
-  const statement = enqueueStatement(db, queue, message);
+export async function enqueueSqlite<M>(
+  db: SqlDatabase,
+  queue: QueueDefinition<M>,
+  message: M,
+  options?: EnqueueOptions,
+): Promise<void> {
+  const statement = enqueueStatement(db, queue, message, options);
   try {
     await statement.run();
   } catch (error) {

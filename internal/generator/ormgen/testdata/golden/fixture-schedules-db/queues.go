@@ -89,13 +89,14 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue, and conflict ends one on a queue that keeps one ready message
+// enqueue, dueIn is the due time of one with a delay, $1 seconds from now,
+// and conflict ends one on a queue that keeps one ready message
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -104,13 +105,25 @@ type queueStatements struct {
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none. On a queue that keeps one ready message per key, the conflict
-// clause replaces or keeps the ready message of the key.
-func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
+// clause replaces or keeps the ready message of the key. A message with a
+// delay is due that long after the database's clock: it writes due_at
+// first, as the statements' dueIn of the delay's seconds.
+func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
+	if delay > 0 {
+		columns = append([]string{"due_at"}, columns...)
+		values = append([]any{delay.Seconds()}, values...)
+	}
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		if delay > 0 {
+			placeholders[0] = t.statements.dueIn
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -237,6 +250,7 @@ var problemChangeQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO problem_change_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE problem_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -283,6 +297,14 @@ const ProblemChangeLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueProblemChange(ctx context.Context, tx TxInterface, msg *types.ProblemChange) error {
+	return EnqueueProblemChangeIn(ctx, tx, msg, 0)
+}
+
+// EnqueueProblemChangeIn writes msg into the queue ProblemChange in tx as EnqueueProblemChange
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueProblemChangeIn(ctx context.Context, tx TxInterface, msg *types.ProblemChange, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -307,7 +329,7 @@ func EnqueueProblemChange(ctx context.Context, tx TxInterface, msg *types.Proble
 		}
 		values = append(values, value)
 	}
-	return problemChangeQueue.insert(ctx, tx, columns, values)
+	return problemChangeQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // ProblemChangeQueue claims the messages of the queue ProblemChange for a worker. A
@@ -409,6 +431,7 @@ var problemDeadlineQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO problem_deadline_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE problem_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -453,6 +476,14 @@ const ProblemDeadlineLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueProblemDeadline(ctx context.Context, tx TxInterface, msg *types.ProblemDeadline) error {
+	return EnqueueProblemDeadlineIn(ctx, tx, msg, 0)
+}
+
+// EnqueueProblemDeadlineIn writes msg into the queue ProblemDeadline in tx as EnqueueProblemDeadline
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueProblemDeadlineIn(ctx context.Context, tx TxInterface, msg *types.ProblemDeadline, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -471,7 +502,7 @@ func EnqueueProblemDeadline(ctx context.Context, tx TxInterface, msg *types.Prob
 		}
 		values = append(values, value)
 	}
-	return problemDeadlineQueue.insert(ctx, tx, columns, values)
+	return problemDeadlineQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // ProblemDeadlineQueue claims the messages of the queue ProblemDeadline for a worker. A
@@ -567,6 +598,7 @@ var problemEventQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO problem_event_queue`,
+		dueIn:  `now() + make_interval(secs => $1)`,
 		expire: `UPDATE problem_event_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -613,6 +645,14 @@ const ProblemEventLease = 60 * time.Second
 // transaction: the message is due once tx commits, and never if it rolls
 // back. A field writes its column as a table's field does.
 func EnqueueProblemEvent(ctx context.Context, tx TxInterface, msg *types.ProblemEvent) error {
+	return EnqueueProblemEventIn(ctx, tx, msg, 0)
+}
+
+// EnqueueProblemEventIn writes msg into the queue ProblemEvent in tx as EnqueueProblemEvent
+// does, due once delay has passed by the database's clock (D80): no worker
+// claims it before. A delay of zero is due at once; a negative one is
+// refused.
+func EnqueueProblemEventIn(ctx context.Context, tx TxInterface, msg *types.ProblemEvent, delay time.Duration) error {
 	var columns []string
 	var values []any
 	columns = append(columns, `row_key`)
@@ -631,7 +671,7 @@ func EnqueueProblemEvent(ctx context.Context, tx TxInterface, msg *types.Problem
 		}
 		values = append(values, value)
 	}
-	return problemEventQueue.insert(ctx, tx, columns, values)
+	return problemEventQueue.insert(ctx, tx, columns, values, delay)
 }
 
 // ProblemEventQueue claims the messages of the queue ProblemEvent for a worker. A

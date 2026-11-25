@@ -52,6 +52,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** The due time of a message enqueued with a delay: the database's clock plus the seconds of its parameter, $1. */
+  readonly dueIn?: string;
   /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
   readonly conflict?: string;
   readonly expire: string;
@@ -114,6 +116,7 @@ export const invoiceChangeQueue: QueueDefinition<InvoiceChange> = {
   ],
   statements: {
     insert: `INSERT INTO invoice_change_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE invoice_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -176,6 +179,7 @@ export const invoiceDeadlineQueue: QueueDefinition<InvoiceDeadline> = {
   ],
   statements: {
     insert: `INSERT INTO invoice_deadline_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE invoice_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -236,6 +240,7 @@ export const ticketChangeQueue: QueueDefinition<TicketChange> = {
   ],
   statements: {
     insert: `INSERT INTO ticket_change_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE ticket_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -298,6 +303,7 @@ export const ticketDeadlineQueue: QueueDefinition<TicketDeadline> = {
   ],
   statements: {
     insert: `INSERT INTO ticket_deadline_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE ticket_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

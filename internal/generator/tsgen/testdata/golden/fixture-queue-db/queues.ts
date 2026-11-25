@@ -19,7 +19,7 @@ and claim with sqliteQueue, both from the runtime's ./sqlite entry, or its
 ./d1 entry on Workers (D53, amended).
 */
 
-import type { OrderChanged, OrderPlaced, Ping, StockChecked, SyncRequested } from './types';
+import type { OrderChanged, OrderPlaced, Ping, StockChecked, StockMoved, SyncRequested } from './types';
 
 /** A field of a queue's message and the column it writes. */
 export interface QueueField {
@@ -57,6 +57,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** The due time of a message enqueued with a delay: the database's clock plus the seconds of its parameter, $1. */
+  readonly dueIn?: string;
   /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
   readonly conflict?: string;
   readonly expire: string;
@@ -118,6 +120,7 @@ export const orderChangedQueue: QueueDefinition<OrderChanged> = {
   ],
   statements: {
     insert: `INSERT INTO order_changed_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
     expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -158,6 +161,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   },
   sqliteStatements: {
     insert: `INSERT INTO order_changed_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -226,6 +230,7 @@ export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {
   ],
   statements: {
     insert: `INSERT INTO order_placed_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -262,6 +267,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   },
   sqliteStatements: {
     insert: `INSERT INTO order_placed_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
@@ -318,6 +324,7 @@ export const pingQueue: QueueDefinition<Ping> = {
   ],
   statements: {
     insert: `INSERT INTO ping_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -354,6 +361,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   },
   sqliteStatements: {
     insert: `INSERT INTO ping_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
@@ -412,6 +420,7 @@ export const stockCheckedQueue: QueueDefinition<StockChecked> = {
   ],
   statements: {
     insert: `INSERT INTO stock_checked_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
     expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -450,6 +459,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   },
   sqliteStatements: {
     insert: `INSERT INTO stock_checked_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
     expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -489,6 +499,115 @@ LIMIT 1`,
 };
 
 /**
+ * StockMoved: a message whose handler fails is due again after 30s, doubled
+ * for each attempt before, up to 3600s, and is dead after 5 such retries; a
+ * claim holds it for 60s unless extended. A done message stays 604800s.
+ *
+ * Sent when stock moves within a warehouse: one waits per warehouse and SKU
+ * together, the two fields its key names (D80). A later move of that SKU
+ * there replaces the one that waits, the same SKU in another warehouse
+ * waits beside it, and a worker holds one claim per warehouse and SKU.
+ */
+export const stockMovedQueue: QueueDefinition<StockMoved> = {
+  name: "StockMoved",
+  table: "stock_moved_queue",
+  retries: 5,
+  backoffSeconds: 30,
+  maxBackoffSeconds: 3600,
+  leaseSeconds: 60,
+  retainSeconds: 604800,
+  fields: [
+    { name: "warehouse", column: "warehouse" },
+    { name: "sku", column: "sku" },
+    { name: "quantity", column: "quantity" },
+  ],
+  statements: {
+    insert: `INSERT INTO stock_moved_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
+    conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
+    expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+    claim: `WITH due AS (
+  SELECT m.id FROM stock_moved_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE stock_moved_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.warehouse, q.sku, q.quantity`,
+    complete: `UPDATE stock_moved_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    fail: `UPDATE stock_moved_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 OR EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+    extend: `UPDATE stock_moved_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    release: `UPDATE stock_moved_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    prune: `DELETE FROM stock_moved_queue WHERE id IN (
+  SELECT id FROM stock_moved_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+  },
+  sqliteStatements: {
+    insert: `INSERT INTO stock_moved_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
+    conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
+    claim: `UPDATE stock_moved_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+  SELECT m.id FROM stock_moved_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT ?1
+)
+RETURNING id, claim_token, attempts, warehouse, sku, quantity`,
+    complete: `UPDATE stock_moved_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+    fail: `UPDATE stock_moved_queue SET
+  state = CASE WHEN attempts > ?3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > ?3 OR EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
+  last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
+RETURNING state`,
+    extend: `UPDATE stock_moved_queue SET claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+    release: `UPDATE stock_moved_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_moved_queue AS p WHERE p.warehouse = stock_moved_queue.warehouse AND p.sku = stock_moved_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = MAX(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+    prune: `DELETE FROM stock_moved_queue WHERE id IN (
+  SELECT id FROM stock_moved_queue
+  WHERE state = 'done' AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || (?1) || ' seconds')
+  ORDER BY updated_at
+  LIMIT ?2
+)`,
+    due: `SELECT 1 FROM stock_moved_queue AS m
+WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+LIMIT 1`,
+  },
+};
+
+/**
  * SyncRequested: a message whose handler fails is due again after 30s, doubled
  * for each attempt before, up to 3600s, and is dead after 5 such retries; a
  * claim holds it for 60s unless extended. A done message stays 604800s.
@@ -510,6 +629,7 @@ export const syncRequestedQueue: QueueDefinition<SyncRequested> = {
   ],
   statements: {
     insert: `INSERT INTO sync_requested_queue`,
+    dueIn: `now() + make_interval(secs => $1)`,
     expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -548,6 +668,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   },
   sqliteStatements: {
     insert: `INSERT INTO sync_requested_queue`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,

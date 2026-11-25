@@ -190,10 +190,35 @@ func modelRole(s sqlgen.RoleSeed, insert, update string) *RoleSeed {
 // that is no queue's or a queue with no key (D80).
 func queueKeyOf(schema *ir.Schema, t *sqlgen.Table) *QueueKey {
 	td := schema.Types[t.OriginalName]
-	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td) {
+	if td == nil || td.Queue == nil || !td.Queue.HasKey() || t.Name != sqlgen.QueueTableName(td) {
 		return nil
 	}
-	return &QueueKey{Key: sqlutil.QueueKeyColumnName(td), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
+	q := &QueueKey{OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
+	// A key of one field is written as it always was, so the model of a
+	// queue that has one, and its hash, stay as they were.
+	if columns := sqlutil.QueueKeyColumnNames(td); len(columns) == 1 {
+		q.Key = columns[0]
+	} else {
+		q.Keys = columns
+	}
+	return q
+}
+
+// Columns are the key's columns, in the key's order: Key alone, or Keys.
+func (q *QueueKey) Columns() []string {
+	switch {
+	case q == nil:
+		return nil
+	case q.Key != "":
+		return []string{q.Key}
+	}
+	return q.Keys
+}
+
+// describe names the key's columns for a hazard: one column, or several
+// joined with "and".
+func (q *QueueKey) describe() string {
+	return strings.Join(q.Columns(), " and ")
 }
 
 // dedupes reports whether a queue keeps one ready message per key.

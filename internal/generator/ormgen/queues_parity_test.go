@@ -34,6 +34,7 @@ var queueParitySubtests = []string{
 	"UnreadableRowFailsAlone",
 	"Base62UUIDsGoHyphenated",
 	"LocationsAndDurationsAgree",
+	"DelayedMessagesWait",
 }
 
 // TestQueueParityOfGoTypeScriptAndRustOnPostgres runs the Go ORM's queue,
@@ -388,12 +389,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use superschematic_http_runtime::postgres::connect;
 use superschematic_http_runtime::queue::{
-    enqueue, enqueue_sqlite, PostgresQueue, QueueDefinition, QueueError, SqliteQueue,
+    enqueue, enqueue_in, enqueue_sqlite, enqueue_sqlite_in, PostgresQueue, QueueDefinition, QueueError,
+    SqliteQueue,
 };
 use superschematic_http_runtime::stackconfig::Database;
 use types::{
-    DeliveryPlanned, OrderChanged, OrderPlaced, StockChecked, SyncRequested, DELIVERY_PLANNED_QUEUE,
-    ORDER_CHANGED_QUEUE, ORDER_PLACED_QUEUE, STOCK_CHECKED_QUEUE, SYNC_REQUESTED_QUEUE,
+    DeliveryPlanned, OrderChanged, OrderPlaced, StockChecked, StockMoved, SyncRequested,
+    DELIVERY_PLANNED_QUEUE, ORDER_CHANGED_QUEUE, ORDER_PLACED_QUEUE, STOCK_CHECKED_QUEUE,
+    STOCK_MOVED_QUEUE, SYNC_REQUESTED_QUEUE,
 };
 
 /// The lease of a claim, the TypeScript script's.
@@ -423,6 +426,17 @@ fn refused(err: QueueError) -> String {
     }
 }
 
+/// The delay an enqueue step's second argument gives, in seconds, or none.
+fn delay(rest: &[String]) -> Result<Option<Duration>, String> {
+    match rest.get(1) {
+        None => Ok(None),
+        Some(seconds) => seconds
+            .parse::<f64>()
+            .map(|seconds| Some(Duration::from_secs_f64(seconds)))
+            .map_err(|err| format!("the delay: {err}")),
+    }
+}
+
 /// Argument i of args.
 fn arg(args: &[String], i: usize) -> Result<&str, String> {
     args.get(i)
@@ -436,6 +450,7 @@ async fn run(args: &[String]) -> Result<Value, String> {
         Ok("DeliveryPlanned") => run_on::<DeliveryPlanned>(DELIVERY_PLANNED_QUEUE, args).await,
         Ok("OrderChanged") => run_on::<OrderChanged>(ORDER_CHANGED_QUEUE, args).await,
         Ok("StockChecked") => run_on::<StockChecked>(STOCK_CHECKED_QUEUE, args).await,
+        Ok("StockMoved") => run_on::<StockMoved>(STOCK_MOVED_QUEUE, args).await,
         Ok("SyncRequested") => run_on::<SyncRequested>(SYNC_REQUESTED_QUEUE, args).await,
         _ => run_on::<OrderPlaced>(ORDER_PLACED_QUEUE, args).await,
     }
@@ -457,7 +472,10 @@ async fn run_on<M: Serialize + DeserializeOwned + Send + 'static>(descriptor: &s
                 .map_err(|err| format!("the message: {err}"))?;
             let mut client = pool.get().await.map_err(|err| err.to_string())?;
             let tx = client.transaction().await.map_err(|err| err.to_string())?;
-            enqueue(&tx, &definition, &message).await.map_err(refused)?;
+            match delay(rest)? {
+                Some(delay) => enqueue_in(&tx, &definition, &message, delay).await.map_err(refused)?,
+                None => enqueue(&tx, &definition, &message).await.map_err(refused)?,
+            }
             tx.commit().await.map_err(|err| err.to_string())?;
             Value::Null
         }
@@ -523,7 +541,10 @@ async fn run_on_sqlite<M: Serialize + DeserializeOwned + Send + 'static>(
             .busy_timeout(Duration::from_secs(5))
             .map_err(|err| err.to_string())?;
         let tx = connection.transaction().map_err(|err| err.to_string())?;
-        enqueue_sqlite(&tx, &definition, &message).map_err(refused)?;
+        match delay(rest)? {
+            Some(delay) => enqueue_sqlite_in(&tx, &definition, &message, delay).map_err(refused)?,
+            None => enqueue_sqlite(&tx, &definition, &message).map_err(refused)?,
+        }
         tx.commit().map_err(|err| err.to_string())?;
         return Ok(Value::Null);
     }
@@ -582,7 +603,7 @@ async fn run_on_sqlite<M: Serialize + DeserializeOwned + Send + 'static>(
 const queueParityScript = `import pg from 'pg';
 import { enqueue, postgresQueue } from '@superschematic/http-runtime/postgres';
 import { enqueueStatement, openSqlite, sqliteFile, sqliteQueue } from '@superschematic/http-runtime/sqlite';
-import { deliveryPlannedQueue, orderChangedQueue, orderPlacedQueue, stockCheckedQueue, syncRequestedQueue } from '@TYPES@/queues';
+import { deliveryPlannedQueue, orderChangedQueue, orderPlacedQueue, stockCheckedQueue, stockMovedQueue, syncRequestedQueue } from '@TYPES@/queues';
 
 const [step, url, ...args] = process.argv.slice(2);
 // The queue QUEUE_PARITY_QUEUE names, OrderPlaced when unset.
@@ -591,6 +612,7 @@ const definitions: Record<string, unknown> = {
   OrderChanged: orderChangedQueue,
   StockChecked: stockCheckedQueue,
   SyncRequested: syncRequestedQueue,
+  StockMoved: stockMovedQueue,
 };
 const definition = (definitions[process.env.QUEUE_PARITY_QUEUE ?? ''] ?? orderPlacedQueue) as typeof orderPlacedQueue;
 const file = url.startsWith('sqlite:') ? openSqlite(sqliteFile(url)) : undefined;
@@ -603,14 +625,16 @@ try {
       result = await queue.claim(Number(args[0]), 60);
       break;
     case 'enqueue': {
+      // A second argument delays the message by that many seconds (D80).
+      const options = args[1] === undefined ? undefined : { delaySeconds: Number(args[1]) };
       if (file !== undefined) {
-        await file.batch([enqueueStatement(file, definition, JSON.parse(args[0]))]);
+        await file.batch([enqueueStatement(file, definition, JSON.parse(args[0]), options)]);
         break;
       }
       const client = await pool!.connect();
       try {
         await client.query('BEGIN');
-        await enqueue(client, definition, JSON.parse(args[0]));
+        await enqueue(client, definition, JSON.parse(args[0]), options);
         await client.query('COMMIT');
       } finally {
         client.release();
@@ -1220,6 +1244,120 @@ func TestQueueParity(t *testing.T) {
 	t.Run("UnreadableRowFailsAlone", testUnreadableRowFailsAlone)
 	t.Run("Base62UUIDsGoHyphenated", testBase62UUIDsGoHyphenated)
 	t.Run("LocationsAndDurationsAgree", testLocationsAndDurationsAgree)
+	t.Run("DelayedMessagesWait", testDelayedMessagesWait)
+}
+
+// enqueueIn writes msg with the Go ORM, due once delay has passed, in a
+// transaction of its own.
+func (p *parity) enqueueIn(msg *types.OrderPlaced, delay time.Duration) error {
+	if p.file == nil {
+		return p.db.Transaction(p.ctx, func(tx TxInterface) error { return EnqueueOrderPlacedIn(p.ctx, tx, msg, delay) })
+	}
+	tx, err := p.file.BeginTx(p.ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := EnqueueOrderPlacedSQLiteIn(p.ctx, tx, msg, delay); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// rowOf is the ID of the queue's one message of the order.
+func (p *parity) rowOf(order string) string {
+	p.t.Helper()
+	var id string
+	p.queryRow(p.dialectSQL(
+		"SELECT id::text FROM order_placed_queue WHERE order_id = $1::uuid",
+		"SELECT id FROM order_placed_queue WHERE order_id = ?1",
+	), []any{order}, &id)
+	return id
+}
+
+// testDelayedMessagesWait (D80): each side enqueues an order with a delay
+// of five minutes, and one more with a fraction of a second's. Each waits
+// ready, with no attempts, due that long after the database's clock, and
+// no side claims it; an order enqueued with no delay is claimed past them.
+// Once its delay has passed, each is claimed by another side, as any ready
+// message is. A negative delay is refused by every side, and writes
+// nothing.
+func testDelayedMessagesWait(t *testing.T) {
+	p := newParity(t)
+	sides := p.sides()
+	delayed := map[string]string{
+		"Go":         "d0000000-0000-4000-8000-000000000001",
+		"TypeScript": "d0000000-0000-4000-8000-000000000002",
+		"Rust":       "d0000000-0000-4000-8000-000000000003",
+	}
+	enqueueIn := func(side, id, seconds string) error {
+		if side != "Go" {
+			_, err := p.step(side, "enqueue", orderJSON(id), seconds)
+			return err
+		}
+		msg := order(id)
+		wait, err := time.ParseDuration(seconds + "s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.enqueueIn(&msg, wait)
+	}
+	for _, name := range []string{"Go", "TypeScript", "Rust"} {
+		if err := enqueueIn(name, delayed[name], "300"); err != nil {
+			t.Fatalf("%s's enqueue with a delay: %v", name, err)
+		}
+		id := p.rowOf(delayed[name])
+		p.expect(id, "ready", 0, "")
+		if left := p.dueIn(id); left > 300 || left < 295 {
+			t.Fatalf("%s's message, enqueued with a delay of 300s, is due in %.1fs", name, left)
+		}
+		if err := enqueueIn(name, delayed[name], "-1"); err == nil {
+			t.Fatalf("%s enqueued a message with a negative delay", name)
+		}
+	}
+	var count int
+	p.queryRow("SELECT count(*) FROM order_placed_queue", nil, &count)
+	if count != 3 {
+		t.Fatalf("the queue holds %d messages, want the three delayed ones: a refused enqueue wrote one", count)
+	}
+	for name, s := range sides {
+		if got := s.claim(5); len(got) != 0 {
+			t.Fatalf("%s claimed %d delayed message(s) before they were due: %+v", name, len(got), got)
+		}
+	}
+	// A message with no delay is due at once, past the ones that wait.
+	const now = "d0000000-0000-4000-8000-00000000000f"
+	sides["TypeScript"].enqueue(orderJSON(now))
+	if got := sides["Rust"].claim(5); len(got) != 1 || got[0].Message.OrderId != mustUUID(now) {
+		t.Fatalf("Rust claimed %+v, want the one message enqueued with no delay", got)
+	}
+	// A delay holds a fraction of a second.
+	const soon = "d0000000-0000-4000-8000-00000000000e"
+	if err := enqueueIn("Rust", soon, "0.25"); err != nil {
+		t.Fatal(err)
+	}
+	if left := p.dueIn(p.rowOf(soon)); left > 0.25 || left < -5 {
+		t.Fatalf("a message enqueued with a delay of 0.25s is due in %.3fs", left)
+	}
+	// Once due, each is claimed by another side.
+	p.due()
+	seen := map[scalars.UUID]bool{}
+	for _, name := range []string{"TypeScript", "Rust", "Go"} {
+		for _, c := range sides[name].claim(2) {
+			seen[c.Message.OrderId] = true
+			if c.Attempt != 1 {
+				t.Errorf("the delayed message of %v is claimed on attempt %d, want 1", c.Message.OrderId, c.Attempt)
+			}
+		}
+	}
+	for name, id := range delayed {
+		if !seen[mustUUID(id)] {
+			t.Errorf("%s's delayed message of %s was not claimed once due", name, id)
+		}
+	}
+	if !seen[mustUUID(soon)] {
+		t.Errorf("the message delayed by a fraction of a second was not claimed once due")
+	}
 }
 
 // testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL

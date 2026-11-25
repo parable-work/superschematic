@@ -69,6 +69,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** The due time of a message enqueued with a delay: the database's clock plus the seconds of its parameter, $1. */
+  readonly dueIn?: string;
   /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
   readonly conflict?: string;
   readonly expire: string;

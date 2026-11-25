@@ -47,6 +47,7 @@ function statements(table: string, columns: string[]): QueueStatements {
   const claimed = `WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`;
   return {
     insert: `INSERT INTO ${table}`,
+    dueIn: 'now() + make_interval(secs => $1)',
     expire: `UPDATE ${table} SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -227,6 +228,39 @@ describe('enqueue', () => {
     const ping: QueueDefinition<{ sentAt?: Date }> = { ...definition(), fields: [{ name: 'sentAt', column: 'sent_at' }], statements: statements('ping_queue', ['sent_at']) };
     await enqueue(client, ping, {});
     expect(client.queries[0]?.text).toBe('INSERT INTO ping_queue DEFAULT VALUES');
+  });
+
+  test('a delay writes due_at first, as the database clock plus its seconds, and numbers the columns after it (D80)', async () => {
+    const client = recorder();
+    await enqueue(client, definition(), { orderId: 'o-1', quantity: 3, shipTo: { line1: '1 Main St', city: 'Springfield' }, tags: [], note: null }, { delaySeconds: 90.5 });
+    expect(client.queries).toEqual([
+      {
+        text: 'INSERT INTO order_placed_queue (due_at, order_id, priority, quantity, ship_to, tags) VALUES (now() + make_interval(secs => $1), $2, $3, $4, $5, $6)',
+        values: [90.5, 'o-1', 'low', 3, '{"line1":"1 Main St","city":"Springfield"}', []],
+      },
+    ]);
+    // A message that sets no column still writes when it is due.
+    const ping: QueueDefinition<{ sentAt?: Date }> = { ...definition(), fields: [{ name: 'sentAt', column: 'sent_at' }], statements: statements('ping_queue', ['sent_at']) };
+    await enqueue(client, ping, {}, { delaySeconds: 5 });
+    expect(client.queries[1]).toEqual({ text: 'INSERT INTO ping_queue (due_at) VALUES (now() + make_interval(secs => $1))', values: [5] });
+    // No delay, and a delay of zero, are an enqueue as it always was: due_at takes its column's default.
+    await enqueue(client, ping, {}, { delaySeconds: 0 });
+    await enqueue(client, ping, {}, {});
+    expect(client.queries.slice(2).map(q => q.text)).toEqual(['INSERT INTO ping_queue DEFAULT VALUES', 'INSERT INTO ping_queue DEFAULT VALUES']);
+  });
+
+  test('a delay that is negative or no number is refused before anything is written, as is one a definition cannot write', async () => {
+    const client = recorder();
+    for (const delaySeconds of [-1, Number.NaN, Number.POSITIVE_INFINITY, '5' as unknown as number]) {
+      await expect(enqueue(client, definition(), { orderId: 'o-1', quantity: 1 } as OrderPlaced, { delaySeconds })).rejects.toThrow(
+        /enqueue on order_placed_queue: delaySeconds is .*; it is a number of seconds, zero or more/,
+      );
+    }
+    const { dueIn: _, ...before } = definition().statements;
+    await expect(enqueue(client, { ...definition(), statements: before }, { orderId: 'o-1', quantity: 1 } as OrderPlaced, { delaySeconds: 5 })).rejects.toThrow(
+      "enqueue on order_placed_queue: the queue's definition holds no dueIn statement, so it cannot delay a message",
+    );
+    expect(client.queries).toEqual([]);
   });
 
   test('names the table when the database refuses the message', async () => {

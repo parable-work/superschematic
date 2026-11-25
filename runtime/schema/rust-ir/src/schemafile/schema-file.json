@@ -6019,6 +6019,13 @@
           "default": "",
           "type": "string"
         },
+        "keys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "lease": {
           "default": "",
           "type": "string"

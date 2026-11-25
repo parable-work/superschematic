@@ -19,10 +19,12 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	}
 	three := 3
 	for name, want := range map[string]*ir.QueueDef{
-		"OrderPlaced":   {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
-		"Ping":          {Retain: "0s"},
-		"OrderChanged":  {Key: "orderId", OnDuplicate: "replace", Serialize: true},
-		"StockChecked":  {Key: "sku", OnDuplicate: "skip"},
+		"OrderPlaced":  {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
+		"Ping":         {Retain: "0s"},
+		"OrderChanged": {Key: "orderId", OnDuplicate: "replace", Serialize: true},
+		"StockChecked": {Key: "sku", OnDuplicate: "skip"},
+		// A key over several fields (D80).
+		"StockMoved":    {Keys: []string{"warehouse", "sku"}, OnDuplicate: "replace", Serialize: true},
 		"SyncRequested": {Key: "accountId", Serialize: true},
 	} {
 		td := schema.Types[name]
@@ -46,7 +48,7 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	for _, td := range schema.Queues() {
 		names = append(names, td.Name)
 	}
-	if strings.Join(names, ",") != "OrderChanged,OrderPlaced,Ping,StockChecked,SyncRequested" {
+	if strings.Join(names, ",") != "OrderChanged,OrderPlaced,Ping,StockChecked,StockMoved,SyncRequested" {
 		t.Errorf("Queues() = %v", names)
 	}
 }

@@ -304,7 +304,7 @@ export async function ping(pool: Pick<Pool, 'query'>, timeoutMs: number): Promis
 // worker's claims, over the definitions a DB's types package exports from
 // its ./queues entry.
 export { ClaimLostError, enqueue, parseArray, postgresQueue } from './queue.js';
-export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueQueryable, QueueQueryConfig, QueueStatements } from './queue.js';
+export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueQueryable, QueueQueryConfig, QueueStatements } from './queue.js';
 
 // The value codec (D79): a UUID's two forms, a row read as the types hold
 // it and a value bound as its column takes it, over the descriptors a DB's

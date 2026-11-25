@@ -51,6 +51,12 @@ export interface QueueField {
 export interface QueueStatements {
   readonly insert: string;
   /**
+   * The due time of a message enqueued with a delay (D80): the database's clock plus the seconds of its one
+   * parameter, $1 (?1 on SQLite). An enqueue with a delay writes due_at first, with this value, and numbers the
+   * columns its message sets from $2.
+   */
+  readonly dueIn?: string;
+  /**
    * Ends an enqueue on a queue that keeps one ready message per key (D80): what it does when a ready message
    * holds the message's key, which replaces that message or keeps it. Other queues have none.
    */
@@ -142,6 +148,33 @@ export interface Queue<M> {
 
 /** The claims of a queue over a pg pool, which postgresQueue makes. */
 export type PostgresQueue<M> = Queue<M>;
+
+/** How an enqueue writes its message, beside the message. */
+export interface EnqueueOptions {
+  /**
+   * How long the message waits before it is due, in seconds, which may hold a fraction, by the database's clock
+   * (D80): no worker claims it before. Zero, the default, is due at once. On a queue that replaces the ready
+   * message of a key, the ready message takes this due time with the new message's fields.
+   */
+  readonly delaySeconds?: number;
+}
+
+/**
+ * The seconds an enqueue's options delay its message by: 0 for none. Throws for a delay that is no finite number,
+ * or negative, and for one on a queue whose definition was generated before a delay existed.
+ */
+export function delayOf(table: string, statements: QueueStatements, options: EnqueueOptions | undefined): number {
+  const delay = options?.delaySeconds ?? 0;
+  if (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) {
+    throw new Error(`enqueue on ${table}: delaySeconds is ${String(delay)}; it is a number of seconds, zero or more`);
+  }
+  if (delay > 0 && statements.dueIn === undefined) {
+    throw new Error(
+      `enqueue on ${table}: the queue's definition holds no dueIn statement, so it cannot delay a message; build its DB service again to write one`,
+    );
+  }
+  return delay;
+}
 
 /** What an enqueue ends with after its VALUES: a space and the queue's conflict clause, or nothing (D80). */
 export function conflictOf(statements: QueueStatements): string {

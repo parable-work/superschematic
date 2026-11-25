@@ -15,6 +15,7 @@
   ],
   "statements": {
     "insert": "INSERT INTO ping_queue",
+    "dueIn": "now() + make_interval(secs => $1)",
     "expire": "UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM ping_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at",
     "complete": "DELETE FROM ping_queue\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
@@ -25,6 +26,7 @@
   },
   "sqliteStatements": {
     "insert": "INSERT INTO ping_queue",
+    "dueIn": "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')",
     "expire": "UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')\nWHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1",
     "claim": "UPDATE ping_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),\n  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')\nWHERE id IN (\n  SELECT id FROM ping_queue\n  WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))\n  ORDER BY due_at, id\n  LIMIT ?1\n)\nRETURNING id, claim_token, attempts, sent_at",
     "complete": "DELETE FROM ping_queue\nWHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'",
@@ -36,6 +38,7 @@
   },
   "sqliteAtStatements": {
     "insert": "INSERT INTO ping_queue",
+    "dueIn": "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')",
     "expire": "UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', ?2)\nWHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', ?2) AND attempts > ?1",
     "claim": "UPDATE ping_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),\n  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', ?3, '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', ?3)\nWHERE id IN (\n  SELECT id FROM ping_queue\n  WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', ?3)) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', ?3))\n  ORDER BY due_at, id\n  LIMIT ?1\n)\nRETURNING id, claim_token, attempts, sent_at",
     "complete": "DELETE FROM ping_queue\nWHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'",

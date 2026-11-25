@@ -3,6 +3,7 @@ import {
   canonicalUUID,
   ClaimLostError,
   conflictOf,
+  delayOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
@@ -10,6 +11,7 @@ import {
   messageUUID,
   parseDuration,
   unset,
+  type EnqueueOptions,
   type PostgresQueue,
   type QueueClaim,
   type QueueDefinition,
@@ -17,7 +19,7 @@ import {
 } from './queue-core.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
-export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 
 /*
 The queue client of a TypeScript API (D53, section 8.8 of
@@ -79,10 +81,25 @@ export interface QueueQueryable {
  * back. Each member the message sets writes its column, a JSON column its
  * JSON text; one it leaves unset takes the column's default, and an enum
  * with a schema default writes that default, as the Go ORM writes them.
+ * With options.delaySeconds the message is due that long after the
+ * database's clock, and no worker claims it before (D80).
  */
-export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<M>, message: M): Promise<void> {
+export async function enqueue<M>(
+  client: QueueQueryable,
+  queue: QueueDefinition<M>,
+  message: M,
+  options?: EnqueueOptions,
+): Promise<void> {
+  const delay = delayOf(queue.table, queue.statements, options);
   const columns: string[] = [];
+  const placeholders: string[] = [];
   const values: unknown[] = [];
+  if (delay > 0) {
+    // due_at goes first: the statement numbers the delay's seconds $1.
+    columns.push('due_at');
+    placeholders.push(queue.statements.dueIn ?? '');
+    values.push(delay);
+  }
   const members = message as unknown as Readonly<Record<string, unknown>>;
   for (const field of queue.fields) {
     const value = members[field.name];
@@ -90,6 +107,7 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
       if (field.default === undefined) continue;
       columns.push(field.column);
       values.push(field.default);
+      placeholders.push(`$${values.length}`);
       continue;
     }
     columns.push(field.column);
@@ -98,11 +116,12 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
     } catch (error) {
       throw new Error(`enqueue on ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
     }
+    placeholders.push(`$${values.length}`);
   }
   const text =
     columns.length === 0
       ? `${queue.statements.insert} DEFAULT VALUES`
-      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})${conflictOf(queue.statements)}`;
+      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})${conflictOf(queue.statements)}`;
   try {
     await client.query({ text, values });
   } catch (error) {
