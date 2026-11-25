@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D148 is the highest so far.
+  the highest number any branch has used. D149 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -663,34 +663,15 @@ takes the lock its row names, and on SQLite and D1 every adapter checks a
 sub-table read made under a lock against its row's version, refusing one
 of a use that writes beside its rows or through an operation of the
 namespace. Development mode runs all twenty-five. Left of step 4: the
-folded Links, Search, Queue and Branches removed, and the folds below
-chosen. Then steps 5 to 7, whose step 6 D117 renames development mode. What the built steps left follows. The
+folded Links, Search, Queue and Branches removed, Blueprint ported and
+Variants a field type (D149). Then steps 5 to 7, whose step 6 D117
+renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
-Four of step 4's ports met the test as follows, and each waits on a choice:
-
-- Rollups fails it: it keeps no state of its own, its values are a
-  function of other rows and its one rule a guard over another use's
-  Workflow. It is ported because D104's Barrier needs it. The fold its
-  module doc proposes for step 5: its values a derived field or a query
-  of the table, and its gate a StateRules rule on the Workflow that reads
-  a rollup.
-- Blueprint fails it on a table and is not ported: it creates a tree of
-  rows from a template, and once they exist it holds no state. The fold
-  proposed: a procedure that creates rows through each table's own
-  `create`, with Dependencies and Rollups for the edges and the gate.
-  `workqueue-blueprint.json` stays the engine's, and `examples/engine-jobs`
-  waits for the choice.
-- Revisions passes it for its review step, whose proposals are its own
-  state, and fails it for its log of revisions, a storage shape
-  `@versioned`'s history keeps on Postgres. It is ported whole. The fold
-  proposed: the log read from `@versioned`'s history where a table has it,
-  and the core's own log kept for SQLite and D1.
-- Variants fails it and is not ported: it keeps no state and is a
-  validation rule, a JSON field typed by a sibling field's value. The fold
-  proposed: a discriminated-union field type whose validators the build
-  writes, with a CHECK constraint where it can, or step 5's declarative
-  validation. `core-variants.json` stays unreplayed.
+Four of step 4's ports met the test in part or not at all: Rollups,
+Blueprint, Revisions and Variants. D149 settles each: Rollups and
+Blueprint stay behaviors, Revisions keeps its own log, and Variants
+becomes a discriminated-union field type.
 
 What Rollups and Dependencies left: a route or field that serves Rollups'
 `values` and Dependencies' `blocked`, which only `Action::Read` reaches;
@@ -1300,7 +1281,7 @@ its policy. Left:
   and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
   engine-notes runs there (its differences are in its README), and
-  engine-jobs waits for the choice on Blueprint (D103's status).
+  engine-jobs waits for Blueprint on the core (D149).
 - The policy asked of a behavior's reads of other types (Dependencies'
   blockers, Revisions' evidence, Rollups' links), as the engine asked
   them; the runner's requests made by a system principal the policy sees.
@@ -1689,3 +1670,37 @@ at one points at the other.
 Build: the behaviors' core and its declarations, `behaviorlayout`,
 `ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
 guide.
+
+## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
+
+D103 holds each behavior to a test when it is ported: state of its own,
+rules over how that state changes, and recurrence across applications.
+Step 4's ports met it in part or not at all four times. Rollups keeps no
+state of its own: its values are a function of the rows that relate to a
+row, and its one rule gates another use's Workflow on them. Blueprint
+creates a tree of rows from a template and holds nothing once they exist.
+Revisions' review step passes, and its log of approved revisions is a
+storage shape `@versioned`'s history also keeps, on Postgres alone.
+Variants is a validation rule: a JSON field typed by a sibling field's
+value. Rollups and Revisions are ported; Blueprint and Variants are not.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Rollups stays a behavior a table implements. A rule that gates a row's moves on the rows that relate to it is a rule over state, so D103's test, as this entry reads it, holds: its values stay fields computed at a read (`Action::Read`), and D104's Barrier is built on it as it is. | Folding it at step 5 into a computed field and a StateRules rule that reads it, which needs an aggregate field nothing else asks for, and rebuilds Barrier on a feature not yet designed |
+| Blueprint is ported onto the core as a behavior, though it holds no state once its rows exist: the cost of the exception is one behavior, and `examples/engine-jobs` and the app D104 counted need it now. It creates a tree of rows from a template through each table's own create, in the command's change set, its recordings (`workqueue-blueprint.json`) replayed as the others' are. | An operation the build writes per blueprint, a generator of its own; leaving it to the app's code, which every project that runs work in steps would write again |
+| Variants becomes a schema feature: a field whose type is a discriminated union, its arm named by a sibling field's value. The build writes its validators in every language, a CHECK constraint on Postgres where the arms' shapes allow one, and its types in each ORM and SDK. The engine's Variants stays until engine types go (D103, step 7). How a schema writes it, a TypeScript union of object types beside the field that discriminates or a field type that names both, is the change's that builds it to settle. | A behavior, which would run a validation rule through the core; step 5's declarative validation, which waits on a vocabulary not yet designed |
+| Revisions keeps its own log of approved revisions on every dialect. A table that is also `@versioned` keeps both: its history records every write, as a row's image, and the log records each approved proposal with its number and evidence. | Reading the log from `@versioned`'s history where a table has one, two code paths whose history rows hold no proposal's number, on Postgres alone |
+
+### What it amends
+
+D103: its test, that a behavior has state of its own, admits a rule over
+the rows that relate to a row, so Rollups passes; Blueprint is ported as
+the one behavior with no state, by this entry; Variants goes from the
+behaviors as a field type, as Links, Search, Queue and Branches go as
+schema features.
+
+Built: Rollups and Revisions as they are. Left: Blueprint on the core,
+its recordings replayed, a table implementing it in each language and
+`examples/engine-jobs` on it; the discriminated-union field type in the
+IR, both readers, every validator, the DDL and both ORMs; and the
+engine's Variants removed with engine types (step 7).
