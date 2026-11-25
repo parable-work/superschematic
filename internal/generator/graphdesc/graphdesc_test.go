@@ -241,7 +241,14 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 		}
 		checkReleasedTable(t, kind, tables, sqlTypes)
 		for column, class := range kind.Columns {
-			sqlType := sqlTypes[column]
+			// A string order column is collated bytewise (D137), and no
+			// other column is. The collation changes how the column
+			// sorts, not what Postgres renders, so the class reads the
+			// type without it.
+			sqlType, collated := strings.CutSuffix(sqlTypes[column], " "+sqlgen.OrderKeyCollation)
+			if orderKey := column == kind.Order && kind.OrderIsKey(); collated != orderKey {
+				t.Errorf("kind %s column %s: stored as %s; a string order column, and no other, is %s", kind.Kind, column, sqlTypes[column], sqlgen.OrderKeyCollation)
+			}
 			element := strings.TrimSuffix(strings.TrimSuffix(class, "[]"), "[]")
 			switch {
 			case strings.HasSuffix(class, "[][]"):
@@ -262,18 +269,12 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 	}
 }
 
-// TestHistoryIsWhatTheTriggersKeep checks each kind's history against the
-// history table the sql generator writes for the same schema: its retention
-// is the prune function's, its exclusions are the columns the capture
-// function leaves out of every image, and its actor is the column a
-// delete's image names its actor in. It checks every graph the fixture
-// corpus declares, then the fixture's own facts, and variants of it that
-// give a member deleted_by or exclude its actor column.
 // checkReleasedTable holds a kind's released table (D139) to what a storage
 // adapter writes into it: a row id of its own, the kind's root and entity
 // key columns, the commit and the sequence of the release, and the kind's
 // content columns, the descriptor's columns less its role and excluded
-// ones, each stored as the kind's table stores it.
+// ones, each stored as the kind's table stores it, a string order column's
+// collation (D137) included.
 func checkReleasedTable(t *testing.T, kind graphdesc.Kind, tables map[string]sqlgen.Table, memberTypes map[string]string) {
 	t.Helper()
 	if kind.ReleasedTable == "" {
@@ -313,6 +314,13 @@ func checkReleasedTable(t *testing.T, kind graphdesc.Kind, tables map[string]sql
 	}
 }
 
+// TestHistoryIsWhatTheTriggersKeep checks each kind's history against the
+// history table the sql generator writes for the same schema: its retention
+// is the prune function's, its exclusions are the columns the capture
+// function leaves out of every image, and its actor is the column a
+// delete's image names its actor in. It checks every graph the fixture
+// corpus declares, then the fixture's own facts, and variants of it that
+// give a member deleted_by or exclude its actor column.
 func TestHistoryIsWhatTheTriggersKeep(t *testing.T) {
 	t.Run("fixture corpus", func(t *testing.T) {
 		dirs, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.FromSlash(fixture)), "fixture-*"))
