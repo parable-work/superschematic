@@ -387,10 +387,12 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
-{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. The auth provider's routeMiddlewaresFirst snippet comes before them all, for a step that must run before any other refusal. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
 {{- define "routeMiddlewares" }}
-			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
+			{{- $first := authSnippet "routeMiddlewaresFirst" .EndpointInfo }}
+			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers (ne $first "") }}
 			Middlewares: []runtimerouting.Middleware{
+				{{- $first }}
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}

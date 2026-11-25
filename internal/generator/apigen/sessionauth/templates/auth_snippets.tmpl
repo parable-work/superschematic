@@ -132,6 +132,8 @@ var (
 {{ define "routesSetup" }}{{ end }}
 {{ define "routesProtectedMiddleware" }}{{ end }}
 
+{{ define "routeMiddlewaresFirst" }}{{ end }}
+
 {{ define "routePermissions" }}
 				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
 {{- end }}

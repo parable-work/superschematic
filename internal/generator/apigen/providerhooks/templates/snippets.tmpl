@@ -1,0 +1,34 @@
+{{/* The snippets of the route hooks test provider. The route snippets
+     write marker calls, so the test can read where each one lands in a
+     route's middleware list. The others are empty. */}}
+
+{{ define "contextImports" }}{{ end }}
+{{ define "contextAuth" }}{{ end }}
+{{ define "middlewareStdImports" }}{{ end }}
+{{ define "middlewareImports" }}{{ end }}
+{{ define "middlewareAliases" }}{{ end }}
+{{ define "middlewareAuthz" }}{{ end }}
+{{ define "middlewareStores" }}{{ end }}
+{{ define "routesImports" }}{{ end }}
+{{ define "routesConfigStores" }}{{ end }}
+{{ define "routesConfigMiddlewares" }}{{ end }}
+{{ define "routesConfigValidate" }}{{ end }}
+{{ define "routesConfigExample" }}{{ end }}
+{{ define "routesSetupPre" }}{{ end }}
+{{ define "routesSetup" }}{{ end }}
+{{ define "routesProtectedMiddleware" }}{{ end }}
+
+{{ define "routeMiddlewaresFirst" }}
+{{- if .RequiresAuth }}
+				firstStep("{{ .HandlerName }}"),
+{{- end }}
+{{- end }}
+
+{{ define "routePermissions" }}
+				permissionStep({{ len .RequiredPerms }}),
+{{- end }}
+
+{{ define "moduleRequires" }}{{ end }}
+{{ define "moduleReplaces" }}{{ end }}
+{{ define "callerImports" }}{{ end }}
+{{ define "callerPrincipal" }}""{{ end }}

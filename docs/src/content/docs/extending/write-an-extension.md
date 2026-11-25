@@ -538,6 +538,10 @@ the model so the generated code compiles against the ORM it is given.
 snippet at `go test`. The api generator checks the set is complete when it
 parses the templates.
 
+Two snippets add middlewares to each mounted route, and take the route's
+`EndpointInfo`: `routeMiddlewaresFirst` runs before every other step, and
+`routePermissions` runs after the rate limit, body limit and service step.
+
 ## Policy on what the core writes
 
 Some features are core mechanism with a distribution-specific rule on top:
