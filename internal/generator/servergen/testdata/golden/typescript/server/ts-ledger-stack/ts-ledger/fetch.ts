@@ -46,7 +46,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { createLogger, type DatabaseConnection, type StackEnv } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { binding, perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { binding, perIsolate, requestIP, stackEnvOf, installQueueWakes, queueWakesSettled } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
 import { ping as pingPool } from '@superschematic/http-runtime/postgres';
@@ -74,6 +74,11 @@ interface ExecutionContext {
 // Each API's config as Cloudflare loads the version, from the string
 // bindings: a refused config throws here, and Cloudflare refuses the version.
 configure('ts-ledger', () => tsLedgerApi.loadEnvConfig(stackEnvOf(env)));
+
+// The wakes the server's writes send (D145, D151), as its QUEUE_WAKES binding
+// names them: an enqueue, a deadline or an event due before the next firing
+// of a worker's Cron Trigger starts a run of the worker's Workflow.
+installQueueWakes(env);
 
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
@@ -153,8 +158,9 @@ async function respond(request: Request, ctx: ExecutionContext): Promise<Respons
   try {
     return await handle(request);
   } finally {
-    // The spans the request ended go out after its response.
-    ctx.waitUntil(telemetry.flush());
+    // The wakes the request sent and the spans it ended go out after its
+    // response.
+    ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
   }
 }
 

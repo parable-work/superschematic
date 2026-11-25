@@ -26,7 +26,15 @@
 // connections. The next firing claims again a minute after this one began,
 // so the queue waits at most the gap between a firing's window and the
 // minute. The queue's keys, serialization, backoff and dead messages are
-// its table's (D80, D68), whatever claims it.
+// its table's (D80, D68), whatever claims it. A firing that leaves a backlog
+// logs a warning that names the queue (D151).
+//
+// The Worker also exports QueueWake, the class of the worker's Workflow
+// (D151). An enqueue of a message due before the next firing, at once or
+// after a short delay, creates an instance of it through the binding
+// QUEUE_WAKES names on the enqueuing Worker, with the time the message is
+// due: the instance sleeps until then and runs one firing as a drain, which
+// stops once the queue held and found nothing for a while.
 //
 // Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
 // when the Worker's OTEL_ bindings name an endpoint, each message's handling
@@ -37,13 +45,13 @@
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-ledger-implementation, at typescript/ts-ledger
 
-import { env } from 'cloudflare:workers';
+import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
-import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { binding, stackEnvOf, installQueueWakes, queueWakesSettled } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
 import { postgresQueue } from '@superschematic/http-runtime/postgres';
-import { runWorker, workerConcurrency, workerDrainSeconds } from '@superschematic/http-runtime/worker';
+import { runFiring, WAKE_HORIZON_MS, WAKE_IDLE_MS, workerConcurrency, workerDrainSeconds } from '@superschematic/http-runtime/worker';
 import type { Pool } from 'pg';
 import { embedLineItemQueue } from '@schemas/ts-ledger-db-types/queues';
 import { createOrm as createTsLedgerDbOrm } from '@schemas/ts-ledger-db-types/orm';
@@ -76,6 +84,11 @@ const telemetry = startWorkersTelemetry(env, { service: 'ts-ledger-embed-line-it
 const concurrency = workerConcurrency(2, stackEnvOf(env));
 const drainSeconds = workerDrainSeconds(50, stackEnvOf(env));
 
+// The wakes the worker's own enqueues send, as its QUEUE_WAKES binding
+// names them (D151): none where the platform binds none, as the cloudflare
+// target binds a drainer none, leaving what it writes to the next firing.
+installQueueWakes(env);
+
 // The API's config as Cloudflare loads the version, from the string
 // bindings: a refused config throws here, and Cloudflare refuses the version.
 configure('ts-ledger', () => tsLedgerApi.loadEnvConfig(stackEnvOf(env)));
@@ -85,18 +98,48 @@ export default {
     try {
       // The firing opens its database connections through Hyperdrive and
       // ends them as it ends (D92).
-      await withHyperdrive(() => drain(controller));
+      await withHyperdrive(() => drain({ cron: controller.cron }));
     } finally {
-      ctx.waitUntil(telemetry.flush());
+      ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
   },
 };
 
+/** What a wake creates an instance of the Workflow with: when the message it was sent for is due, in epoch milliseconds. */
+interface WakeParams {
+  readonly dueAt?: number;
+}
+
+/**
+ * The worker's Workflow (D151). An instance sleeps until the message it was
+ * created for is due, then runs one firing as a drain within one step,
+ * which retries nothing itself: what it leaves, the next firing of the
+ * Cron Trigger takes.
+ */
+export class QueueWake extends WorkflowEntrypoint<unknown, WakeParams> {
+  async run(event: Readonly<WorkflowEvent<WakeParams>>, step: WorkflowStep): Promise<string> {
+    const dueAt = typeof event.payload?.dueAt === 'number' ? event.payload.dueAt : 0;
+    if (dueAt > Date.now()) await step.sleepUntil('until due', new Date(dueAt));
+    await step.do('drain', { retries: { limit: 0, delay: 0 }, timeout: drainSeconds * 1000 + GRACE_MS + 60_000 }, async () => {
+      try {
+        await withHyperdrive(() => drain({ wake: event.instanceId }));
+      } finally {
+        await queueWakesSettled();
+        await telemetry.flush();
+      }
+      return 'drained';
+    });
+    return 'drained';
+  }
+}
+
 /**
  * Builds the worker from the Worker's bindings and claims and handles
- * messages for the firing's window, then stops as main.ts stops at SIGTERM.
+ * messages for the firing's window, then stops as main.ts stops at SIGTERM:
+ * at a firing of the Cron Trigger, or, for a wake's run, once the queue was
+ * idle a while.
  */
-async function drain(controller: ScheduledController): Promise<void> {
+async function drain(on: { readonly cron?: string; readonly wake?: string }): Promise<void> {
   // The string bindings.
   const values = stackEnvOf(env);
   const tsLedgerConfig = configure('ts-ledger', () => tsLedgerApi.loadEnvConfig(values));
@@ -114,12 +157,11 @@ async function drain(controller: ScheduledController): Promise<void> {
   };
   const workers = await construct('ts-ledger', 'workers', () => tsLedgerImpl.createWorkers(tsLedgerDeps));
   const queue = postgresQueue(tsLedgerDbPool, embedLineItemQueue);
-  // The window's end stops the claims, as SIGTERM stops main.ts's.
-  const stop = new AbortController();
-  const timer = setTimeout(() => stop.abort(), drainSeconds * 1000);
-  logger.info('worker started', { api: 'ts-ledger', class: 'EmbedLineItems', queue: queue.name, concurrency, cron: controller.cron, drainSeconds });
-  try {
-    await runWorker(
+  logger.info('worker started', { api: 'ts-ledger', class: 'EmbedLineItems', queue: queue.name, concurrency, drainSeconds, ...on });
+  // The window's end stops the claims, as SIGTERM stops main.ts's; a wake's
+  // run stops sooner, once the queue was idle a while.
+  await runFiring(
+    [
       {
         name: queue.name,
         leaseSeconds: queue.leaseSeconds,
@@ -135,12 +177,11 @@ async function drain(controller: ScheduledController): Promise<void> {
         fail: (id, token, cause) => queue.fail(id, token, cause),
         release: (id, token) => queue.release(id, token),
         prune: limit => queue.prune(limit),
+        nextDue: () => queue.nextDue(),
       },
-      { signal: stop.signal, concurrency, graceMs: GRACE_MS, logger }
-    );
-  } finally {
-    clearTimeout(timer);
-  }
+    ],
+    { windowMs: drainSeconds * 1000, concurrency, graceMs: GRACE_MS, logger, ...(on.wake === undefined ? {} : { wake: { idleMs: WAKE_IDLE_MS, horizonMs: WAKE_HORIZON_MS } }) }
+  );
 }
 
 /** Loads an API's configuration, naming the API when it fails. */

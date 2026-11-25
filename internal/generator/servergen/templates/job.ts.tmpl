@@ -22,7 +22,7 @@
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .PostgresDatabases }}
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, queueWakesSettled } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
 {{- end }}
 {{- if .SQLiteDatabases }}
