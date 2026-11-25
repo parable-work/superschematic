@@ -812,7 +812,10 @@ named after one.
 Default: `{SERVICE}_DATABASE`
 
 The field of an API's database: its `authDb`, or its one DB-kind
-dependency.
+dependency. An API has one database, so this template alone may leave
+`{SERVICE}` out: `DATABASE` gives the field `DATABASE`, which a platform
+sets as `DATABASE_URL` or the `DATABASE_CLOUD_SQL_*` variables, whatever
+the database is named.
 
 ### `derived_fields.service`
 
