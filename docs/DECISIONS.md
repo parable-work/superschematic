@@ -420,7 +420,12 @@ release tag exists.
   an image the stack adds packages to or extends: a Cloud Build of two
   steps whose second reads the first's image from the build's daemon, a
   Go and a Rust binary on `debian:trixie-slim` as `nonroot`, and Bun's
-  image taking `apt-get install` (D144).
+  image taking `apt-get install` (D144); a worker in drain mode: its
+  Cloud Run job, an execution a wake starts with the metadata server's
+  token and `roles/run.invoker` on the job alone, a wake the job refuses
+  before the worker's wave has rolled out, the Cloud Scheduler tick, a
+  session's advisory lock held through the Cloud SQL connector for a
+  task's life, and a task stopped at its day's limit (D145).
 - **Cloudflare.** The storefront on Workers and a D1-backed TypeScript API,
   the target's own done line (D64, L 7086); `TestRealD1`, which the D1
   migration driver waits for (D27, L 3012); destroy order, the bucket
@@ -1596,25 +1601,42 @@ SDK generators and the client SDKs guide.
 
 ## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
 
-On gcp a worker is a worker pool at a fixed count, so a queue that is
-empty most of the day still pays for an instance. The scaler that would
-change the count is designed and not built, for three reasons the section
-above gives: a grant that lets its holder redeploy the worker, a field the
-next deploy resets, and a scheduled run a minute for ever.
+Built: a worker's `mode` and `idle` settings and what resolution refuses of
+them (`internal/stack/workers.go`); the drain worker's entrypoint in Go and
+TypeScript, which takes one of `instances` advisory locks named for its
+queue as it starts and exits 0 once no message was ready or held for
+`idle` (`runtime/http/go/worker`, the TypeScript runtime's `./worker`,
+`sqlutil`'s `slot` statement); the wake a queue client sends after an
+enqueue, at most once per queue in five seconds per process, which fails
+no enqueue (`runtime/http/go/wake` behind the Go ORM's `OnEnqueue`, the
+TypeScript runtime's `queue-wake.ts`); and on gcp the Cloud Run job in the
+worker pool's place, `roles/run.invoker` on that job alone and
+`QUEUE_WAKES` for each deployable that may enqueue to its queue, and the
+Cloud Scheduler tick (`extensions/gcp/cloudrunworker.go`). `stack dev`
+runs a drain worker as it runs any worker. The stacks and queues guides
+and section 8.8 of `docs/stack-model.md` describe it. The commit that
+built it names D145, and says where it departs from the decision's text.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A worker's settings take `mode`: `pool`, the default, or `drain`. In drain mode the worker's entrypoint claims as it does now and exits 0 once no message was ready or held for `idle` (`30s` when absent). | The scaler; Pub/Sub push or Cloud Tasks to a service, a second delivery system beside the queue's table whose HTTP time limit bounds a message's handling |
-| gcp lowers a drain worker as a Cloud Run job with the worker's image, account, config and connections, and no worker pool. `instances` is how many tasks may run at once, one when absent; `maxInstances` is refused beside it. | |
-| Each deployable that enqueues to the queue gets the job's name in its config and `roles/run.invoker` on that job alone. Its queue client runs the job after an enqueue, at most once per queue in five seconds per process, and logs a failure without failing the enqueue. | A grant on the project; a wake that can fail the write |
-| A drain worker takes one of `instances` advisory locks named for its queue as it starts, and exits at once when none is free, so wakes that overlap cost a start and nothing else. | Asking the platform what is running before each wake |
-| A Cloud Scheduler job runs the drain job every `tick` (`5m` when absent) with `roles/run.invoker`, as a scheduled job's does. It covers a message a trigger enqueued, a retry that is due later, a delayed message (D80) and a wake that was lost. | Trusting the wake alone |
-| `stack dev` runs a drain worker as it runs any worker. Cloudflare's drainer already drains at each Cron firing; waking it before the next one (D92) can use the same seam and is left. | |
+Left:
 
-Build: `internal/stack/workers.go`, `extensions/gcp` (the worker's
-lowering, the job, the connector and its grant, the scheduler job, the
-settings schema), the workers' entrypoints in `servergen`, the three queue
-clients and the stacks and queues guides.
+- A Rust worker in drain mode. The Rust runtime's worker loop does not
+  exit when its queue is idle and takes no slot, so gcp refuses a Rust
+  worker whose mode is drain; and the Rust queue client sends no wake, so
+  a message a Rust API enqueues waits for the tick. Its queue descriptor
+  holds the `slot` statement already.
+- A behavior worker in drain mode, which resolution refuses: triggers and
+  the clock fill its queues, so no enqueue's wake hears them, and its
+  claim loops take no slot.
+- The wake on Cloudflare: waking a worker's Worker before its next Cron
+  firing (D92) through the same seam, `ir.ResolvedDeployable.Wakes` and
+  `QUEUE_WAKES`. `mode: "drain"` changes nothing there.
+- A wake from an enqueue on SQLite (`Enqueue<Queue>SQLite`,
+  `enqueueStatement`), and a slot there: no target runs a drain worker
+  over a SQLite file.
+- A TypeScript entrypoint that waits for the wakes it has sent before it
+  exits, as a Go one does: a job that exits right after its one enqueue
+  may end before its wake goes out, and the tick finds the message.
+- A bound on a task's life shorter than a day, and a setting for it.
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 

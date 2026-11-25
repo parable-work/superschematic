@@ -358,6 +358,13 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 	settings := &ir.DeployableSettings{}
 	var job, worker, deriver, app string
 	var runner bool
+	// A worker's element takes maxInstances, mode and idle as its own
+	// (D53, D145); on any other element each is the platform's setting of
+	// that name, as a Cloud Run server's maxInstances is.
+	isWorker := false
+	if name, _ := element["worker"].(string); name != "" {
+		isWorker = true
+	}
 	for _, key := range sortedKeys(element) {
 		value := element[key]
 		switch key {
@@ -410,6 +417,32 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 				settings.Env[field] = ir.EnvValue{Value: v}
 			}
 		default:
+			if isWorker {
+				switch key {
+				case "maxInstances":
+					n, ok := value.(float64)
+					if !ok || n != float64(int(n)) {
+						return nil, fmt.Errorf("maxInstances is %v; it is a whole number, one or more", value)
+					}
+					maxInstances := int(n)
+					settings.MaxInstances = &maxInstances
+					continue
+				case "mode":
+					mode, ok := value.(string)
+					if !ok {
+						return nil, fmt.Errorf("mode is %v; it is %q or %q", value, ir.WorkerModePool, ir.WorkerModeDrain)
+					}
+					settings.Mode = mode
+					continue
+				case "idle":
+					idle, ok := value.(string)
+					if !ok {
+						return nil, fmt.Errorf("idle is %v; it is a duration such as \"30s\"", value)
+					}
+					settings.Idle = idle
+					continue
+				}
+			}
 			if settings.Values == nil {
 				settings.Values = map[string]any{}
 			}
@@ -711,6 +744,12 @@ func checkWorkerSettings(where, owner string, settings *ir.DeployableSettings, r
 		if settings.Concurrency != nil {
 			keys = append(keys, "concurrency")
 		}
+		if settings.Mode != "" {
+			keys = append(keys, "mode")
+		}
+		if settings.Idle != "" {
+			keys = append(keys, "idle")
+		}
 		if len(keys) > 0 {
 			r.Errorf(owner, "%s sets %s, which only a worker or a deriver takes; name the worker beside its API's handle, `of: <API handle>, worker: \"<worker class>\"`, or the deriver, `of: <API handle>, deriver: \"<deriver class>\"`", where, strings.Join(keys, " and "))
 		}
@@ -725,4 +764,24 @@ func checkWorkerSettings(where, owner string, settings *ir.DeployableSettings, r
 	if settings.Concurrency != nil && *settings.Concurrency < 1 {
 		r.Errorf(owner, "%s concurrency is %d; it is one or more", where, *settings.Concurrency)
 	}
+	if err := CheckWorkerMode(settings.Mode, settings.Idle); err != nil {
+		r.Errorf(owner, "%s %v", where, err)
+	}
+}
+
+// CheckWorkerMode checks a worker's mode and idle settings in every form
+// (D145): a mode of pool or drain, and an idle of whole seconds, which
+// only drain mode reads.
+func CheckWorkerMode(mode, idle string) error {
+	switch mode {
+	case "", ir.WorkerModePool, ir.WorkerModeDrain:
+	default:
+		return fmt.Errorf("mode is %q; it is %q, a worker whose instances keep running, or %q, one that runs as a job that empties its queue and exits", mode, ir.WorkerModePool, ir.WorkerModeDrain)
+	}
+	if idle != "" {
+		if _, err := TimeoutSeconds(idle); err != nil {
+			return fmt.Errorf("idle: %w", err)
+		}
+	}
+	return nil
 }

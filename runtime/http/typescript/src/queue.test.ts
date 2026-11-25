@@ -11,10 +11,12 @@ import {
   parsePoint,
   pointText,
   postgresQueue,
+  setProcessQueueWaker,
   type QueueDefinition,
   type QueueQueryConfig,
   type QueueStatements,
 } from './queue';
+import { runWorker, type WorkerQueue } from './worker';
 
 /** The variable that names a Postgres the queue's database tests run against; they are skipped without it. */
 const databaseVariable = 'SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL';
@@ -78,6 +80,7 @@ RETURNING state`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.${table}'), $1::int)`,
   };
 }
 
@@ -118,6 +121,116 @@ function recorder(...results: { rows: unknown[]; rowCount: number | null }[]) {
     },
   };
 }
+
+describe('an enqueue wakes its queue (D145)', () => {
+  test("it tells the process's waker its queue once its statement has run, and not when the statement fails", async () => {
+    const woken: string[] = [];
+    setProcessQueueWaker({
+      enqueued: async queue => {
+        woken.push(queue);
+      },
+    });
+    try {
+      const client = recorder({ rows: [], rowCount: 1 });
+      await enqueue(client, definition(), { orderId: 'o-1', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+      expect(client.queries).toHaveLength(1);
+      expect(woken).toEqual(['OrderPlaced']);
+      const broken = {
+        query: async () => {
+          throw new Error('the database is down');
+        },
+      };
+      await expect(enqueue(broken, definition(), { orderId: 'o-2', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } })).rejects.toThrow(
+        'the database is down'
+      );
+      expect(woken).toEqual(['OrderPlaced']);
+      // A waker that throws fails no enqueue.
+      setProcessQueueWaker({
+        enqueued: () => {
+          throw new Error('the waker broke');
+        },
+      });
+      await enqueue(recorder({ rows: [], rowCount: 1 }), definition(), { orderId: 'o-3', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+    } finally {
+      setProcessQueueWaker(undefined);
+    }
+  });
+});
+
+describe("a queue's slots (D145)", () => {
+  /** A pool whose connections answer the slot statement from the slots taken, and record how each was released. */
+  function slotPool(taken: Set<number>) {
+    const released: (boolean | undefined)[] = [];
+    const asked: unknown[][] = [];
+    return {
+      released,
+      asked,
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => ({
+        query: async (config: QueueQueryConfig) => {
+          asked.push(config.values);
+          const slot = config.values[0] as number;
+          if (taken.has(slot)) return { rows: [[false]], rowCount: 1 };
+          taken.add(slot);
+          return { rows: [[true]], rowCount: 1 };
+        },
+        release: (destroy?: boolean) => void released.push(destroy),
+      }),
+    };
+  }
+
+  test('slot takes the first free of its slots on a connection of its own, which giving it back ends', async () => {
+    const taken = new Set<number>([1]);
+    const pool = slotPool(taken);
+    const give = await postgresQueue(pool, definition()).slot(3);
+    expect(give).toBeDefined();
+    expect(pool.asked).toEqual([[1], [2]]);
+    expect(pool.released).toEqual([]);
+    await give?.();
+    // The connection is destroyed, so the session and its lock end.
+    expect(pool.released).toEqual([true]);
+  });
+
+  test('with every slot taken it resolves to undefined and gives its connection back', async () => {
+    const pool = slotPool(new Set([1, 2]));
+    expect(await postgresQueue(pool, definition()).slot(2)).toBeUndefined();
+    expect(pool.asked).toEqual([[1], [2]]);
+    expect(pool.released).toEqual([undefined]);
+  });
+
+  test('it refuses a client that is no pool, and a definition written before slots', async () => {
+    await expect(postgresQueue(recorder(), definition()).slot(1)).rejects.toThrow('gives no connection of its own');
+    // A pg Client's connect resolves to no connection of its own.
+    const client = { ...recorder(), connect: async () => undefined };
+    await expect(postgresQueue(client, definition()).slot(1)).rejects.toThrow('gives no connection of its own');
+    const { slot: _slot, ...before } = definition().statements;
+    await expect(postgresQueue(slotPool(new Set()), { ...definition(), statements: before }).slot(1)).rejects.toThrow('holds no slot statement');
+  });
+
+  test.skipIf(dsn === '')('on Postgres, two pools take different slots of one queue, a third finds none, and a slot given back is free', async () => {
+    const table = `slot_probe_${Date.now()}_queue`;
+    const pools = [1, 2, 3].map(() => new pg.Pool({ connectionString: dsn, max: 2 }));
+    try {
+      const queues = pools.map(pool => postgresQueue(pool, definition(table)));
+      const first = await queues[0]!.slot(2);
+      const second = await queues[1]!.slot(2);
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      expect(await queues[2]!.slot(2)).toBeUndefined();
+      // Another queue's slots are its own.
+      const other = await postgresQueue(pools[2]!, definition(`${table}_other`)).slot(1);
+      expect(other).toBeDefined();
+      await other?.();
+      await first?.();
+      const again = await queues[2]!.slot(2);
+      expect(again).toBeDefined();
+      await again?.();
+      await second?.();
+    } finally {
+      await Promise.all(pools.map(pool => pool.end()));
+    }
+  });
+});
 
 describe('parseArray', () => {
   test('reads a one-dimensional array literal, quoted elements and NULL included', () => {
@@ -531,6 +644,92 @@ describe.skipIf(dsn === '')('on Postgres', () => {
       ]);
     } finally {
       await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test('a worker in drain mode drains a real queue while it holds its slot, a second start finds the slot taken and stops, and the first stops once the queue is idle (D145)', async () => {
+    const schema = `queue_runtime_drain_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const options = `-c search_path=${schema},public`;
+    const pool = new pg.Pool({ connectionString: dsn, max: 4, options });
+    const other = new pg.Pool({ connectionString: dsn, max: 2, options });
+    try {
+      // The slot is named for the table, so the table's name is the test's own.
+      const table = `drained_${Date.now()}_queue`;
+      await pool.query(createTable(table));
+      const def = definition(table);
+      const orders = ['6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b91', '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b92', '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b93'];
+      for (const orderId of orders) {
+        await enqueue(pool, def, { orderId, quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+      }
+      const handled: string[] = [];
+      /** The queue a generated worker entrypoint builds over postgresQueue's claims, whose handler waits for hold. */
+      const workerQueue = (from: pg.Pool, hold: Promise<void>): WorkerQueue => {
+        const queue = postgresQueue(from, def);
+        return {
+          name: queue.name,
+          leaseSeconds: queue.leaseSeconds,
+          claim: async (n, leaseSeconds) =>
+            (await queue.claim(n, leaseSeconds)).map(claim => ({
+              id: claim.id,
+              token: claim.token,
+              attempt: claim.attempt,
+              handle: async () => {
+                await hold;
+                handled.push(claim.message.orderId);
+              },
+            })),
+          extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
+          complete: (id, token) => queue.complete(id, token),
+          fail: (id, token, cause) => queue.fail(id, token, cause),
+          release: (id, token) => queue.release(id, token),
+          prune: limit => queue.prune(limit),
+          slot: slots => queue.slot(slots),
+        };
+      };
+      const count = async (state: string): Promise<number> => {
+        const { rows } = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE state = $1`, [state]);
+        return rows[0]?.n ?? 0;
+      };
+      const until = async (what: string, cond: () => Promise<boolean>): Promise<void> => {
+        const deadline = Date.now() + 10_000;
+        while (!(await cond())) {
+          if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+      };
+      const never = new AbortController().signal;
+      let letGo: () => void = () => {};
+      const hold = new Promise<void>(resolve => {
+        letGo = resolve;
+      });
+      const first = runWorker(workerQueue(pool, hold), { signal: never, concurrency: 3, idleMs: 20, drain: { idleMs: 300, slots: 1 } });
+      await until("the first worker's claims", async () => (await count('claimed')) === 3);
+
+      // A second start of the worker, as an overlapping wake makes, finds the
+      // one slot taken: it stops at once, whatever its idle time.
+      const began = Date.now();
+      await runWorker(workerQueue(other, Promise.resolve()), { signal: never, idleMs: 20, drain: { idleMs: 60_000, slots: 1 } });
+      expect(Date.now() - began).toBeLessThan(10_000);
+      expect(handled).toEqual([]);
+
+      letGo();
+      await first;
+      expect([...handled].sort()).toEqual(orders);
+      expect(await count('done')).toBe(3);
+      expect(await count('ready')).toBe(0);
+
+      // The first gave its slot back as it stopped: a later start takes it.
+      let give: (() => Promise<void>) | undefined;
+      await until('the slot to be free', async () => (give = await postgresQueue(other, def).slot(1)) !== undefined);
+      await give?.();
+    } finally {
+      await pool.end();
+      await other.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);
       await admin.end();
     }

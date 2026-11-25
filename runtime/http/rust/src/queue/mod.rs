@@ -200,6 +200,14 @@ pub struct QueueStatements {
     pub extend: String,
     pub release: String,
     pub prune: String,
+    /// On Postgres alone: takes slot `$1` of the locks a worker in drain
+    /// mode holds while it runs (D145), a session advisory lock named for
+    /// the queue's table, and returns whether it took it. The Go and
+    /// TypeScript workers take one; this crate's worker does not drain
+    /// yet, and holds the statement so that it takes the same lock when
+    /// it does. Empty on SQLite, and in a descriptor written before.
+    #[serde(default)]
+    pub slot: String,
     /// On SQLite alone: whether a message is due, which a claim reads
     /// before it takes the write lock; empty on Postgres.
     #[serde(default)]

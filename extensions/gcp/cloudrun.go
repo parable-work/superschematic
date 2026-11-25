@@ -242,6 +242,8 @@ func (w workload) labeled(props map[string]any) map[string]any {
 //     such as the generic connector's signing key, from a Secret Manager
 //     secret of its own (secretMemberNodes, D63), and, when it exports
 //     its traces, OpenTelemetry's variables (telemetryEnv);
+//   - the wakes of the workers in drain mode its enqueues may leave a
+//     message for (wakesEnv, D145);
 //   - the image's repository path, which the deploy pins to a digest
 //     (section 11.2), and the cpu and memory settings;
 //   - the Cloud SQL volume, holding the instances its connections name,
@@ -327,6 +329,9 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 			return registry.Lowered{}, workload{}, err
 		}
 		envs = append(envs, vars...)
+	}
+	if wakes := wakesEnv(v, d); wakes != nil {
+		envs = append(envs, wakes)
 	}
 
 	_, short := workloadName(env, d)

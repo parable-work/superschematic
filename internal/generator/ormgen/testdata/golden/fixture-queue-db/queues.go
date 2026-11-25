@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	types "example.com/schemas/types/go/fixture-queue-db"
@@ -79,6 +80,8 @@ func keyHeld(err error) bool {
 // claim alike.
 type queueTable struct {
 	name string
+	// queue is the `@queue` class, which an enqueue's wake names.
+	queue string
 	// retries is how many times a failed message is handled again; backoff
 	// is how long it then waits, doubled for each attempt before, up to
 	// maxBackoff.
@@ -96,9 +99,10 @@ type queueTable struct {
 // per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
-// prune deletes up to $2 messages done $1 seconds ago or more.
+// prune deletes up to $2 messages done $1 seconds ago or more; slot takes
+// slot $1 of the locks a worker in drain mode holds while it runs.
 type queueStatements struct {
-	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune string
+	insert, dueIn, conflict, expire, claim, complete, fail, extend, release, prune, slot string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -135,7 +139,53 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
+	if f := onEnqueue.Load(); f != nil {
+		(*f)(t.queue)
+	}
 	return nil
+}
+
+// onEnqueue is what OnEnqueue last gave, or nil.
+var onEnqueue atomic.Pointer[func(queue string)]
+
+// OnEnqueue has every enqueue of the package call f once its statement has
+// run, with the queue's `@queue` class (D145): an entrypoint gives the
+// function that wakes the queue's worker where it runs in drain mode, the
+// HTTP runtime's wake.Notifier's Enqueued. f is called in the enqueue's
+// goroutine, before its transaction commits, so it returns at once and
+// fails nothing. A nil f, the package's state until OnEnqueue is called,
+// calls nothing.
+func OnEnqueue(f func(queue string)) {
+	if f == nil {
+		onEnqueue.Store(nil)
+		return
+	}
+	onEnqueue.Store(&f)
+}
+
+// slot takes one of slots locks named for the table, the first that is
+// free, on a connection of its own, and returns the function that gives
+// it back; it reports false when every one is taken (D145). The lock is
+// the session's, so release closes the connection, and a worker that dies
+// gives its slot back as its connection ends.
+func (t queueTable) slot(ctx context.Context, pool *pgxpool.Pool, slots int) (release func(), ok bool, err error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("take a slot of %s: %w", t.name, err)
+	}
+	for slot := 1; slot <= slots; slot++ {
+		var held bool
+		if err := conn.QueryRow(ctx, t.statements.slot, slot).Scan(&held); err != nil {
+			conn.Release()
+			return nil, false, fmt.Errorf("take a slot of %s: %w", t.name, err)
+		}
+		if held {
+			session := conn.Hijack()
+			return func() { _ = session.Close(context.Background()) }, true, nil
+		}
+	}
+	conn.Release()
+	return nil, false, nil
 }
 
 // claim marks dead each message whose last attempt's claim expired, then
@@ -246,6 +296,7 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statem
 // orderChangedQueue is the table of the queue OrderChanged.
 var orderChangedQueue = queueTable{
 	name:       `order_changed_queue`,
+	queue:      "OrderChanged",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
@@ -290,6 +341,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)`,
 	},
 }
 
@@ -411,9 +463,18 @@ func (q *OrderChangedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return orderChangedQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *OrderChangedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return orderChangedQueue.slot(ctx, q.pool, slots)
+}
+
 // orderPlacedQueue is the table of the queue OrderPlaced.
 var orderPlacedQueue = queueTable{
 	name:       `order_placed_queue`,
+	queue:      "OrderPlaced",
 	retries:    3,
 	backoff:    60 * time.Second,
 	maxBackoff: 200 * time.Second,
@@ -454,6 +515,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)`,
 	},
 }
 
@@ -599,9 +661,18 @@ func (q *OrderPlacedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return orderPlacedQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *OrderPlacedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return orderPlacedQueue.slot(ctx, q.pool, slots)
+}
+
 // pingQueue is the table of the queue Ping.
 var pingQueue = queueTable{
 	name:       `ping_queue`,
+	queue:      "Ping",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
@@ -642,6 +713,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)`,
 	},
 }
 
@@ -752,9 +824,18 @@ func (q *PingQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return pingQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *PingQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return pingQueue.slot(ctx, q.pool, slots)
+}
+
 // stockCheckedQueue is the table of the queue StockChecked.
 var stockCheckedQueue = queueTable{
 	name:       `stock_checked_queue`,
+	queue:      "StockChecked",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
@@ -797,6 +878,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)`,
 	},
 }
 
@@ -905,9 +987,18 @@ func (q *StockCheckedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return stockCheckedQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *StockCheckedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return stockCheckedQueue.slot(ctx, q.pool, slots)
+}
+
 // stockMovedQueue is the table of the queue StockMoved.
 var stockMovedQueue = queueTable{
 	name:       `stock_moved_queue`,
+	queue:      "StockMoved",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
@@ -952,6 +1043,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)`,
 	},
 }
 
@@ -1064,9 +1156,18 @@ func (q *StockMovedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return stockMovedQueue.prune(ctx, q.pool, limit)
 }
 
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *StockMovedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return stockMovedQueue.slot(ctx, q.pool, slots)
+}
+
 // syncRequestedQueue is the table of the queue SyncRequested.
 var syncRequestedQueue = queueTable{
 	name:       `sync_requested_queue`,
+	queue:      "SyncRequested",
 	retries:    5,
 	backoff:    30 * time.Second,
 	maxBackoff: 3600 * time.Second,
@@ -1109,6 +1210,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+		slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)`,
 	},
 }
 
@@ -1219,4 +1321,12 @@ func (q *SyncRequestedQueue) Release(ctx context.Context, id, token string) erro
 // deletes limit. It never deletes a dead message.
 func (q *SyncRequestedQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return syncRequestedQueue.prune(ctx, q.pool, limit)
+}
+
+// Slot takes one of slots locks named for the queue, which a worker in
+// drain mode holds while it runs (D145), so no more than slots of them
+// drain the queue at once: it reports false when every one is taken, and
+// otherwise returns the function that gives the slot back.
+func (q *SyncRequestedQueue) Slot(ctx context.Context, slots int) (release func(), ok bool, err error) {
+	return syncRequestedQueue.slot(ctx, q.pool, slots)
 }

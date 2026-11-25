@@ -606,6 +606,12 @@ type Database struct {
 	// (D85): every API on the database holds the one secret. Empty for a
 	// database without one.
 	FieldKeys string
+
+	// Queues is true when the database declares a queue: the entrypoint
+	// gives its ORM's OnEnqueue the wakes the environment holds, so an
+	// enqueue starts the queue's worker where it runs in drain mode
+	// (D145).
+	Queues bool
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -890,6 +896,7 @@ func Plan(in Input) (*Server, error) {
 				if keys := o.Deps.FieldKeys; keys != "" {
 					d.FieldKeys = api.Var + "Config." + keys
 				}
+				d.Queues = o.Deps.Queues
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
 				if slices.Contains(in.CloudSQL, db) {
@@ -1502,6 +1509,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyIdentity": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
+		},
+		"anyQueues": func(databases []*Database) bool {
+			return slices.ContainsFunc(databases, func(d *Database) bool { return d.Queues })
 		},
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })

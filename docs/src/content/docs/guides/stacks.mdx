@@ -45,7 +45,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1 |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool, or, in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes, for a Go or a TypeScript worker; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1; drain mode for a Rust worker and a behavior worker |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -559,7 +559,7 @@ TypeScript twin.
 | `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, storageCorsHeaders, memoryStoreImage, memoryStorePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
+| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency`, `enabled`, `mode` and `idle` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -830,6 +830,67 @@ whose writes matter. A Rust API's behavior worker claims on a SQLite file
 connections of its own, and prunes each as any worker does. No TypeScript
 or Go one claims on SQLite yet, and none on D1, so there a hearing
 table's change queue grows by a message per write until one does.
+
+### Drain mode
+
+A worker's instances keep running, each polling its queue, so a queue
+that is empty most of the day still pays for an instance. A worker whose
+settings say `mode: "drain"` runs as a job instead (D145): it starts when
+there is something to handle, claims as a pool's instance does, and exits
+0 once no message was ready or held for its `idle` time.
+
+```ts
+settings: [{ of: ShopOrders, worker: "FulfilOrders", mode: "drain", idle: "1m", instances: 2 }]
+```
+
+| Setting | Default | |
+| --- | --- | --- |
+| `mode` | `"pool"` | `"drain"` runs the worker as a job that empties its queue and exits |
+| `idle` | `30s` | how long a drain worker waits with no message ready or held before it exits, in whole seconds; only a drain worker takes it |
+| `instances` | `1` | in drain mode, how many of the worker may run at once; `maxInstances` beside `mode: "drain"` does not resolve |
+| `tick` | `5m` | on gcp, how often the worker is started whatever its queue holds: `1m` to `30m` in steps that divide an hour, or `1h` to `24h` in steps that divide a day |
+
+Three things make it work:
+
+- **A wake.** Every deployable that may enqueue to the queue, which is
+  each server, job, worker and app with a connection to the queue's
+  database, is given the worker's wake in `QUEUE_WAKES` and the right to
+  use it. After an enqueue's statement has run, the Go ORM and the
+  TypeScript queue client send it, at most once per queue in five seconds
+  per process. It is a hint and no part of the write: nothing waits for
+  it, and one that fails is logged as a warning and fails nothing.
+- **A tick.** The platform also starts the worker on a schedule, every
+  five minutes unless `tick` says. It finds what no wake announces: a
+  message an `@enqueueOnChange` trigger wrote, a retry or a
+  [delayed message](/superschematic/guides/queues/#enqueue-for-later) that
+  falls due later, a message a Rust API enqueued, and a wake that was
+  lost.
+- **Slots.** As it starts, a drain worker takes one of `instances`
+  advisory locks named for its queue, on a connection it keeps while it
+  runs, and exits at once when none is free. So wakes that overlap cost a
+  start and nothing else, and nothing asks the platform what is running.
+
+On gcp the worker is then a Cloud Run job of one task, with the worker's
+image, account, config and connections, and no worker pool. Each
+enqueuer's account holds `roles/run.invoker` on that job alone, its wake
+is the job's run method with the token its own metadata server gives it,
+and the tick is a Cloud Scheduler job that runs the job as the worker's
+own account. Cloud Run retries no task of it, and stops one after a day;
+the next wake or tick starts another. A drain worker that is off keeps
+its job, so its image stays pinned, and has no tick and no wake.
+
+`stack dev` runs a drain worker as it runs any worker, a process that
+polls until it is stopped. On cloudflare a worker's Worker already drains
+at each firing of its Cron Trigger, and `mode` changes nothing there.
+
+A Rust worker's entrypoint does not exit when its queue is empty yet, so
+one in drain mode does not resolve on gcp, and the Rust queue client
+sends no wake. A `@behaviorWorker` does not resolve in drain mode on any
+target: triggers and the clock fill its queues, which no wake hears. A
+queue on SQLite has no advisory lock, so a worker there takes no slot.
+If your database is reached through a pooler that hands a connection back
+between transactions, a session's lock does not hold, and every start
+drains: keep `instances` in mind as a hint there, not a bound.
 
 ## The engine's runner
 
@@ -1749,6 +1810,7 @@ every environment with Cloud Run.
 | job | a Cloud Run job with its own service account, named after the job (`shop-orders-ship-orders`), with its API's config, secrets and connections; one task, with the job's timeout for each try and its retries, at most 10 |
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | worker | a Cloud Run worker pool with its own service account, named after the worker (`shop-orders-fulfil-orders`), with its API's config, secrets and connections and `WORKER_CONCURRENCY`; no port and no URL, scaled by hand to the worker's `instances`, zero when it is off. A `grace` of ten seconds or more is refused, since Cloud Run stops an instance ten seconds after SIGTERM |
+| worker in [drain mode](#drain-mode) | a Cloud Run job in the pool's place, named and configured as the pool would be, of one task with no retries, with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`; a Cloud Scheduler job, named as the worker is, that runs it every `tick` as the worker's own account; and, for each deployable that may enqueue to its queue, `roles/run.invoker` on the job for that deployable's account, whose config holds the job's run method in `QUEUE_WAKES` |
 | runner | a Cloud Run worker pool with its own service account, named after the runner (`shop-db-engine-runner`), with its database's connection as its one config; scaled by hand to one instance, zero when it is off |
 | app | a Cloud Run service with its own service account, named after the app (`shop-stock-backoffice`), with its API's config, secrets and connections, as a server; a TCP startup probe and a TCP liveness probe on its port, and no HTTP probe. Internal only and reachable by no one unless exposed. When it is off, its account and grants alone, with no service and no image ([Apps](#apps)) |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
@@ -1799,6 +1861,7 @@ Settings and their defaults:
 | `gcp.cloudrun` | `cpuAlwaysAllocated` | false: CPU only while an instance handles a request |
 | `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrunworker` | `cpu`, `memory` | `1`, `512Mi` |
+| `gcp.cloudrunworker` | `tick` | `5m`: how often a worker in [drain mode](#drain-mode) is started; a pool's worker takes none |
 | `gcp.cloudrunrunner` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrun`, `gcp.cloudrunjob`, `gcp.cloudrunworker`, `gcp.cloudrunrunner` | `telemetry` | the environment's: export when its `telemetry` is set |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
@@ -2519,6 +2582,9 @@ retention and dead messages are as on gcp
 `instances` over one, and `maxInstances`, do not resolve;
 `enabled: false` leaves the Worker with no Cron Trigger. A Go or Rust
 worker does not resolve, and neither does one whose queue is on D1.
+`mode: "drain"` ([Drain mode](#drain-mode)) changes nothing here: each
+firing already drains the queue and stops, and no enqueue wakes the
+Worker before its next firing.
 
 ### Sites on Workers
 

@@ -416,6 +416,15 @@ type DeployableSettings struct {
 	// target scales a worker yet: gcp refuses a range, and local runs one
 	// process. Only an element whose `of` names a worker sets it.
 	MaxInstances *int `json:"maxInstances,omitempty" yaml:"maxInstances,omitempty"`
+
+	// Mode is how a worker runs (D145): WorkerModePool, the default, keeps
+	// its instances running, and WorkerModeDrain runs it as a job that
+	// empties its queue and exits. Idle is how long a worker in drain mode
+	// waits with no message ready or held before it exits, a duration of
+	// whole seconds, DefaultWorkerIdleSeconds when unset. Only an element
+	// whose `of` names a worker sets them.
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Idle string `json:"idle,omitempty" yaml:"idle,omitempty"`
 }
 
 // EnvValue is the value an environment gives one config field: a literal,

@@ -104,6 +104,14 @@ type QueueStatements struct {
 	// while it deletes a whole batch.
 	Prune string
 
+	// Slot, on Postgres alone, takes slot $1 of the queue's drain locks
+	// (D145), a session advisory lock named for the queue's table, and
+	// returns whether it took it. A worker in drain mode takes one of as
+	// many slots as may run at once as it starts, on a connection it keeps
+	// while it runs, and exits when none is free; closing the connection
+	// gives the slot back. SQLite has none: a worker there takes no slot.
+	Slot string
+
 	// Due, on SQLite alone, reads whether a message is due or claimed past
 	// its claim's expiry, a row or none, with no parameter: a claim runs it
 	// first and takes the write lock only when it finds one, so an idle
@@ -305,6 +313,7 @@ func PostgresQueueStatements(spec QueueSpec) QueueStatements {
 	s := QueueStatements{
 		Insert: "INSERT INTO " + table,
 		DueIn:  "now() + make_interval(secs => $1)",
+		Slot:   fmt.Sprintf("SELECT pg_try_advisory_lock(hashtext(%s), $1::int)", QuoteLiteral(QueueDrainLock(spec.Table))),
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),
 			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()",
@@ -573,10 +582,20 @@ func (s QueueStatements) All() []NamedStatement {
 		NamedStatement{"expire", s.Expire}, NamedStatement{"claim", s.Claim}, NamedStatement{"complete", s.Complete},
 		NamedStatement{"fail", s.Fail}, NamedStatement{"extend", s.Extend}, NamedStatement{"release", s.Release}, NamedStatement{"prune", s.Prune},
 	)
+	if s.Slot != "" {
+		all = append(all, NamedStatement{"slot", s.Slot})
+	}
 	if s.Due != "" {
 		all = append(all, NamedStatement{"due", s.Due})
 	}
 	return all
+}
+
+// QueueDrainLock is the name of the advisory locks the workers that drain
+// the queue of a table take (QueueStatements.Slot, D145): the first key of
+// each lock is its hash, and the second the slot.
+func QueueDrainLock(table string) string {
+	return "superschematic.drain." + table
 }
 
 // NamedStatement is one of a queue's statements with its name, lower case.

@@ -234,6 +234,64 @@ func TestStackDecoratorReadsOrigins(t *testing.T) {
 // a job beside a class, or no packages in its list is refused, and
 // verification refuses a package that is no Debian package's name, a path
 // outside the repository and an element that adds nothing.
+// TestEnvironmentDecoratorReadsAWorkersMode: a worker's settings element
+// takes mode, idle and maxInstances as the worker's own (D145, D53), and
+// any other element's key of those names is its platform's setting, as a
+// Cloud Run server's maxInstances is. A mode or an idle time that cannot
+// be read is refused when the schema is verified, in every form.
+func TestEnvironmentDecoratorReadsAWorkersMode(t *testing.T) {
+	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
+	staging := &ir.TypeDef{Name: "Staging"}
+	if err := applyStackDecorator(t, "environment", staging, map[string]any{"settings": []any{
+		map[string]any{"of": handle("shop-orders", "API"), "worker": "FulfilOrders", "mode": "drain", "idle": "1m", "instances": float64(2), "maxInstances": float64(4), "tick": "10m"},
+		map[string]any{"of": handle("shop-api", "API"), "maxInstances": float64(5), "mode": "fast", "idle": "soon"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	two, four := 2, 4
+	want := []*ir.DeployableSettings{
+		{Of: ir.DeployableRef{Service: &orders, Worker: "FulfilOrders"}, Mode: "drain", Idle: "1m", Instances: &two, MaxInstances: &four, Values: map[string]any{"tick": "10m"}},
+		{Of: ir.DeployableRef{Service: &api}, Values: map[string]any{"maxInstances": float64(5), "mode": "fast", "idle": "soon"}},
+	}
+	if got := staging.Environment.Settings; !reflect.DeepEqual(got, want) {
+		t.Errorf("@environment wrote %+v and %+v, want %+v and %+v", got[0], got[1], want[0], want[1])
+	}
+	for _, c := range []struct {
+		element map[string]any
+		want    string
+	}{
+		{map[string]any{"mode": float64(3)}, `mode is 3; it is "pool" or "drain"`},
+		{map[string]any{"idle": true}, `idle is true; it is a duration such as "30s"`},
+		{map[string]any{"maxInstances": 1.5}, "maxInstances is 1.5; it is a whole number, one or more"},
+	} {
+		element := map[string]any{"of": handle("shop-orders", "API"), "worker": "FulfilOrders"}
+		for key, value := range c.element {
+			element[key] = value
+		}
+		err := applyStackDecorator(t, "environment", &ir.TypeDef{Name: "E"}, map[string]any{"settings": []any{element}})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("@environment settings %v = %v, want a refusal saying %q", c.element, err, c.want)
+		}
+	}
+	for name, c := range map[string]struct {
+		mode, idle string
+		want       string
+	}{
+		"pool":            {mode: "pool"},
+		"drain":           {mode: "drain", idle: "90s"},
+		"an unknown mode": {mode: "burst", want: `mode is "burst"; it is "pool"`},
+		"no duration":     {mode: "drain", idle: "soon", want: `idle: "soon" is no duration`},
+		"a fraction":      {mode: "drain", idle: "1500ms", want: `idle: "1500ms" is not a whole number of seconds`},
+		"none":            {mode: "drain", idle: "0s", want: `idle: "0s" is not positive`},
+	} {
+		err := CheckWorkerMode(c.mode, c.idle)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: CheckWorkerMode(%q, %q) = %v, want %q", name, c.mode, c.idle, err, c.want)
+		}
+	}
+}
+
 func TestStackDecoratorReadsImages(t *testing.T) {
 	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
 	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}

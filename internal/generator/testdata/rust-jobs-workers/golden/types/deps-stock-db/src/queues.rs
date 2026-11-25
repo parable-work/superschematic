@@ -43,7 +43,8 @@ pub const RECOUNT_QUEUE: &str = r#"{
     "fail": "UPDATE recount_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE recount_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE recount_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "prune": "DELETE FROM recount_queue WHERE id IN (\n  SELECT id FROM recount_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
+    "prune": "DELETE FROM recount_queue WHERE id IN (\n  SELECT id FROM recount_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.recount_queue'), $1::int)"
   }
 }"#;
 
@@ -98,6 +99,7 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
     "fail": "UPDATE stock_low_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE stock_low_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "release": "UPDATE stock_low_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "prune": "DELETE FROM stock_low_queue WHERE id IN (\n  SELECT id FROM stock_low_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
+    "prune": "DELETE FROM stock_low_queue WHERE id IN (\n  SELECT id FROM stock_low_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)",
+    "slot": "SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_low_queue'), $1::int)"
   }
 }"#;

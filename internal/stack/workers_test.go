@@ -100,6 +100,143 @@ func TestWorkerInstances(t *testing.T) {
 	}
 }
 
+// TestWorkerDrainMode (D145): a worker its settings put in drain mode runs
+// as a job that empties its queue and exits. Its run says so, with the
+// idle time the settings give or thirty seconds, and its instances are how
+// many of it may run at once. Each deployable that runs an API's code and
+// connects to the queue's database, but the worker itself, gets the worker
+// among its wakes, with the queue's class, the worker's platform and the
+// name its platform gave it. A member of Preview, which extends Staging,
+// drains too, under its own name; Production, whose settings say nothing,
+// keeps its pool and wakes nothing; and a drain worker turned off is not
+// woken.
+func TestWorkerDrainMode(t *testing.T) {
+	reg := assemble(t)
+	fulfil := stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")
+	wakes := func(env *ir.ResolvedEnvironment) string {
+		var out []string
+		for _, d := range env.Deployables {
+			for _, w := range d.Wakes {
+				out = append(out, fmt.Sprintf("%s %s wakes %s on %s (%v) for %s of %s", d.Kind, d.Name, w.Worker, w.Platform, w.ResourceName, w.Queue, w.Database))
+			}
+		}
+		return strings.Join(out, "; ")
+	}
+	s, services := workerShop()
+	settingsFor(s.Environment("Staging"), fulfil).Mode = ir.WorkerModeDrain
+	env := mustResolve(t, reg, s, services, "Staging")
+	run := env.Deployable(stacktest.FulfilOrdersWorker).Worker
+	if !run.Drains() || run.Mode != ir.WorkerModeDrain || run.IdleSeconds != ir.DefaultWorkerIdleSeconds || run.Instances != 1 || run.MaxInstances != 0 || run.Concurrency != 8 {
+		t.Errorf("Staging's worker runs %+v, want drain mode, idle after 30s, one at a time", run)
+	}
+	const staging = "server Orders wakes shop-orders-fulfil-orders on fake.worker (shop-orders-fulfil-orders) for OrderPlaced of shop-db; " +
+		"server shop-api wakes shop-orders-fulfil-orders on fake.worker (shop-orders-fulfil-orders) for OrderPlaced of shop-db"
+	if got := wakes(env); got != staging {
+		t.Errorf("Staging's wakes = %s\nwant            %s", got, staging)
+	}
+	if got := env.Deployable(stacktest.FulfilOrdersWorker).Wakes; len(got) != 0 {
+		t.Errorf("the worker wakes itself: %+v", got)
+	}
+
+	// The settings' idle time and instances; a job of the API is woken too.
+	s, services = stacktest.Shop(), stacktest.AcmeShop()
+	set := settingsFor(s.Environment("Staging"), fulfil)
+	set.Mode, set.Idle, set.Instances = ir.WorkerModeDrain, "2m", intp(3)
+	env = mustResolve(t, reg, s, services, "Staging")
+	if run := env.Deployable(stacktest.FulfilOrdersWorker).Worker; run.IdleSeconds != 120 || run.Instances != 3 {
+		t.Errorf("the worker idles %ds and runs %d at once, want 120 and 3", run.IdleSeconds, run.Instances)
+	}
+	if got := wakes(env); !strings.Contains(got, "job "+stacktest.ShipOrdersJob+" wakes shop-orders-fulfil-orders") {
+		t.Errorf("the API's job is not given the wake: %s", got)
+	}
+
+	// Preview extends Staging; Production says nothing of a mode.
+	s, services = workerShop()
+	settingsFor(s.Environment("Staging"), fulfil).Mode = ir.WorkerModeDrain
+	preview := mustResolve(t, reg, s, services, "Preview")
+	if !preview.Deployable(stacktest.FulfilOrdersWorker).Worker.Drains() || !strings.Contains(wakes(preview), "server shop-api wakes shop-orders-fulfil-orders") {
+		t.Errorf("Preview's worker runs %+v and its wakes are %s", preview.Deployable(stacktest.FulfilOrdersWorker).Worker, wakes(preview))
+	}
+	production := mustResolve(t, reg, s, services, "Production")
+	if run := production.Deployable(stacktest.FulfilOrdersWorker).Worker; run.Drains() || run.Mode != "" || run.IdleSeconds != 0 || wakes(production) != "" {
+		t.Errorf("Production's worker runs %+v and its wakes are %q, want a pool and none", run, wakes(production))
+	}
+
+	// pool says what the default is, and a later environment may say it
+	// over an earlier one's drain.
+	s, services = workerShop()
+	settingsFor(s.Environment("Staging"), fulfil).Mode = ir.WorkerModePool
+	if run := mustResolve(t, reg, s, services, "Staging").Deployable(stacktest.FulfilOrdersWorker).Worker; run.Drains() || run.Mode != "" {
+		t.Errorf("mode pool runs %+v", run)
+	}
+
+	// Turned off, it is not woken.
+	off := false
+	s, services = workerShop()
+	set = settingsFor(s.Environment("Staging"), fulfil)
+	set.Mode, set.Enabled = ir.WorkerModeDrain, &off
+	env = mustResolve(t, reg, s, services, "Staging")
+	if run := env.Deployable(stacktest.FulfilOrdersWorker).Worker; !run.Drains() || run.Instances != 0 || wakes(env) != "" {
+		t.Errorf("a drain worker turned off runs %+v and its wakes are %q", run, wakes(env))
+	}
+}
+
+// TestWorkerDrainModeRefusals: what resolution refuses of a worker's mode
+// and idle time.
+func TestWorkerDrainModeRefusals(t *testing.T) {
+	reg := assemble(t)
+	fulfil := stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")
+	for name, c := range map[string]struct {
+		set  func(*ir.DeployableSettings)
+		of   ir.DeployableRef
+		want string
+	}{
+		"a range of instances beside drain": {
+			set:  func(s *ir.DeployableSettings) { s.Mode, s.MaxInstances = ir.WorkerModeDrain, intp(4) },
+			of:   fulfil,
+			want: "worker shop-orders-fulfil-orders runs in drain mode (Staging set it) and sets maxInstances (Staging set it); a worker in drain mode runs when its queue has messages and exits when it has none, and instances is how many of it may run at once, so leave maxInstances out (D145)",
+		},
+		"an idle time on a pool": {
+			set:  func(s *ir.DeployableSettings) { s.Idle = "1m" },
+			of:   fulfil,
+			want: `worker shop-orders-fulfil-orders sets idle (Staging set it) and does not run in drain mode; only a worker with mode "drain" exits when it is idle (D145)`,
+		},
+		"an unknown mode": {
+			set:  func(s *ir.DeployableSettings) { s.Mode = "burst" },
+			of:   fulfil,
+			want: `mode is "burst"; it is "pool", a worker whose instances keep running, or "drain", one that runs as a job that empties its queue and exits`,
+		},
+		"an idle time that is no duration": {
+			set:  func(s *ir.DeployableSettings) { s.Mode, s.Idle = ir.WorkerModeDrain, "soon" },
+			of:   fulfil,
+			want: `idle: "soon" is no duration`,
+		},
+		"a mode on a server": {
+			set:  func(s *ir.DeployableSettings) { s.Mode = ir.WorkerModeDrain },
+			of:   stacktest.Of(stacktest.ShopAPI),
+			want: "sets mode on server shop-api; only a worker takes instances, maxInstances, concurrency, mode and idle",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, services := workerShop()
+			c.set(settingsFor(s.Environment("Staging"), c.of))
+			_, errs := resolve(t, reg, s, services, "Staging")
+			mustFail(t, errs, stack.CodeInvalidSettings, c.want)
+		})
+	}
+}
+
+// TestABehaviorWorkerDoesNotDrain: drain mode is a `@worker`'s; a behavior
+// worker (D103), whose queues no enqueue's wake hears, is refused it.
+func TestABehaviorWorkerDoesNotDrain(t *testing.T) {
+	s, services := workerShop()
+	orders := service(services, "shop-orders")
+	orders.Workers = append(orders.Workers, ir.Worker{Name: "OrderTimers", Queue: "OrderPlaced", Queues: []string{"OrderPlaced"}, BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Order"}, Origin: ir.OriginBehavior})
+	settingsFor(s.Environment("Staging"), stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers")).Mode = ir.WorkerModeDrain
+	_, errs := resolve(t, assemble(t), s, services, "Staging")
+	mustFail(t, errs, stack.CodeInvalidSettings, "worker shop-orders-order-timers is a behavior worker and runs in drain mode (Staging set it)", "leave its mode out, so its instances keep running (D145)")
+}
+
 // TestWorkerRollsOutAfterItsCallees: the worker calls shop-api, so it rolls
 // out in the wave after it, with Orders, after the migrations of its
 // database.
@@ -158,7 +295,7 @@ func TestWorkerRefusals(t *testing.T) {
 		s, services := workerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).Instances = intp(2)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances on server shop-api; only a worker takes instances, maxInstances and concurrency")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances on server shop-api; only a worker takes instances, maxInstances, concurrency, mode and idle")
 	})
 	t.Run("a schedule on a worker", func(t *testing.T) {
 		s, services := workerShop()
@@ -182,7 +319,7 @@ func TestWorkerRefusals(t *testing.T) {
 		s, services := workerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).MaxInstances = intp(2)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets maxInstances on server shop-api; only a worker takes instances, maxInstances and concurrency")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets maxInstances on server shop-api; only a worker takes instances, maxInstances, concurrency, mode and idle")
 	})
 	t.Run("a concurrency of none", func(t *testing.T) {
 		s, services := workerShop()

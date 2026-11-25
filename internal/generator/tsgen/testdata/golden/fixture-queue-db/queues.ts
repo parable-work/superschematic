@@ -68,6 +68,8 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs, and returns whether it took it. */
+  readonly slot?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -158,6 +160,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_changed_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO order_changed_queue`,
@@ -264,6 +267,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.order_placed_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO order_placed_queue`,
@@ -358,6 +362,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.ping_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO ping_queue`,
@@ -456,6 +461,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_checked_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO stock_checked_queue`,
@@ -561,6 +567,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.stock_moved_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO stock_moved_queue`,
@@ -665,6 +672,7 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.sync_requested_queue'), $1::int)`,
   },
   sqliteStatements: {
     insert: `INSERT INTO sync_requested_queue`,

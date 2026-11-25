@@ -127,8 +127,10 @@ export interface DeployableSettings {
   concurrency?: number;
   enabled?: boolean;
   env?: { [key: string]: EnvValue };
+  idle?: string;
   instances?: number;
   maxInstances?: number;
+  mode?: string;
   of: DeployableRef;
   onDeploy?: boolean;
   platform?: string;

@@ -182,6 +182,15 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	if settings.Concurrency != nil {
 		parts = append(parts, fmt.Sprintf("concurrency: %d", *settings.Concurrency))
 	}
+	if settings.MaxInstances != nil {
+		parts = append(parts, fmt.Sprintf("maxInstances: %d", *settings.MaxInstances))
+	}
+	if settings.Mode != "" {
+		parts = append(parts, "mode: "+quote(settings.Mode))
+	}
+	if settings.Idle != "" {
+		parts = append(parts, "idle: "+quote(settings.Idle))
+	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
 		case "of", "job", "worker", "deriver", "app", "runner", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":

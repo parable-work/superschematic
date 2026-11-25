@@ -430,6 +430,37 @@ export abstract class WorkerSettings {}
 })
 export abstract class LocalWorker {}
 
+// A worker's element takes its mode and, in drain mode, its idle time
+// (D145), on every target.
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "drain", idle: "1m", instances: 2 }],
+})
+export abstract class DrainWorker {}
+
+@environment({
+  target: "local",
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "pool" }],
+})
+export abstract class LocalPoolWorker {}
+
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  // @ts-expect-error a worker's mode is "pool" or "drain"
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "burst" }],
+})
+export abstract class UnknownWorkerMode {}
+
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  // @ts-expect-error an idle time is a duration's text
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", mode: "drain", idle: 30 }],
+})
+export abstract class IdleAsANumber {}
+
 // A deriver's element names its API's handle and the deriver's class; it
 // turns the deriver on or off, runs one instance or none, sets how many
 // answers it runs at a time, and takes an env of its API's config (D74).

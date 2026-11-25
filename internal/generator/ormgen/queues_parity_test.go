@@ -656,6 +656,14 @@ try {
     case 'prune':
       result = await queue.prune(Number(args[0]));
       break;
+    case 'slot': {
+      // Takes one of that many slots of the queue, prints whether it took
+      // one, and gives it back (D145).
+      const give = await queue.slot?.(Number(args[0]));
+      result = give !== undefined;
+      await give?.();
+      break;
+    }
     default:
       throw new Error('no step ' + step);
   }
@@ -1245,6 +1253,79 @@ func TestQueueParity(t *testing.T) {
 	t.Run("Base62UUIDsGoHyphenated", testBase62UUIDsGoHyphenated)
 	t.Run("LocationsAndDurationsAgree", testLocationsAndDurationsAgree)
 	t.Run("DelayedMessagesWait", testDelayedMessagesWait)
+	t.Run("DrainSlotsAndTheWakeHook", testDrainSlotsAndTheWakeHook)
+}
+
+// testDrainSlotsAndTheWakeHook (D145): the Go ORM and the TypeScript
+// client take the same slots of a queue, since both run the statement
+// sqlutil writes: while a Go worker holds the one slot, a second Go worker
+// and a TypeScript one find none, with two slots the TypeScript one takes
+// the second, and a slot given back is free for either. A slot is a
+// session's advisory lock, so SQLite has none. And the ORM's OnEnqueue is
+// told each enqueue's queue once its statement has run, which an
+// entrypoint points at the wake of the queue's worker.
+func testDrainSlotsAndTheWakeHook(t *testing.T) {
+	if onSQLite() {
+		t.Skip("SQLite has no advisory lock, so a worker in drain mode takes no slot there")
+	}
+	p := newParity(t)
+	release, ok, err := p.db.OrderPlacedQueue().Slot(p.ctx, 1)
+	if err != nil || !ok {
+		t.Fatalf("Go's Slot of a free queue = %t, %v", ok, err)
+	}
+	if again, took, err := p.db.OrderPlacedQueue().Slot(p.ctx, 1); err != nil || took || again != nil {
+		t.Fatalf("a second Go worker took the one slot: %t, %v", took, err)
+	}
+	if got := p.must("TypeScript", "slot", "1"); got != "false" {
+		t.Fatalf("the TypeScript client took the one slot a Go worker holds: it printed %s", got)
+	}
+	if got := p.must("TypeScript", "slot", "2"); got != "true" {
+		t.Fatalf("the TypeScript client found no slot of two while one is held: it printed %s", got)
+	}
+	release()
+	// The slot is free once the session that held it has ended, which the
+	// server does a moment after the connection closes.
+	freed := false
+	for try := 0; try < 20 && !freed; try++ {
+		freed = p.must("TypeScript", "slot", "1") == "true"
+	}
+	if !freed {
+		t.Fatal("the TypeScript client found no slot after the Go worker gave its slot back")
+	}
+	// The TypeScript client gave its slot back as it exited.
+	for try := 0; ; try++ {
+		release, ok, err = p.db.OrderPlacedQueue().Slot(p.ctx, 1)
+		if err != nil {
+			t.Fatalf("Go's Slot = %v", err)
+		}
+		if ok {
+			release()
+			break
+		}
+		if try == 50 {
+			t.Fatal("Go found no slot after the TypeScript client gave its slot back")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	var woken []string
+	OnEnqueue(func(queue string) { woken = append(woken, queue) })
+	defer OnEnqueue(nil)
+	msg := order("e0000000-0000-4000-8000-000000000001")
+	if err := p.enqueue(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(woken) != "[OrderPlaced]" {
+		t.Errorf("OnEnqueue was told %v, want the queue's class once", woken)
+	}
+	OnEnqueue(nil)
+	msg = order("e0000000-0000-4000-8000-000000000002")
+	if err := p.enqueue(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if len(woken) != 1 {
+		t.Errorf("an enqueue after OnEnqueue(nil) told the old function: %v", woken)
+	}
 }
 
 // enqueueIn writes msg with the Go ORM, due once delay has passed, in a

@@ -3567,7 +3567,64 @@ export abstract class FulfilOrders {}
   runs one instance unless its settings say otherwise. Resolution records
   what runs on the deployable (`ir.ResolvedWorker`): its API and class,
   its queue and the database that holds it, the instances, the
-  concurrency and the grace.
+  concurrency and the grace, and for a worker in drain mode its mode and
+  its idle time.
+- **Drain mode.** A worker's settings take `mode`: `pool`, the default,
+  whose instances keep running, or `drain` (D145). A worker in drain mode
+  runs as a job: its entrypoint claims as a pool's instance does and exits
+  0 once no message was ready or held for `idle`, thirty seconds unless
+  the settings say (`ir.DefaultWorkerIdleSeconds`), so a queue that is
+  empty runs nothing. `instances` is then how many of it may run at once,
+  and `maxInstances` beside it is refused, as is `idle` on a pool's
+  worker, and drain mode on a behavior worker, whose queues triggers and
+  the clock fill. The core names no provider. It gives a platform three
+  things to build on:
+  - the worker's mode in its run, and three variables its entrypoint
+    reads (`ir.WorkerModeVariable`, `ir.WorkerIdleSecondsVariable`,
+    `ir.WorkerSlotsVariable`): `WORKER_MODE=drain`, the idle time in
+    seconds, and how many may run at once. With no `WORKER_MODE`, or
+    `pool`, the entrypoint polls until it is stopped, so one image runs
+    in either mode;
+  - the wakes. Nothing of a drain worker runs while its queue is empty,
+    so an enqueue has to start it. The resolver cannot see which code
+    enqueues, so each deployable that runs an API's code, a server, a
+    job, a worker or an app, with a sql edge to the queue's database,
+    but the worker itself, holds the worker among its `Wakes`
+    (`ir.ResolvedWake`: the worker, its queue's class, its platform and
+    the name that platform gave it), and the worker holds each of them
+    in `WokenBy`. A platform that can start the worker gives each such
+    deployable `QUEUE_WAKES` (`ir.QueueWakesVariable`), a JSON object
+    that maps a queue's class to the list of its wakes, each an
+    `ir.QueueWake`: a URL to `POST` an empty JSON object to, and where
+    the bearer token comes from, a URL to `GET` with headers that answers
+    `{ access_token, expires_in }`. A worker another target runs, or a
+    platform with no wake, leaves the variable out;
+  - the slots. `sqlutil.PostgresQueueStatements` writes one more
+    statement, `slot`, `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.<table>'), $1::int)`,
+    which the Go ORM's `<Queue>Queue.Slot(ctx, slots)` and the TypeScript
+    `postgresQueue(...).slot(slots)` run for slot 1, 2 and on, on a
+    connection of the worker's own that it keeps while it runs: the first
+    lock it takes is its slot, and none is every slot taken. The lock is
+    the session's, so giving the slot back closes the connection, and a
+    worker that dies gives it back as its connection ends. SQLite has no
+    such lock, and a worker there takes no slot.
+
+  The queue clients send the wake. The Go ORM's `queues.go` has
+  `OnEnqueue(func(queue string))`, which every `Enqueue<Queue>` calls with
+  the queue's class once its statement has run; a Go entrypoint whose
+  database declares a queue builds a `wake.Notifier`
+  (`runtime/http/go/wake`) from `QUEUE_WAKES` and gives the ORM its
+  `Enqueued`. The TypeScript `enqueue` calls `wakeAfterEnqueue`
+  (`queue-wake.ts`), which reads `QUEUE_WAKES` once per process. Both
+  send a queue's wakes at most once in five seconds per process, in the
+  background, hold a token until a minute before it ends, and log a wake
+  that failed as a warning, `the wake of a queue's worker failed: its
+  tick finds the message`: a wake is sent after the statement, not after
+  the commit, is awaited by nothing and fails no enqueue. The Rust queue
+  client sends none yet. Because a wake is a hint, a platform that
+  provides one also starts the worker on a schedule, its tick, which
+  finds a message a trigger enqueued, a retry or a delayed message (D80)
+  that falls due later, and a message whose wake was lost.
 - **Entrypoint.** The `server` generator writes a Go module per worker at
   `<output-root>/server/<stack>/<worker>/`, from the templates a server's
   and a job's share, with its image as theirs (section 8.2), the binary at
@@ -3593,7 +3650,15 @@ export abstract class FulfilOrders {}
     once is gone, so they need no coordination;
   - on SIGTERM or SIGINT claims no more, lets the running methods finish
     within the grace, then cancels them, releases their messages and
-    exits 0.
+    exits 0;
+  - in drain mode (`worker.DrainFromEnv`, `worker.Options.Drain`) takes a
+    slot of its queue before its first claim, through the queue's `Slot`,
+    and returns at once when none is free; then runs the same loop, which
+    ends, with `drained: no message was ready or held`, once a claim
+    found nothing, no method runs and none has run or returned for the
+    idle time. It stops its prune, gives the slot back and exits 0. A
+    behavior worker's claim loops share one idle clock (`worker.RunAll`),
+    so they stop together.
 
   A TypeScript worker's package (section 8.6) does the same on Bun: its
   `main.ts` loads the API's `EnvConfig` with `loadBackgroundEnvConfig()`
@@ -3602,7 +3667,9 @@ export abstract class FulfilOrders {}
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
   `workerConcurrency` reads from `WORKER_CONCURRENCY`, and prunes as Go's
-  does through `postgresQueue`'s `prune`. Each method gets a signal that
+  does through `postgresQueue`'s `prune`, and drains as Go's does, with
+  the drain `workerDrain` reads from `WORKER_MODE`, `WORKER_IDLE_SECONDS`
+  and `WORKER_SLOTS` and the slot `postgresQueue`'s `slot` takes. Each method gets a signal that
   aborts when the grace is over. JavaScript cannot stop a
   method that ignores it: its message is released all the same, and its
   outcome, when it comes, is logged and changes nothing, since the process
@@ -3662,7 +3729,32 @@ export abstract class FulfilOrders {}
   always allocated, so `cpu` takes one or more. Bootstrap needs no new API
   or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
   `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
-  reads them.
+  reads them. A worker in drain mode (D145), in Go or TypeScript, is no
+  worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
+  as the pool would be, of one task with no retries and a day to run,
+  with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`, the
+  last its `instances`. Its tick is a Cloud Scheduler job, `<worker>.tick`,
+  named as the worker is, that runs the job in UTC every `tick`, a
+  setting of `gcp.cloudrunworker`, five minutes unless set, as the
+  worker's own account, which holds `roles/run.invoker` on the job
+  (`<worker>.tick-invoker`), as a scheduled job's account does. A tick is
+  minutes that divide an hour or hours that divide a day, since Cloud
+  Scheduler takes a cron schedule. For each deployable in the worker's
+  `WokenBy` that runs on Cloud Run, the worker lowers
+  `<worker>.woken-by.<deployable>`, `roles/run.invoker` on the job for
+  that deployable's account, and that deployable's container takes
+  `QUEUE_WAKES`, whose wake is the Cloud Run Admin API's
+  `jobs/<name>:run` and whose token is its metadata server's. The grant
+  is the worker's node because the job rolls out in the worker's wave,
+  which may be after a waker's, and the wake names the job by its
+  resource name, not by its node's output, so a server the worker calls
+  does not wait for the worker. A waker that rolls out first sends wakes
+  the job refuses until the worker's wave, which the tick covers. A drain
+  worker the environment turns off keeps its job and has no tick and no
+  grant. A Rust worker in drain mode is refused, since its entrypoint
+  does not exit when idle yet. `deployer`'s `roles/run.admin` and
+  `roles/cloudscheduler.admin` manage all of it, as they manage a
+  scheduled job's.
 - **Dead messages.** A dead message stays in the table, with its last
   error, for an operator: `superschematic stack queue dead|retry|drop
   <environment> <db>.<Queue>` (section 11.1) lists the dead messages,

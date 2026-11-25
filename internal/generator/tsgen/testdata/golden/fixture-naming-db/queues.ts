@@ -63,6 +63,8 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs, and returns whether it took it. */
+  readonly slot?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -151,5 +153,6 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )`,
+    slot: `SELECT pg_try_advisory_lock(hashtext('superschematic.drain."linePosted"'), $1::int)`,
   },
 };

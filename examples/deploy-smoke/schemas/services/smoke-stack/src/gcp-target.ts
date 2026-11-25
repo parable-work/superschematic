@@ -12,8 +12,8 @@ declare module "@superschematic/stack" {
       database: { tier?: string; highAvailability?: boolean; version?: "POSTGRES_15" | "POSTGRES_16" | "POSTGRES_17"; deletionProtection?: boolean; diskSize?: number };
       job: { cpu?: string; memory?: string; telemetry?: boolean };
       site: {};
-      bucket: { versioning?: boolean; deleteAfterDays?: number; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string }[] };
-      worker: { cpu?: string; memory?: string; telemetry?: boolean };
+      bucket: { versioning?: boolean; deleteAfterDays?: number; cors?: ({ origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string })[] };
+      worker: { cpu?: string; memory?: string; telemetry?: boolean; tick?: string };
       runner: { cpu?: string; memory?: string; telemetry?: boolean };
       deriver: { cpu?: string; memory?: string; telemetry?: boolean };
       memoryStore: { nodeType?: "SHARED_CORE_NANO" | "STANDARD_SMALL" | "HIGHCPU_MEDIUM" | "HIGHMEM_MEDIUM" | "HIGHMEM_XLARGE" | "STANDARD_LARGE" | "HIGHMEM_2XLARGE" | "CUSTOM_PICO" | "CUSTOM_MICRO" | "CUSTOM_MINI"; replicas?: number };

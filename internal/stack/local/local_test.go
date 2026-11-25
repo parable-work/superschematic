@@ -783,6 +783,35 @@ func TestRunnerProcess(t *testing.T) {
 	}
 }
 
+// TestADrainWorkerRunsAsAnyWorker (D145): `stack dev` runs a worker its
+// settings put in drain mode as it runs any worker, a process that polls
+// until it is stopped: its process node is the pool's, with no WORKER_MODE,
+// and no deployable is given a wake.
+func TestADrainWorkerRunsAsAnyWorker(t *testing.T) {
+	reg := assemble(t)
+	pool := resolve(t, reg, shop(), stacktest.AcmeShop(), "Dev")
+	s := shop()
+	s.Environments[0].Settings = append(s.Environments[0].Settings, &ir.DeployableSettings{Of: stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders"), Mode: ir.WorkerModeDrain})
+	drain := resolve(t, reg, s, stacktest.AcmeShop(), "Dev")
+	if run := drain.Deployable(stacktest.FulfilOrdersWorker).Worker; !run.Drains() {
+		t.Fatalf("the worker runs %+v, want drain mode", run)
+	}
+	want, err := json.Marshal(pool.Resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(drain.Resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("drain mode changed the local environment's nodes:\n%s\nwant\n%s", got, want)
+	}
+	if bytes.Contains(got, []byte(ir.WorkerModeVariable)) || bytes.Contains(got, []byte(ir.QueueWakesVariable)) {
+		t.Errorf("the local environment sets %s or %s", ir.WorkerModeVariable, ir.QueueWakesVariable)
+	}
+}
+
 // TestDeriverProcess: a deriver (D74) is a process of its own, as a worker
 // is: the entrypoint module the build writes at server/<stack>/<deriver>,
 // in its API's TypeScript, no port, ready once it starts, its API's

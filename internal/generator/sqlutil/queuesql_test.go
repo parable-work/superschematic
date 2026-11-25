@@ -151,7 +151,7 @@ func TestQueueConflictReplacesOrSkips(t *testing.T) {
 	for _, s := range PostgresQueueStatements(spec).All() {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "insert,dueIn,conflict,expire,claim,complete,fail,extend,release,prune" {
+	if strings.Join(names, ",") != "insert,dueIn,conflict,expire,claim,complete,fail,extend,release,prune,slot" {
 		t.Errorf("All = %v", names)
 	}
 }

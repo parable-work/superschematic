@@ -4088,11 +4088,19 @@
           "default": {},
           "type": "object"
         },
+        "idle": {
+          "default": "",
+          "type": "string"
+        },
         "instances": {
           "type": "integer"
         },
         "maxInstances": {
           "type": "integer"
+        },
+        "mode": {
+          "default": "",
+          "type": "string"
         },
         "of": {
           "$ref": "#/$defs/DeployableRef"

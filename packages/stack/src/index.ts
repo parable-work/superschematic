@@ -204,6 +204,20 @@ export type WorkerRun = {
   readonly concurrency?: number;
   /** Turns the worker on or off. */
   readonly enabled?: boolean;
+  /**
+   * How the worker runs (D145): `"pool"`, the default, keeps its instances
+   * running, and `"drain"` runs it as a job that empties its queue and
+   * exits, which an enqueue wakes and a schedule ticks where the target
+   * can. In drain mode `instances` is how many may run at once, and
+   * `maxInstances` does not resolve.
+   */
+  readonly mode?: "pool" | "drain";
+  /**
+   * How long a worker in drain mode waits with no message ready or held
+   * before it exits, a duration of whole seconds such as `"30s"`, the
+   * default. Only a worker in drain mode takes it.
+   */
+  readonly idle?: string;
 };
 
 /**

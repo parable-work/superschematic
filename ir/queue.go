@@ -153,6 +153,69 @@ const (
 	DefaultWorkerDrainSeconds = 50
 )
 
+// The modes a worker runs in (D145), which its settings in an environment
+// choose.
+const (
+	// WorkerModePool keeps the worker's instances running, each polling
+	// its queue: the default.
+	WorkerModePool = "pool"
+
+	// WorkerModeDrain runs the worker as a job: it claims as a pool's
+	// instance does and exits 0 once no message was ready or held for its
+	// idle time, so a queue that is empty runs nothing. Something starts
+	// it: a platform's wake after an enqueue, and a tick on a schedule.
+	WorkerModeDrain = "drain"
+)
+
+// DefaultWorkerIdleSeconds is how long a worker in drain mode waits with
+// no message ready or held before it exits, unless its settings say
+// otherwise (D145): long enough that a transaction that enqueued just
+// before a wake has committed, and a burst's next message finds the
+// worker still up.
+const DefaultWorkerIdleSeconds = 30
+
+// The environment variables a platform sets on a worker in drain mode
+// (D145), which its entrypoint reads as it reads
+// WorkerConcurrencyVariable: WorkerModeVariable is WorkerModeDrain,
+// WorkerIdleSecondsVariable how long it waits idle before it exits, and
+// WorkerSlotsVariable how many of it may run at once, each holding one of
+// that many locks named for its queue. A worker with no WorkerModeVariable
+// runs as a pool's instance.
+const (
+	WorkerModeVariable        = "WORKER_MODE"
+	WorkerIdleSecondsVariable = "WORKER_IDLE_SECONDS"
+	WorkerSlotsVariable       = "WORKER_SLOTS"
+)
+
+// QueueWakesVariable is the environment variable a platform sets on a
+// deployable that may enqueue to the queue of a worker in drain mode
+// (D145): a JSON object that maps each such queue, by its `@queue` class,
+// to the wake that starts its worker, a QueueWake. A queue client reads it
+// after an enqueue.
+const QueueWakesVariable = "QUEUE_WAKES"
+
+// QueueWake is how a queue client starts the worker of a queue after an
+// enqueue (D145), as a platform gives it in QueueWakesVariable: an HTTP
+// POST of an empty JSON object to URL, with a bearer token when Token
+// says where one comes from. It names no provider: the gcp target fills
+// it with the Cloud Run job's run method and the metadata server's token.
+type QueueWake struct {
+	// URL is what the client POSTs to.
+	URL string `json:"url"`
+
+	// Token is where the client reads the bearer token it sends, nil for a
+	// wake that needs none.
+	Token *QueueWakeToken `json:"token,omitempty"`
+}
+
+// QueueWakeToken is where a wake's bearer token comes from: a GET of URL
+// with Headers answers a JSON object whose `access_token` member is the
+// token and whose `expires_in` member is how many seconds it lasts.
+type QueueWakeToken struct {
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // WorkerConcurrencyVariable is the environment variable a worker platform
 // sets on each instance of a worker to the concurrency its environment
 // gives it (ResolvedWorker.Concurrency), which the worker's entrypoint

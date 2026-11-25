@@ -184,6 +184,24 @@ concurrency of each and the grace it gives running handlers when it
 stops. It sets `WORKER_CONCURRENCY` on the process to the concurrency,
 which the worker's entrypoint reads. A worker has a server's bindings,
 from its API's config and its own edges, and no callers field.
+
+A worker's `Mode` may be `ir.WorkerModeDrain` (D145): the environment asks
+that it run as a job that empties its queue and exits. A platform that
+has such a thing sets `WORKER_MODE=drain`, `WORKER_IDLE_SECONDS` to the
+run's `IdleSeconds` and `WORKER_SLOTS` to how many may run at once, its
+`Instances`, and the generated Go and TypeScript entrypoints do the rest;
+a platform that has none may run the worker as it runs any, as the local
+target does. Something must then start it. The deployable's `WokenBy`
+lists each deployable that may enqueue to its queue, with its platform,
+and each of those holds the worker in its `Wakes`, with the worker's
+platform and resource name. A platform that can start the worker gives
+those deployables the right to, and sets `QUEUE_WAKES` on each to a JSON
+object that maps the queue's class to a list of `ir.QueueWake`: a URL the
+queue client `POST`s an empty JSON object to, and where its bearer token
+comes from. The queue clients send it after an enqueue, and name no
+provider. A wake is a hint, sent before the enqueue's transaction
+commits and lost without a retry, so a platform that provides one also
+starts the worker on a schedule of its own.
 `stack/stacktest`'s `fake.worker` lowers one to a pool with its own
 account, the local target's `local.worker` to a process with no port,
 ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker

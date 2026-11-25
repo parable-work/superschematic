@@ -68,6 +68,11 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /**
+   * On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs (D145), a session
+   * advisory lock named for the queue's table, and returns whether it took it.
+   */
+  readonly slot?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -144,10 +149,16 @@ export interface Queue<M> {
    * a dead message.
    */
   prune(limit: number): Promise<number>;
+  /**
+   * Takes one of slots locks named for the queue, the first that is free, which a worker in drain mode holds
+   * while it runs (D145), so no more than slots of them drain the queue at once. Resolves to the function that
+   * gives the slot back, or to undefined when every one is taken. A queue on SQLite has none.
+   */
+  slot?(slots: number): Promise<(() => Promise<void>) | undefined>;
 }
 
-/** The claims of a queue over a pg pool, which postgresQueue makes. */
-export type PostgresQueue<M> = Queue<M>;
+/** The claims of a queue over a pg pool, which postgresQueue makes: a queue's, with its slots. */
+export type PostgresQueue<M> = Queue<M> & Required<Pick<Queue<M>, 'slot'>>;
 
 /** How an enqueue writes its message, beside the message. */
 export interface EnqueueOptions {
