@@ -529,7 +529,7 @@ them. The core ships `session`. acme ships `apikey`.
 | `Endpoint(field, set, info)` | per-route scope (acme does nothing) |
 | `Templates()` | one `{{ define }}` per hook the core templates call |
 | `Funcs()` | extra template functions |
-| `Files(out)` | extra files to write (optional) |
+| `Files(out)` | extra files to write (optional); one with a core file's name, such as `context.go`, replaces it |
 | `OpenAPIParameters(out)` | parameters on authenticated routes |
 
 `Analyze` runs against the schema `authDb` names. The snippets branch on
@@ -537,6 +537,14 @@ the model so the generated code compiles against the ORM it is given.
 `registry.AuthSnippetFunc(provider)` in a provider test catches a missing
 snippet at `go test`. The api generator checks the set is complete when it
 parses the templates.
+
+Three snippets add middlewares to each mounted route, and take the
+route's `EndpointInfo`: `routeMiddlewaresFirst` runs before every other
+step, `routePermissions` runs after the rate limit, body limit and service
+step, and `routeMiddlewaresAfterDecrypt` runs after the payload decryptor
+and before the timeout. `routesConfigFields` adds the `Config` fields they
+read, in every API, public or not, and `routesDeclarations` adds the
+functions, types and values of `routes.go` they call.
 
 ## Policy on what the core writes
 
