@@ -344,6 +344,7 @@ func templateFuncs(provider AuthProvider, router naming.GoAPIConfig) (template.F
 		"appErrorContext":         router.AppErrorContextArg,
 		"deref":                   func(p *int) int { return *p },
 		"bodyArgsAsStruct":        func(endpoint EndpointInfo) bool { return bodyArgsAsStruct(router, endpoint) },
+		"queryListEmptyItem":      func(arg Param) string { return queryListEmptyItem(router, arg) },
 		"base":                    filepath.Base,
 		"toGoName":                codegen.ToPascalCase,
 		"toKebabCase":             codegen.ToKebabCase,

@@ -1112,6 +1112,16 @@ first that fails, at its name. The argument's own rules are not checked
 under `struct`. A route with a union argument reads it as `values` says.
 Any other value fails the load.
 
+### `go_api.query_param_list_empty_item`
+
+Default: empty
+
+The detail of the 400 the router sends for a list of a `@query` parameter
+that holds an empty item, `?ids=` or `?ids=a,,b`. `{name}` is the
+parameter's name. Empty, the route drops an empty item, and a list of no
+item is absent. A list argument of a GET operation drops its empty items
+under either value.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

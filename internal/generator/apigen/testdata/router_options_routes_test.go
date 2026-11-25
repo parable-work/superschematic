@@ -388,6 +388,35 @@ func TestBodyArguments(t *testing.T) {
 	})
 }
 
+// TestQueryParamListEmptyItem: under go_api.query_param_list_empty_item a
+// @query list with an empty item is refused with the key's text, where
+// the core drops the item.
+func TestQueryParamListEmptyItem(t *testing.T) {
+	emptyItem := answer{Status: 400, Detail: "codes cannot contain empty values"}
+	runCases(t, []routerCase{
+		{
+			name: "an empty value", method: http.MethodGet, target: "/api/widgets/w1?codes=",
+			defaults: answer{Status: 200},
+			options:  emptyItem,
+		},
+		{
+			name: "an empty item", method: http.MethodGet, target: "/api/widgets/w1?codes=a,,b",
+			defaults: answer{Status: 200},
+			options:  emptyItem,
+		},
+		{
+			name: "an item of white space", method: http.MethodGet, target: "/api/widgets/w1?codes=a&codes=%20",
+			defaults: answer{Status: 200},
+			options:  emptyItem,
+		},
+		{
+			name: "no empty item", method: http.MethodGet, target: "/api/widgets/w1?codes=a&codes=b",
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+	})
+}
+
 // TestPathParamError: go_api.path_param_error is the detail of the 400 of a
 // path parameter that does not decode to UTF-8.
 func TestPathParamError(t *testing.T) {

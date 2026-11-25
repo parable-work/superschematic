@@ -30,6 +30,9 @@ import (
 	"regexp"
 {{- end }}
 	"strconv"
+{{- if .RefusesEmptyQueryListItems }}
+	"strings"
+{{- end }}
 {{- if .HasFileUpload }}
 	"bytes"
 	"io"
@@ -1643,6 +1646,22 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 }
 {{- end }}
 
+{{- if .RefusesEmptyQueryListItems }}
+
+// queryListHasEmptyItem reports whether a @query list's values, split on
+// commas, hold an empty item, which the route refuses
+// (go_api.query_param_list_empty_item).
+func queryListHasEmptyItem(values []string) bool {
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			if strings.TrimSpace(item) == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+{{- end }}
 {{- if .RenamesQueryListValidators }}
 
 // routeValidatorNames are the names the route sends for the validators of
@@ -1907,6 +1926,12 @@ func webhookHMACVerifierMiddleware(cfg Config, provider string) runtimerouting.M
 		// absent list.
 		var {{ .GoName }} []{{ .GoType }}
 		{
+			{{- with queryListEmptyItem . }}
+			if queryListHasEmptyItem(r.URL.Query()[{{ printf "%q" $.Name }}]) {
+				RespondError(w, r, gohttp.StatusBadRequest, {{ printf "%q" . }})
+				return
+			}
+			{{- end }}
 			listErrors := types.NewValidationErrors()
 			{{ .GoName }} = bodyargs.QueryList[{{ .GoType }}](listErrors, r.URL.Query(), queryList{{ .GoName }}Arg)
 			if listErrors.HasErrors() {

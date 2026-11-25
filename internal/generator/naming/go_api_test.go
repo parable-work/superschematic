@@ -33,6 +33,7 @@ strict_input_refusals = "decoder"
 app_error_context = true
 manual_route_constants = true
 body_arguments = "struct"
+query_param_list_empty_item = "{name} has an empty item"
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -41,16 +42,17 @@ minLength = "min_length"
 		t.Fatal(err)
 	}
 	want := GoAPIConfig{
-		ValidationErrorCode:    "VL-1",
-		PathParamError:         "{name} is not a segment",
-		ValidatorNames:         map[string]string{"minLength": "min_length"},
-		UndeclaredInputKeys:    GoAPIKeep,
-		InputTrailingData:      GoAPIIgnore,
-		OptionalInputEmptyBody: GoAPIObject,
-		StrictInputRefusals:    GoAPIDecoder,
-		AppErrorContext:        true,
-		ManualRouteConstants:   true,
-		BodyArguments:          GoAPIStruct,
+		ValidationErrorCode:     "VL-1",
+		PathParamError:          "{name} is not a segment",
+		ValidatorNames:          map[string]string{"minLength": "min_length"},
+		UndeclaredInputKeys:     GoAPIKeep,
+		InputTrailingData:       GoAPIIgnore,
+		OptionalInputEmptyBody:  GoAPIObject,
+		StrictInputRefusals:     GoAPIDecoder,
+		AppErrorContext:         true,
+		ManualRouteConstants:    true,
+		BodyArguments:           GoAPIStruct,
+		QueryParamListEmptyItem: "{name} has an empty item",
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)

@@ -108,3 +108,30 @@ func joinOptions(opts []string) string {
 	}
 	return ", " + strings.Join(opts, ", ")
 }
+
+// queryListEmptyItem is the detail of the 400 the route sends for an
+// empty item of the query list arg (go_api.query_param_list_empty_item),
+// empty when the route drops such an item: always for a list argument of a
+// GET operation.
+func queryListEmptyItem(router naming.GoAPIConfig, arg Param) string {
+	if !arg.QueryParameter {
+		return ""
+	}
+	return router.QueryParamListEmptyItemOf(arg.Name)
+}
+
+// RefusesEmptyQueryListItems reports whether routes.go writes
+// queryListHasEmptyItem: a route refuses an empty item of a @query list.
+func (o *APIOutput) RefusesEmptyQueryListItems() bool {
+	if o.Naming.GoAPI.QueryParamListEmptyItem == "" {
+		return false
+	}
+	for _, endpoint := range o.HandlerEndpoints() {
+		for _, arg := range endpoint.ArgQueryParams() {
+			if arg.IsArray && arg.QueryParameter {
+				return true
+			}
+		}
+	}
+	return false
+}

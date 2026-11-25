@@ -92,6 +92,20 @@ type GoAPIConfig struct {
 	// answers the first that fails, at its name. A union argument is read
 	// as "values" says.
 	BodyArguments string `toml:"body_arguments"`
+
+	// QueryParamListEmptyItem is the detail of the 400 the router sends for
+	// a list of a @query parameter that holds an empty item (?ids= or
+	// ?ids=a,,b), {name} for the parameter's name. Empty (default), the
+	// route drops an empty item, and a list of none is absent. A list
+	// argument of a GET operation drops its empty items under either
+	// value.
+	QueryParamListEmptyItem string `toml:"query_param_list_empty_item"`
+}
+
+// QueryParamListEmptyItemOf is the detail of the 400 for the @query list
+// name that holds an empty item, empty when such an item is dropped.
+func (c GoAPIConfig) QueryParamListEmptyItemOf(name string) string {
+	return strings.ReplaceAll(c.QueryParamListEmptyItem, GoAPINamePlaceholder, name)
 }
 
 // The values of body_arguments.
@@ -178,7 +192,7 @@ func (c GoAPIConfig) PathParamErrorOf(name string) string {
 
 // check refuses a value the [go_api] table does not take.
 func (c GoAPIConfig) check() error {
-	for _, kv := range [][2]string{{"validation_error_code", c.ValidationErrorCode}, {"path_param_error", c.PathParamError}} {
+	for _, kv := range [][2]string{{"validation_error_code", c.ValidationErrorCode}, {"path_param_error", c.PathParamError}, {"query_param_list_empty_item", c.QueryParamListEmptyItem}} {
 		if err := checkGoAPIText(kv[0], kv[1]); err != nil {
 			return err
 		}

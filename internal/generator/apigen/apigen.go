@@ -72,6 +72,9 @@ type Param struct {
 	Reference *Reference
 	// Search marks the operation's search argument (SearchQuery, D62).
 	Search bool
+	// QueryParameter marks a @query parameter, as against an argument of
+	// a GET operation, which travels in the query string too.
+	QueryParameter bool
 	// Sort is the operation's sort argument (SortBy, D60 amended), nil for
 	// every other. It stays among the endpoint's QueryParams, so the SDKs
 	// and the tool documents send it as the optional query argument it
@@ -1289,6 +1292,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 
 		switch {
 		case arg.IsQuery:
+			param.QueryParameter = true
 			queryParams = append(queryParams, param)
 		case op.RestPath != "" && embeddedParams[arg.Name]:
 			pathParams = append(pathParams, param)

@@ -23,15 +23,16 @@ const routerOptionsAPI = "router-options-api"
 // from its default but app_error_context, which needs a runtime whose
 // Respond takes a context (TestAppErrorContext).
 var routerOptions = naming.GoAPIConfig{
-	ValidationErrorCode:    "VALIDATION-1",
-	PathParamError:         "{name} is not a path segment",
-	ValidatorNames:         map[string]string{"minLength": "min_length", "maxLength": "max_length", "listMax": "list_max"},
-	UndeclaredInputKeys:    naming.GoAPIKeep,
-	InputTrailingData:      naming.GoAPIIgnore,
-	OptionalInputEmptyBody: naming.GoAPIObject,
-	StrictInputRefusals:    naming.GoAPIDecoder,
-	ManualRouteConstants:   true,
-	BodyArguments:          naming.GoAPIStruct,
+	ValidationErrorCode:     "VALIDATION-1",
+	PathParamError:          "{name} is not a path segment",
+	ValidatorNames:          map[string]string{"minLength": "min_length", "maxLength": "max_length", "listMax": "list_max"},
+	UndeclaredInputKeys:     naming.GoAPIKeep,
+	InputTrailingData:       naming.GoAPIIgnore,
+	OptionalInputEmptyBody:  naming.GoAPIObject,
+	StrictInputRefusals:     naming.GoAPIDecoder,
+	ManualRouteConstants:    true,
+	BodyArguments:           naming.GoAPIStruct,
+	QueryParamListEmptyItem: "{name} cannot contain empty values",
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,
