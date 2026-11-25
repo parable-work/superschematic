@@ -980,6 +980,24 @@ Default: `{column} cannot move from % to %`
 The message the Postgres guard raises for a move the machine does not
 list, with the placeholders of `sql.state_guard_terminal`.
 
+## `[go_api]`
+
+How the generated Go API routers answer a request they refuse, and the
+symbols they write beside the routes. Every key defaults to the core's
+router. A project whose clients and hand-written handlers know the answers
+of another router sets these keys, so that the generated router answers
+each request as that router did. The TypeScript and Rust routers do not
+read the table. A text value that holds a line break, a NUL, a quote or a
+backslash fails the load.
+
+### `go_api.validation_error_code`
+
+Default: empty
+
+The code of the validation problem the router sends for a path, query or
+filter value that breaks a rule. Empty, the router passes no code and the
+runtime sends its own, `bad_request`.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches
