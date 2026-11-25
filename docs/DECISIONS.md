@@ -1967,8 +1967,12 @@ and enqueues a cleared message; an upload whose bytes differ is refused,
 and an object is deleted once no file names it. The uploads go through a
 bucket on an R2 binding whose S3 API a stand-in serves, which checks each
 PUT against the URL's V4 signature; the workerd fixture `uploads` signs,
-sends, checks and hashes a direct upload inside workerd. Bucket CORS on the
-cloudflare target came with #514 and needed nothing for this.
+sends, checks and hashes a direct upload inside workerd. `examples/deploy-smoke`
+uploads a line item's file to its bucket through the signed URL, completes
+it and files it onto another line item; `smoke.sh Dev` passes, and
+`TestDeploySmokeEnvironments` holds the Cloudflare environment's R2 bucket,
+tokens and bindings. Bucket CORS on the cloudflare target came with #514
+and needed nothing for this.
 
 Left:
 
