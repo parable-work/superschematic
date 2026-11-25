@@ -342,6 +342,7 @@ func templateFuncs(provider AuthProvider, router naming.GoAPIConfig) (template.F
 		"readInputNote":           func(endpoint EndpointInfo) string { return readInputNote(router, endpoint) },
 		"decodeRefusalOptions":    func(endpoint EndpointInfo) string { return decodeRefusalOptions(router, endpoint) },
 		"appErrorContext":         router.AppErrorContextArg,
+		"deref":                   func(p *int) int { return *p },
 		"base":                    filepath.Base,
 		"toGoName":                codegen.ToPascalCase,
 		"toKebabCase":             codegen.ToKebabCase,

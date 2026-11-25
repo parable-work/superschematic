@@ -50,6 +50,10 @@ func (s *widgets) TouchWidgets(_ context.Context, input *types.WidgetInput) (*st
 	return s.record(input), nil
 }
 
+func (s *widgets) UploadWidgetFile(_ context.Context, id string) (*string, error) {
+	return s.record(id), nil
+}
+
 func (s *widgets) ClaimWidget(_ context.Context, token types.IdentityUUID) (*string, error) {
 	return s.record(token), nil
 }

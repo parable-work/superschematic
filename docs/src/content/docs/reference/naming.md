@@ -1081,6 +1081,19 @@ client canceled, or whose deadline passed, from that context.
 superschematic's runtime takes no context, so a project sets the key only
 with a runtime whose `Respond` does.
 
+### `go_api.manual_route_constants`
+
+Default: `false`
+
+`true` makes `routes.go` write, for each `@manualRouteRegistration`
+operation, its method and full path, and the rate limit, the name of its
+rate limit counter, the body limit and the timeout it declares, as
+constants: `<Handler>Method`, `<Handler>Path`,
+`<Handler>RequestsPerMinute`, `<Handler>RateLimitBucket`,
+`<Handler>BodyLimitMegabytes` and `<Handler>TimeoutSeconds`. A server that
+mounts the route itself reads them rather than typing them again. A
+constant of a limit is written only when the operation declares it.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

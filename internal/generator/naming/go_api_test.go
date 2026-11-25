@@ -30,6 +30,8 @@ undeclared_input_keys = "keep"
 input_trailing_data = "ignore"
 optional_input_empty_body = "object"
 strict_input_refusals = "decoder"
+app_error_context = true
+manual_route_constants = true
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -45,6 +47,8 @@ minLength = "min_length"
 		InputTrailingData:      GoAPIIgnore,
 		OptionalInputEmptyBody: GoAPIObject,
 		StrictInputRefusals:    GoAPIDecoder,
+		AppErrorContext:        true,
+		ManualRouteConstants:   true,
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)

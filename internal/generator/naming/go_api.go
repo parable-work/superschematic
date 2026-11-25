@@ -73,6 +73,13 @@ type GoAPIConfig struct {
 	// context, so the key is for a runtime whose Respond does. False
 	// (default) passes none.
 	AppErrorContext bool `toml:"app_error_context"`
+
+	// ManualRouteConstants makes routes.go write, for each
+	// @manualRouteRegistration operation, its method and full path, and
+	// the rate limit, body limit and timeout it declares, as constants, so
+	// that a server that mounts the route itself reads them rather than
+	// typing them again. False (default) writes none.
+	ManualRouteConstants bool `toml:"manual_route_constants"`
 }
 
 // AppErrorContextArg is the argument the router's calls of

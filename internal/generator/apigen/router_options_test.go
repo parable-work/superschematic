@@ -30,6 +30,7 @@ var routerOptions = naming.GoAPIConfig{
 	InputTrailingData:      naming.GoAPIIgnore,
 	OptionalInputEmptyBody: naming.GoAPIObject,
 	StrictInputRefusals:    naming.GoAPIDecoder,
+	ManualRouteConstants:   true,
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,
@@ -60,6 +61,15 @@ func TestRouterOptionsAnswerTheirRequests(t *testing.T) {
 			mode := fmt.Sprintf("package routeroptionsapi_test\n\nconst optionsSet = %t\n", tc.name == "options")
 			if err := os.WriteFile(filepath.Join(apiDir, "router_options_mode_test.go"), []byte(mode), 0o644); err != nil {
 				t.Fatal(err)
+			}
+			if tc.options.ManualRouteConstants {
+				manual, err := os.ReadFile(filepath.Join("testdata", "router_options_manual_test.go"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(apiDir, "router_options_manual_test.go"), manual, 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			runGoAPIModule(t, apiDir)
 		})

@@ -91,6 +91,19 @@ operationSets:
         arguments:
           - name: input
             typeRef: { name: WidgetInput }
+      # Upload a widget's file; the server mounts the route itself, with
+      # its rate limit, body limit and timeout. Returns the name.
+      - name: uploadWidgetFile
+        typeRef: { name: string }
+        required: true
+        httpMethod: PUT
+        restPath: "widgets/{id}/file"
+        manualRouteRegistration: true
+        middleware: { rateLimit: 30, bodyLimit: 8, timeout: 60 }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
       # Claim a widget with a token; returns the token.
       - name: claimWidget
         typeRef: { name: string }

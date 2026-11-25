@@ -1808,6 +1808,44 @@ func createRapiDocHandler() gohttp.HandlerFunc {
 }
 {{- authSnippet "routesDeclarations" . }}
 
+{{- if .Naming.GoAPI.ManualRouteConstants }}
+{{- range .ManualEndpoints }}
+
+// {{ .HandlerName }}Method is the HTTP method of {{ .Name }}, a
+// @manualRouteRegistration operation: a server that mounts the route
+// itself mounts the handler with this method (go_api.manual_route_constants).
+const {{ .HandlerName }}Method = {{ printf "%q" .Method }}
+
+// {{ .HandlerName }}Path is the full path of {{ .Name }}, /api prefix
+// included: a server that mounts the route itself mounts the handler at
+// this path.
+const {{ .HandlerName }}Path = {{ printf "%q" .Path }}
+{{- if .RateLimit }}
+
+// {{ .HandlerName }}RequestsPerMinute is the limit {{ .Name }} declares with
+// @rateLimit, per minute.
+const {{ .HandlerName }}RequestsPerMinute = {{ deref .RateLimit }}
+
+// {{ .HandlerName }}RateLimitBucket names the rate limit counter of
+// {{ .Name }}: its method and full path, as the router names the counter
+// of each route it mounts.
+const {{ .HandlerName }}RateLimitBucket = {{ printf "%q" (printf "%s %s" .Method .Path) }}
+{{- end }}
+{{- if .BodyLimit }}
+
+// {{ .HandlerName }}BodyLimitMegabytes is the request body limit
+// {{ .Name }} declares with @bodyLimit, in megabytes.
+const {{ .HandlerName }}BodyLimitMegabytes = {{ deref .BodyLimit }}
+{{- end }}
+{{- if .Timeout }}
+
+// {{ .HandlerName }}TimeoutSeconds is the request deadline {{ .Name }}
+// declares with @timeout, in seconds.
+const {{ .HandlerName }}TimeoutSeconds = {{ deref .Timeout }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- if .HasWebhookHMACEndpoints }}
 
 func webhookHMACVerifierMiddleware(cfg Config, provider string) runtimerouting.Middleware {
