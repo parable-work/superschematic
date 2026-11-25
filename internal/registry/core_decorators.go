@@ -172,6 +172,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_fenced.go, D119).
 	specs = append(specs, fencedDecorator())
 
+	// Per-record access: a table's audience, the table of grants and the
+	// access log (core_access.go, D156).
+	specs = append(specs, accessDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

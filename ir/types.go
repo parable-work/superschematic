@@ -261,6 +261,17 @@ type TypeDef struct {
 	// covers. Empty for every other type. See [Fence].
 	Fences []*Fence `json:"fences,omitempty" yaml:"fences,omitempty"`
 
+	// Audience is the @audience declaration of a DB table (D156): who may
+	// see each row, and what an agent run may do with it. Nil for every
+	// other type. See [AudienceDef].
+	Audience *AudienceDef `json:"audience,omitempty" yaml:"audience,omitempty"`
+
+	// AccessGrants marks the DB class that is the table of grants (D156),
+	// and AccessLog the one that is the access log; the loader fills
+	// their fields. Nil for every other type.
+	AccessGrants *AccessGrantsDef `json:"accessGrants,omitempty" yaml:"accessGrants,omitempty"`
+	AccessLog    *AccessLogDef    `json:"accessLog,omitempty" yaml:"accessLog,omitempty"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].

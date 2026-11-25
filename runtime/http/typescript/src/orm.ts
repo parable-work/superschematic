@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { currentCaller } from './caller.js';
+import { accessCallerOf, currentAccess, currentCaller, type AccessCaller, type Caller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
@@ -420,6 +420,77 @@ export interface TableDefinition {
   readonly relations?: readonly RelationDefinition[];
   /** The one-to-many relations a read includes (D90). */
   readonly many?: readonly ManyDefinition[];
+  /**
+   * An @audience table's resolved columns (D156), which a read in an
+   * operation compares its caller with; on a projection of one, its
+   * source's, and the probe that holds the view to them.
+   */
+  readonly audience?: AudienceDefinition;
+  /**
+   * What the table is to per-record access (D156): the table of grants,
+   * the access log, or the UserRole table whose rows a grant's role names.
+   */
+  readonly access?: 'grants' | 'log' | 'roles';
+}
+
+/**
+ * What a read of an @audience table compares its caller with (D156): the
+ * row's effective audience, null for everyone or the ids of the principals
+ * it is visible to, and its effective agent access, each a column qualified
+ * by its table. On a projection, probe is the view's key in the keys of its
+ * source's rows of the WHERE %s.
+ */
+export interface AudienceDefinition {
+  readonly effective: string;
+  readonly agents: string;
+  readonly probe?: string;
+}
+
+/**
+ * Thrown by a write of a party or an agent run that leaves a row its
+ * grants do not reach (D156): a create under a target no grant names. A
+ * table operation answers it 403 forbidden; in a transaction the write
+ * rolls back with it.
+ */
+export class AccessRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AccessRefusedError';
+  }
+}
+
+/**
+ * The conditions that keep a read, or with write a write, to what caller
+ * may see of a table (D156), each value appended to args, its placeholder
+ * numbered after offset: the reusable audience predicate a read of rows
+ * across tables (a search, a calendar's feed, references, notifications)
+ * applies as a repository does. For an @audience table, the rows whose
+ * effective audience is everyone or holds the caller's id, or for an agent
+ * run its own or the id of whom it acts for, and whose agent access lets an
+ * agent run read them, or with write write them. A caller with no id, an
+ * anonymous one or one whose subject is no UUID, sees the rows everyone
+ * may. definition.probe, a projection's, holds the view to its source's
+ * rows that do.
+ */
+export function audienceConditions(definition: AudienceDefinition, caller: AccessCaller, args: unknown[], offset: number, write = false): string[] {
+  let n = offset;
+  const ids: string[] = [];
+  for (const subject of [caller.subject, caller.kind === 'agent' ? caller.actingFor?.subject : undefined]) {
+    const value = subject === undefined ? undefined : uuidValue(subject);
+    if (value !== undefined) ids.push(uuidToDb(subject!));
+  }
+  const parts: string[] = [];
+  if (ids.length === 0) parts.push(`${definition.effective} IS NULL`);
+  else {
+    const placeholders = ids.map(id => {
+      args.push(id);
+      return `$${++n}`;
+    });
+    parts.push(`(${definition.effective} IS NULL OR ${definition.effective} && ARRAY[${placeholders.join(', ')}]::uuid[])`);
+  }
+  if (caller.kind === 'agent') parts.push(write ? `${definition.agents} = 'followRole'` : `${definition.agents} <> 'none'`);
+  const text = parts.join(' AND ');
+  return [definition.probe ? fill(definition.probe, ` WHERE ${text}`) : text];
 }
 
 /**
@@ -1070,8 +1141,8 @@ export interface OrmOptions {
   readonly rules?: RulesCore;
 }
 
-/** Who acts: a principal, as ctx.principal holds one. */
-export interface Actor {
+/** Who acts: a principal, as ctx.principal holds one, with its kind, whom it acts for and its grants, which its reads keep to (D156). */
+export interface Actor extends Caller {
   readonly subject: string;
 }
 
@@ -1281,6 +1352,20 @@ const CALLER = Symbol('caller');
 type Acting = string | undefined | typeof CALLER;
 
 /**
+ * Whom an ORM's reads keep to (D156): the caller of the operation being
+ * run (CALLER), which outside one is no one to keep to; every row (ALL),
+ * the system actor's and a job's; or a principal, as as and withUser name
+ * one.
+ */
+const ALL = 'all';
+type Viewer = typeof CALLER | typeof ALL | AccessCaller;
+
+/** The viewer of a user's id, the anonymous one for none. */
+function viewerOf(id: string | null | undefined): Viewer {
+  return accessCallerOf(id === null || id === undefined || id === '' ? null : { subject: id });
+}
+
+/**
  * The user acting resolves to now. A caller whose subject is no UUID, a
  * custom authenticator's, is no user an audit field can hold, so it binds
  * no one; as(principal) still refuses one.
@@ -1306,7 +1391,8 @@ class TableRepository {
     private readonly acting: Acting,
     private readonly keys: FieldKeyring | undefined,
     private readonly rules: RulesCore | undefined = undefined,
-    private readonly behaviorCaller: CoreCaller | undefined = undefined
+    private readonly behaviorCaller: CoreCaller | undefined = undefined,
+    private readonly viewer: Viewer = CALLER
   ) {
     this.encrypted = def.columns.filter(c => c.encrypted);
     this.behaviors = orm.rules?.types[def.name];
@@ -1315,6 +1401,112 @@ class TableRepository {
   /** The acting user, resolved when a statement is written. */
   private get user(): string | undefined {
     return actingUser(this.acting);
+  }
+
+  /** Whom the reads keep to now (D156): every row outside an operation, else the caller. */
+  private get sees(): typeof ALL | AccessCaller {
+    if (this.viewer === CALLER) return currentAccess() ?? ALL;
+    return this.viewer;
+  }
+
+  /** Whether the reads of the table keep to a caller now: an @audience table's, or any table's for a caller with grants (D156). */
+  private get held(): boolean {
+    const sees = this.sees;
+    return sees !== ALL && (this.def.audience !== undefined || sees.grants !== undefined);
+  }
+
+  /**
+   * The conditions that keep a read, or with write a write, of the table
+   * to what the caller sees (D156): an @audience table's audience
+   * (audienceConditions), and for a party or an agent run, the rows one of
+   * its grants reaches. None outside an operation, for the system actor,
+   * and on a table no audience holds for a caller with no grants.
+   */
+  private accessConditions(args: unknown[], offset: number, write: boolean): string[] {
+    const sees = this.sees;
+    if (sees === ALL) return [];
+    const out: string[] = [];
+    let n = offset;
+    if (this.def.audience) {
+      const before = args.length;
+      out.push(...audienceConditions(this.def.audience, sees, args, n, write));
+      n += args.length - before;
+    }
+    if (sees.grants !== undefined) {
+      const branches: string[] = [];
+      for (const grant of sees.grants) {
+        if (grant.targetType === this.def.name) {
+          args.push(this.encode(grant.targetId, this.keyColumn(), 'grant target'));
+          branches.push(fill(this.clauses.eq, this.keyColumn().qualified, ++n));
+        }
+        for (const path of grant.reaches[this.def.name] ?? []) {
+          // Every row of the table.
+          if (path === '*') return out;
+          const filter = this.reachFilter(path, grant.targetType, grant.targetId);
+          if (filter === undefined) continue;
+          const before = args.length;
+          const inner = this.filterConditions(filter, args, n, false);
+          n += args.length - before;
+          if (inner.length > 0) branches.push(fill(this.group, inner.join(this.clauses.and)));
+        }
+      }
+      // No grant reaches a row of the table: none is there.
+      out.push(branches.length === 0 ? 'FALSE' : fill(this.group, branches.join(this.clauses.or ?? ' OR ')));
+    }
+    return out;
+  }
+
+  /**
+   * The filter of a role's path from the table to a grant's target (D156):
+   * unit.contract is { unit: { contract: { <key>: { eq: targetId } } } },
+   * each step a to-one or a one-to-many relation of the table it is on.
+   * undefined for a path that names no relation, or that ends at another
+   * table than the target's: it reaches no row.
+   */
+  private reachFilter(path: string, targetType: string, targetId: string): Values | undefined {
+    const steps = path.split('.');
+    let at: TableRepository = this;
+    for (const step of steps) {
+      const one = at.def.relations?.find(rel => rel.field === step);
+      const many = one ? undefined : at.def.many?.find(rel => rel.name === step);
+      const member = one?.target ?? many?.target;
+      if (member === undefined) return undefined;
+      const next = at.peers[member];
+      if (next === undefined) return undefined;
+      at = next;
+    }
+    if (at.def.name !== targetType) return undefined;
+    let filter: Values = { [at.def.key]: { eq: targetId } };
+    for (const step of [...steps].reverse()) filter = { [step]: filter };
+    return filter;
+  }
+
+  /** Throws NotFoundError unless the row whose key is id is one the caller sees, or with write may write (D156). */
+  private async requireReach(id: unknown, write: boolean): Promise<void> {
+    if (!this.held) return;
+    const key = this.keyColumn();
+    const args: unknown[] = [this.encode(id, key, 'key')];
+    const conditions = [fill(this.clauses.eq, key.qualified, 1), ...this.accessConditions(args, 1, write)];
+    const s = this.def.statements;
+    const { rows } = await run(this.runner, fill(s.findOne, s.columns, this.liveWhere(this.whereOf(conditions), false), ''), args);
+    if (rows.length === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+  }
+
+  /** Throws AccessRefusedError when a party or an agent run created a row its grants do not reach (D156). */
+  private async requireCreatedReach(row: Values): Promise<void> {
+    const sees = this.sees;
+    if (sees === ALL || sees.grants === undefined) return;
+    try {
+      await this.requireReach(row[this.def.key], true);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new AccessRefusedError(`${this.def.name}: the row is not one the caller's grants reach`);
+      throw error;
+    }
+  }
+
+  /** Throws for an upsert of a table whose reads keep to a caller (D156): its update would reach a row the caller may not see. */
+  private refuseHeldUpsert(method: string): void {
+    if (this.held) throw new Error(`orm: ${method} of ${this.def.name}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key`);
   }
 
   private peer(member: string): TableRepository {
@@ -1564,8 +1756,24 @@ class TableRepository {
     return this.user;
   }
 
-  /** The filter's conditions, each value appended to args, its placeholder numbered after offset (Go's conditions). */
-  conditions(filter: Values | null | undefined, args: unknown[], offset: number): string[] {
+  /**
+   * The filter's conditions, each value appended to args, its placeholder
+   * numbered after offset (Go's conditions), then the conditions that keep
+   * the rows to what the operation's caller sees, or with write may write
+   * (D156, accessConditions).
+   */
+  conditions(filter: Values | null | undefined, args: unknown[], offset: number, write = false): string[] {
+    const before = args.length;
+    const out = this.filterConditions(filter, args, offset, true);
+    return [...out, ...this.accessConditions(args, offset + (args.length - before), write)];
+  }
+
+  /**
+   * The filter's conditions alone. A filter through a relation holds the
+   * target's rows to what the caller sees too, unless access is false, as
+   * a grant's path is: its steps are the role's to name.
+   */
+  private filterConditions(filter: Values | null | undefined, args: unknown[], offset: number, access: boolean): string[] {
     if (!filter) return [];
     const c = this.clauses;
     const conditions: string[] = [];
@@ -1629,10 +1837,25 @@ class TableRepository {
       if (through === undefined || through === null) continue;
       const target = this.peer(rel.target);
       const before = args.length;
-      const inner = target.conditions(through, args, n);
+      const inner = access ? target.conditions(through, args, n) : target.filterConditions(through, args, n, false);
       n += args.length - before;
       if (target.def.softDelete) inner.push(target.def.statements.liveCondition);
       conditions.push(fill(rel.probe, target.whereOf(inner)));
+    }
+    // A filter through a one-to-many relation (D156): the key in the keys
+    // its rows' foreign key holds, of the rows the filter finds, so a path
+    // to a row's members reaches through a list of them.
+    for (const many of this.def.many ?? []) {
+      const through = filter[many.name] as Values | null | undefined;
+      if (through === undefined || through === null) continue;
+      const source = this.peer(many.target);
+      const foreign = source.def.columns.find(column => column.name === many.column);
+      if (!foreign) throw new Error(`orm: ${this.def.name}'s relation ${many.name} reads ${many.column}, which ${source.def.name} has no column of`);
+      const before = args.length;
+      const inner = access ? source.conditions(through, args, n) : source.filterConditions(through, args, n, false);
+      n += args.length - before;
+      if (source.def.softDelete) inner.push(source.def.statements.liveCondition);
+      conditions.push(`${this.keyColumn().qualified} IN (SELECT ${foreign.qualified} FROM ${source.def.table}${source.whereOf(inner)})`);
     }
     for (const ref of this.def.referencedBy ?? []) {
       const probe = filter[ref.filter] as { exists?: boolean; includeDeleted?: boolean } | null | undefined;
@@ -1657,7 +1880,7 @@ class TableRepository {
     const allOf = filter.allOf as readonly (Values | null | undefined)[] | null | undefined;
     for (const each of allOf ?? []) {
       const before = args.length;
-      conditions.push(...this.conditions(each, args, n));
+      conditions.push(...this.filterConditions(each, args, n, access));
       n += args.length - before;
     }
     // anyOf ORs filters of the table (D90), each one's conditions ANDed.
@@ -1671,7 +1894,7 @@ class TableRepository {
       let every = false;
       for (const branch of anyOf) {
         const before = args.length;
-        const inner = this.conditions(branch, args, n);
+        const inner = this.filterConditions(branch, args, n, access);
         n += args.length - before;
         if (inner.length === 0) {
           every = true;
@@ -1710,6 +1933,12 @@ class TableRepository {
   }
 
   async getOne(id: unknown, options: ReadSpec = {}): Promise<Values> {
+    // A row the caller does not see is not there (D156).
+    if (this.held) {
+      const row = await this.findOne({ [this.def.key]: { eq: id } }, options as FindOptions<string> & ReadSpec);
+      if (row === null) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+      return row;
+    }
     const s = this.def.statements;
     let text = s.getOne;
     let selection: Selection | undefined;
@@ -1734,6 +1963,11 @@ class TableRepository {
   async getManyByIds(ids: readonly unknown[]): Promise<Map<unknown, Values>> {
     const out = new Map<unknown, Values>();
     if (ids.length === 0) return out;
+    if (this.held) {
+      const { rows } = await this.findMany({ [this.def.key]: { in: ids } }, { count: false, limit: ids.length });
+      for (const row of rows) out.set(row[this.def.key], row);
+      return out;
+    }
     const key = this.keyColumn();
     const seen = new Set<unknown>();
     const values: unknown[] = [];
@@ -1980,12 +2214,18 @@ class TableRepository {
   }
 
   async createOne(input: Values): Promise<Values> {
-    if (this.behaviors) return this.atomically(repo => repo.createThroughCore(input));
+    if (this.behaviors) {
+      const created = await this.atomically(repo => repo.createThroughCore(input));
+      await this.requireCreatedReach(created);
+      return created;
+    }
     const args: unknown[] = [];
     const { columns, placeholders } = this.insertOne(this.sealed(this.stamped(input), 'create'), args);
     const s = this.def.statements;
     const { rows } = await run(this.runner, fill(s.insert, columns.join(', '), placeholders.join(', '), s.columns), args);
-    return this.decode(rows[0]!);
+    const created = this.decode(rows[0]!);
+    await this.requireCreatedReach(created);
+    return created;
   }
 
   async createMany(inputs: readonly Values[]): Promise<Values[]> {
@@ -2007,7 +2247,9 @@ class TableRepository {
     const { columns, tuples } = this.insertTuples(order, rows, args);
     const s = this.def.statements;
     const result = await run(this.runner, fill(s.insertMany, columns.join(', '), tuples.join(', '), s.columns), args);
-    return result.rows.map(row => this.decode(row));
+    const created = result.rows.map(row => this.decode(row));
+    for (const row of created) await this.requireCreatedReach(row);
+    return created;
   }
 
   /**
@@ -2099,6 +2341,8 @@ class TableRepository {
   }
 
   async updateOne(id: unknown, update: Values, options: WriteOptions = {}): Promise<Values> {
+    // A row the caller may not write is not there (D156).
+    await this.requireReach(id, true);
     if (this.behaviors) return this.atomically(repo => repo.updateThroughCore(id, update, options.preconditions));
     this.refusePreconditions(options.preconditions);
     const args: unknown[] = [];
@@ -2124,7 +2368,7 @@ class TableRepository {
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
     // Each fence the assignments advance, their stamps among them (D119).
     sets.push(...fenceBumps(this.def.fences, sets));
-    const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length)), false);
+    const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
     const { rowCount } = await run(this.runner, fill(this.def.statements.updateMany, sets.join(', '), where), args);
     return rowCount;
   }
@@ -2135,6 +2379,7 @@ class TableRepository {
 
   async upsertOneResult(input: Values, on: readonly string[], update: Values, options: UpsertOptions = {}): Promise<UpsertResult<Values>> {
     this.refuseUpsert('upsertOne');
+    this.refuseHeldUpsert('upsertOne');
     const name = on.join(',');
     const key = this.uniqueKey(name);
     const onlyIfChanged = options.onlyIfChanged === true;
@@ -2166,6 +2411,7 @@ class TableRepository {
 
   async upsertMany(inputs: readonly Values[], on: readonly string[], update: readonly string[], options: UpsertManyOptions = {}): Promise<UpsertResult<Values>[]> {
     this.refuseUpsert('upsertMany');
+    this.refuseHeldUpsert('upsertMany');
     const name = on.join(',');
     const key = this.uniqueKey(name);
     if (!key.rows) throw this.expressionKey('upsertMany', name);
@@ -2512,6 +2758,7 @@ class TableRepository {
   }
 
   async deleteOne(id: unknown, options: WriteOptions = {}): Promise<void> {
+    await this.requireReach(id, true);
     if (this.behaviors) return this.atomically(repo => repo.deleteThroughCore(id, options.preconditions));
     this.refusePreconditions(options.preconditions);
     if (!this.def.softDelete) return this.hardDeleteOne(id);
@@ -2529,12 +2776,12 @@ class TableRepository {
       const user = this.requireUser();
       const deletedBy = this.audit('deletedBy');
       const args: unknown[] = deletedBy ? [new Date(), this.encode(user, deletedBy, 'deletedBy')] : [new Date()];
-      const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length)), false);
+      const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
       const { rowCount } = await run(this.runner, fill(s.softDeleteMany, where), args);
       return rowCount;
     }
     const args: unknown[] = this.def.historyActor ? [this.actor()] : [];
-    const where = this.whereOf(this.conditions(filter, args, args.length));
+    const where = this.whereOf(this.conditions(filter, args, args.length, true));
     const text = (this.def.historyActor ? this.orm.historyActorCTE : '') + fill(s.deleteMany, where);
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
@@ -2542,6 +2789,7 @@ class TableRepository {
   }
 
   async hardDeleteOne(id: unknown): Promise<void> {
+    await this.requireReach(id, true);
     const key = this.encode(id, this.keyColumn(), 'key');
     const s = this.def.statements;
     const args = this.def.historyActor ? [this.actor(), key] : [key];
@@ -2969,11 +3217,11 @@ function distinct(values: readonly unknown[]): unknown[] {
   return out;
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined): Record<string, TableRepository> {
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller);
+    out[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller, viewer);
     out[member].bindUses();
   }
   // An include and a filter through a relation read the target through
@@ -3024,19 +3272,19 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
  * acts as the transaction it is nested in, the caller (D87) and the
  * behavior caller among them.
  */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0): OrmTx<R> {
+function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys, rules, behaviorCaller),
+    ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, behaviorCaller, depth),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth),
-    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth),
-    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, client, acting, keys, rules, caller ?? undefined, depth),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, behaviorCaller, depth, viewerOf(id)),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth, accessCallerOf(principal)),
+    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth, ALL),
+    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, client, acting, keys, rules, caller ?? undefined, depth, viewer),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
     // A nested transaction is a savepoint, named for its depth, as
@@ -3047,7 +3295,7 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
       await client.query({ text: `SAVEPOINT ${savepoint}`, values: [] });
       let out: T;
       try {
-        out = await fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, depth + 1));
+        out = await fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, depth + 1, viewer));
       } catch (error) {
         await client.query({ text: `ROLLBACK TO SAVEPOINT ${savepoint}`, values: [] });
         await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
@@ -3072,24 +3320,24 @@ export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | n
   const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
   // A system actor that is no UUID throws here, not at a job's first write.
   systemActorOf(orm);
-  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules, undefined);
+  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules, undefined, opts.user === undefined ? CALLER : viewerOf(opts.user));
 }
 
-function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined): Orm<R> {
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false, pool };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys, rules, behaviorCaller),
+    ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules, behaviorCaller),
-    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules, behaviorCaller),
-    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules, behaviorCaller),
-    withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, acting, keys, rules, caller ?? undefined),
+    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules, behaviorCaller, viewerOf(id)),
+    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules, behaviorCaller, accessCallerOf(principal)),
+    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules, behaviorCaller, ALL),
+    withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, acting, keys, rules, caller ?? undefined, viewer),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller)));
+      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, 0, viewer)));
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
