@@ -1,6 +1,12 @@
 package naming
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
+
+// goSuffixRE is the form of a suffix of an exported Go name.
+var goSuffixRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 // GoConfig is the [go] table of superschematic.toml: shapes of the
 // generated Go types and ORM beyond the core's. Its defaults are the
@@ -33,6 +39,14 @@ type GoConfig struct {
 	// Validate, so a types package with no Parse function for a number
 	// scalar needs none.
 	EnvNumberScalars string `toml:"env_number_scalars"`
+
+	// ORMRelationFilterSuffix ends the name of the member of a Go ORM
+	// filter that keeps the rows whose to-one relation points at a row
+	// another filter finds (D90): "" (default) names it after the
+	// relation, Vendor; "Where" names it VendorWhere (D163). It holds
+	// ASCII letters and digits and starts with an upper-case letter, so
+	// the member stays an exported Go name.
+	ORMRelationFilterSuffix string `toml:"orm_relation_filter_suffix"`
 }
 
 // The values of the [go] keys.
@@ -72,6 +86,9 @@ func (c GoConfig) check() error {
 	}
 	if c.EnvNumberScalars != "" && c.EnvNumberScalars != GoEnvParse && c.EnvNumberScalars != GoEnvStrconv {
 		return fmt.Errorf("go.env_number_scalars is %q: use %q or %q", c.EnvNumberScalars, GoEnvParse, GoEnvStrconv)
+	}
+	if c.ORMRelationFilterSuffix != "" && !goSuffixRE.MatchString(c.ORMRelationFilterSuffix) {
+		return fmt.Errorf("go.orm_relation_filter_suffix is %q: use ASCII letters and digits, starting with an upper-case letter, or leave it out", c.ORMRelationFilterSuffix)
 	}
 	return nil
 }

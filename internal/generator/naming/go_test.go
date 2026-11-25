@@ -25,6 +25,7 @@ func TestParseReadsTheGoTable(t *testing.T) {
 limit_constants = "on"
 optional_zero = "keep"
 env_number_scalars = "strconv"
+orm_relation_filter_suffix = "Where"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +34,7 @@ env_number_scalars = "strconv"
 	want.LimitConstants = GoOn
 	want.OptionalZero = GoOptionalKeep
 	want.EnvNumberScalars = GoEnvStrconv
+	want.ORMRelationFilterSuffix = "Where"
 	if n.Go != want {
 		t.Errorf("[go] = %+v, want %+v", n.Go, want)
 	}
@@ -49,6 +51,8 @@ func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
 		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
 		{"[go]\noptional_zero = \"pointers\"\n", `go.optional_zero is "pointers": use "omit" or "keep"`},
 		{"[go]\nenv_number_scalars = \"atoi\"\n", `go.env_number_scalars is "atoi": use "parse" or "strconv"`},
+		{"[go]\norm_relation_filter_suffix = \"where\"\n", `go.orm_relation_filter_suffix is "where": use ASCII letters and digits`},
+		{"[go]\norm_relation_filter_suffix = \"_Where\"\n", `go.orm_relation_filter_suffix is "_Where"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

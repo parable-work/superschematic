@@ -1045,6 +1045,17 @@ valid number` or `not a finite number`. Use `strconv` with a scalar
 library whose types package has no `Parse` function for a number scalar.
 Any other value fails the load.
 
+### `go.orm_relation_filter_suffix`
+
+Default: empty
+
+Ends the name of the member of a Go ORM filter that keeps the rows whose
+to-one relation points at a row another filter finds, such as
+`OrderFilter.Customer *CustomerFilter`. Empty names the member after the
+relation; `Where` names it `CustomerWhere`. The condition does not
+change. The value holds ASCII letters and digits and starts with an
+upper-case letter; any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

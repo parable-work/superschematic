@@ -438,7 +438,8 @@ type Repository struct {
 }
 
 // PathRelation is a to-one relation a filter reaches through (D90):
-// sqlutil's, with its member of the filter, GoField.
+// sqlutil's, with its member of the filter, GoField: the relation's field
+// in PascalCase, then go.orm_relation_filter_suffix (D163).
 type PathRelation struct {
 	sqlutil.ToOne
 	GoField string
@@ -1040,6 +1041,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if repo.Merge, err = sqlutil.MergePlanOf(schema, tables, typeDef.Name); err != nil {
 				return nil, err
 			}
+		}
+		// go.orm_relation_filter_suffix names the member of each to-one
+		// relation the filter reaches through (D163).
+		for j := range repo.PathRelations {
+			repo.PathRelations[j].GoField += opts.Naming.Go.ORMRelationFilterSuffix
 		}
 		repositories = append(repositories, repo)
 	}
