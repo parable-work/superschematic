@@ -197,16 +197,31 @@ const QueueWakesVariable = "QUEUE_WAKES"
 // QueueWake is how a queue client starts the worker of a queue after an
 // enqueue (D145), as a platform gives it in QueueWakesVariable: an HTTP
 // POST of an empty JSON object to URL, with a bearer token when Token
-// says where one comes from. It names no provider: the gcp target fills
-// it with the Cloud Run job's run method and the metadata server's token.
+// says where one comes from; or, with Binding and no URL, the create of a
+// run of the object the deployable holds under that binding, which waits
+// until the message is due and drains the worker's queues (D151). It
+// names no provider: the gcp target fills it with the Cloud Run job's run
+// method and the metadata server's token, and the cloudflare target with
+// the binding of the worker's Workflow.
 type QueueWake struct {
 	// URL is what the client POSTs to.
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// Token is where the client reads the bearer token it sends, nil for a
 	// wake that needs none.
 	Token *QueueWakeToken `json:"token,omitempty"`
+
+	// Binding names the deployable's binding whose create starts a run of
+	// the worker (D151): a Workflow's on Cloudflare.
+	Binding string `json:"binding,omitempty"`
 }
+
+// QueueWakeClass is the class a worker's bundle on Cloudflare Workers
+// exports beside its scheduled handler (D151): a Workflow whose instance a
+// wake creates, which sleeps until the message it was created for is due
+// and runs one firing of the worker's drain. The server generator writes
+// it into drain.ts and the cloudflare target names it.
+const QueueWakeClass = "QueueWake"
 
 // QueueWakeToken is where a wake's bearer token comes from: a GET of URL
 // with Headers answers a JSON object whose `access_token` member is the
