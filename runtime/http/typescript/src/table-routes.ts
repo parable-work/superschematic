@@ -37,6 +37,15 @@ reaches every row. A member may be a path through the table's relations
 has a party row that names the caller, one condition of the row's WHERE,
 each step a subquery over the next table's rows.
 
+The repositories hold every read and write of the transaction to what its
+caller sees (D156): an @audience table's rows the caller is in the audience
+of, and for a party or an agent run the rows its grants reach. A row the
+caller does not see is the 404 of one that is not there.
+
+A @decrypted member that names a permission (D156) is opened only for a
+caller who holds it, and answered masked to any other; each value it opens
+is recorded in the database's access log, in the transaction.
+
 A create whose body names the state its row starts in (D109), the field of
 a Workflow of the table, creates the row in the Workflow's initial state
 and makes the Workflow's transition to that state in the same transaction,
@@ -88,6 +97,12 @@ export interface TableOperation {
   readonly view: readonly string[];
   /** The members of the view marked @decrypted, each the opened value of its Encrypted<T> column. */
   readonly decrypted?: readonly string[];
+  /**
+   * The @decrypted members only a holder of a permission sees (D156), by
+   * member: any other caller gets the member masked, and each value opened
+   * is recorded in the access log.
+   */
+  readonly reveal?: Readonly<Record<string, string>>;
   /** The members of a create's and an update's body, each the row's member it sets. */
   readonly body?: readonly string[];
   /** A list's SearchQuery argument (D62), by its query parameter. */
@@ -168,8 +183,11 @@ interface UseShape {
 interface OrmShape {
   as(principal: unknown): OrmShape;
   withBehaviorCaller(caller: unknown): OrmShape;
-  transaction<T>(fn: (tx: Readonly<Record<string, RepositoryShape | undefined>>) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (tx: TxShape) => Promise<T>): Promise<T>;
 }
+
+/** A transaction's repositories, and the system actor's view of them. */
+type TxShape = Readonly<Record<string, RepositoryShape | undefined>> & { asSystem?(): TxShape };
 
 /** The columns of a repository's table, or none when it holds no definition. */
 function columnsOf(repository: RepositoryShape): readonly ColumnShape[] {
@@ -271,6 +289,8 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
   if (name === 'NotFoundError') return notFound(`${operation.type} not found`, { cause: error });
   if (name === 'NoUserError') return unauthorized(undefined, { cause: error });
   if (name === 'PageKeyError') return refusedCursor();
+  // A party's or an agent run's write that leaves a row its grants do not reach (D156).
+  if (name === 'AccessRefusedError') return forbidden(`${operation.type}: the row is not one the caller's grants reach`, { cause: error });
   const failed = databaseError(error);
   if (!failed) return error;
   const body = operation.body ?? [];
@@ -312,7 +332,7 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
  * back: a refusal of the behaviors' core as a behavior operation answers
  * it (behaviorOperation), and any other as refusalOf says.
  */
-async function inTransaction<T>(orm: object, operation: TableOperation, ctx: RequestContext, work: (repository: RepositoryShape) => Promise<T>): Promise<T> {
+async function inTransaction<T>(orm: object, operation: TableOperation, ctx: RequestContext, work: (repository: RepositoryShape, tx: TxShape) => Promise<T>): Promise<T> {
   let columns: readonly ColumnShape[] = [];
   const acting = ctx.principal && uuidValue(ctx.principal.subject) !== undefined ? ctx.principal : null;
   try {
@@ -324,7 +344,7 @@ async function inTransaction<T>(orm: object, operation: TableOperation, ctx: Req
           const repository = tx[operation.repository];
           if (!repository) throw new Error(`table operation: the repositories hold no ${operation.repository}, the repository of ${operation.type}`);
           columns = columnsOf(repository);
-          return work(repository);
+          return work(repository, tx);
         })
     );
   } catch (error) {
@@ -394,13 +414,60 @@ function pathOf(operation: TableOperation, repository: RepositoryShape, member: 
   return { steps, column };
 }
 
-/** The row's view: the members the operation's result lists, a @decrypted one opened. */
-function viewOf(operation: TableOperation, row: Row): Values {
-  const view: [string, unknown][] = operation.view.map(member => [
-    member,
-    operation.decrypted?.includes(member) ? revealed(row[member]) : row[member],
-  ]);
+/**
+ * The row's view: the members the operation's result lists, a @decrypted
+ * one opened, but one whose reveal permission the caller does not hold,
+ * which stays masked (D156). opened collects the members whose value it
+ * opened under a reveal permission, which the access log records.
+ */
+function viewOf(operation: TableOperation, row: Row, ctx?: RequestContext, opened?: string[]): Values {
+  const view: [string, unknown][] = operation.view.map(member => {
+    if (!operation.decrypted?.includes(member)) return [member, row[member]];
+    const permission = operation.reveal?.[member];
+    if (permission === undefined) return [member, revealed(row[member])];
+    if (!ctx?.principal?.permissions.some(granted => covers(granted, permission))) return [member, row[member]];
+    if (row[member] !== null && row[member] !== undefined) opened?.push(member);
+    return [member, revealed(row[member])];
+  });
   return Object.fromEntries(view);
+}
+
+/**
+ * The views of rows, each member opened under a reveal permission recorded
+ * in the database's access log (D156), in the operation's transaction, as
+ * the system actor, so the caller's own audience never hides the record.
+ * A reveal with no access log to record it in is refused: a value is never
+ * opened unrecorded.
+ */
+async function viewsOf(operation: TableOperation, rows: readonly Row[], ctx: RequestContext, tx: TxShape): Promise<Values[]> {
+  const views: Values[] = [];
+  const records: Values[] = [];
+  for (const row of rows) {
+    const opened: string[] = [];
+    views.push(viewOf(operation, row, ctx, opened));
+    for (const field of opened) {
+      const principal = ctx.principal;
+      records.push({
+        at: new Date(),
+        kind: 'reveal',
+        principal: principal?.subject ?? null,
+        principalKind: principal ? (principal.kind ?? 'user') : null,
+        actingFor: principal?.actingFor?.subject ?? null,
+        credential: principal?.credential?.id ?? null,
+        operation: ctx.operation.name,
+        targetType: operation.type,
+        targetId: operation.key === undefined ? null : String(row[operation.key] ?? ''),
+        field,
+      });
+    }
+  }
+  if (records.length > 0) {
+    const system = tx.asSystem?.() ?? tx;
+    const log = Object.values(system).find(repository => typeof repository === 'object' && repository?.def?.access === 'log') as RepositoryShape | undefined;
+    if (!log) throw new Error(`table operation: ${operation.type} reveals ${String(records[0]!.field)}, and the database has no @accessLog table to record it in (D156)`);
+    for (const record of records) await log.createOne(record);
+  }
+  return views;
 }
 
 /** The condition each of the operation's parents is: the row's member holds the path's. */
@@ -443,7 +510,7 @@ function bodyOf(operation: TableOperation, request: TableRequest): Row {
  * soft-deleted row's and a row's under another parent among them.
  */
 export function tableRead(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => viewOf(operation, await liveRow(repository, operation, ctx, request)));
+  return inTransaction(orm, operation, ctx, async (repository, tx) => (await viewsOf(operation, [await liveRow(repository, operation, ctx, request)], ctx, tx))[0]);
 }
 
 /** The text a contains matches, as the repository's ilike reads it between its two %: with \, % and _ escaped by \, so each matches itself. */
@@ -486,7 +553,7 @@ export function tableList(
   page: PageRequest,
   filter: RequestFilter = {}
 ): Promise<Page<unknown>> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const search = operation.search === undefined ? undefined : request.query[operation.search];
     const parents = parentsOf(operation, request);
     const reach = reachOf(operation, repository, ctx);
@@ -510,7 +577,7 @@ export function tableList(
       ...(after !== undefined ? { after } : {}),
     });
     return {
-      items: found.rows.map(row => viewOf(operation, row)),
+      items: await viewsOf(operation, found.rows, ctx, tx),
       next: found.next === null || found.next === undefined ? null : encodeCursor(found.next),
     };
   });
@@ -522,7 +589,7 @@ export function tableList(
  * path names; the view of the row as the write left it.
  */
 export function tableCreate(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const body = bodyOf(operation, request);
     const starts = operation.starts ?? [];
     const input: Values = {};
@@ -567,10 +634,10 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
       await use.transition(created[key], { to });
       moved = true;
     }
-    if (!moved) return viewOf(operation, created);
+    if (!moved) return (await viewsOf(operation, [created], ctx, tx))[0];
     const key = columns.find(column => column.key)!.name;
     const row = await repository.findOne({ [key]: { eq: created[key] } });
-    return viewOf(operation, row ?? created);
+    return (await viewsOf(operation, [row ?? created], ctx, tx))[0];
   });
 }
 
@@ -583,7 +650,7 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
  * It answers the view of the row as the write left it.
  */
 export function tableUpdate(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const row = await liveRow(repository, operation, ctx, request);
     const body = bodyOf(operation, request);
     const columns = columnsOf(repository);
@@ -595,8 +662,8 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
       }
       update[member] = body[member];
     }
-    if (Object.keys(update).length === 0) return viewOf(operation, row);
-    return viewOf(operation, await repository.updateOne(row[operation.key!], update));
+    if (Object.keys(update).length === 0) return (await viewsOf(operation, [row], ctx, tx))[0];
+    return (await viewsOf(operation, [await repository.updateOne(row[operation.key!], update)], ctx, tx))[0];
   });
 }
 
@@ -607,9 +674,9 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
  * the view of the row as it was before.
  */
 export function tableDelete(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const row = await liveRow(repository, operation, ctx, request);
     await repository.deleteOne(row[operation.key!]);
-    return viewOf(operation, row);
+    return (await viewsOf(operation, [row], ctx, tx))[0];
   });
 }

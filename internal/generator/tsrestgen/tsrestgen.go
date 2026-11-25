@@ -226,6 +226,10 @@ type TableRoute struct {
 	// them marked @decrypted.
 	View      []string
 	Decrypted []string
+	// Reveal are the @decrypted members whose value only a holder of a
+	// permission sees (D156), by member, each its permission, in the
+	// view's order.
+	Reveal [][2]string
 	// Body are the members of a create's and an update's body.
 	Body []string
 	// Search is a list's SearchQuery argument, by its query parameter.
@@ -274,6 +278,13 @@ func (r *TableRoute) Literal() string {
 	fields = append(fields, "view: "+tsStringList(r.View))
 	if len(r.Decrypted) > 0 {
 		fields = append(fields, "decrypted: "+tsStringList(r.Decrypted))
+	}
+	if len(r.Reveal) > 0 {
+		entries := make([]string, len(r.Reveal))
+		for i, reveal := range r.Reveal {
+			entries[i] = reveal[0] + ": " + tsString(reveal[1])
+		}
+		fields = append(fields, "reveal: { "+strings.Join(entries, ", ")+" }")
 	}
 	if r.Kind == ir.TableOperationCreate || r.Kind == ir.TableOperationUpdate {
 		fields = append(fields, "body: "+tsStringList(r.Body))
@@ -1487,6 +1498,9 @@ func (b *builder) tableEndpoint(ep apigen.EndpointInfo, op *ir.TableOperation) (
 		route.View = append(route.View, field.Name)
 		if field.Decrypted {
 			route.Decrypted = append(route.Decrypted, field.Name)
+			if field.RevealPermission != "" {
+				route.Reveal = append(route.Reveal, [2]string{field.Name, field.RevealPermission})
+			}
 		}
 	}
 

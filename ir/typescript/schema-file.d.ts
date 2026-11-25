@@ -309,6 +309,7 @@ export interface FieldDef {
   requiredNull?: boolean;
   restMethod?: string;
   restPath?: string;
+  revealPermission?: string;
   runtime?: boolean;
   searchField?: boolean;
   secret?: boolean;

@@ -612,6 +612,13 @@ type FieldDef struct {
 	// needs to hold such a field at all.
 	Decrypted bool `json:"decrypted,omitempty" yaml:"decrypted,omitempty"`
 
+	// RevealPermission, on a @decrypted field, is the permission a caller
+	// holds to see its value (D156): `@decrypted({ permission })`. A
+	// generated operation answers the field masked to a caller without it,
+	// and records each value it opens in the access log. Empty, every
+	// caller the route admits sees it, as before.
+	RevealPermission string `json:"revealPermission,omitempty" yaml:"revealPermission,omitempty"`
+
 	// SQLName is the column a DB table field is stored in, from
 	// @column("name") (D85): a to-one relation's foreign key column itself.
 	// Empty means the field's name in snake case (with _id for a relation).
