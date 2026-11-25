@@ -179,3 +179,4 @@ optional_input_empty_body = "refuse"
 strict_input_refusals = "route"
 app_error_context = false
 manual_route_constants = false
+body_arguments = "values"

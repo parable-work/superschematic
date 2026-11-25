@@ -1097,6 +1097,21 @@ constants: `<Handler>Method`, `<Handler>Path`,
 mounts the route itself reads them rather than typing them again. A
 constant of a limit is written only when the operation declares it.
 
+### `go_api.body_arguments`
+
+Default: `values`
+
+How a route reads the arguments of an operation without an input type
+from its JSON body. `values` decodes each argument from its own JSON value
+and checks the argument's rules, every failure at its path. `struct` reads
+the body's first JSON value, the null as `{}`, and decodes it into one
+struct with each argument's type's decoder, so a value the decoder refuses
+is a decode refusal. It then checks each argument with its type's own
+`Validate`, `ValidateRequired` for a required argument, and answers the
+first that fails, at its name. The argument's own rules are not checked
+under `struct`. A route with a union argument reads it as `values` says.
+Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

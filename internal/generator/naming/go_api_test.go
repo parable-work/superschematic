@@ -32,6 +32,7 @@ optional_input_empty_body = "object"
 strict_input_refusals = "decoder"
 app_error_context = true
 manual_route_constants = true
+body_arguments = "struct"
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -49,6 +50,7 @@ minLength = "min_length"
 		StrictInputRefusals:    GoAPIDecoder,
 		AppErrorContext:        true,
 		ManualRouteConstants:   true,
+		BodyArguments:          GoAPIStruct,
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -68,6 +70,7 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 		{"[go_api]\ninput_trailing_data = \"keep\"\n", `go_api.input_trailing_data is "keep": use "refuse" or "ignore"`},
 		{"[go_api]\noptional_input_empty_body = \"null\"\n", `go_api.optional_input_empty_body is "null": use "refuse" or "object"`},
 		{"[go_api]\nstrict_input_refusals = \"type\"\n", `go_api.strict_input_refusals is "type": use "route" or "decoder"`},
+		{"[go_api]\nbody_arguments = \"object\"\n", `go_api.body_arguments is "object": use "values" or "struct"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -352,6 +352,42 @@ func TestOptionalInputEmptyBody(t *testing.T) {
 	})
 }
 
+// TestBodyArguments: under go_api.body_arguments = "struct" a route reads
+// its body arguments as one struct: the null is the empty object, whose
+// required argument its type's ValidateRequired refuses at its name, a
+// value its type's decoder refuses is a decode refusal, and trailing data
+// is not read, as the core's reading does not read it.
+func TestBodyArguments(t *testing.T) {
+	const token = `"0b7b4c4e-6a43-4d4b-9a8e-1f2d3c4b5a69"`
+	runCases(t, []routerCase{
+		{
+			name: "a valid token", method: http.MethodPost, target: "/api/widgets/claim", body: `{"token":` + token + `}`,
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+		{
+			name: "the null", method: http.MethodPost, target: "/api/widgets/claim", body: `null`,
+			defaults: answer{Status: 400, Detail: "Invalid request body"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "token=required"},
+		},
+		{
+			name: "no token", method: http.MethodPost, target: "/api/widgets/claim", body: `{}`,
+			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "token=required"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "token=required"},
+		},
+		{
+			name: "a token that is not a string", method: http.MethodPost, target: "/api/widgets/claim", body: `{"token":5}`,
+			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "token=type"},
+			options:  answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "does not match the declared type"},
+		},
+		{
+			name: "trailing data", method: http.MethodPost, target: "/api/widgets/claim", body: `{"token":` + token + `} x`,
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+	})
+}
+
 // TestPathParamError: go_api.path_param_error is the detail of the 400 of a
 // path parameter that does not decode to UTF-8.
 func TestPathParamError(t *testing.T) {

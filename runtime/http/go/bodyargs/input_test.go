@@ -35,6 +35,9 @@ func TestReadOptions(t *testing.T) {
 		{name: "white space as an object", body: " \n", opts: []ReadOption{EmptyBodyAsObject()}, raw: `{}`},
 		{name: "white space as an object, first value", body: " \n", opts: []ReadOption{EmptyBodyAsObject(), FirstValue()}, raw: `{}`},
 		{name: "the null is still refused", body: "null", opts: []ReadOption{EmptyBodyAsObject()}, detail: BodyMismatch},
+		{name: "the null as an object", body: " null ", opts: []ReadOption{NullAsEmptyObject()}, raw: `{}`},
+		{name: "the null as an object, first value", body: "null x", opts: []ReadOption{NullAsEmptyObject(), FirstValue()}, raw: `{}`},
+		{name: "an empty body is not the null", body: "", opts: []ReadOption{NullAsEmptyObject()}, detail: BodyRequired},
 	} {
 		raw, refusal := ReadInput(strings.NewReader(tc.body), fields, tc.opts...)
 		switch {

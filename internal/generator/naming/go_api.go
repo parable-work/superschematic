@@ -80,7 +80,29 @@ type GoAPIConfig struct {
 	// that a server that mounts the route itself reads them rather than
 	// typing them again. False (default) writes none.
 	ManualRouteConstants bool `toml:"manual_route_constants"`
+
+	// BodyArguments is "values" (default) or "struct": how a route reads
+	// the arguments of an operation without an input type from its JSON
+	// body. "values" decodes each argument from its own JSON value and
+	// checks the argument's rules, every failure at its path. "struct"
+	// reads the body's first JSON value, the null as {}, decodes it into
+	// one struct with each argument's type's decoder (a value the decoder
+	// refuses is a decode refusal), then checks each argument with its
+	// type's own Validate (ValidateRequired for a required argument) and
+	// answers the first that fails, at its name. A union argument is read
+	// as "values" says.
+	BodyArguments string `toml:"body_arguments"`
 }
+
+// The values of body_arguments.
+const (
+	GoAPIValues = "values"
+	GoAPIStruct = "struct"
+)
+
+// DecodesBodyArgumentsAsStruct reports whether body_arguments is
+// "struct".
+func (c GoAPIConfig) DecodesBodyArgumentsAsStruct() bool { return c.BodyArguments == GoAPIStruct }
 
 // AppErrorContextArg is the argument the router's calls of
 // RespondAppError pass before the logger: "r.Context(), " under
@@ -171,6 +193,9 @@ func (c GoAPIConfig) check() error {
 		return err
 	}
 	if err := checkGoAPIChoice("strict_input_refusals", c.StrictInputRefusals, GoAPIRoute, GoAPIDecoder); err != nil {
+		return err
+	}
+	if err := checkGoAPIChoice("body_arguments", c.BodyArguments, GoAPIValues, GoAPIStruct); err != nil {
 		return err
 	}
 	for from, to := range c.ValidatorNames {

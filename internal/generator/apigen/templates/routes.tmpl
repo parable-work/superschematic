@@ -690,7 +690,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	filter{{ .GoName }}Arg := {{ .Value.NewArg }}
 	{{- end }}
 	{{- end }}
-	{{- if .BodyArgs }}
+	{{- if and .BodyArgs (not (bodyArgsAsStruct .)) }}
 	// Body arguments: the JSON type of each value, then its rules in the
 	// order they are checked (the scalar type's own, then the argument's).
 	{{- range .BodyArgs }}
@@ -1480,6 +1480,38 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 		{{- end }}
+		{{- end }}
+		{{- else if bodyArgsAsStruct . }}
+		// Parse body arguments (non-GET endpoints) as one struct, as the
+		// naming file's go_api.body_arguments says: the body is the first
+		// JSON value, null is the empty object, each argument is decoded by
+		// its type's decoder, and the first argument whose type's own rules
+		// fail is reported at its name.
+		rawBody, refusal := bodyargs.ReadInput(r.Body, nil, bodyargs.KeepUndeclaredKeys(), bodyargs.FirstValue(), bodyargs.NullAsEmptyObject())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		var requestBody struct {
+			{{- range .BodyArgs }}
+			{{ .GoName }} {{ .GoListType }} `json:"{{ .Name }}"`
+			{{- end }}
+		}
+		if err := json.Unmarshal(rawBody, &requestBody); err != nil {
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawBody, &requestBody, err))
+			return
+		}
+		{{- range .BodyArgs }}
+		if validator, ok := interface{}(requestBody.{{ .GoName }}).(interface {
+			{{ if .Required }}ValidateRequired{{ else }}Validate{{ end }}() (bool, []types.ValidationError)
+		}); ok {
+			if valid, fieldErrs := validator.{{ if .Required }}ValidateRequired{{ else }}Validate{{ end }}(); !valid {
+				validationErrors := types.NewValidationErrors()
+				validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
+				RespondValidationErrors(w, r, validationErrors)
+				return
+			}
+		}
 		{{- end }}
 		{{- else }}
 		// Parse body arguments (non-GET endpoints). The body is one JSON

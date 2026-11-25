@@ -50,6 +50,7 @@ type readOptions struct {
 	keepUndeclared bool
 	firstValue     bool
 	emptyAsObject  bool
+	nullAsObject   bool
 	strictType     string
 }
 
@@ -68,6 +69,11 @@ func FirstValue() ReadOption { return func(o *readOptions) { o.firstValue = true
 // EmptyBodyAsObject reads an empty body, or one of white space alone, as
 // the empty object {}, for an input the operation does not require.
 func EmptyBodyAsObject() ReadOption { return func(o *readOptions) { o.emptyAsObject = true } }
+
+// NullAsEmptyObject reads a body that is the JSON null as the empty object
+// {}, as encoding/json decodes null into a struct: it leaves every field
+// unset, for the field rules to find.
+func NullAsEmptyObject() ReadOption { return func(o *readOptions) { o.nullAsObject = true } }
 
 // StrictType names a closed (@strictJSON) input type, name, whose own
 // decoder owns its refusals. ReadInput records name as the Type of the
@@ -89,6 +95,16 @@ func readOptionsOf(opts []ReadOption) readOptions {
 // readJSON reads a body that holds one JSON value, with the refusals of
 // ReadInput's first two checks, as the options say.
 func readJSON(r io.Reader, o readOptions) (json.RawMessage, *InputRefusal) {
+	raw, refusal := readJSONValue(r, o)
+	if refusal == nil && o.nullAsObject && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return json.RawMessage("{}"), nil
+	}
+	return raw, refusal
+}
+
+// readJSONValue reads the body's JSON value as readJSON does, the null
+// left as it is.
+func readJSONValue(r io.Reader, o readOptions) (json.RawMessage, *InputRefusal) {
 	if o.firstValue {
 		var raw json.RawMessage
 		if err := json.NewDecoder(r).Decode(&raw); err != nil {

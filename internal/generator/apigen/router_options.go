@@ -24,6 +24,22 @@ func readsEmptyBodyAsObject(router naming.GoAPIConfig, endpoint EndpointInfo) bo
 	return router.ReadsOptionalEmptyBodyAsObject() && !endpoint.InputRequired && !endpoint.HasFileUpload
 }
 
+// bodyArgsAsStruct reports whether the route of endpoint decodes its body
+// arguments as one struct (go_api.body_arguments = "struct"). A route
+// with a union argument, which encoding/json cannot fill, decodes each
+// value as the core does.
+func bodyArgsAsStruct(router naming.GoAPIConfig, endpoint EndpointInfo) bool {
+	if !router.DecodesBodyArgumentsAsStruct() || len(endpoint.BodyArgs) == 0 {
+		return false
+	}
+	for _, arg := range endpoint.BodyArgs {
+		if arg.UnionWrapper != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // readInputOptions are the bodyargs.ReadOption arguments, each after a
 // comma, the route of endpoint passes to bodyargs.ReadInput, as the naming
 // file's [go_api] table says. With the table at its defaults they are
