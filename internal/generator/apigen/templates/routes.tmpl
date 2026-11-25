@@ -196,7 +196,6 @@ type Config struct {
 	// route to you to mount.
 	ManualRoutes *ManualRoutes
 {{- end }}
-{{- authSnippet "routesConfigFields" . }}
 
 	// MinClientVersions is the oldest version of each client the API
 	// serves (D143): a request under /api whose X-Client-Version names a
@@ -205,6 +204,7 @@ type Config struct {
 	// whose config says clientVersions reads it from MIN_CLIENT_VERSIONS,
 	// which its EnvConfig holds.
 	MinClientVersions clientversion.Minimums
+{{- authSnippet "routesConfigFields" . }}
 
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
