@@ -1521,6 +1521,15 @@ express: `Exec` for a write, and `Query` for a read such as a keyset-paged
 join across tables. `Query` returns pgx rows, which the caller closes; the
 no-op transaction returns none.
 
+In Go, the database takes a raw read too, outside any transaction:
+`db.Query(ctx, sql, args...)` returns pgx rows, and `db.QueryRow(ctx, sql,
+args...)` one row, whose `Scan` is `pgx.ErrNoRows` when the read finds
+none. Each runs one statement on the pool, so it saves the `BEGIN` and
+`COMMIT` a transaction sends. A read that needs what an earlier statement
+set, such as a transaction-local `set_config`, or several reads that must
+agree, belongs in a transaction. The server's error and the context's
+come back as pgx returns them. The no-op database reads no rows.
+
 `TransactionWith(ctx, orm.TxOptions{Isolation: orm.Serializable, ReadOnly:
 true}, fn)` begins at an isolation level, `ReadCommitted`, the default,
 `RepeatableRead` or `Serializable`, read only or not:

@@ -196,6 +196,22 @@ func (tx *Tx) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows
 	return tx.tx.Query(ctx, sql, arguments...)
 }
 
+// Query runs one raw read on the pool, outside any transaction, for a read
+// the repositories do not express. One statement reads the same with or
+// without BEGIN, so a lone read saves the BEGIN and COMMIT that Transaction
+// sends around it. A read that needs what an earlier statement set, such
+// as a transaction-local set_config, or several statements that must
+// agree, belongs in a transaction. The caller closes the returned rows.
+func (db *Database) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
+	return db.pool.Query(ctx, sql, arguments...)
+}
+
+// QueryRow is Query for a read of at most one row. Its Scan returns
+// pgx.ErrNoRows when the read finds none.
+func (db *Database) QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row {
+	return db.pool.QueryRow(ctx, sql, arguments...)
+}
+
 // WithUserID returns a new context with the user ID set
 func WithUserID(ctx context.Context, userID types.IdentityUUID) context.Context {
 	return context.WithValue(ctx, userContextKey, userID)

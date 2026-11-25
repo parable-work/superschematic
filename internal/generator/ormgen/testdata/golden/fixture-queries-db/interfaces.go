@@ -163,6 +163,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
 
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
+
 // GetQueries returns the declared queries, each of which reads no rows.
 func (db *NoOpDatabase) GetQueries() *Queries {
 	return &Queries{runner: noOpQueryRunner{}}
@@ -199,6 +209,11 @@ func (noOpRows) Close()                        {}
 func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
 
 func (db *NoOpDatabase) GetAccountRepository() AccountRepositoryInterface {
 	return db.Account
