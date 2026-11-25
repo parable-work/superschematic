@@ -32,7 +32,10 @@ caller: a read, a list, an update and a delete keep the rows one of the
 rule's members holds the caller's subject in, so a row that names another
 is the 404 of one that is not there, and a create sets each member but
 createdBy to the caller. A caller who holds the rule's override permission
-reaches every row.
+reaches every row. A member may be a path through the table's relations
+(D156): unit.contract.parties.party keeps the rows whose unit's contract
+has a party row that names the caller, one condition of the row's WHERE,
+each step a subquery over the next table's rows.
 
 A create whose body names the state its row starts in (D109), the field of
 a Workflow of the table, creates the row in the Workflow's initial state
@@ -92,7 +95,8 @@ export interface TableOperation {
   /**
    * The row rule (D108): the row's members that name who may reach it,
    * each a member that holds a subject, a UUID, a to-one relation's key,
-   * text or createdBy. Absent reaches every row the route admits.
+   * text or createdBy, or a path to one through the table's relations
+   * (D156), dotted. Absent reaches every row the route admits.
    */
   readonly by?: readonly string[];
   /** The permission whose holder the row rule does not hold back. */
@@ -138,7 +142,16 @@ interface ColumnShape {
 
 /** A table's repository, as the handlers run it (orm.ts's Repository), with the definition it holds. */
 interface RepositoryShape {
-  readonly def?: { readonly columns?: readonly ColumnShape[] };
+  readonly def?: {
+    readonly name?: string;
+    readonly key?: string;
+    readonly columns?: readonly ColumnShape[];
+    readonly relations?: readonly { readonly field: string; readonly target: string }[];
+    readonly many?: readonly { readonly name: string; readonly target: string }[];
+    readonly access?: string;
+  };
+  /** The repositories of the ORM's tables, by member, which a path through a relation steps to. */
+  readonly peers?: Readonly<Record<string, RepositoryShape>>;
   findOne(filter: Values): Promise<Row | null>;
   findPage(filter: Values, options: Values): Promise<{ readonly rows: readonly Row[]; readonly next: unknown }>;
   createOne(input: Values): Promise<Row>;
@@ -335,27 +348,50 @@ const NO_ROW = Symbol('no row');
  * anything is read: a filter drops a member it does not know, and a rule
  * that dropped one would reach every row.
  */
-function reachOf(operation: TableOperation, columns: readonly ColumnShape[], ctx: RequestContext): Values | typeof NO_ROW | undefined {
+function reachOf(operation: TableOperation, repository: RepositoryShape, ctx: RequestContext): Values | typeof NO_ROW | undefined {
   const by = operation.by ?? [];
   if (by.length === 0) return undefined;
-  const members = by.map(member => {
-    const column = columns.find(candidate => candidate.name === member);
-    if (!column?.filter?.includes('eq')) {
-      throw new Error(`table operation: the row rule of ${operation.type} names ${member}, which its repository keeps no equality filter for; rebuild the database's types`);
-    }
-    return column;
-  });
+  const members = by.map(member => pathOf(operation, repository, member));
   const principal = ctx.principal;
   const override = operation.overridePermission;
   if (override !== undefined && principal?.permissions.some(granted => covers(granted, override))) return undefined;
   const subject = principal?.subject;
   if (subject === undefined || subject === '') return NO_ROW;
   const named: Values[] = [];
-  for (const column of members) {
+  for (const { steps, column } of members) {
     if (column.uuid === true && uuidValue(subject) === undefined) continue;
-    named.push({ [column.name]: { eq: subject } });
+    let filter: Values = { [column.name]: { eq: subject } };
+    for (const step of [...steps].reverse()) filter = { [step]: filter };
+    named.push(filter);
   }
   return named.length === 0 ? NO_ROW : { anyOf: named };
+}
+
+/**
+ * A member of a row rule (D108), or a path to one (D156): the relations it
+ * steps through, each a to-one or a one-to-many relation of the table the
+ * step before reached, and the column at its end, which holds the subject.
+ * A step or a member the repositories do not know is the generator's
+ * error, thrown before anything is read: a filter drops a member it does
+ * not know, and a rule that dropped one would reach every row.
+ */
+function pathOf(operation: TableOperation, repository: RepositoryShape, member: string): { steps: string[]; column: ColumnShape } {
+  const steps = member.split('.');
+  const last = steps.pop()!;
+  let at = repository;
+  for (const step of steps) {
+    const target = at.def?.relations?.find(rel => rel.field === step)?.target ?? at.def?.many?.find(rel => rel.name === step)?.target;
+    const next = target === undefined ? undefined : at.peers?.[target];
+    if (next === undefined) {
+      throw new Error(`table operation: the row rule of ${operation.type} names ${member}, whose step ${step} is no relation its repositories reach; rebuild the database's types`);
+    }
+    at = next;
+  }
+  const column = columnsOf(at).find(candidate => candidate.name === last);
+  if (!column?.filter?.includes('eq')) {
+    throw new Error(`table operation: the row rule of ${operation.type} names ${member}, which its repository keeps no equality filter for; rebuild the database's types`);
+  }
+  return { steps, column };
 }
 
 /** The row's view: the members the operation's result lists, a @decrypted one opened. */
@@ -381,7 +417,7 @@ function parentsOf(operation: TableOperation, request: TableRequest): Values {
 async function liveRow(repository: RepositoryShape, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<Row> {
   const key = operation.key;
   if (key === undefined) throw new Error(`table operation: a ${operation.kind} of ${operation.type} names no key`);
-  const reach = reachOf(operation, columnsOf(repository), ctx);
+  const reach = reachOf(operation, repository, ctx);
   if (reach === NO_ROW) throw notFound(`${operation.type} not found`);
   const row = await repository.findOne({
     ...parentsOf(operation, request),
@@ -453,7 +489,7 @@ export function tableList(
   return inTransaction(orm, operation, ctx, async repository => {
     const search = operation.search === undefined ? undefined : request.query[operation.search];
     const parents = parentsOf(operation, request);
-    const reach = reachOf(operation, columnsOf(repository), ctx);
+    const reach = reachOf(operation, repository, ctx);
     // A caller the row rule names in no row lists none.
     if (reach === NO_ROW) return { items: [], next: null };
     // The parents and the row rule hold beside the filter, whatever it says of them.
@@ -498,9 +534,11 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
     }
     for (const parent of operation.parents ?? []) input[parent] = request.path[parent];
     // The row rule's members name the caller in the new row (D108):
-    // createdBy as the repository stamps it, each other one set here.
+    // createdBy as the repository stamps it, each other one set here. A
+    // path names rows of other tables, which a create does not set (D156).
     const columns = columnsOf(repository);
     for (const member of operation.by ?? []) {
+      if (member.includes('.')) continue;
       const column = columns.find(candidate => candidate.name === member);
       if (column?.audit !== undefined) continue;
       const subject = ctx.principal?.subject;
