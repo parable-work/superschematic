@@ -132,7 +132,7 @@ func TestOpenAPIGraphOperations(t *testing.T) {
 	for _, permission := range catalog.Permissions {
 		listed[permission.Name] = permission.Operations
 	}
-	if want := []string{"RecipeArrangeHandler", "RecipeCommitHandler", "RecipeDiscardHandler", "RecipeRebaseHandler", "RecipeRevertHandler", "RecipeSaveHandler", "RecipeSealHandler"}; !reflect.DeepEqual(listed["recipes.admin"], want) {
+	if want := []string{"RecipeArrangeHandler", "RecipeCommitHandler", "RecipeDiscardHandler", "RecipeMergeHandler", "RecipeRebaseHandler", "RecipeRevertHandler", "RecipeSaveHandler", "RecipeSealHandler"}; !reflect.DeepEqual(listed["recipes.admin"], want) {
 		t.Errorf("the catalog lists recipes.admin under %v, want the operations the row rule holds, %v", listed["recipes.admin"], want)
 	}
 	if want := []string{"RecipeReleaseHandler"}; !reflect.DeepEqual(listed["recipes.release"], want) {

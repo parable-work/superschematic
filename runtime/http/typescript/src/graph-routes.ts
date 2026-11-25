@@ -501,7 +501,11 @@ export function graphSeal(orm: object, graph: GraphFacade, operation: GraphOpera
  * Merge (D138): the path's change set merged into the ref the body's into
  * names, a ref of the root, or into its parent without one, at that ref's
  * version. Conflicts left after the body's resolutions are answered, and
- * nothing was written.
+ * nothing was written. The merge writes its target, so a target that is a
+ * change set is held to the row rule as a save to it is: another caller's
+ * is the 404. A primary line, which no caller owns, takes a merge from
+ * whoever holds the operation's permission, and so does any source: the
+ * merge reads it and writes nothing to it.
  */
 export function graphMerge(orm: object, graph: GraphFacade, operation: GraphOperation, ctx: RequestContext, request: GraphRequest): Promise<unknown> {
   return answered(async () => {
@@ -510,14 +514,14 @@ export function graphMerge(orm: object, graph: GraphFacade, operation: GraphOper
     const body = bodyOf(operation, request);
     const facade = writing(graph, ctx);
     let into = given<string>(body.into);
-    if (into !== undefined) {
-      await refOf(orm, operation, ctx, root, into, false);
-    } else {
+    if (into === undefined) {
       into = given<string>(source.parentRefId);
       if (into === undefined) {
         throw new HttpProblem(409, 'the ref is a primary line, which has no parent to merge into: name the ref to merge into', { code: 'no_parent' });
       }
     }
+    const target = await refOf(orm, operation, ctx, root, into, false);
+    if (given(target.parentRefId) !== undefined) await refOf(orm, operation, ctx, root, into, true);
     return facade.merge(idOf(source.id, 'ref'), into, body.version as number, resolutionsOf(body.resolutions) as never, commitOptions(body));
   });
 }

@@ -314,7 +314,7 @@ export const graphOperations = {
   discard: { graph: recipeGraph, operation: 'discard', by: ['createdBy'], overridePermission: 'recipes.admin' },
   save: { graph: recipeGraph, operation: 'save', by: ['createdBy'], overridePermission: 'recipes.admin' },
   history: { graph: recipeGraph, operation: 'history' },
-  merge: { graph: recipeGraph, operation: 'merge' },
+  merge: { graph: recipeGraph, operation: 'merge', by: ['createdBy'], overridePermission: 'recipes.admin' },
   rebase: { graph: recipeGraph, operation: 'rebase', by: ['createdBy'], overridePermission: 'recipes.admin' },
   revert: { graph: recipeGraph, operation: 'revert', by: ['createdBy'], overridePermission: 'recipes.admin' },
   seal: { graph: recipeGraph, operation: 'seal', by: ['createdBy'], overridePermission: 'recipes.admin' },

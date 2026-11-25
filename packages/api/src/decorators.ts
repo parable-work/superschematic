@@ -488,8 +488,9 @@ export type GraphOperationsOptions = {
   /**
    * The members of a change set's ref that name who may write it:
    * `["createdBy"]` keeps save, arrange, commit, seal, rebase, revert and
-   * discard to the caller who branched it. Another caller's change set is the 404
-   * of one that is not there.
+   * discard to the caller who branched it, and a merge into a change set
+   * too; a merge into a primary line is not held. Another caller's change
+   * set is the 404 of one that is not there.
    */
   readonly by?: readonly "createdBy"[];
   /** The permission whose holder `by` does not hold back. */

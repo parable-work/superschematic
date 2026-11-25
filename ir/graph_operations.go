@@ -64,9 +64,12 @@ var GraphOperationNames = []string{
 // GraphOperationsOwned are the operations that write a change set, which
 // the set's row rule keeps to the ref's creator (D138). A revert is among
 // them: it writes the change set's rows and commits on it, as a save and
-// a commit do.
+// a commit do. So is a merge, for its target alone: a merge into a change
+// set writes it, and the rule holds that target as it holds a save's
+// ref; a merge into a primary line, which no caller owns, and the change
+// set it reads, are not held.
 var GraphOperationsOwned = []string{
-	GraphOpSave, GraphOpArrange, GraphOpCommit, GraphOpSeal, GraphOpRebase, GraphOpRevert, GraphOpDiscard,
+	GraphOpSave, GraphOpArrange, GraphOpCommit, GraphOpSeal, GraphOpMerge, GraphOpRebase, GraphOpRevert, GraphOpDiscard,
 }
 
 // GraphOperationsByCreatedBy is the one member a @graphOperations set's

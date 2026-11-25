@@ -9,6 +9,7 @@
         "RecipeArrangeHandler",
         "RecipeCommitHandler",
         "RecipeDiscardHandler",
+        "RecipeMergeHandler",
         "RecipeRebaseHandler",
         "RecipeRevertHandler",
         "RecipeSaveHandler",

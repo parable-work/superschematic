@@ -227,6 +227,9 @@ describe('the graph operations of fixture-graph-api', () => {
     });
     expect(await refusal(sdk(BOB).recipe.commit(recipe, draft.id, { version: draft.version }))).toMatchObject({ status: 404, code: 'not_found' });
     expect(await refusal(sdk(BOB).recipe.discard(recipe, draft.id, { version: draft.version }))).toMatchObject({ status: 404, code: 'not_found' });
+    // A merge writes its target: a merge into another caller's change set
+    // is not found as a save to it is, whatever the source.
+    expect(await refusal(sdk(BOB).recipe.merge(recipe, main, { into: draft.id, version: draft.version }))).toMatchObject({ status: 404, code: 'not_found' });
     // A read is not a write of the change set.
     expect((await sdk(BOB).recipe.compose(recipe, draft.id)).part).toHaveLength(3);
     expect(await versionOf(draft.id)).toBe(draft.version);

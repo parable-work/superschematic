@@ -113,6 +113,7 @@ function database() {
     recipeRef: [
       { id: 'main', rootId: ROOT, parentRefId: null, createdBy: ANN },
       { id: 'draft', rootId: ROOT, parentRefId: 'main', createdBy: ANN },
+      { id: 'bobs', rootId: ROOT, parentRefId: 'draft', createdBy: BOB },
       { id: 'theirs', rootId: OTHER_ROOT, parentRefId: null, createdBy: ANN },
     ],
     recipeCommit: [
@@ -242,6 +243,31 @@ describe('the row rule', () => {
       expect(calls).toEqual([{ actor: BOB, method: 'commit', args: ['draft', 3, {}] }]);
       expect(asked.at(-1)?.filter).toEqual({ id: { eq: 'draft' }, rootId: { eq: ROOT } });
     }
+  });
+
+  test("a merge into a change set is held to the rule as a save to it is, and one into a primary line is not", async () => {
+    const { orm, asked } = database();
+    const { graph, calls } = facade({ merge: () => ({ ref: {}, commit: {}, conflicts: [] }) });
+    // Bob's change set into ann's, named or as its parent: not found.
+    for (const body of [{ into: 'draft', version: 1 }, { version: 1 }]) {
+      expect(await refused(graphMerge(orm, graph, operation('merge', true), context(BOB, ['recipes.write']), request({ ref: 'bobs' }, body)))).toEqual({
+        status: 404,
+        code: 'not_found',
+        detail: 'ref not found',
+      });
+      expect(asked.at(-1)?.filter).toEqual({ id: { eq: 'draft' }, rootId: { eq: ROOT }, anyOf: [{ createdBy: { eq: BOB } }] });
+    }
+    expect(calls).toEqual([]);
+    // Into a primary line, from another caller's change set, and by a
+    // holder of the override permission: each merges.
+    await graphMerge(orm, graph, operation('merge', true), context(BOB), request({ ref: 'draft' }, { into: 'main', version: 1 }));
+    await graphMerge(orm, graph, operation('merge', true), context(BOB, ['recipes.admin']), request({ ref: 'bobs' }, { version: 2 }));
+    await graphMerge(orm, graph, operation('merge', true), context(ANN), request({ ref: 'bobs' }, { into: 'draft', version: 3 }));
+    expect(calls.map(call => [call.actor, call.args.slice(0, 3)])).toEqual([
+      [BOB, ['draft', 'main', 1]],
+      [BOB, ['bobs', 'draft', 2]],
+      [ANN, ['bobs', 'draft', 3]],
+    ]);
   });
 
   test('a request with no caller, or one whose subject is no UUID, reaches none', async () => {

@@ -2655,8 +2655,11 @@ does not release.
 `by: ["createdBy"]` is the row rule. It keeps the operations that write a
 change set, `save`, `arrange`, `commit`, `seal`, `rebase`, `revert` and
 `discard`, to the caller who branched it: another caller's change set is the 404 of one
-that is not there. A holder of `overridePermission` writes every change
-set. `by` takes `createdBy` alone for now.
+that is not there. A `merge` writes its target, so a merge into a change
+set is held the same way; a merge into a primary line, which no caller
+owns, is not, and neither is the change set a merge reads. A holder of
+`overridePermission` writes every change set. `by` takes `createdBy`
+alone for now.
 
 The actor of every write is the caller's subject, which the graph records
 as a UUID. A write by a request with no caller, or by one whose subject is
