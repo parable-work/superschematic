@@ -288,6 +288,21 @@ func StoragePort(env registry.StackEnvironment) int {
 	return hashPort(storagePortBase, checkoutOf(env), env.Stack, env.Name)
 }
 
+// StorageCORSHeaders returns the request headers the environment's storage
+// emulator allows in a browser's preflight beside its own, from the
+// `storageCorsHeaders` value, sorted and each once (D148).
+func StorageCORSHeaders(env registry.StackEnvironment) []string {
+	list, _ := env.Values["storageCorsHeaders"].([]any)
+	var out []string
+	for _, item := range list {
+		if h, ok := item.(string); ok && h != "" && !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // StorageImage returns the image the environment's storage emulator runs:
 // the `storageImage` value, or DefaultStorageImage.
 func StorageImage(env registry.StackEnvironment) string {
@@ -474,9 +489,25 @@ func postgresContainer(env registry.StackEnvironment) *ir.Resource {
 // them for the next run. The emulator writes the URLs it hands out with
 // the host's view of its address. Every bucket deployable returns the same
 // node, so they share it. It is ready once it answers its list of buckets.
+//
+// The emulator answers a browser's preflight for every bucket alike, from
+// any origin, so a page of a local site uploads to a signed URL as it
+// would to a bucket whose `cors` names the site's origin (D148). It keeps
+// no rules per bucket: it allows the request headers Content-Type,
+// Content-Encoding, Range and Content-Range, and those the environment's
+// `storageCorsHeaders` value adds (StorageCORSHeaders), which a page that
+// sends another header, an `x-goog-meta-` one say, names there.
 func storageContainer(env registry.StackEnvironment) *ir.Resource {
 	port := StoragePort(env)
 	host := Loopback + ":" + strconv.Itoa(port)
+	args := []any{
+		"-scheme", "http", "-host", "0.0.0.0", "-port", strconv.Itoa(storagePort),
+		"-backend", "filesystem", "-filesystem-root", "/storage",
+		"-public-host", host, "-external-url", StorageURL(port),
+	}
+	if headers := StorageCORSHeaders(env); len(headers) > 0 {
+		args = append(args, "-cors-headers", strings.Join(headers, ","))
+	}
 	return &ir.Resource{
 		ID:   StorageContainer,
 		Type: TypeContainer,
@@ -488,11 +519,7 @@ func storageContainer(env registry.StackEnvironment) *ir.Resource {
 				"hostPort":      port,
 				"containerPort": storagePort,
 			}},
-			"args": []any{
-				"-scheme", "http", "-host", "0.0.0.0", "-port", strconv.Itoa(storagePort),
-				"-backend", "filesystem", "-filesystem-root", "/storage",
-				"-public-host", host, "-external-url", StorageURL(port),
-			},
+			"args":      args,
 			"labels":    containerLabels(env),
 			"readiness": map[string]any{"http": StorageReadinessPath},
 		},

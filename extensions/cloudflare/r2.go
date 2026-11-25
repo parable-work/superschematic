@@ -36,14 +36,16 @@ const R2 = "cloudflare.r2"
 // WorkersR2Connector realizes a bucket edge from a Worker to an R2 bucket.
 const WorkersR2Connector = "cloudflare.workers-r2"
 
-// The resource types of a bucket and of its edges. TypeR2Bucket and
-// TypeR2BucketLifecycle are pinned in schemas/ at ProviderVersion; the
-// bucket edge's token is TypeAccountToken, which bootstrap pinned.
+// The resource types of a bucket and of its edges. TypeR2Bucket,
+// TypeR2BucketLifecycle and TypeR2BucketCors are pinned in schemas/ at
+// ProviderVersion; the bucket edge's token is TypeAccountToken, which
+// bootstrap pinned.
 // TypeR2ManagedDomain and TypeR2CustomDomain, which would make a bucket
 // public, no platform emits: buckets-never-public names them.
 const (
 	TypeR2Bucket          = "cloudflare:index/r2Bucket:R2Bucket"
 	TypeR2BucketLifecycle = "cloudflare:index/r2BucketLifecycle:R2BucketLifecycle"
+	TypeR2BucketCors      = "cloudflare:index/r2BucketCors:R2BucketCors"
 	TypeR2ManagedDomain   = "cloudflare:index/r2ManagedDomain:R2ManagedDomain"
 	TypeR2CustomDomain    = "cloudflare:index/r2CustomDomain:R2CustomDomain"
 )
@@ -98,7 +100,9 @@ func R2JurisdictionEndpoint(account, jurisdiction string) string {
 //     `<account>.<jurisdiction>.r2.cloudflarestorage.com`, which the bucket
 //     edge's R2 credential names, so the runtime signs its URLs for it
 //     (D64, amended). A jurisdiction overrides a location hint, which is
-//     refused beside it.
+//     refused beside it;
+//   - cors, the CORS rules the bucket answers a browser with (D148), in
+//     the shape every bucket platform takes (registry.BucketCORSSchema).
 //
 // R2 has no object versioning, so gcp's versioning has no place here.
 const r2Settings = `{
@@ -107,7 +111,8 @@ const r2Settings = `{
     "jurisdiction": {"enum": ["eu", "fedramp"]},
     "locationHint": {"enum": ["wnam", "enam", "weur", "eeur", "apac", "oc"]},
     "storageClass": {"enum": ["Standard", "InfrequentAccess"]},
-    "deleteAfterDays": {"type": "integer", "minimum": 1, "maximum": 36500}
+    "deleteAfterDays": {"type": "integer", "minimum": 1, "maximum": 36500},
+    "cors": ` + registry.BucketCORSSchema + `
   },
   "additionalProperties": false
 }`
@@ -141,9 +146,11 @@ func bucketName(ctx registry.PlatformContext) any {
 	return accountName(ctx.Environment, ctx.Deployable.Name)
 }
 
-// bucketID and lifecycleID are the IDs of a bucket deployable's nodes.
+// bucketID, lifecycleID and corsID are the IDs of a bucket deployable's
+// nodes.
 func bucketID(bucket string) string    { return bucket + ".bucket" }
 func lifecycleID(bucket string) string { return bucket + ".lifecycle" }
+func corsID(bucket string) string      { return bucket + ".cors" }
 
 // bucketAddress is the bucket's name, an output of its node, so each
 // workload whose edge names it waits for it.
@@ -163,8 +170,9 @@ var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 // lowerBucket lowers a bucket deployable to an r2Bucket in the
 // environment's account, with the location hint and the storage class its
 // settings give, and with deleteAfterDays an r2BucketLifecycle whose one
-// rule deletes each object that many days after it was written. It refuses
-// as unrealizable a name R2 does not take, and the state bucket's name.
+// rule deletes each object that many days after it was written, and with
+// cors an r2BucketCors that holds its rules (D148). It refuses as
+// unrealizable a name R2 does not take, and the state bucket's name.
 func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	v := targetValuesOf(ctx.Environment.Values)
@@ -218,7 +226,66 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 		}
 		out.Resources = append(out.Resources, lifecycle)
 	}
+	rules, err := registry.BucketCORS(d.Name, d.Settings)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	if len(rules) > 0 {
+		cors := &ir.Resource{
+			ID:    corsID(d.Name),
+			Type:  TypeR2BucketCors,
+			Phase: ir.PhaseInfrastructure,
+			Properties: map[string]any{
+				"accountId":  v.accountID,
+				"bucketName": bucketAddress(ctx),
+				"rules":      bucketCORS(rules),
+			},
+		}
+		if jurisdiction != "" {
+			cors.Properties["jurisdiction"] = jurisdiction
+		}
+		out.Resources = append(out.Resources, cors)
+	}
 	return out, nil
+}
+
+// bucketCORS writes a bucket's CORS rules (D148) as an r2BucketCors's
+// rules: the origins, the methods and the request headers a rule allows,
+// the response headers it exposes, and its maxAge in seconds. Each rule's
+// id says where it stands in the setting, so a plan names the rule a
+// change moves.
+func bucketCORS(rules []registry.BucketCORSRule) []any {
+	out := make([]any, 0, len(rules))
+	for i, rule := range rules {
+		allowed := map[string]any{
+			"origins": anyList(rule.Origins),
+			"methods": anyList(rule.Methods),
+		}
+		if len(rule.Headers) > 0 {
+			allowed["headers"] = anyList(rule.Headers)
+		}
+		cors := map[string]any{
+			"id":      fmt.Sprintf("cors-%d", i+1),
+			"allowed": allowed,
+		}
+		if len(rule.ExposeHeaders) > 0 {
+			cors["exposeHeaders"] = anyList(rule.ExposeHeaders)
+		}
+		if rule.MaxAgeSeconds > 0 {
+			cors["maxAgeSeconds"] = float64(rule.MaxAgeSeconds)
+		}
+		out = append(out, cors)
+	}
+	return out
+}
+
+// anyList is a list of strings as a node's property holds one.
+func anyList(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 // wholeNumber reads a setting that the schema holds to an integer.

@@ -594,6 +594,133 @@
           "type": "TEXT"
         },
         {
+          "name": "warehouse",
+          "origin": "StockMoved.warehouse",
+          "type": "TEXT"
+        },
+        {
+          "name": "sku",
+          "origin": "StockMoved.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "StockMoved.quantity",
+          "type": "INTEGER"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "warehouse",
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_moved_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "warehouse",
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_moved_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "stock_moved_queue",
+      "origin": "StockMoved",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "stock_moved_queue_pkey"
+      },
+      "queue": {
+        "keys": [
+          "warehouse",
+          "sku"
+        ],
+        "onDuplicate": "replace",
+        "serialize": true
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
           "name": "account_id",
           "origin": "SyncRequested.accountId",
           "type": "TEXT"

@@ -150,9 +150,10 @@ type Service struct {
 	Queues []string
 
 	// QueueKeys are the quoted key columns of a DB service's queues that
-	// keep one ready message per key (D80), by queue: an operator's retry
-	// of such a queue's dead messages leaves a key one ready message.
-	QueueKeys map[string]string
+	// keep one ready message per key (D80), by queue, one column or
+	// several: an operator's retry of such a queue's dead messages leaves
+	// a key one ready message.
+	QueueKeys map[string][]string
 
 	// QueueTables are the tables of a DB service's queues whose @table
 	// names them (D85), by queue, so the operator's statements name that

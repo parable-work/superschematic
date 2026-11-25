@@ -47,8 +47,9 @@ func bucketAddress(ctx registry.PlatformContext) any {
 // lowerBucket lowers a bucket to a Cloud Storage bucket in the
 // environment's region, with uniform bucket-level access and public access
 // prevention. Settings turn object versioning on (`versioning`, off
-// unless set) and delete each object a number of days after it was
-// written (`deleteAfterDays`), through a lifecycle rule. Only a member of
+// unless set), delete each object a number of days after it was
+// written (`deleteAfterDays`), through a lifecycle rule, and answer a
+// browser's preflight (`cors`, D148). Only a member of
 // a parameterized environment sets forceDestroy, so its destroy removes
 // the bucket with its objects.
 func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
@@ -85,11 +86,57 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"condition": map[string]any{"age": days},
 		}}
 	}
+	rules, err := registry.BucketCORS(d.Name, d.Settings)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	if len(rules) > 0 {
+		props["cors"] = bucketCORS(rules)
+	}
 	return registry.Lowered{Resources: []*ir.Resource{{
 		ID:         d.Name + ".bucket",
 		Type:       TypeBucket,
 		Properties: props,
 	}}}, nil
+}
+
+// bucketCORS writes a bucket's CORS rules (D148) as Cloud Storage's `cors`:
+// a rule's origins and methods as they are, and its maxAge in seconds.
+// Cloud Storage keeps one list of headers per rule, `responseHeaders`,
+// which it answers a preflight's requested headers from and exposes to
+// the page, so the rule's headers and exposeHeaders both go there, each
+// once.
+func bucketCORS(rules []registry.BucketCORSRule) []any {
+	out := make([]any, 0, len(rules))
+	for _, rule := range rules {
+		cors := map[string]any{
+			"origins": anyList(rule.Origins),
+			"methods": anyList(rule.Methods),
+		}
+		var headers []string
+		for _, h := range append(slices.Clone(rule.Headers), rule.ExposeHeaders...) {
+			if !slices.ContainsFunc(headers, func(have string) bool { return strings.EqualFold(have, h) }) {
+				headers = append(headers, h)
+			}
+		}
+		if len(headers) > 0 {
+			cors["responseHeaders"] = anyList(headers)
+		}
+		if rule.MaxAgeSeconds > 0 {
+			cors["maxAgeSeconds"] = rule.MaxAgeSeconds
+		}
+		out = append(out, cors)
+	}
+	return out
+}
+
+// anyList is a list of strings as a node's property holds one.
+func anyList(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 // publicAccessEnforced is the public access prevention that refuses every

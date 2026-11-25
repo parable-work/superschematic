@@ -605,6 +605,65 @@ pub fn parse_stock_checked(value: Value, unknown_fields: rt::UnknownFields) -> R
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `StockMoved` declares, by their wire names.
+pub const STOCK_MOVED_FIELDS: &[&str] = &["warehouse", "sku", "quantity"];
+
+/// Validates a JSON value as `StockMoved`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_stock_moved(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("warehouse");
+        if rt::is_absent(field) {
+            errors.push("warehouse", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "warehouse", field);
+    }
+    {
+        let field = value.get("sku");
+        if rt::is_absent(field) {
+            errors.push("sku", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "sku", field);
+    }
+    {
+        let field = value.get("quantity");
+        errors.set_result("quantity", scalars::validate_generic_int64_required(field));
+    }
+    errors
+}
+
+/// Validates a `StockMoved` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_stock_moved_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_stock_moved)
+}
+
+/// Prepares a JSON value as `StockMoved`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_stock_moved` decodes.
+pub fn prepare_stock_moved(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, STOCK_MOVED_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_stock_moved(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `StockMoved`: `prepare_stock_moved`, then decodes it.
+pub fn parse_stock_moved(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::StockMoved, rt::ParseError> {
+    let value = prepare_stock_moved(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `SyncRequested` declares, by their wire names.
 pub const SYNC_REQUESTED_FIELDS: &[&str] = &["accountId", "reason"];
 

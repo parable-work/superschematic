@@ -29,7 +29,8 @@ export interface Targets {
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container, of its storage emulator
- * (D54) and of its memory stores' Valkey container (D75), a server's, an
+ * (D54), with the request headers its CORS answers allow beside its own
+ * (D148), and of its memory stores' Valkey container (D75), a server's, an
  * app's (D78) and a site's settings its port, and a database, a job, a
  * worker, a bucket, an engine's runner (D58), a deriver (D74) and a memory
  * store (D75) take no settings. A port left out is derived from the
@@ -41,6 +42,7 @@ export interface LocalTarget {
     postgresPort?: number;
     storageImage?: string;
     storagePort?: number;
+    storageCorsHeaders?: readonly string[];
     memoryStoreImage?: string;
     memoryStorePort?: number;
   };
@@ -202,6 +204,20 @@ export type WorkerRun = {
   readonly concurrency?: number;
   /** Turns the worker on or off. */
   readonly enabled?: boolean;
+  /**
+   * How the worker runs (D145): `"pool"`, the default, keeps its instances
+   * running, and `"drain"` runs it as a job that empties its queue and
+   * exits, which an enqueue wakes and a schedule ticks where the target
+   * can. In drain mode `instances` is how many may run at once, and
+   * `maxInstances` does not resolve.
+   */
+  readonly mode?: "pool" | "drain";
+  /**
+   * How long a worker in drain mode waits with no message ready or held
+   * before it exits, a duration of whole seconds such as `"30s"`, the
+   * default. Only a worker in drain mode takes it.
+   */
+  readonly idle?: string;
 };
 
 /**
@@ -361,13 +377,75 @@ export type Origin = {
 };
 
 /**
+ * What the stack adds to a deployable's image (D144). A generated
+ * Dockerfile is written whole and never edited, so a workload that needs a
+ * program beside its runtime, a headless browser, a PDF tool or fonts,
+ * asks for it here. An image serves every environment, so the stack names
+ * its additions once, and no environment's settings change them.
+ */
+export type ImageAdditions = {
+  /**
+   * Debian packages the image's final stage installs with
+   * `apt-get install --no-install-recommends`: each a package's name, with
+   * no version.
+   */
+  readonly packages?: readonly string[];
+  /**
+   * The path of a Dockerfile the project owns, relative to the repository
+   * root. A deploy builds the generated image, then builds this file with
+   * the build argument `BASE` set to it (`ARG BASE` and `FROM ${BASE}`),
+   * and deploys the result. The directory that holds the file is in the
+   * build context, so it copies what lies beside it. It is the escape
+   * hatch: what a package's name says belongs in `packages`.
+   */
+  readonly extend?: string;
+};
+
+/**
+ * One element of `@stack`'s `images` (D144): the deployable in `of`, an
+ * API's handle for its server or a declared server's class, with `job`,
+ * `worker`, `deriver` or `app` beside an API's handle for that job,
+ * worker, deriver or app, or `runner: true` beside a DB's for the engine's
+ * runner of the database, as a settings element names one, and what the
+ * stack adds to its image.
+ */
+export type ImageElement<E> = E extends { readonly of: infer H }
+  ? ImageAdditions &
+      (E extends { readonly job: unknown }
+        ? H extends ServiceHandle<"API", unknown, infer J>
+          ? { readonly of: H; readonly job: J }
+          : never
+        : E extends { readonly worker: unknown }
+          ? H extends ServiceHandle<"API", unknown, string, infer W>
+            ? { readonly of: H; readonly worker: W }
+            : never
+          : E extends { readonly deriver: unknown }
+            ? H extends ServiceHandle<"API", unknown, string, string, infer D>
+              ? { readonly of: H; readonly deriver: D }
+              : never
+            : E extends { readonly app: unknown }
+              ? H extends ServiceHandle<"API", unknown, string, string, string, infer A>
+                ? { readonly of: H; readonly app: A }
+                : never
+              : E extends { readonly runner: unknown }
+                ? H extends ServiceHandle<"DB">
+                  ? { readonly of: H; readonly runner: true }
+                  : never
+                : { readonly of: ServiceHandle<"API"> | DeployableClass })
+  : ImageAdditions & { readonly of: ServiceHandle<"API" | "DB"> | DeployableClass };
+
+/**
  * Declares the stack: its entry points and what is reachable from outside.
  * A site (a Site service's handle) is always exposed, named in `expose` or
  * not, and each API it calls must be exposed (D55), unless the site's
  * origin serves it (`origins`, D91). An app is exposed beside its API's
- * handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
+ * handle, `{ of: ShopStock, app: "Backoffice" }` (D78). `images` lists
+ * what the stack adds to its deployables' images (D144).
  */
-export function stack<const X extends readonly unknown[] = readonly []>(_options: {
+export function stack<
+  const X extends readonly unknown[] = readonly [],
+  const M extends readonly unknown[] = readonly [],
+>(_options: {
   readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
   readonly expose?: X & {
     readonly [I in keyof X]: X[I] extends { readonly app: unknown; readonly of: infer H }
@@ -376,6 +454,12 @@ export function stack<const X extends readonly unknown[] = readonly []>(_options
   };
   /** Sites that serve APIs they call on their own origin (D91). */
   readonly origins?: readonly Origin[];
+  /**
+   * What the stack adds to the images of its deployables that run code,
+   * each named once (D144): `{ of: ShopApi, packages: ["chromium"] }`, or
+   * `{ of: ShopOrders, worker: "PrintInvoices", extend: "docker/invoices/Dockerfile" }`.
+   */
+  readonly images?: M & { readonly [I in keyof M]: Exact<ImageElement<M[I]>, M[I]> };
 }): ClassDecorator {
   return noop;
 }

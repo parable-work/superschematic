@@ -15,8 +15,10 @@ import (
 // resolver treats a worker as it treats a job wherever a deployable runs
 // code (ir.DeployableKind.RunsCode). What is its own is decided here: the
 // queue it claims from, which must be a queue of the database its API
-// connects to, a database the environment runs on Postgres, and how many
-// instances run, each handling how many messages at a time.
+// connects to, a database the environment runs on Postgres, how many
+// instances run, each handling how many messages at a time, and its mode
+// (D145): a pool whose instances keep running, or a job that drains its
+// queue and exits, which the deployables that may enqueue to it wake.
 
 // Workers returns the workers of in.Stack, which no environment changes: a
 // worker per `@worker` of every API service the stack reaches, sorted by
@@ -127,20 +129,20 @@ func (r *resolver) resolveWorkerRef(where string, ref ir.DeployableRef) (*deploy
 }
 
 // applyWorkerSettings merges a worker's settings of one element, from
-// environment env: instances, concurrency and enabled. It reports whether
-// the element is done with: it named a worker, or set what only a worker
-// takes on another deployable, which it refuses.
+// environment env: instances, concurrency, enabled, mode and idle. It
+// reports whether the element is done with: it named a worker, or set what
+// only a worker takes on another deployable, which it refuses.
 func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *ir.DeployableSettings) bool {
 	if d.res.Kind != ir.DeployableWorker {
-		if entry.Instances != nil || entry.Concurrency != nil || entry.MaxInstances != nil {
+		if entry.Instances != nil || entry.Concurrency != nil || entry.MaxInstances != nil || entry.Mode != "" || entry.Idle != "" {
 			var set []string
-			for name, on := range map[string]bool{"instances": entry.Instances != nil, "maxInstances": entry.MaxInstances != nil, "concurrency": entry.Concurrency != nil} {
+			for name, on := range map[string]bool{"instances": entry.Instances != nil, "maxInstances": entry.MaxInstances != nil, "concurrency": entry.Concurrency != nil, "mode": entry.Mode != "", "idle": entry.Idle != ""} {
 				if on {
 					set = append(set, name)
 				}
 			}
 			slices.Sort(set)
-			r.fail(CodeInvalidSettings, "%s sets %s on %s %s; only a worker takes instances, maxInstances and concurrency, named beside its API's handle with `worker`", where, strings.Join(set, " and "), d.res.Kind, d.res.Name)
+			r.fail(CodeInvalidSettings, "%s sets %s on %s %s; only a worker takes instances, maxInstances, concurrency, mode and idle, named beside its API's handle with `worker`", where, strings.Join(set, " and "), d.res.Kind, d.res.Name)
 			return true
 		}
 		return false
@@ -180,6 +182,16 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 		enabled := *entry.Enabled
 		s.enabled, s.workerFrom["enabled"] = &enabled, env
 	}
+	if err := registry.CheckWorkerMode(entry.Mode, entry.Idle); err != nil {
+		r.fail(CodeInvalidSettings, "%s %v", where, err)
+		return true
+	}
+	if entry.Mode != "" {
+		s.mode, s.workerFrom["mode"] = entry.Mode, env
+	}
+	if entry.Idle != "" {
+		s.idle, s.workerFrom["idle"] = entry.Idle, env
+	}
 	return true
 }
 
@@ -190,7 +202,10 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 // concurrency, the
 // decorator's unless the settings change it; and its instances, one unless
 // the settings change them, and none when they turn it off. Its grace is
-// the decorator's.
+// the decorator's. A worker its settings put in drain mode (D145) runs as
+// a job that empties its queue and exits: its instances are then how many
+// of it may run at once, so a range of them is refused, and its idle time
+// is the settings', ir.DefaultWorkerIdleSeconds unless they say.
 func (r *resolver) runWorkers() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -240,9 +255,67 @@ func (r *resolver) runWorkers() {
 			}
 			run.MaxInstances = *s.maxInstances
 		}
+		switch {
+		case s.mode == ir.WorkerModeDrain:
+			run.Mode = ir.WorkerModeDrain
+			run.IdleSeconds = ir.DefaultWorkerIdleSeconds
+			if s.idle != "" {
+				// applyWorkerSettings checked it.
+				run.IdleSeconds, _ = registry.TimeoutSeconds(s.idle)
+			}
+			if s.maxInstances != nil {
+				r.fail(CodeInvalidSettings, "worker %s runs in drain mode (%s set it) and sets maxInstances (%s set it); a worker in drain mode runs when its queue has messages and exits when it has none, and instances is how many of it may run at once, so leave maxInstances out (D145)",
+					name, s.workerFrom["mode"], s.workerFrom["maxInstances"])
+			}
+			if d.worker.BehaviorWorker != nil {
+				// Its queues are filled by triggers and by the core, and
+				// its deadlines fall due by the clock: no enqueue of a
+				// queue client wakes it, and its claim loops take no slot,
+				// so a tick would start one beside another for as long as
+				// its queues are busy.
+				r.fail(CodeInvalidSettings, "worker %s is a behavior worker and runs in drain mode (%s set it); a behavior worker's queues are filled by triggers and fall due by the clock, which no enqueue's wake hears, and drain mode is not built for one: leave its mode out, so its instances keep running (D145)",
+					name, s.workerFrom["mode"])
+			}
+		case s.idle != "":
+			r.fail(CodeInvalidSettings, "worker %s sets idle (%s set it) and does not run in drain mode; only a worker with mode %q exits when it is idle (D145)", name, s.workerFrom["idle"], ir.WorkerModeDrain)
+		}
 		if s.enabled != nil && !*s.enabled {
 			run.Instances, run.MaxInstances = 0, 0
 		}
 		run.GraceSeconds = registry.WorkerGraceSeconds(d.worker)
+	}
+}
+
+// wakeWorkers gives each deployable that may enqueue to the queue of a
+// worker in drain mode that worker among its Wakes (D145). Nothing of such
+// a worker runs while its queue is empty, so an enqueue has to start it,
+// where its platform can be started: the deployable's platform gives it
+// the wake, the worker's platform gives it the right to use it (the
+// worker's WokenBy), and a platform that provides none leaves the worker
+// to its tick. The resolver cannot see
+// which code enqueues, so it takes every deployable that runs an API's
+// code, a server, a job, a worker or an app, with a sql edge to the
+// database that holds the queue, but the worker itself, which runs
+// whenever it enqueues. A worker the environment turns off is not woken.
+func (r *resolver) wakeWorkers() {
+	for _, name := range sortedKeys(r.deployables) {
+		w := r.deployables[name]
+		run := w.res.Worker
+		if w.res.Kind != ir.DeployableWorker || !run.Drains() || run.Instances == 0 || run.Database == "" {
+			continue
+		}
+		for _, id := range sortedKeys(r.edges) {
+			e := r.edges[id]
+			if e.res.Kind != ir.EdgeSQL || e.res.Service.Name != run.Database || e.from == w {
+				continue
+			}
+			switch e.from.res.Kind {
+			case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableApp:
+			default:
+				continue
+			}
+			e.from.res.Wakes = append(e.from.res.Wakes, ir.ResolvedWake{Worker: name, Queue: run.Queue, Database: run.Database, Platform: w.res.Platform, ResourceName: w.res.ResourceName})
+			w.res.WokenBy = append(w.res.WokenBy, ir.ResolvedWaker{Deployable: e.from.res.Name, Platform: e.from.res.Platform})
+		}
 	}
 }

@@ -101,9 +101,9 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 			}
 			if td.Queue.Dedupes() {
 				if svc.QueueKeys == nil {
-					svc.QueueKeys = map[string]string{}
+					svc.QueueKeys = map[string][]string{}
 				}
-				svc.QueueKeys[td.Name] = sqlutil.QueueKeyColumn(td)
+				svc.QueueKeys[td.Name] = sqlutil.QueueKeyColumns(td)
 			}
 		}
 		engineTypes := codegen.EngineTypes(schema)

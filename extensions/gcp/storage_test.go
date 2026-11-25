@@ -17,19 +17,23 @@ import (
 // TestBucketPlatform checks the Cloud Storage platform (D54): shop-media is
 // a private bucket in each environment's region, named after the project,
 // the stack and the Bucket service, which Staging's settings give a
-// lifecycle rule and Production's versioning; a Preview member's bucket
-// is its own, named with the parameter's value, and its destroy empties
-// it. The deployable's address is the bucket's name, an output of it.
+// lifecycle rule and a CORS rule (D148) and Production's versioning; a
+// Preview member's bucket is its own, named with the parameter's value,
+// and its destroy empties it. The CORS rule's headers and exposeHeaders
+// are the one list Cloud Storage keeps, and its maxAge is in seconds. The
+// deployable's address is the bucket's name, an output of it.
 func TestBucketPlatform(t *testing.T) {
 	reg := assemble(t)
 	for _, c := range []struct {
 		env, props string
 	}{
-		{"Staging", `{"forceDestroy":false,"lifecycleRules":[{"action":{"type":"Delete"},"condition":{"age":30}}],"location":"US-EAST1",` +
+		{"Staging", `{"cors":[{"maxAgeSeconds":3600,"methods":["GET","PUT"],"origins":["https://staging.acme.dev"],"responseHeaders":["content-type","etag"]}],` +
+			`"forceDestroy":false,"lifecycleRules":[{"action":{"type":"Delete"},"condition":{"age":30}}],"location":"US-EAST1",` +
 			`"name":"acme-staging-shop-shop-media","project":"acme-staging","publicAccessPrevention":"enforced","uniformBucketLevelAccess":true,"versioning":{"enabled":false}}`},
 		{"Production", `{"forceDestroy":false,"location":"US-EAST1",` +
 			`"name":"acme-prod-shop-shop-media","project":"acme-prod","publicAccessPrevention":"enforced","uniformBucketLevelAccess":true,"versioning":{"enabled":true}}`},
-		{"Preview", `{"forceDestroy":true,"lifecycleRules":[{"action":{"type":"Delete"},"condition":{"age":30}}],"location":"US-EAST1",` +
+		{"Preview", `{"cors":[{"maxAgeSeconds":3600,"methods":["GET","PUT"],"origins":["https://staging.acme.dev"],"responseHeaders":["content-type","etag"]}],` +
+			`"forceDestroy":true,"lifecycleRules":[{"action":{"type":"Delete"},"condition":{"age":30}}],"location":"US-EAST1",` +
 			`"name":{"$concat":["acme-staging-shop-shop-media-pr",{"$parameter":"pr"}]},"project":"acme-staging","publicAccessPrevention":"enforced","uniformBucketLevelAccess":true,"versioning":{"enabled":false}}`},
 	} {
 		t.Run(c.env, func(t *testing.T) {
@@ -52,8 +56,9 @@ func TestBucketPlatform(t *testing.T) {
 }
 
 // TestBucketRefusals checks what the platform refuses: settings outside
-// its schema, a name longer than Cloud Storage allows, and a name that
-// holds `google`, which Cloud Storage refuses.
+// its schema, a CORS rule that admits PUT from any origin or keeps a
+// preflight over a day (D148), a name longer than Cloud Storage allows,
+// and a name that holds `google`, which Cloud Storage refuses.
 func TestBucketRefusals(t *testing.T) {
 	reg := assemble(t)
 	refused := func(t *testing.T, s *ir.Stack, code stack.Code, want string) {
@@ -80,6 +85,31 @@ func TestBucketRefusals(t *testing.T) {
 	})
 	t.Run("a public bucket", func(t *testing.T) {
 		refused(t, settings(map[string]any{"public": true}), stack.CodeInvalidSettings, "shop-media")
+	})
+	cors := func(rule map[string]any) *ir.Stack { return settings(map[string]any{"cors": []any{rule}}) }
+	t.Run("a CORS rule with no methods", func(t *testing.T) {
+		refused(t, cors(map[string]any{"origins": []any{"https://staging.acme.dev"}}), stack.CodeInvalidSettings, "shop-media")
+	})
+	t.Run("a CORS rule with a method no bucket takes", func(t *testing.T) {
+		refused(t, cors(map[string]any{"origins": []any{"https://staging.acme.dev"}, "methods": []any{"PATCH"}}), stack.CodeInvalidSettings, "shop-media")
+	})
+	t.Run("a CORS origin with a path", func(t *testing.T) {
+		refused(t, cors(map[string]any{"origins": []any{"https://staging.acme.dev/upload"}, "methods": []any{"PUT"}}), stack.CodeInvalidSettings, "shop-media")
+	})
+	t.Run("PUT from any origin", func(t *testing.T) {
+		refused(t, cors(map[string]any{"origins": []any{"*"}, "methods": []any{"GET", "PUT"}}), stack.CodeLowering,
+			"cors rule 1 of bucket shop-media admits PUT from the origin *")
+	})
+	t.Run("a preflight kept over a day", func(t *testing.T) {
+		refused(t, cors(map[string]any{"origins": []any{"https://staging.acme.dev"}, "methods": []any{"PUT"}, "maxAge": "48h"}), stack.CodeLowering,
+			`maxAge is "48h", over a day`)
+	})
+	t.Run("GET from any origin", func(t *testing.T) {
+		env, err := stack.Resolve(reg, stack.Input{Stack: cors(map[string]any{"origins": []any{"*"}, "methods": []any{"GET", "HEAD"}}), Services: stacktest.AcmeShop(), Environment: "Staging"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantJSON(t, "the bucket's cors", node(t, env, "shop-media.bucket").Properties["cors"], `[{"methods":["GET","HEAD"],"origins":["*"]}]`)
 	})
 	t.Run("a long name", func(t *testing.T) {
 		s := shop()

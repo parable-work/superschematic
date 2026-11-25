@@ -42,7 +42,8 @@ const (
 
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
-	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
+	// CloudRunWorker runs workers as Cloud Run worker pools (D53), and a
+	// worker in drain mode as a Cloud Run job (D145);
 	// CloudRunRunner runs an engine's runner as a Cloud Run worker pool of
 	// one instance (D58); CloudRunDeriver runs a deriver as a Cloud Run
 	// worker pool of one instance (D74); CloudRunApp runs an app as a Cloud
@@ -228,7 +229,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			Extension: Name,
 			Kind:      ir.DeployableRunner,
 			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
-			Settings:  json.RawMessage(cloudRunWorkerSettings),
+			Settings:  json.RawMessage(cloudRunPoolSettings),
 			NameOf:    serviceName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerRunner,
@@ -239,7 +240,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			Kind:      ir.DeployableDeriver,
 			// In its API's language, TypeScript or Rust (D74).
 			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
-			Settings:  json.RawMessage(cloudRunWorkerSettings),
+			Settings:  json.RawMessage(cloudRunPoolSettings),
 			NameOf:    serviceName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerDeriver,

@@ -37,6 +37,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -53,6 +54,97 @@ const scope = "github.com/parable-work/superschematic/runtime/http/go/worker"
 // number of messages a worker handles at a time in its environment: the
 // worker's settings or its `@worker` concurrency.
 const ConcurrencyVariable = "WORKER_CONCURRENCY"
+
+// The environment variables a platform sets on a worker in drain mode
+// (D145; ir.WorkerModeVariable and its neighbours): ModeVariable is
+// ModeDrain, IdleSecondsVariable how long the worker waits with no message
+// ready or held before it exits, and SlotsVariable how many of it may run
+// at once. A worker with no ModeVariable, or ModePool, polls until it is
+// stopped.
+const (
+	ModeVariable        = "WORKER_MODE"
+	IdleSecondsVariable = "WORKER_IDLE_SECONDS"
+	SlotsVariable       = "WORKER_SLOTS"
+
+	ModePool  = "pool"
+	ModeDrain = "drain"
+
+	// DefaultDrainIdle is how long a worker in drain mode waits idle
+	// before it exits, unless IdleSecondsVariable says.
+	DefaultDrainIdle = 30 * time.Second
+
+	// DrainHorizon is how far ahead a worker in drain mode that found its
+	// queue idle looks for a message that is not due yet, a delayed one
+	// or a retry after its backoff (D145): it waits for one due within
+	// the horizon instead of exiting, and leaves one due later to the
+	// platform's next start, a wake or its tick. Five minutes is gcp's
+	// default tick, so with that tick a message waits at most about one
+	// tick past its due time whether the worker waits for it or not; and
+	// a worker kept for it costs at most five minutes of a task that does
+	// nothing.
+	DrainHorizon = 5 * time.Minute
+)
+
+// Drain is how a worker in drain mode runs (D145): it claims as any worker
+// does, and Run returns once no message was ready or held for Idle and
+// none falls due within Horizon, so the process exits 0 and a queue that
+// is empty runs nothing. Once every claim has failed for Idle, Run returns
+// an error, so the process exits with one and gives its slot back rather
+// than hold it until the platform's time limit. Slots is how
+// many such workers may run at once: each takes one of that many locks
+// named for its queue as it starts (Queue.Slot), and one that finds none
+// free returns at once, so starts that overlap cost a start and nothing
+// else.
+type Drain struct {
+	// Idle is how long the worker waits with no message ready or held
+	// before it stops; zero is DefaultDrainIdle.
+	Idle time.Duration
+
+	// Slots is how many workers may drain the queue at once; less than
+	// one is one.
+	Slots int
+
+	// Horizon is how far ahead the worker looks for a message that is not
+	// due yet before it stops (Queue.NextDue); zero is DrainHorizon.
+	Horizon time.Duration
+}
+
+// DrainFromEnv returns the drain the environment gives a worker, or nil
+// for one that runs as a pool's instance: ModeVariable unset, empty or
+// ModePool. It refuses a mode it does not know, and an idle time or a
+// slot count that is no whole number, one or more.
+func DrainFromEnv() (*Drain, error) {
+	switch mode := os.Getenv(ModeVariable); mode {
+	case "", ModePool:
+		return nil, nil
+	case ModeDrain:
+	default:
+		return nil, fmt.Errorf("%s is %q; it is %q or %q", ModeVariable, mode, ModePool, ModeDrain)
+	}
+	d := &Drain{Idle: DefaultDrainIdle, Slots: 1}
+	whole := func(name string) (int, bool, error) {
+		value := os.Getenv(name)
+		if value == "" {
+			return 0, false, nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return 0, false, fmt.Errorf("%s is %q; it is a whole number, one or more", name, value)
+		}
+		return n, true, nil
+	}
+	if seconds, ok, err := whole(IdleSecondsVariable); err != nil {
+		return nil, err
+	} else if ok {
+		d.Idle = time.Duration(seconds) * time.Second
+	}
+	if slots, ok, err := whole(SlotsVariable); err != nil {
+		return nil, err
+	} else if ok {
+		d.Slots = slots
+	}
+	return d, nil
+}
 
 // The defaults of Options.
 const (
@@ -125,6 +217,19 @@ type Queue struct {
 	// Prune deletes up to limit messages done for the queue's retention,
 	// and returns how many it deleted. Nil prunes nothing.
 	Prune func(ctx context.Context, limit int) (int, error)
+
+	// Slot takes one of slots locks named for the queue, which a worker in
+	// drain mode holds while it runs (D145): it reports false when every
+	// one is taken, and otherwise returns the function that gives the slot
+	// back. Nil takes none, as on a database with no such lock: every
+	// worker started then drains.
+	Slot func(ctx context.Context, slots int) (release func(), ok bool, err error)
+
+	// NextDue reports how long until the first ready message that is not
+	// due yet falls due, or false when none waits (D145): a worker in drain
+	// mode that found the queue idle waits for one due within its horizon
+	// instead of stopping. Nil reads none: the worker stops once idle.
+	NextDue func(ctx context.Context) (time.Duration, bool, error)
 }
 
 // Options are how Run runs.
@@ -148,6 +253,32 @@ type Options struct {
 
 	// Logger logs each message's outcome; nil logs nothing.
 	Logger *zap.Logger
+
+	// Drain, when set, runs the worker in drain mode (D145): Run takes a
+	// slot of the queue, and returns once no message was ready or held for
+	// the drain's idle time. Nil polls until ctx ends.
+	Drain *Drain
+
+	// quiet is the clock the claim loops of one RunAll share in drain
+	// mode, so a behavior worker's queues stop together, once all of them
+	// were idle.
+	quiet *quiet
+}
+
+// quiet is when a worker in drain mode was last busy, and how many of its
+// handlers run: a claim that found a message, a handler that started and
+// one that returned each make it busy.
+type quiet struct {
+	last    atomic.Int64
+	running atomic.Int64
+}
+
+// busy marks the worker busy now.
+func (q *quiet) busy() { q.last.Store(time.Now().UnixNano()) }
+
+// over reports whether no handler runs and none was busy for idle.
+func (q *quiet) over(idle time.Duration) bool {
+	return q.running.Load() == 0 && time.Since(time.Unix(0, q.last.Load())) >= idle
 }
 
 // Concurrency returns the concurrency the environment gives a worker in
@@ -176,6 +307,11 @@ func RunAll(ctx context.Context, queues []Queue, opts Options) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if opts.Drain != nil {
+		// The queues are idle together or not at all.
+		opts.quiet = &quiet{}
+		opts.quiet.busy()
+	}
 	errs := make([]error, len(queues))
 	var wg sync.WaitGroup
 	for i, q := range queues {
@@ -225,19 +361,57 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 		logger = zap.NewNop()
 	}
 	logger = logger.With(zap.String("queue", q.Name))
+	if opts.Drain != nil {
+		drain := *opts.Drain
+		if drain.Idle <= 0 {
+			drain.Idle = DefaultDrainIdle
+		}
+		if drain.Slots < 1 {
+			drain.Slots = 1
+		}
+		if drain.Horizon <= 0 {
+			drain.Horizon = DrainHorizon
+		}
+		opts.Drain = &drain
+		if opts.quiet == nil {
+			opts.quiet = &quiet{}
+			opts.quiet.busy()
+		}
+		if q.Slot != nil {
+			release, ok, err := q.Slot(ctx, drain.Slots)
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return nil
+			case err != nil:
+				return fmt.Errorf("worker: take a slot of queue %s: %w", q.Name, err)
+			case !ok:
+				logger.Info("every slot of the queue is taken: the workers that hold them drain it", zap.Int("slots", drain.Slots))
+				return nil
+			}
+			defer release()
+		}
+	}
 	w := &loop{q: q, opts: opts, logger: logger, running: map[string]*handling{}, done: make(chan struct{}, opts.Concurrency)}
 	// The handlers' context outlives ctx by the grace: a stopping worker
 	// cancels it only once the grace is over.
 	w.handlers, w.cancelHandlers = context.WithCancel(context.WithoutCancel(ctx))
 	defer w.cancelHandlers()
+	// The prune stops with the claims: when ctx ends, or once a worker in
+	// drain mode has drained.
+	pruning, stopPruning := context.WithCancel(ctx)
+	defer stopPruning()
 	pruned := make(chan struct{})
 	go func() {
 		defer close(pruned)
-		w.pruneLoop(ctx)
+		w.pruneLoop(pruning)
 	}()
-	w.claimLoop(ctx)
+	claimErr := w.claimLoop(ctx)
+	stopPruning()
 	err := w.stop()
 	<-pruned
+	if claimErr != nil {
+		return claimErr
+	}
 	return err
 }
 
@@ -266,15 +440,20 @@ type handling struct {
 	released bool
 }
 
-// claimLoop claims messages for the free slots until ctx ends.
-func (w *loop) claimLoop(ctx context.Context) {
+// claimLoop claims messages for the free slots until ctx ends, or, in
+// drain mode, until the worker has drained. It returns an error only in
+// drain mode, once every claim has failed for the drain's idle time.
+func (w *loop) claimLoop(ctx context.Context) error {
 	wait := w.opts.Idle
+	// When the claims began to fail: a worker in drain mode whose every
+	// claim fails for its idle time stops with an error.
+	var failingSince time.Time
 	for ctx.Err() == nil {
 		free := w.opts.Concurrency - w.count()
 		if free <= 0 {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case <-w.done:
 			}
 			continue
@@ -282,23 +461,88 @@ func (w *loop) claimLoop(ctx context.Context) {
 		msgs, err := w.q.Claim(ctx, free, w.q.Lease)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return nil
+			}
+			if failingSince.IsZero() {
+				failingSince = time.Now()
+			}
+			if d := w.opts.Drain; d != nil && time.Since(failingSince) >= d.Idle {
+				w.logger.Error("every claim failed for the idle time: the worker stops with an error and gives its slot back", zap.Duration("idle", d.Idle), zap.Error(err))
+				return fmt.Errorf("worker: every claim of queue %s failed for %s, so the worker in drain mode stops: %w", w.q.Name, d.Idle, err)
 			}
 			w.logger.Error("claim failed", zap.Duration("retryIn", wait), zap.Error(err))
 			if !sleep(ctx, wait) {
-				return
+				return nil
 			}
 			wait = min(wait*2, maxBackoff)
 			continue
 		}
 		wait = w.opts.Idle
+		failingSince = time.Time{}
 		for _, msg := range msgs {
 			w.start(msg)
 		}
+		if w.drained(len(msgs)) {
+			// A message that falls due within the horizon, a delayed one
+			// or a retry, is waited for: the claim after the wait takes it.
+			due, ok := w.nextDue(ctx)
+			if !ok {
+				w.logger.Info("drained: no message was ready or held", zap.Duration("idle", w.opts.Drain.Idle))
+				return nil
+			}
+			w.logger.Info("idle, and waiting for a message due soon", zap.Duration("dueIn", due))
+			if !sleep(ctx, max(due, w.opts.Idle)) {
+				return nil
+			}
+			continue
+		}
 		if len(msgs) < free && !w.idle(ctx) {
-			return
+			return nil
 		}
 	}
+	return nil
+}
+
+// nextDue reports how long until a message that is not due yet falls due,
+// when that is within the drain's horizon: a worker in drain mode that
+// found its queue idle waits for it. A queue that reads none, or whose
+// read fails, reports false, and the worker stops.
+func (w *loop) nextDue(ctx context.Context) (time.Duration, bool) {
+	if w.q.NextDue == nil {
+		return 0, false
+	}
+	readCtx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	due, ok, err := w.q.NextDue(readCtx)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			w.logger.Warn("reading when the next message is due failed: the tick runs it", zap.Error(err))
+		}
+		return 0, false
+	case !ok:
+		return 0, false
+	case due > w.opts.Drain.Horizon:
+		w.logger.Info("the next message is due past the drain's horizon: a wake or the tick runs it",
+			zap.Duration("dueIn", due), zap.Duration("horizon", w.opts.Drain.Horizon))
+		return 0, false
+	}
+	return max(due, 0), true
+}
+
+// drained reports whether a worker in drain mode is done: its claim found
+// nothing, none of its handlers runs, and none was busy for the drain's
+// idle time. A claim that found a message makes the worker busy.
+func (w *loop) drained(claimed int) bool {
+	d, q := w.opts.Drain, w.opts.quiet
+	if d == nil || q == nil {
+		return false
+	}
+	if claimed > 0 || w.count() > 0 {
+		q.busy()
+		return false
+	}
+	return q.over(d.Idle)
 }
 
 // pruneLoop prunes the queue at once, then every PruneEvery, until ctx
@@ -362,10 +606,19 @@ func (w *loop) start(msg Message) {
 	w.mu.Lock()
 	w.running[msg.ID] = h
 	w.mu.Unlock()
+	if q := w.opts.quiet; q != nil {
+		q.running.Add(1)
+		q.busy()
+	}
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
 		defer func() {
+			// A handler that returns leaves the worker busy until now.
+			if q := w.opts.quiet; q != nil {
+				q.busy()
+				q.running.Add(-1)
+			}
 			select {
 			case w.done <- struct{}{}:
 			default:

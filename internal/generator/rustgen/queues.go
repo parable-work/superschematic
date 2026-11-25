@@ -135,6 +135,9 @@ type QueueField struct {
 // (sqlutil.QueueStatements), by the names queues.ts gives them.
 type QueueStatements struct {
 	Insert string `json:"insert"`
+	// DueIn is the due time of a message enqueued with a delay (D80): the
+	// database's clock plus the seconds of its parameter, $1.
+	DueIn string `json:"dueIn"`
 	// Conflict ends an enqueue on a queue that keeps one ready message per
 	// key (D80); other queues have none.
 	Conflict string `json:"conflict,omitempty"`
@@ -145,6 +148,12 @@ type QueueStatements struct {
 	Extend   string `json:"extend"`
 	Release  string `json:"release"`
 	Prune    string `json:"prune"`
+	// Slot takes slot $1 of the locks a worker in drain mode holds while
+	// it runs (D145), on Postgres alone.
+	Slot string `json:"slot,omitempty"`
+	// NextDue reads the seconds until the first ready message that waits
+	// falls due (D145), on Postgres alone.
+	NextDue string `json:"nextDue,omitempty"`
 	// Due is SQLite's read of whether a message is due, which a claim
 	// runs before it takes the write lock; Postgres has none.
 	Due string `json:"due,omitempty"`
@@ -154,6 +163,7 @@ type QueueStatements struct {
 func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 	return QueueStatements{
 		Insert:   s.Insert,
+		DueIn:    s.DueIn,
 		Conflict: s.Conflict,
 		Expire:   s.Expire,
 		Claim:    s.Claim,
@@ -162,6 +172,8 @@ func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 		Extend:   s.Extend,
 		Release:  s.Release,
 		Prune:    s.Prune,
+		Slot:     s.Slot,
+		NextDue:  s.NextDue,
 		Due:      s.Due,
 	}
 }

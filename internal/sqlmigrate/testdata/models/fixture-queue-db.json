@@ -608,6 +608,134 @@
           "type": "UUID"
         },
         {
+          "name": "warehouse",
+          "origin": "StockMoved.warehouse",
+          "type": "TEXT"
+        },
+        {
+          "name": "sku",
+          "origin": "StockMoved.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "StockMoved.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when stock moves within a warehouse: one waits per warehouse and SKU\ntogether, the two fields its key names (D80). A later move of that SKU\nthere replaces the one that waits, the same SKU in another warehouse\nwaits beside it, and a worker holds one claim per warehouse and SKU.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_moved_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "warehouse",
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_moved_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "warehouse",
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_moved_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "stock_moved_queue",
+      "origin": "StockMoved",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "stock_moved_queue_pkey"
+      },
+      "queue": {
+        "keys": [
+          "warehouse",
+          "sku"
+        ],
+        "onDuplicate": "replace",
+        "serialize": true
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
           "name": "account_id",
           "origin": "SyncRequested.accountId",
           "type": "UUID"

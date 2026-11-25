@@ -276,7 +276,7 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	req := request(service, queue)
-	req.Key, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
+	req.Keys, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
 	if req.Operation == queueops.Backfill {
 		if req.Backfills, err = c.queueBackfills(service, queue); err != nil {
 			return err
@@ -378,15 +378,15 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 	return host.Name, nil
 }
 
-// queueKey is the quoted key column of the queue of the DB service when it
-// keeps one ready message per key (D80), else "".
-func (c *deployContext) queueKey(service, queue string) string {
+// queueKey is the quoted key columns of the queue of the DB service when
+// it keeps one ready message per key (D80), else none.
+func (c *deployContext) queueKey(service, queue string) []string {
 	for _, svc := range c.services {
 		if svc.Name == service {
 			return svc.QueueKeys[queue]
 		}
 	}
-	return ""
+	return nil
 }
 
 // queueTable is the table of service's queue, as its class names it

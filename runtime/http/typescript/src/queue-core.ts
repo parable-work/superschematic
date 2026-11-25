@@ -51,6 +51,12 @@ export interface QueueField {
 export interface QueueStatements {
   readonly insert: string;
   /**
+   * The due time of a message enqueued with a delay (D80): the database's clock plus the seconds of its one
+   * parameter, $1 (?1 on SQLite). An enqueue with a delay writes due_at first, with this value, and numbers the
+   * columns its message sets from $2.
+   */
+  readonly dueIn?: string;
+  /**
    * Ends an enqueue on a queue that keeps one ready message per key (D80): what it does when a ready message
    * holds the message's key, which replaces that message or keeps it. Other queues have none.
    */
@@ -62,6 +68,16 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /**
+   * On Postgres alone: takes slot $1 of the locks a worker in drain mode holds while it runs (D145), a session
+   * advisory lock named for the queue's table, and returns whether it took it.
+   */
+  readonly slot?: string;
+  /**
+   * On Postgres alone: the seconds, by the database's clock, until the first ready message that is not due yet
+   * falls due, or NULL when none waits (D145).
+   */
+  readonly nextDue?: string;
   /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
   readonly due?: string;
 }
@@ -138,10 +154,49 @@ export interface Queue<M> {
    * a dead message.
    */
   prune(limit: number): Promise<number>;
+  /**
+   * Takes one of slots locks named for the queue, the first that is free, which a worker in drain mode holds
+   * while it runs (D145), so no more than slots of them drain the queue at once. Resolves to the function that
+   * gives the slot back, or to undefined when every one is taken. A queue on SQLite has none.
+   */
+  slot?(slots: number): Promise<(() => Promise<void>) | undefined>;
+  /**
+   * Resolves to the seconds, by the database's clock, until the first ready message that is not due yet falls
+   * due, or to undefined when none waits (D145): a worker in drain mode that found the queue idle waits for one
+   * due within its horizon instead of stopping. A queue on SQLite has none.
+   */
+  nextDue?(): Promise<number | undefined>;
 }
 
-/** The claims of a queue over a pg pool, which postgresQueue makes. */
-export type PostgresQueue<M> = Queue<M>;
+/** The claims of a queue over a pg pool, which postgresQueue makes: a queue's, with its slots and its next due time. */
+export type PostgresQueue<M> = Queue<M> & Required<Pick<Queue<M>, 'slot' | 'nextDue'>>;
+
+/** How an enqueue writes its message, beside the message. */
+export interface EnqueueOptions {
+  /**
+   * How long the message waits before it is due, in seconds, which may hold a fraction, by the database's clock
+   * (D80): no worker claims it before. Zero, the default, is due at once. On a queue that replaces the ready
+   * message of a key, the ready message takes this due time with the new message's fields.
+   */
+  readonly delaySeconds?: number;
+}
+
+/**
+ * The seconds an enqueue's options delay its message by: 0 for none. Throws for a delay that is no finite number,
+ * or negative, and for one on a queue whose definition was generated before a delay existed.
+ */
+export function delayOf(table: string, statements: QueueStatements, options: EnqueueOptions | undefined): number {
+  const delay = options?.delaySeconds ?? 0;
+  if (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) {
+    throw new Error(`enqueue on ${table}: delaySeconds is ${String(delay)}; it is a number of seconds, zero or more`);
+  }
+  if (delay > 0 && statements.dueIn === undefined) {
+    throw new Error(
+      `enqueue on ${table}: the queue's definition holds no dueIn statement, so it cannot delay a message; build its DB service again to write one`,
+    );
+  }
+  return delay;
+}
 
 /** What an enqueue ends with after its VALUES: a space and the queue's conflict clause, or nothing (D80). */
 export function conflictOf(statements: QueueStatements): string {

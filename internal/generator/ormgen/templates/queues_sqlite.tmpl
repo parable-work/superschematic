@@ -95,14 +95,22 @@ type sqliteClaimed struct {
 
 // insert writes msg into the table through tx: each member its JSON sets
 // writes its column, and each it leaves unset takes the column's default,
-// or an enum's schema default.
-func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) error {
+// or an enum's schema default. A message with a delay is due that long
+// after the database's clock: it writes due_at first, as the statements'
+// dueIn of the delay's seconds.
+func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("enqueue on %s: the delay is %s; it is zero or more", t.name, delay)
+	}
 	members, err := sqliteMembers(msg)
 	if err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
 	var columns, placeholders []string
 	var values []any
+	if delay > 0 {
+		columns, placeholders, values = []string{"due_at"}, []string{t.statements.dueIn}, []any{delay.Seconds()}
+	}
 	for _, f := range t.fields {
 		value, set := members[f.name]
 		if !set || sqliteUnset(value, f) {
@@ -456,7 +464,14 @@ var {{ lowerFirst .Name }}SQLiteQueue = sqliteQueueTable{
 // tx, the caller's transaction: the message is due once tx commits, and
 // never if it rolls back.
 func Enqueue{{ .Name }}SQLite(ctx context.Context, tx SQLiteExecer, msg *types.{{ .Name }}) error {
-	return {{ lowerFirst .Name }}SQLiteQueue.insert(ctx, tx, msg)
+	return {{ lowerFirst .Name }}SQLiteQueue.insert(ctx, tx, msg, 0)
+}
+
+// Enqueue{{ .Name }}SQLiteIn writes msg into the queue {{ .Name }} on SQLite as
+// Enqueue{{ .Name }}SQLite does, due once delay has passed by the database's
+// clock (D80), as Enqueue{{ .Name }}In does on Postgres.
+func Enqueue{{ .Name }}SQLiteIn(ctx context.Context, tx SQLiteExecer, msg *types.{{ .Name }}, delay time.Duration) error {
+	return {{ lowerFirst .Name }}SQLiteQueue.insert(ctx, tx, msg, delay)
 }
 
 // {{ .Name }}SQLiteQueue claims the messages of the queue {{ .Name }} on SQLite for

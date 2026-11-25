@@ -17,7 +17,9 @@
 // retention. On SIGTERM or SIGINT it claims no more, lets the running methods
 // finish for 2s, aborts the rest and gives their messages back, and
 // exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it exits 0 once no message was ready or held for
+// WORKER_IDLE_SECONDS.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -25,7 +27,7 @@
 
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
 import { openSqlite, sqliteFile, sqliteQueue, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
-import { runWorker, workerConcurrency } from '@superschematic/http-runtime/worker';
+import { runWorker, workerConcurrency, workerDrain } from '@superschematic/http-runtime/worker';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
 import * as tsNotesApi from '@schemas/ts-notes-api';
@@ -81,7 +83,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
       release: (id, token) => queue.release(id, token),
       prune: limit => queue.prune(limit),
     },
-    { signal, concurrency, graceMs: GRACE_MS, logger }
+    { signal, concurrency, graceMs: GRACE_MS, logger, drain: workerDrain() }
   );
 }
 

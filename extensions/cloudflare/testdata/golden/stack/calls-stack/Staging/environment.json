@@ -20,6 +20,24 @@
         }
       ],
       "settings": {
+        "cors": [
+          {
+            "exposeHeaders": [
+              "etag"
+            ],
+            "headers": [
+              "content-type"
+            ],
+            "maxAge": "1h",
+            "methods": [
+              "GET",
+              "PUT"
+            ],
+            "origins": [
+              "https://staging.acme.dev"
+            ]
+          }
+        ],
         "deleteAfterDays": 30,
         "locationHint": "weur"
       },
@@ -218,6 +236,47 @@
           "location": "weur",
           "name": "calls-stack-staging-shop-media"
         },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
+        ]
+      },
+      {
+        "id": "shop-media.cors",
+        "type": "cloudflare:index/r2BucketCors:R2BucketCors",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bucketName": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "name"
+            }
+          },
+          "rules": [
+            {
+              "allowed": {
+                "headers": [
+                  "content-type"
+                ],
+                "methods": [
+                  "GET",
+                  "PUT"
+                ],
+                "origins": [
+                  "https://staging.acme.dev"
+                ]
+              },
+              "exposeHeaders": [
+                "etag"
+              ],
+              "id": "cors-1",
+              "maxAgeSeconds": 3600
+            }
+          ]
+        },
+        "dependsOn": [
+          "shop-media.bucket"
+        ],
         "phase": "infrastructure",
         "owners": [
           "shop-media"
@@ -697,6 +756,7 @@
       "step": "infrastructure",
       "resources": [
         "shop-media.bucket",
+        "shop-media.cors",
         "shop-media.lifecycle",
         "shop-pricing.worker",
         "shop-storefront.calls.shop-pricing.key",

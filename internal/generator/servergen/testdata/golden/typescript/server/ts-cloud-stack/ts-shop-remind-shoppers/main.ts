@@ -17,7 +17,11 @@
 // retention. On SIGTERM or SIGINT it claims no more, lets the running methods
 // finish for 2s, aborts the rest and gives their messages back, and
 // exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it takes
+// one of WORKER_SLOTS locks named for its queue as it starts, exiting 0 at
+// once when none is free, and exits 0 once no message was ready or held for
+// WORKER_IDLE_SECONDS.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -25,7 +29,7 @@
 
 import { createLogger, serviceCredentialFor, type Database, type Service, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { connectPostgres, postgresQueue } from '@superschematic/http-runtime/postgres';
-import { runWorker, workerConcurrency } from '@superschematic/http-runtime/worker';
+import { runWorker, workerConcurrency, workerDrain } from '@superschematic/http-runtime/worker';
 import { startTelemetry, type Telemetry } from '@superschematic/http-runtime/telemetry';
 import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
@@ -102,8 +106,10 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
       fail: (id, token, cause) => queue.fail(id, token, cause),
       release: (id, token) => queue.release(id, token),
       prune: limit => queue.prune(limit),
+      slot: slots => queue.slot(slots),
+      nextDue: () => queue.nextDue(),
     },
-    { signal, concurrency, graceMs: GRACE_MS, logger }
+    { signal, concurrency, graceMs: GRACE_MS, logger, drain: workerDrain() }
   );
 }
 

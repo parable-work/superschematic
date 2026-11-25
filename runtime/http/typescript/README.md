@@ -652,7 +652,26 @@ As it starts and every `pruneEveryMs`, five minutes unless set, it runs
 the queue's `prune` in batches of `PRUNE_BATCH`, a thousand, until a batch
 is short, and logs `done messages pruned` with `pruned`.
 `workerConcurrency(fallback)` reads `WORKER_CONCURRENCY`, which a platform
-sets.
+sets. With `drain: { idleMs, slots }` the worker runs in drain mode (D145):
+it takes one of `slots` locks of its queue through the queue's `slot`,
+resolving at once when none is free, and resolves once no message was
+ready or held for `idleMs`, thirty seconds unless set. `workerDrain()`
+reads that drain from `WORKER_MODE`, `WORKER_IDLE_SECONDS` and
+`WORKER_SLOTS`, and is undefined for a worker that polls until it is
+stopped. `postgresQueue(pool, queue).slot(slots)` takes the slot, a
+session's advisory lock on a connection of its own, which giving the slot
+back ends.
+
+`enqueue` also wakes its queue's worker where the environment holds a
+wake for it in `QUEUE_WAKES` (D145), a JSON object that gives each queue's
+class the list of its wakes, `{ url, token?: { url, headers } }`: a `POST`
+of `{}` to `url`, with the bearer token a `GET` of the token's `url`
+answers as `{ access_token, expires_in }`. It is sent once the enqueue's
+statement has run, at most once per queue in `WAKE_INTERVAL_MS`, five
+seconds, per process; nothing awaits it, and one that fails is logged with
+`console.warn` and fails nothing. `queueWaker(wakes, host)` is the sender
+over a host a test replaces, `parseQueueWakes` reads the variable, and
+`setProcessQueueWaker` replaces the process's waker.
 
 `Bucket`, from the main entry, is the provider-neutral interface of a
 bucket an API lists in its `buckets` (D54), which its `Deps` holds: `put`

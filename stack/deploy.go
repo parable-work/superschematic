@@ -111,9 +111,11 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 }
 
 // WriteContext writes the build context of a Dockerfile as a gzipped
-// tarball, cut down by its ignore file; see internal/stackdeploy.WriteContext.
-func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
-	return stackdeploy.WriteContext(w, root, dockerfile)
+// tarball, cut down by its ignore file, with the Dockerfile at extend in
+// it when one extends the image (D144); see
+// internal/stackdeploy.WriteContext.
+func WriteContext(w io.Writer, root, dockerfile string, extend ...string) (*Context, error) {
+	return stackdeploy.WriteContext(w, root, dockerfile, extend...)
 }
 
 // SplitImage splits an image reference by digest into its repository and

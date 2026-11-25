@@ -34,6 +34,7 @@ function statements(table: string, columns: string[], keepDone: boolean): QueueS
   const claimed = `WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`;
   return {
     insert: `INSERT INTO ${table}`,
+    dueIn: `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')`,
     expire: `UPDATE ${table} SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = ${NOW}
 WHERE state = 'claimed' AND claim_expires_at <= ${NOW} AND attempts > ?1`,
@@ -208,6 +209,31 @@ describe('the queue client on SQLite', () => {
         '["2026-10-09T12:30:15.250Z"]',
       ],
     ]);
+  });
+
+  test('a message enqueued with a delay waits it out by the database clock, and one with none is claimed past it (D80)', async () => {
+    const [db] = database();
+    const later = '0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b';
+    await db.batch([enqueueStatement(db, orderPlaced, { ...MESSAGE, orderId: later }, { delaySeconds: 300 })]);
+    await enqueueSqlite(db, orderPlaced, { ...MESSAGE, orderId: '1d8b1f25-7b54-4a1f-9a2c-6e7d8f9a0b1c' }, { delaySeconds: 0.5 });
+    const due = (await db
+      .prepare("SELECT order_id, round((julianday(due_at) - julianday('now')) * 86400, 1), state, attempts FROM order_placed_queue ORDER BY due_at")
+      .raw()) as [string, number, string, number][];
+    expect(due.map(row => [row[0], row[2], row[3]])).toEqual([
+      ['1d8b1f25-7b54-4a1f-9a2c-6e7d8f9a0b1c', 'ready', 0],
+      [later, 'ready', 0],
+    ]);
+    expect(due[0]?.[1]).toBeGreaterThan(-5);
+    expect(due[0]?.[1]).toBeLessThanOrEqual(0.5);
+    expect(due[1]?.[1]).toBeGreaterThan(295);
+    expect(due[1]?.[1]).toBeLessThanOrEqual(300);
+    const queue = sqliteQueue(db, orderPlaced);
+    await db.prepare('DELETE FROM order_placed_queue WHERE order_id <> ?1').bind(later).run();
+    expect(await queue.claim(5)).toEqual([]);
+    await enqueueSqlite(db, orderPlaced, MESSAGE);
+    const claims = await queue.claim(5);
+    expect(claims.map(c => c.attempt)).toEqual([1]);
+    expect(() => enqueueStatement(db, orderPlaced, MESSAGE, { delaySeconds: -1 })).toThrow(/delaySeconds is -1; it is a number of seconds, zero or more/);
   });
 
   test('a claim reads each field as the TypeScript types hold it, and two connections claim different messages', async () => {

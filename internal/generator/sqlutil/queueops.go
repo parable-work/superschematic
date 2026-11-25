@@ -2,6 +2,7 @@ package sqlutil
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -54,10 +55,11 @@ type QueueOperatorStatements struct {
 // PostgresQueueOperatorStatements are the operator's statements on the
 // queue whose table is table, quoted for SQL as QuoteIdentifier quotes it.
 // They read the columns every queue keeps (ir.QueueColumns), and the
-// message's as the row's other columns, so they need no list of them. key
-// is the quoted column of the key of a queue that keeps one ready message
-// per key (D80), or "" for every other queue.
-func PostgresQueueOperatorStatements(table, key string) QueueOperatorStatements {
+// message's as the row's other columns, so they need no list of them. keys
+// are the quoted columns of the key of a queue that keeps one ready message
+// per key (D80), one or several, or none for every other queue.
+func PostgresQueueOperatorStatements(table string, keys ...string) QueueOperatorStatements {
+	keys = slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k == "" })
 	kept := make([]string, 0, len(ir.QueueColumns()))
 	for _, c := range ir.QueueColumns() {
 		kept = append(kept, "'"+c+"'")
@@ -98,15 +100,16 @@ func PostgresQueueOperatorStatements(table, key string) QueueOperatorStatements 
 			"RETURNING id::text",
 		),
 	}
-	if key != "" {
+	if len(keys) > 0 {
 		// One dead message per key, the last to die, and none whose key a
 		// ready message holds.
-		free := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %[1]s AS p WHERE p.%[2]s = %[1]s.%[2]s AND p.state = '%[3]s')", table, key, ir.QueueStateReady)
+		key := strings.Join(keys, ", ")
+		free := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s AS p WHERE %s AND p.state = '%s')", table, QueueKeyEquals("p", table, keys), ir.QueueStateReady)
 		last := func(where string) string {
 			return fmt.Sprintf("id IN (SELECT DISTINCT ON (%s) id FROM %s WHERE %s ORDER BY %s, updated_at DESC, id)", key, table, where, key)
 		}
 		s.States = lines(
-			fmt.Sprintf("SELECT q.id::text, CASE WHEN q.state = '%[1]s' AND EXISTS (SELECT 1 FROM %[2]s AS p WHERE p.%[3]s = q.%[3]s AND p.state = '%[4]s')", ir.QueueStateDead, table, key, ir.QueueStateReady),
+			fmt.Sprintf("SELECT q.id::text, CASE WHEN q.state = '%s' AND EXISTS (SELECT 1 FROM %s AS p WHERE %s AND p.state = '%s')", ir.QueueStateDead, table, QueueKeyEquals("p", "q", keys), ir.QueueStateReady),
 			fmt.Sprintf("  THEN 'dead, and a ready message holds its key' ELSE q.state END FROM %s AS q WHERE q.%s", table, ids),
 		)
 		s.Retry = lines(
