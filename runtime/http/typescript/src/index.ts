@@ -232,6 +232,9 @@ export type {
   StackEnv,
 } from './stackconfig.js';
 export { DEFAULT_PAGE_SIZE, MAX_SIGNED_URL_SECONDS, ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './bucket.js';
+// A stream's SHA-256 as it is read, which an attachment's upload is
+// checked against (D154): workerd's native digest on Workers.
+export { Sha256, sha256Stream } from './sha256.js';
 export type {
   Bucket,
   BucketBody,
