@@ -418,6 +418,48 @@ func TestInFlight(t *testing.T) {
 	}
 }
 
+// TestShortTTLHoldsTheKeyWhileTheFirstRuns: a ttl shorter than the
+// route's time limit keeps a running row until the limit, so a repeat
+// after the ttl and before the limit is 409 and does not run the handler
+// a second time, and a sweep then leaves the row.
+func TestShortTTLHoldsTheKeyWhileTheFirstRuns(t *testing.T) {
+	for dialect, open := range stores(t) {
+		t.Run(dialect, func(t *testing.T) {
+			now := &clock{}
+			now.at.Store(1_800_000_000_000)
+			release := make(chan struct{})
+			entered := make(chan struct{}, 4)
+			store := open()
+			handler, runs := serve(t, Options{Store: store, Operation: "orders.createOrder", TTL: time.Second, InFlight: 45 * time.Second, Now: now.now}, func(w http.ResponseWriter, _ *http.Request, run int64) {
+				entered <- struct{}{}
+				if run == 1 {
+					<-release
+				}
+				_, _ = fmt.Fprintf(w, `{"run":%d}`, run)
+			})
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() { done <- call(handler, "POST", "/api/orders", `{}`, KeyHeader, "short") }()
+			<-entered
+
+			now.at.Add(31_000)
+			if swept, err := store.Sweep(context.Background(), now.at.Load(), 100); err != nil || swept != 0 {
+				t.Errorf("a sweep past the ttl and within the limit = %d, %v, want 0", swept, err)
+			}
+			waiting := call(handler, "POST", "/api/orders", `{}`, KeyHeader, "short")
+			if waiting.Code != http.StatusConflict || problemCode(t, waiting) != CodeInFlight || waiting.Header().Get("Retry-After") != "14" {
+				t.Errorf("past the ttl, within the limit: %d %s, Retry-After %q", waiting.Code, waiting.Body, waiting.Header().Get("Retry-After"))
+			}
+			close(release)
+			if first := <-done; first.Code != http.StatusOK || first.Body.String() != `{"run":1}` {
+				t.Errorf("the first request: %d %s", first.Code, first.Body)
+			}
+			if runs.Load() != 1 {
+				t.Errorf("%d runs, want 1", runs.Load())
+			}
+		})
+	}
+}
+
 // TestCallerPrincipal: a key is the authenticated principal's, a service
 // caller's when it forwards no end user, and no one's on a public route.
 func TestCallerPrincipal(t *testing.T) {

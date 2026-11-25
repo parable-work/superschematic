@@ -947,7 +947,10 @@ caller keeps no key, and a 504 keeps none either.
 The row is not in the implementation's transaction, which the runtime
 does not own. A first request counts as running for the route's
 `@timeout`, 60 seconds on a route without one. A repeat after that takes
-the key over and runs the operation. So a server that stops after the
+the key over and runs the operation. A row is kept at least that long,
+whatever its `ttl`, so a `ttl` shorter than the time limit never lets a
+repeat run the operation beside a first request that may still be
+running. So a server that stops after the
 implementation commits and before the answer is kept leaves the row
 running, and a repeat past the time limit runs the operation again: a key
 makes a call run once but for that window. An implementation that must

@@ -370,7 +370,10 @@ export async function runIdempotent(
     key,
     requestHash,
     now: startedAt,
-    expiresAt: startedAt + config.ttlSeconds * 1000,
+    // A row expires no sooner than its in-flight limit, so a ttl shorter
+    // than the route's time limit never lets a repeat take over a first
+    // request that may still be running, nor a sweep delete its row.
+    expiresAt: startedAt + Math.max(config.ttlSeconds * 1000, inFlightMs),
     takeOverBefore: startedAt - inFlightMs,
   });
   switch (begin.kind) {

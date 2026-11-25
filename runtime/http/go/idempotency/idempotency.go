@@ -324,7 +324,8 @@ type Options struct {
 	Store Store
 	// Operation names the operation, `<namespace>.<name>`.
 	Operation string
-	// TTL is how long a key's answer is kept; zero is DefaultTTL.
+	// TTL is how long a key's answer is kept; zero is DefaultTTL. A row is
+	// kept at least InFlight, whatever TTL says.
 	TTL time.Duration
 	// Required refuses a request without the header.
 	Required bool
@@ -410,6 +411,10 @@ func Middleware(opts Options) func(http.Handler) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
+	// A row expires no sooner than its in-flight limit, so a ttl shorter
+	// than the route's time limit never lets a repeat take over a first
+	// request that may still be running, nor a sweep delete its row.
+	keep := max(ttl, inFlight)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			keys, sent := r.Header[KeyHeader]
@@ -452,7 +457,7 @@ func Middleware(opts Options) func(http.Handler) http.Handler {
 			begin, err := opts.Store.Begin(r.Context(), Attempt{
 				Lookup: lookup, Operation: opts.Operation, Principal: principal, Key: key,
 				RequestHash: RequestHash(r.Method, pathAndQuery, body),
-				Now:         startedAt, ExpiresAt: startedAt + ttl.Milliseconds(), TakeOverBefore: startedAt - inFlight.Milliseconds(),
+				Now:         startedAt, ExpiresAt: startedAt + keep.Milliseconds(), TakeOverBefore: startedAt - inFlight.Milliseconds(),
 			})
 			if err != nil {
 				response.LoggedError(w, r, http.StatusInternalServerError, "An unexpected error occurred", "internal_error")

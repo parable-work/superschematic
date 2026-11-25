@@ -12,6 +12,7 @@ import {
   isIdempotencyKey,
   memoryIdempotencyStore,
   postgresIdempotencyStore,
+  runIdempotent,
   sqliteIdempotencyStore,
   type IdempotencyBegin,
   type IdempotencyStore,
@@ -172,6 +173,49 @@ const createOrder: OperationSpec = {
   auth: { public: false, required: true, permissions: [] },
   manual: false,
 };
+
+describe('a ttl shorter than the time limit', () => {
+  for (const [dialect, open] of Object.entries(stores)) {
+    test(`holds the key while the first request may run, on ${dialect}`, async () => {
+      const store = await open();
+      let at = 1_800_000_000_000;
+      let runs = 0;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>(resolve => (release = resolve));
+      let entered: () => void = () => undefined;
+      const running = new Promise<void>(resolve => (entered = resolve));
+      const request = {
+        operation: 'orders.createOrder',
+        principal: 'u1',
+        method: 'POST',
+        pathAndQuery: '/api/orders',
+        headers: new Headers({ 'Idempotency-Key': 'short' }),
+        body: async () => new TextEncoder().encode('{}'),
+        requestId: 'r',
+        timeoutSeconds: 45,
+      };
+      const run = (work: () => Promise<Response>) => runIdempotent(request, { ttlSeconds: 1 }, store, work, () => at);
+      const first = run(async () => {
+        runs += 1;
+        entered();
+        await held;
+        return new Response('{"run":1}', { status: 200 });
+      });
+      await running;
+      at += 31_000;
+      expect(await store.sweep(at, 100)).toBe(0);
+      const waiting = await run(async () => {
+        runs += 1;
+        return new Response('{"run":2}', { status: 200 });
+      }).catch((error: HttpProblem) => error);
+      expect(waiting).toBeInstanceOf(HttpProblem);
+      expect([(waiting as HttpProblem).status, (waiting as HttpProblem).code]).toEqual([409, IdempotencyCode.IN_FLIGHT]);
+      release();
+      expect((await first).status).toBe(200);
+      expect(runs).toBe(1);
+    });
+  }
+});
 
 describe('an @idempotent route', () => {
   function serve(spec: OperationSpec = createOrder, store: IdempotencyStore = memoryIdempotencyStore()) {
