@@ -275,10 +275,7 @@ mod tests {
                 vg_arrange,
                 format!(
                     r#"{{"descriptor":{ORDERED},"tree":{{}},"kind":"step","keys":[]}}"#,
-                    ORDERED = DESCRIPTOR.replace(
-                        r#""history""#,
-                        r#""order":"title","history""#
-                    )
+                    ORDERED = DESCRIPTOR.replace(r#""history""#, r#""order":"title","history""#)
                 ),
             ),
         ];
