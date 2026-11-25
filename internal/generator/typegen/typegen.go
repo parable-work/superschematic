@@ -448,7 +448,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		if scalar.ParseAsInt64 {
 			output.HasInt64ScalarParsers = true
 		}
-		if scalar.ParseAsJSON {
+		// A JSON scalar without a Parse function (no ParseTarget) calls no
+		// json function, so it needs no encoding/json import.
+		if scalar.ParseAsJSON && scalar.ParseTarget != "" {
 			output.HasJSONScalarParsers = true
 		}
 	}
