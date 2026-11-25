@@ -3701,9 +3701,12 @@ export class TriageTickets {}
   config's `permission`, and runs the HTTP runtime's `runDeriver`
   (`@superschematic/http-runtime/deriver`) over each table's
   `derived.staleDerivations` and `derived.settleDerivations`: the same
-  loop, which pulls again after five seconds when nothing is stale, a
-  table having no commit to wake it, and waits out a pull or a settle
-  that fails, a second, doubling to thirty. The repositories run on
+  loop, which pulls again after five seconds when a pass settles
+  nothing, a table having no commit to wake it, holds each answer to
+  what a settle takes so that a bad one fails its own field, and waits
+  out a table whose pull or settle fails for a reason time cures, a
+  second, doubling to thirty; a refusal of the core's other than busy
+  ends it with the error. The repositories run on
   Postgres, so the database lists `postgres` first. Rust and Go follow.
 - **Its principal.** The deployable's name as the subject, holding each
   derived type's name and each Derived config's `permission`. The

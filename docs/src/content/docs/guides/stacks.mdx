@@ -890,8 +890,12 @@ deployable's name, and what it pulls from depends on its schemas:
   `derived.settleDerivations`: read a page of stale fields, hand each to
   its method, settle the answers by the hash it pulled. Every answer goes
   through the behaviors' core, as the table's own operations do. When
-  nothing is stale it pulls again after five seconds, and a pull or a
-  settle that fails is waited out, a second, doubling to thirty. The
+  a pass settles nothing it pulls again after five seconds, and each
+  pull scans the table. An answer of no shape a settle takes fails its
+  own field. A pull or a settle that fails for a reason time cures has
+  its table waited out, a second, doubling to thirty, while the other
+  tables go on; one the core refuses for good, a caller without the
+  permission among them, ends the deriver with the error. The
   database lists `postgres` first, since the TypeScript repositories run
   there. A Rust API's deriver of tables is refused until it follows.
 - **Engine types** (D74). A TypeScript or a Rust API's deriver opens the

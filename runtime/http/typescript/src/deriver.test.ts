@@ -12,6 +12,11 @@ class FakeTable {
   pulls: Array<{ limit?: number; cursor?: string }> = [];
   settles: DerivationSettlement[][] = [];
   pullErrors = 0;
+  settleErrors = 0;
+  /** What a pull or a settle that fails throws. */
+  failure: () => unknown = () => new Error('the database is down');
+  /** Fields another behavior's guard holds: a settle skips them and counts no attempt. */
+  held = new Set<string>();
   maxAttempts = 2;
 
   stale(id: string, field: string, inputs: Record<string, unknown>): void {
@@ -24,7 +29,7 @@ class FakeTable {
         this.pulls.push(params);
         if (this.pullErrors > 0) {
           this.pullErrors--;
-          throw new Error('the database is down');
+          throw this.failure();
         }
         const stale = [...this.fields.values()].filter(f => f.value === undefined && f.attempts < this.maxAttempts);
         const from = params.cursor === undefined ? 0 : Number(params.cursor);
@@ -45,11 +50,32 @@ class FakeTable {
         return { items, next: from + limit < stale.length ? String(from + limit) : null };
       },
       settleDerivations: async ({ items }) => {
+        if (this.settleErrors > 0) {
+          this.settleErrors--;
+          throw this.failure();
+        }
+        // The core holds the whole call to its parameters: one item of
+        // another shape refuses every item.
+        for (const item of items) {
+          const extra = Object.keys(item).filter(key => !['id', 'field', 'sourceHash', 'value', 'confidence', 'usage', 'failure'].includes(key));
+          const usage = item.usage ?? {};
+          const counts = [usage.inputTokens, usage.outputTokens, usage.costMicros].filter(count => count !== undefined);
+          const malformed =
+            extra.length > 0 ||
+            (item.value === undefined) === (item.failure === undefined) ||
+            (item.confidence !== undefined && !(item.confidence >= 0 && item.confidence <= 1)) ||
+            counts.some(count => !Number.isInteger(count) || (count as number) < 0) ||
+            (usage.modelId ?? '').length > 200 ||
+            (item.failure !== undefined && (item.failure.message.length > 2000 || (item.failure.class ?? '').length > 64));
+          if (malformed) throw Object.assign(new Error(`settleDerivations: ${item.id}/${item.field} is malformed`), { code: 'invalid_argument' });
+        }
         this.settles.push(items);
         const result = { settled: 0, failed: 0, skipped: [] as Array<{ id: string; field: string; reason: string }> };
         for (const item of items) {
           const held = this.fields.get(`${item.id}/${item.field}`);
-          if (held === undefined) {
+          if (this.held.has(`${item.id}/${item.field}`)) {
+            result.skipped.push({ id: item.id, field: item.field, reason: 'vetoed' });
+          } else if (held === undefined) {
             result.skipped.push({ id: item.id, field: item.field, reason: 'not_found' });
           } else if (held.sourceHash !== item.sourceHash) {
             result.skipped.push({ id: item.id, field: item.field, reason: 'moved' });
@@ -238,6 +264,174 @@ describe('runDeriver', () => {
       idleMs: 5,
       signal: halt.signal,
     });
+    expect(tickets.settles).toEqual([]);
+  });
+
+  test('an answer of no shape a settle takes fails its own item, and the page still settles', async () => {
+    const tickets = new FakeTable();
+    for (const id of ['extra', 'empty', 'unsure', 'costly', 'wordy', 'text', 'fine']) tickets.stale(id, 'category', { subject: 'card' });
+    const answers: Record<string, unknown> = {
+      extra: { value: 'billing', confidence: 0.5, note: 'a member a settle does not take' },
+      empty: {},
+      unsure: { value: 'billing', confidence: 2 },
+      costly: { value: 'billing', usage: { inputTokens: 12, outputTokens: -1, costMicros: 1.5, modelId: 'm'.repeat(300), region: 'eu' } },
+      wordy: { failure: { class: 'c'.repeat(100), message: 'x'.repeat(5000), retry: true } },
+      text: 'billing',
+      fine: { value: 'other' },
+    };
+    const stop = new AbortController();
+    const retries: unknown[] = [];
+    const running = runDeriver({
+      tables: { Ticket: tickets.table() },
+      answer: (_table, item) => answers[item.id] as DerivationAnswer,
+      idleMs: 5,
+      signal: stop.signal,
+      onRetry: error => retries.push(error),
+    });
+    await until(() => tickets.settles.length > 0);
+    stop.abort();
+    await running;
+    const settled = Object.fromEntries(tickets.settles[0]!.map(item => [item.id, item]));
+    const base = (id: string) => ({ id, field: 'category', sourceHash: `hash-${id}-category` });
+    expect(settled.extra).toEqual({ ...base('extra'), value: 'billing', confidence: 0.5 });
+    expect(settled.empty).toEqual({ ...base('empty'), failure: { class: 'invalid_answer', message: 'the answer holds neither a value nor a failure' } });
+    expect(settled.unsure).toEqual({ ...base('unsure'), failure: { class: 'invalid_answer', message: "the answer's confidence, 2, is no number from 0 to 1" } });
+    expect(settled.costly).toEqual({ ...base('costly'), value: 'billing', usage: { inputTokens: 12, costMicros: 2, modelId: 'm'.repeat(200) } });
+    expect(settled.wordy).toEqual({ ...base('wordy'), failure: { class: 'c'.repeat(64), message: 'x'.repeat(2000) } });
+    expect(settled.text).toEqual({ ...base('text'), failure: { class: 'invalid_answer', message: 'the answer is no object: it holds a value, or a failure with a message' } });
+    expect(settled.fine).toEqual({ ...base('fine'), value: 'other' });
+    // One call settled the page: the bad answers each cost their own item an attempt, and nothing was retried.
+    expect(retries).toEqual([]);
+    expect(tickets.fields.get('fine/category')?.value).toBe('other');
+    expect(tickets.fields.get('empty/category')?.attempts).toBeGreaterThanOrEqual(1);
+  });
+
+  test('a pass that settles and fails nothing waits before it pulls again', async () => {
+    const tickets = new FakeTable();
+    tickets.stale('t1', 'category', { subject: 'card' });
+    // Another behavior's guard holds the field: every settle skips it and counts no attempt.
+    tickets.held.add('t1/category');
+    const stop = new AbortController();
+    let asked = 0;
+    const running = runDeriver({
+      tables: { Ticket: tickets.table() },
+      answer: (table, item) => {
+        asked++;
+        return fakeModel(table, item);
+      },
+      idleMs: 60,
+      signal: stop.signal,
+    });
+    await sleep(150);
+    stop.abort();
+    await running;
+    // Back to back it would have asked hundreds of times.
+    expect(asked).toBeGreaterThanOrEqual(1);
+    expect(asked).toBeLessThanOrEqual(4);
+  });
+
+  test('a table that fails is waited out, each wait double the last up to the longest, while the tables after it go on', async () => {
+    const down = new FakeTable();
+    down.stale('d1', 'category', { subject: 'card' });
+    down.pullErrors = 4;
+    const up = new FakeTable();
+    up.stale('u1', 'category', { subject: 'card' });
+    const stop = new AbortController();
+    const retries: Array<[string, number, string]> = [];
+    const running = runDeriver({
+      tables: { Down: down.table(), Up: up.table() },
+      answer: fakeModel,
+      idleMs: 5,
+      retryMinMs: 10,
+      retryMaxMs: 40,
+      signal: stop.signal,
+      onRetry: (error, waitMs, table) => retries.push([error instanceof Error ? error.message : String(error), waitMs, table]),
+    });
+    // The table after the failing one settles on the first pass.
+    await until(() => up.fields.get('u1/category')?.value !== undefined);
+    expect(down.fields.get('d1/category')?.value).toBeUndefined();
+    await until(() => down.fields.get('d1/category')?.value !== undefined);
+    expect(retries).toEqual([
+      ['the database is down', 10, 'Down'],
+      ['the database is down', 20, 'Down'],
+      ['the database is down', 40, 'Down'],
+      ['the database is down', 40, 'Down'],
+    ]);
+    // Once it answers again its wait starts over.
+    down.stale('d2', 'category', { subject: 'card' });
+    down.pullErrors = 1;
+    await until(() => retries.length === 5);
+    expect(retries[4]).toEqual(['the database is down', 10, 'Down']);
+    stop.abort();
+    await running;
+  });
+
+  test('a settle that throws is waited out, and its page is pulled and settled again', async () => {
+    const tickets = new FakeTable();
+    tickets.stale('t1', 'category', { subject: 'card' });
+    tickets.settleErrors = 1;
+    const stop = new AbortController();
+    const retries: number[] = [];
+    const running = runDeriver({
+      tables: { Ticket: tickets.table() },
+      answer: fakeModel,
+      idleMs: 5,
+      retryMinMs: 10,
+      signal: stop.signal,
+      onRetry: (_error, waitMs) => retries.push(waitMs),
+    });
+    await until(() => tickets.fields.get('t1/category')?.value !== undefined);
+    stop.abort();
+    await running;
+    expect(retries).toEqual([10]);
+    expect(tickets.settles.length).toBe(1);
+  });
+
+  test('a refusal time does not cure, and a programming error, end the loop with the table named', async () => {
+    const tickets = new FakeTable();
+    tickets.pullErrors = 1;
+    tickets.failure = () => Object.assign(new Error('the caller does not hold tickets.derive'), { code: 'forbidden' });
+    const retries: unknown[] = [];
+    const forbidden = runDeriver({ tables: { Ticket: tickets.table() }, answer: fakeModel, idleMs: 5, onRetry: error => retries.push(error) });
+    await expect(forbidden).rejects.toThrow('deriver: table Ticket: the caller does not hold tickets.derive');
+    expect(retries).toEqual([]);
+
+    const broken = new FakeTable();
+    broken.pullErrors = 1;
+    broken.failure = () => new TypeError('undefined is not a function');
+    await expect(runDeriver({ tables: { Ticket: broken.table() }, answer: fakeModel, idleMs: 5 })).rejects.toThrow('deriver: table Ticket: undefined is not a function');
+
+    // A refusal as busy is one time cures.
+    const busy = new FakeTable();
+    busy.stale('t1', 'category', { subject: 'card' });
+    busy.pullErrors = 1;
+    busy.failure = () => Object.assign(new Error('busy'), { code: 'busy' });
+    const stop = new AbortController();
+    const running = runDeriver({ tables: { Ticket: busy.table() }, answer: fakeModel, idleMs: 5, retryMinMs: 10, signal: stop.signal });
+    await until(() => busy.fields.get('t1/category')?.value !== undefined);
+    stop.abort();
+    await running;
+  });
+
+  test('starts no answer after its signal aborts in the middle of a page', async () => {
+    const tickets = new FakeTable();
+    for (let i = 0; i < 6; i++) tickets.stale(`t${i}`, 'category', { subject: 'card' });
+    const stop = new AbortController();
+    const started: string[] = [];
+    await runDeriver({
+      tables: { Ticket: tickets.table() },
+      answer: async (table, item) => {
+        started.push(item.id);
+        if (started.length === 2) stop.abort();
+        await sleep(5);
+        return fakeModel(table, item);
+      },
+      concurrency: 2,
+      idleMs: 5,
+      signal: stop.signal,
+    });
+    // The two lanes each started one answer; neither took another, and nothing settled.
+    expect(started).toEqual(['t0', 't1']);
     expect(tickets.settles).toEqual([]);
   });
 });

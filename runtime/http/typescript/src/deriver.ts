@@ -15,13 +15,25 @@ table's repository in place of an engine.
 
 It pages each table until nothing is stale, answering a page's items
 `concurrency` at a time, and settles each page in one call. An answer that
-throws settles as a failure, so Derived counts the attempt. When a pass
-finds nothing it waits idleMs and pulls again: a table has no commit to
-wake it. A pull or a settle that fails (the database is down, a table its
-migration has not made yet, a command the core refuses as busy) is
-reported to onRetry and waited out, a second, doubling to thirty, as a
-worker waits out a claim that failed, so a deriver may start before its
-database does. The loop resolves when its signal aborts.
+throws settles as a failure, so Derived counts the attempt, and so does an
+answer of no shape a settle takes (no value and no failure, a confidence
+outside 0 to 1): the loop holds each answer to the settle's parameters
+before it sends the page, so one bad answer costs its item an attempt and
+never refuses the page. When a pass settles and fails nothing it waits
+idleMs and pulls again: a table has no commit to wake it, and an item the
+core skips without counting an attempt (another behavior's guard holds
+it) would otherwise be pulled and answered back to back.
+
+A pull or a settle that fails for a reason time cures (the database is
+down, a table its migration has not made yet, a command the core refuses
+as busy) is reported to onRetry and its table waited out, a second,
+doubling to thirty, as a worker waits out a claim that failed, so a
+deriver may start before its database does. The other tables go on
+meanwhile. A failure time does not cure, a refusal of the core's other
+than busy (forbidden, a caller without the config's permission, among
+them) or a programming error, rejects runDeriver with the table's name, as
+the engine's loop throws it, so the process ends and says why. The loop
+resolves when its signal aborts, and starts no answer after that.
 */
 
 /** How many stale fields a pull asks for unless set. */
@@ -40,8 +52,13 @@ export const DEFAULT_DERIVER_IDLE_MS = 5_000;
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
 
-/** The longest message a thrown answer's failure records. */
+/** The longest message a failure records, the longest class, and the longest model id a usage names, as settleDerivations takes them. */
 const MAX_FAILURE = 2_000;
+const MAX_FAILURE_CLASS = 64;
+const MAX_MODEL_ID = 200;
+
+/** The core's refusals time does not cure: every code of its but busy. */
+const PERMANENT_CODES = new Set(['invalid_schema', 'incompatible_change', 'not_found', 'invalid_argument', 'forbidden', 'invalid_instance', 'conflict', 'vetoed', 'behavior_error', 'internal']);
 
 /** One stale derived field, as a table's staleDerivations lists it. */
 export interface DerivationItem {
@@ -110,46 +127,76 @@ export interface DeriverOptions {
   readonly concurrency?: number;
   /** How long a pass that found nothing waits before it pulls again: DEFAULT_DERIVER_IDLE_MS unless set. */
   readonly idleMs?: number;
+  /** The first wait of a table whose pull or settle failed, which doubles to retryMaxMs: a second, and thirty, unless set. */
+  readonly retryMinMs?: number;
+  readonly retryMaxMs?: number;
   /** Stops the deriver: the answers running are aborted, and nothing more is settled. */
   readonly signal?: AbortSignal;
   /** Called after each settle, for logs. */
   readonly onSettled?: (table: string, result: SettleResult) => void;
-  /** Called with a failure of a pull or a settle the loop waits out, and the wait before it tries again, for logs. */
-  readonly onRetry?: (error: unknown, waitMs: number) => void;
+  /** Called with a failure of a pull or a settle the loop waits out, the wait before it tries that table again, and the table, for logs. */
+  readonly onRetry?: (error: unknown, waitMs: number, table: string) => void;
 }
 
-/** Runs a deriver over tables until its signal aborts. */
+/**
+ * Whether a failure of a pull or a settle is one time does not cure: a
+ * refusal of the core's other than busy, or a programming error. Anything
+ * else, a database's or a network's error among them, is waited out.
+ */
+function permanent(error: unknown): boolean {
+  if (error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError || error instanceof SyntaxError) return true;
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && PERMANENT_CODES.has(code);
+}
+
+/**
+ * Runs a deriver over tables until its signal aborts. It rejects on a
+ * failure of a pull or a settle that time does not cure.
+ */
 export async function runDeriver(options: DeriverOptions): Promise<void> {
   const batchSize = Math.min(Math.max(Math.trunc(options.batchSize ?? DEFAULT_DERIVER_BATCH_SIZE), 1), MAX_DERIVER_BATCH_SIZE);
   const concurrency = Math.max(Math.trunc(options.concurrency ?? DEFAULT_DERIVER_CONCURRENCY), 1);
   const idleMs = Math.max(options.idleMs ?? DEFAULT_DERIVER_IDLE_MS, 0);
+  const retryMinMs = Math.max(options.retryMinMs ?? RETRY_MIN_MS, 1);
+  const retryMaxMs = Math.max(options.retryMaxMs ?? RETRY_MAX_MS, retryMinMs);
   const signal = options.signal ?? new AbortController().signal;
   let wake: (() => void) | undefined;
   const aborted = (): void => wake?.();
   signal.addEventListener('abort', aborted);
-  let backoff = RETRY_MIN_MS;
+  // Each table that failed, with its wait and when it is tried again.
+  const waiting = new Map<string, { backoff: number; retryAt: number }>();
   try {
     while (!signal.aborted) {
-      let found = false;
-      let waitMs = idleMs;
-      try {
-        for (const [name, table] of Object.entries(options.tables)) {
-          if (signal.aborted) {
-            return;
-          }
-          found = (await derive(options, name, table, batchSize, concurrency, signal)) || found;
-        }
-        backoff = RETRY_MIN_MS;
-      } catch (error) {
+      let progressed = false;
+      for (const [name, table] of Object.entries(options.tables)) {
         if (signal.aborted) {
           return;
         }
-        options.onRetry?.(error, backoff);
-        waitMs = backoff;
-        backoff = Math.min(backoff * 2, RETRY_MAX_MS);
-        found = false;
+        const held = waiting.get(name);
+        if (held !== undefined && held.retryAt > Date.now()) {
+          continue;
+        }
+        try {
+          progressed = (await derive(options, name, table, batchSize, concurrency, signal)) || progressed;
+          waiting.delete(name);
+        } catch (error) {
+          if (signal.aborted) {
+            return;
+          }
+          if (permanent(error)) {
+            throw new Error(`deriver: table ${name}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+          }
+          const backoff = held === undefined ? retryMinMs : Math.min(held.backoff * 2, retryMaxMs);
+          waiting.set(name, { backoff, retryAt: Date.now() + backoff });
+          options.onRetry?.(error, backoff, name);
+        }
       }
-      if (!found && !signal.aborted) {
+      if (!progressed && !signal.aborted) {
+        // Until the idle wait is over, or a table that failed is due again.
+        let waitMs = idleMs;
+        for (const { retryAt } of waiting.values()) {
+          waitMs = Math.min(waitMs, Math.max(retryAt - Date.now(), 0));
+        }
         await new Promise<void>(resolve => {
           const timer = setTimeout(done, waitMs);
           function done(): void {
@@ -167,10 +214,11 @@ export async function runDeriver(options: DeriverOptions): Promise<void> {
 }
 
 // derive pages one table's stale fields, answers and settles each page,
-// and says whether it found any.
+// and says whether a settle wrote a value or counted an attempt: a pass
+// that only met items the core skips made no progress.
 async function derive(options: DeriverOptions, name: string, table: DerivedTable, batchSize: number, concurrency: number, signal: AbortSignal): Promise<boolean> {
   let cursor: string | null = null;
-  let found = false;
+  let progressed = false;
   do {
     const params: { limit: number; cursor?: string } = { limit: batchSize };
     if (cursor !== null) {
@@ -182,32 +230,78 @@ async function derive(options: DeriverOptions, name: string, table: DerivedTable
     if (items.length === 0) {
       continue;
     }
-    found = true;
     const answers = await answerAll(options, name, items, concurrency, signal);
     if (signal.aborted) {
-      return found;
+      return progressed;
     }
-    const result = await table.settleDerivations({
-      items: items.map((item, i) => ({ id: item.id, field: item.field, sourceHash: item.sourceHash, ...answers[i]! })),
-    });
+    const result = await table.settleDerivations({ items: items.map((item, i) => settlementOf(item, answers[i])) });
+    progressed = progressed || result.settled > 0 || result.failed > 0;
     options.onSettled?.(name, result);
   } while (cursor !== null && !signal.aborted);
-  return found;
+  return progressed;
+}
+
+// settlementOf holds an answer to what settleDerivations takes of an item,
+// so that one answer of another shape fails its own item and the page
+// still settles: a failure keeps its message and class, cut to their
+// lengths; a value keeps a confidence from 0 to 1 and what of its usage
+// is well formed; and anything else is the item's failure.
+function settlementOf(item: DerivationItem, answer: unknown): DerivationSettlement {
+  const base = { id: item.id, field: item.field, sourceHash: item.sourceHash };
+  const refused = (message: string): DerivationSettlement => ({ ...base, failure: { class: 'invalid_answer', message: message.slice(0, MAX_FAILURE) } });
+  if (typeof answer !== 'object' || answer === null) {
+    return refused('the answer is no object: it holds a value, or a failure with a message');
+  }
+  const given = answer as Record<string, unknown>;
+  if (given.failure !== undefined) {
+    const failure = given.failure as Record<string, unknown> | null;
+    if (typeof failure !== 'object' || failure === null || typeof failure.message !== 'string') {
+      return refused("the answer's failure has no message");
+    }
+    const out: { class?: string; message: string } = { message: failure.message.slice(0, MAX_FAILURE) };
+    if (typeof failure.class === 'string') out.class = failure.class.slice(0, MAX_FAILURE_CLASS);
+    return { ...base, failure: out };
+  }
+  if (given.value === undefined) {
+    return refused('the answer holds neither a value nor a failure');
+  }
+  const out: DerivationSettlement = { ...base, value: given.value };
+  if (given.confidence !== undefined) {
+    const confidence = given.confidence;
+    if (typeof confidence !== 'number' || !(confidence >= 0 && confidence <= 1)) {
+      return refused(`the answer's confidence, ${String(confidence)}, is no number from 0 to 1`);
+    }
+    out.confidence = confidence;
+  }
+  // What a call cost is kept for reports: a member of another shape is
+  // left out, and a count is a whole number.
+  if (typeof given.usage === 'object' && given.usage !== null) {
+    const usage = given.usage as Record<string, unknown>;
+    const kept: NonNullable<DerivationSettlement['usage']> = {};
+    for (const member of ['inputTokens', 'outputTokens', 'costMicros'] as const) {
+      const count = usage[member];
+      if (typeof count === 'number' && Number.isFinite(count) && count >= 0) kept[member] = Math.round(count);
+    }
+    if (typeof usage.modelId === 'string') kept.modelId = usage.modelId.slice(0, MAX_MODEL_ID);
+    if (Object.keys(kept).length > 0) out.usage = kept;
+  }
+  return out;
 }
 
 // answerAll answers items, concurrency at a time, in their order; a throw
-// is the item's failure.
-async function answerAll(options: DeriverOptions, name: string, items: readonly DerivationItem[], concurrency: number, signal: AbortSignal): Promise<DerivationAnswer[]> {
-  const out: DerivationAnswer[] = new Array(items.length);
+// is the item's failure. Once the signal aborts it starts no answer more,
+// and the items it did not reach hold none.
+async function answerAll(options: DeriverOptions, name: string, items: readonly DerivationItem[], concurrency: number, signal: AbortSignal): Promise<unknown[]> {
+  const out: unknown[] = new Array(items.length);
   let next = 0;
   const lane = async (): Promise<void> => {
-    while (next < items.length) {
+    while (next < items.length && !signal.aborted) {
       const i = next++;
       const item = items[i]!;
       try {
         out[i] = await options.answer(name, item, signal);
       } catch (error) {
-        out[i] = { failure: { class: 'thrown', message: (error instanceof Error ? error.message : String(error)).slice(0, MAX_FAILURE) } };
+        out[i] = { failure: { class: 'thrown', message: error instanceof Error ? error.message : String(error) } };
       }
     }
   };

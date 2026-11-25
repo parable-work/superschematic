@@ -16,10 +16,12 @@
 // through the behaviors' core, as a table's own operations run. A method that
 // rejects fails its field, which counts an attempt. WORKER_CONCURRENCY, which
 // the platform sets, says how many methods run at a time: {{ .Deriver.Concurrency }} unless it says
-// otherwise. When nothing is stale it pulls again after five seconds, and a
-// pull or a settle that fails is waited out, a second, doubling to thirty. It
-// acts as its deployable's name, holding each Derived config's permission. On
-// SIGTERM or SIGINT it stops and exits 0.
+// otherwise. When a pass settles nothing it pulls again after five seconds. A
+// pull or a settle that fails for a reason time cures has its table waited
+// out, a second, doubling to thirty; one the core refuses for good (a caller
+// without the permission) ends the process with the error. It acts as its
+// deployable's name, holding each Derived config's permission. On SIGTERM or
+// SIGINT it stops and exits 0.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -90,8 +92,8 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
         logger.info('derivations settled', { table, settled: result.settled, failed: result.failed, skipped: result.skipped.length });
       }
     },
-    onRetry: (error, waitMs) => {
-      logger.warn('deriver waits', { error: error instanceof Error ? error.message : String(error), waitMs });
+    onRetry: (error, waitMs, table) => {
+      logger.warn('deriver waits', { table, error: error instanceof Error ? error.message : String(error), waitMs });
     },
   });
 }
