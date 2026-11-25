@@ -298,28 +298,36 @@ func TestDrainFromEnv(t *testing.T) {
 // idle.
 func TestADrainWorkerWaitsForAMessageDueWithinItsHorizon(t *testing.T) {
 	f := newFake()
+	// The queue holds a message due 150ms from now: a claim takes it once
+	// it is due, and NextDue reads how long until then, as the database
+	// reads a ready message that waits.
 	dueAt := time.Now().Add(150 * time.Millisecond)
 	var later bool
-	time.AfterFunc(150*time.Millisecond, func() {
-		f.add("delayed", func(context.Context) error {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			// The next message is due in an hour, past the horizon.
-			later = true
-			return nil
-		})
+	f.add("delayed", func(context.Context) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		// The next message is due in an hour, past the horizon.
+		later = true
+		return nil
 	})
 	q := f.queue(time.Minute)
+	claim := q.Claim
+	q.Claim = func(ctx context.Context, n int, lease time.Duration) ([]Message, error) {
+		if time.Now().Before(dueAt) {
+			return nil, nil
+		}
+		return claim(ctx, n, lease)
+	}
 	q.NextDue = func(context.Context) (time.Duration, bool, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		switch {
 		case later:
 			return time.Hour, true, nil
-		case len(f.ready) > 0:
-			return 0, false, nil
+		case time.Now().Before(dueAt):
+			return time.Until(dueAt), true, nil
 		}
-		return max(time.Until(dueAt), 0), true, nil
+		return 0, false, nil
 	}
 	core, logs := observer.New(zap.InfoLevel)
 	started := time.Now()

@@ -361,23 +361,24 @@ describe('runWorker in drain mode (D145)', () => {
 
   test('an idle worker waits for a message due within its horizon, a delayed one or a retry, and handles it, and stops once the next is due past it', async () => {
     const f = new FakeQueue(60);
-    // The queue holds a message due 150 ms from now: the claims find
-    // nothing until then.
+    // The queue holds a message due 150 ms from now: a claim takes it once
+    // it is due, and nextDue reads how long until then, as the database
+    // reads a ready message that waits.
     const dueAt = Date.now() + 150;
     let later = false;
+    f.add('delayed', async () => {
+      // A message due in an hour waits past the horizon of a minute.
+      later = true;
+    });
+    const fake = f.queue();
     const queue: WorkerQueue = {
-      ...f.queue(),
+      ...fake,
+      claim: async (n, leaseSeconds) => (Date.now() < dueAt ? [] : fake.claim(n, leaseSeconds)),
       nextDue: async () => {
-        if (f.ready.length > 0 || later) return later ? 3600 : undefined;
-        return Math.max(0, dueAt - Date.now()) / 1000;
+        if (later) return 3600;
+        return Date.now() < dueAt ? (dueAt - Date.now()) / 1000 : undefined;
       },
     };
-    setTimeout(() => {
-      f.add('delayed', async () => {
-        // A message due in an hour waits past the horizon of a minute.
-        later = true;
-      });
-    }, 150);
     const { lines, logger } = logs();
     const started = Date.now();
     await runWorker(queue, { signal: never, idleMs: 5, logger, drain: { idleMs: 20 }, drainHorizonMs: 60_000 });
