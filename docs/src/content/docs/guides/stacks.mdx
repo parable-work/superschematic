@@ -36,7 +36,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers and behavior workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger and are woken through a Workflow for a message due sooner, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself |
 | [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and an engine in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
@@ -822,10 +822,11 @@ to the API's `Workers` methods your implementation writes, so such a
 worker builds the API's `Deps` and calls the implementation's workers
 constructor as a `@worker`'s does
 ([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers),
-D104). `concurrency` applies to each queue. A table's change queue that no deployed worker runs keeps its
-messages waiting: no rule runs and no raw write's deadline moves until one
-does, so run a behavior worker for each such table in every environment
-whose writes matter. A Rust API's behavior worker claims on a SQLite file
+D104). `concurrency` applies to each queue. A table's deadline, change or
+event queue that no worker the environment runs claims would keep its
+messages waiting, no rule running and no deadline firing, so the build
+refuses the environment, naming the database, the table and the queue
+(D151): declare a behavior worker for each such table and run it there. A Rust API's behavior worker claims on a SQLite file
 (D116): its process drains the table's queues, deadlines first, on
 connections of its own, and prunes each as any worker does. No TypeScript
 or Go one claims on SQLite yet, and none on D1, so there a hearing
@@ -896,12 +897,14 @@ its job, so its image stays pinned, and has no tick and no wake.
 
 `stack dev` runs a drain worker as it runs any worker, a process that
 polls until it is stopped. On cloudflare a worker's Worker already drains
-at each firing of its Cron Trigger, and `mode` changes nothing there.
+at each firing of its Cron Trigger, and is woken sooner whatever its mode
+([Queue workers on Cron Triggers](#queue-workers-on-cron-triggers)), so
+`mode` changes nothing there.
 
 A Rust worker's entrypoint does not exit when its queue is empty yet, so
 one in drain mode does not resolve on gcp, and the Rust queue client
 sends no wake. A `@behaviorWorker` does not resolve in drain mode on any
-target: triggers and the clock fill its queues, which no wake hears. A
+target: a trigger fills its change queue, which no wake hears. A
 queue on SQLite has no advisory lock, so a worker there takes no slot.
 If your database is reached through a pooler that hands a connection back
 between transactions, a session's lock does not hold, and every start
@@ -2587,7 +2590,7 @@ retention and dead messages are as on gcp
 
 | Setting | Default | |
 | --- | --- | --- |
-| `drainSeconds` | `50` | how long each firing claims; it and the grace must fit in a Cron Trigger's 15 minutes |
+| `drainSeconds` | `50`, or less for a behavior worker | how long each firing claims; it and the grace must fit in a Cron Trigger's 15 minutes, and a behavior worker's in its `cpuMs` |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: handlers' work counts, waits do not |
 | `logs` | `true` | Workers Logs |
 | `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
@@ -2598,8 +2601,30 @@ retention and dead messages are as on gcp
 `enabled: false` leaves the Worker with no Cron Trigger. A Go or Rust
 worker does not resolve, and neither does one whose queue is on D1.
 `mode: "drain"` ([Drain mode](#drain-mode)) changes nothing here: each
-firing already drains the queue and stops, and no enqueue wakes the
-Worker before its next firing.
+firing already drains the queue and stops.
+
+A `@behaviorWorker` is a drainer too (D151). Its `drain.ts` runs its
+table's deadline, change and event queues at each firing, all at once,
+with the handlers its `main.ts` runs under `stack dev`. Its window and
+grace fit within the CPU time a firing may take, 30 seconds unless
+`cpuMs` says, since wall time bounds CPU time: the window is 50 seconds or
+what the CPU time leaves, 22 seconds with the defaults, and a
+`drainSeconds` that does not fit does not resolve. A claim takes up to
+`concurrency` messages of a queue. A firing that ends with messages left
+logs `backlog left for the next firing`, naming the queue and how many it
+handled; the next firing takes the rest.
+
+Each drainer's Worker is also a Workflow, of the class `QueueWake` its
+`drain.ts` exports. A server or a job that may write to the worker's
+queues holds a binding to it and `QUEUE_WAKES`, and a write whose message
+is due before the next firing creates an instance: an enqueue, delayed or
+not, an event a behavior emits, or a deadline armed within a minute. The
+instance sleeps until the message is due, then runs one firing as a
+drain, which stops once the queues are idle. So an urgent deadline fires
+within seconds of its time, and anything later at the firing after it,
+within a minute. A change a trigger writes, which a Reaction hears, waits
+for the next firing, and so does what one worker's handlers leave
+another.
 
 ### Sites on Workers
 
