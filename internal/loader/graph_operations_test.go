@@ -91,7 +91,7 @@ func TestGraphOperationsExpand(t *testing.T) {
 		{"seal", "POST", "recipes/{id}/refs/{ref}/seal", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphSealInput")}, "RecipeGraphCommitResult", "recipe_seal", "Recipe graph: seal", true, false, write},
 		{"merge", "POST", "recipes/{id}/refs/{ref}/merge", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphMergeInput")}, "RecipeGraphMergeResult", "recipe_merge", "Recipe graph: merge", false, false, write},
 		{"rebase", "POST", "recipes/{id}/refs/{ref}/rebase", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphRebaseInput")}, "RecipeGraphMergeResult", "recipe_rebase", "Recipe graph: rebase", true, false, write},
-		{"revert", "POST", "recipes/{id}/refs/{ref}/revert", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphRevertInput")}, "RecipeGraphCommitResult", "recipe_revert", "Recipe graph: revert", false, false, write},
+		{"revert", "POST", "recipes/{id}/refs/{ref}/revert", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphRevertInput")}, "RecipeGraphCommitResult", "recipe_revert", "Recipe graph: revert", true, false, write},
 		{"discard", "POST", "recipes/{id}/refs/{ref}/discard", []string{arg("id", uuid), arg("ref", uuid), arg("input", "RecipeGraphDiscardInput")}, "boolean", "recipe_discard", "Recipe graph: discard", true, false, write},
 		{"history", "GET", "recipes/{id}/refs/{ref}/history", []string{arg("id", uuid), arg("ref", uuid)}, "RecipeGraphCommit[]", "recipe_history", "Recipe graph: history", false, true, write},
 		{"compose", "GET", "recipes/{id}/refs/{ref}/tree", []string{arg("id", uuid), arg("ref", uuid)}, "RecipeGraphTree", "recipe_compose", "Recipe graph: compose", false, true, write},
