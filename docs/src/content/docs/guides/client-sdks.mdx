@@ -535,6 +535,12 @@ problem `client_too_old`, before any other step of its route:
   Unset or empty, every client is served.
 - One setting serves every API of a server whose config says
   `clientVersions`: a client is the application's, not one API's.
+- The 426 carries no `Upgrade` header, though RFC 9110 asks one of a 426.
+  `Upgrade` names a protocol to switch the connection to, and there is
+  none: the client upgrades itself, as `details.minimum` says. It is also
+  a connection header, which HTTP/2 and HTTP/3 forbid, so a server behind
+  a load balancer that speaks either could not send it intact. A client
+  reads the problem's `code`, never the header.
 - The Go, TypeScript and Rust servers decide each request alike
   (`runtime/http/testdata/client_version_parity.json`). A hand-written
   server passes the minimums itself: `Config.MinClientVersions` in Go,

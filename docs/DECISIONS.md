@@ -1534,7 +1534,11 @@ decorator, and the tool documents (`tools/schema.json`, the SDKs' tool
 invokers) do not list `idempotencyKey`: the replay contract holds a
 pointer to a required string argument of the tool, which the key is not
 unless the operation says `required`, and each SDK's invoker would have to
-pass it to the method as the key.
+pass it to the method as the key. A tool that both asks the person to
+confirm (D93) and is `@idempotent` asks again on a repeat that the route
+would answer from the kept answer: the endpoint confirms before the route
+reads the key, and its check (D98) keeps no key, so it cannot tell a
+replay from a first call.
 
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 

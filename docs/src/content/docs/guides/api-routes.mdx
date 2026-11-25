@@ -956,6 +956,13 @@ running, and a repeat past the time limit runs the operation again: a key
 makes a call run once but for that window. An implementation that must
 not run twice even then checks its own state under the same key.
 
+A route with no `@timeout` has no time limit at all: its implementation
+may run for minutes, while its key counts as running for 60 seconds
+only. A repeat after those 60 seconds takes the key over and runs the
+operation a second time beside the first. Give an `@idempotent`
+operation that may run longer than a minute a `@timeout` at least as
+long as it may run.
+
 A server deletes expired rows itself: after it keeps a new key, at most
 once a minute, it deletes up to 100 rows past their time. No job is
 needed.
