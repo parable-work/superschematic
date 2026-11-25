@@ -230,6 +230,8 @@ describe('the graph operations of fixture-graph-api', () => {
     // A merge writes its target: a merge into another caller's change set
     // is not found as a save to it is, whatever the source.
     expect(await refusal(sdk(BOB).recipe.merge(recipe, main, { into: draft.id, version: draft.version }))).toMatchObject({ status: 404, code: 'not_found' });
+    // A primary line is never discarded, by the caller who made it either.
+    expect(await refusal(sdk(ANN).recipe.discard(recipe, main, { version: await versionOf(main) }))).toMatchObject({ status: 409, code: 'primary_merge_only' });
     // A read is not a write of the change set.
     expect((await sdk(BOB).recipe.compose(recipe, draft.id)).part).toHaveLength(3);
     expect(await versionOf(draft.id)).toBe(draft.version);

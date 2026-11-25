@@ -1456,9 +1456,13 @@ edits a change set must read it; `branch` with no `from` branches the
 root's primary line and creates it, named `main`, for a root that has
 none, since no route creates one; `revert` is under the row rule with the
 six the text lists, since it writes a change set too, and so is a
-`merge`'s target when it is a change set, since the merge writes it; and
-every operation is an MCP tool without `@mcp` on the class, as a behavior
-set's are. The commits that built it name D138.
+`merge`'s target when it is a change set, since the merge writes it; a
+primary line is never discarded through the routes (409
+`primary_merge_only`), since the next branch would make it again, empty,
+though the engines' `Discard` still retires one, which a root with several
+primary lines may need; and every operation is an MCP tool without `@mcp`
+on the class, as a behavior set's are. The commits that built it name
+D138.
 
 Left: the Go and Rust servers do not serve the set: each operation stays
 a method of the implementation to write by hand, with the same route and

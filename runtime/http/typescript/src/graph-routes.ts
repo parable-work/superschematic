@@ -546,11 +546,18 @@ export function graphRevert(orm: object, graph: GraphFacade, operation: GraphOpe
   });
 }
 
-/** Discard (D138): a ref discarded at its version; true once it is. */
+/**
+ * Discard (D138): a change set discarded at its version; true once it is.
+ * A primary line is 409 primary_merge_only: discarding it would leave the
+ * root a line the next branch makes again, empty.
+ */
 export function graphDiscard(orm: object, graph: GraphFacade, operation: GraphOperation, ctx: RequestContext, request: GraphRequest): Promise<unknown> {
   return answered(async () => {
     const root = await rootOf(orm, operation.graph, request);
     const ref = await pathRef(orm, operation, ctx, request, root, true);
+    if (given(ref.parentRefId) === undefined) {
+      throw new HttpProblem(409, 'the ref is a primary line, which is never discarded: discard a change set of it', { code: 'primary_merge_only' });
+    }
     await writing(graph, ctx).discard(idOf(ref.id, 'ref'), bodyOf(operation, request).version as number);
     return true;
   });

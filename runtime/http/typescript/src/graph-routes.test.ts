@@ -270,6 +270,16 @@ describe('the row rule', () => {
     ]);
   });
 
+  test('a primary line is never discarded: 409 primary_merge_only, even for the caller who made it', async () => {
+    const { orm } = database();
+    const { graph, calls } = facade();
+    expect(await refused(graphDiscard(orm, graph, operation('discard', true), context(ANN), request({ ref: 'main' }, { version: 1 })))).toMatchObject({
+      status: 409,
+      code: 'primary_merge_only',
+    });
+    expect(calls).toEqual([]);
+  });
+
   test('a request with no caller, or one whose subject is no UUID, reaches none', async () => {
     const { orm } = database();
     const { graph, calls } = facade();
