@@ -25,6 +25,7 @@ var routerOptions = naming.GoAPIConfig{
 	PathParamError:      "{name} is not a path segment",
 	ValidatorNames:      map[string]string{"minLength": "min_length", "maxLength": "max_length", "listMax": "list_max"},
 	UndeclaredInputKeys: naming.GoAPIKeep,
+	InputTrailingData:   naming.GoAPIIgnore,
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,

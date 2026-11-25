@@ -239,6 +239,43 @@ func TestUndeclaredInputKeys(t *testing.T) {
 	})
 }
 
+// notJSON is the answer of a body that is not one JSON value.
+var notJSON = answer{Status: 400, Code: "bad_request", Detail: "Request body is not valid JSON"}
+
+// TestInputTrailingData: under go_api.input_trailing_data = "ignore" the
+// route reads the first JSON value of the body, of an open, a closed and an
+// optional input alike, and a body that is not JSON is refused under
+// either value.
+func TestInputTrailingData(t *testing.T) {
+	runCases(t, []routerCase{
+		{
+			name: "trailing data", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1} trailing`,
+			defaults: notJSON,
+			options:  answer{Status: 200},
+		},
+		{
+			name: "two objects", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1}{}`,
+			defaults: notJSON,
+			options:  answer{Status: 200},
+		},
+		{
+			name: "trailing data of a closed type", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1} x`,
+			defaults: notJSON,
+			options:  answer{Status: 200},
+		},
+		{
+			name: "trailing data of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: `{"name":"ab","count":1} x`,
+			defaults: notJSON,
+			options:  answer{Status: 200},
+		},
+		{
+			name: "a body cut short", method: http.MethodPost, target: "/api/widgets", body: `{"name":`,
+			defaults: notJSON,
+			options:  notJSON,
+		},
+	})
+}
+
 // TestPathParamError: go_api.path_param_error is the detail of the 400 of a
 // path parameter that does not decode to UTF-8.
 func TestPathParamError(t *testing.T) {

@@ -1035,6 +1035,16 @@ into the field it matches, as `encoding/json` does. A closed type,
 the keys of an `@allowUnknownFields` type, or of a webhook's input, are
 dropped under either value. Any other value fails the load.
 
+### `go_api.input_trailing_data`
+
+Default: `refuse`
+
+`refuse` reads the whole input body and refuses one with anything after
+its JSON value. `ignore` reads the first JSON value, as a `json.Decoder`
+reads it, and leaves the rest of the body unread: trailing data and a
+second value are not refused, and a read error after the first value is
+not seen. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

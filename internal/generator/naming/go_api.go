@@ -42,13 +42,25 @@ type GoAPIConfig struct {
 	// @strictJSON or @denyUnknownFields, is refused under either value, and
 	// an @allowUnknownFields type's keys are dropped under either value.
 	UndeclaredInputKeys string `toml:"undeclared_input_keys"`
+
+	// InputTrailingData is "refuse" (default) or "ignore". "refuse" reads
+	// the whole input body and refuses one with anything after its JSON
+	// value. "ignore" reads the first JSON value, as a json.Decoder reads
+	// it, and leaves the rest of the body unread: trailing data and a
+	// second value are not refused.
+	InputTrailingData string `toml:"input_trailing_data"`
 }
 
-// The values of go_api.undeclared_input_keys.
+// The values of go_api.undeclared_input_keys and input_trailing_data.
 const (
 	GoAPIRefuse = "refuse"
 	GoAPIKeep   = "keep"
+	GoAPIIgnore = "ignore"
 )
+
+// IgnoresInputTrailingData reports whether input_trailing_data is
+// "ignore".
+func (c GoAPIConfig) IgnoresInputTrailingData() bool { return c.InputTrailingData == GoAPIIgnore }
 
 // KeepsUndeclaredInputKeys reports whether undeclared_input_keys is
 // "keep".
@@ -91,6 +103,9 @@ func (c GoAPIConfig) check() error {
 		}
 	}
 	if err := checkGoAPIChoice("undeclared_input_keys", c.UndeclaredInputKeys, GoAPIRefuse, GoAPIKeep); err != nil {
+		return err
+	}
+	if err := checkGoAPIChoice("input_trailing_data", c.InputTrailingData, GoAPIRefuse, GoAPIIgnore); err != nil {
 		return err
 	}
 	for from, to := range c.ValidatorNames {

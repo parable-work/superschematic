@@ -23,6 +23,9 @@ func readInputOptions(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	if keepsUndeclaredKeys(router, endpoint) {
 		opts = append(opts, "bodyargs.KeepUndeclaredKeys()")
 	}
+	if router.IgnoresInputTrailingData() {
+		opts = append(opts, "bodyargs.FirstValue()")
+	}
 	return joinOptions(opts)
 }
 
@@ -32,6 +35,9 @@ func readInputNote(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	var notes []string
 	if keepsUndeclaredKeys(router, endpoint) {
 		notes = append(notes, "a key the type does not declare goes on to its decoder")
+	}
+	if router.IgnoresInputTrailingData() {
+		notes = append(notes, "the first JSON value is read and the rest of the body is not")
 	}
 	if len(notes) == 0 {
 		return ""

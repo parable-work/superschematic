@@ -27,6 +27,7 @@ func TestParseReadsTheGoAPITable(t *testing.T) {
 validation_error_code = "VL-1"
 path_param_error = "{name} is not a segment"
 undeclared_input_keys = "keep"
+input_trailing_data = "ignore"
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -39,6 +40,7 @@ minLength = "min_length"
 		PathParamError:      "{name} is not a segment",
 		ValidatorNames:      map[string]string{"minLength": "min_length"},
 		UndeclaredInputKeys: GoAPIKeep,
+		InputTrailingData:   GoAPIIgnore,
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -55,6 +57,7 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 		{"[go_api.validator_names]\nenum = \"one_of\"\n", `go_api.validator_names renames "enum", which no route check names: rename one of min, max, minLength, maxLength, pattern, listMin, listMax`},
 		{"[go_api.validator_names]\nmin = \"\"\n", `go_api.validator_names renames "min" to an empty name`},
 		{"[go_api]\nundeclared_input_keys = \"drop\"\n", `go_api.undeclared_input_keys is "drop": use "refuse" or "keep"`},
+		{"[go_api]\ninput_trailing_data = \"keep\"\n", `go_api.input_trailing_data is "keep": use "refuse" or "ignore"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
