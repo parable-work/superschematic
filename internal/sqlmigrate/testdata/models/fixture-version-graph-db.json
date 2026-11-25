@@ -629,7 +629,7 @@
         {
           "name": "rank",
           "origin": "Part.rank",
-          "type": "TEXT"
+          "type": "TEXT COLLATE \"C\""
         },
         {
           "name": "heading",
@@ -800,7 +800,7 @@
         {
           "name": "rank",
           "origin": "PartReleased.rank",
-          "type": "TEXT"
+          "type": "TEXT COLLATE \"C\""
         },
         {
           "name": "heading",

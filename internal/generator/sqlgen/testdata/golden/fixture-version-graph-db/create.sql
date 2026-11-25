@@ -52,7 +52,7 @@ CREATE TABLE part (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   recipe_id UUID NOT NULL,
   parent_key UUID,
-  rank TEXT NOT NULL,
+  rank TEXT COLLATE "C" NOT NULL,
   heading TEXT NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE part_released (
   recipe_id UUID NOT NULL,
   entity_key UUID NOT NULL,
   parent_key UUID,
-  rank TEXT NOT NULL,
+  rank TEXT COLLATE "C" NOT NULL,
   heading TEXT NOT NULL,
   commit_id UUID NOT NULL,
   "sequence" BIGINT NOT NULL

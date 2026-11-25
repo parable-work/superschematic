@@ -112,6 +112,32 @@ func TestVersionGraphFacadeArranges(t *testing.T) {
 		t.Fatalf("save parts: %v", err)
 	}
 	mix, knead, bake := *saved.Saved.Part[0].EntityKey, *saved.Saved.Part[1].EntityKey, *saved.Saved.Part[2].EntityKey
+	// A string order column sorts bytewise, as the core makes its keys
+	// (D137): the column and its copy in part_released are COLLATE "C",
+	// so ORDER BY rank reads F, V, k whatever the database's locale,
+	// where en_US.UTF-8 would read F, k, V.
+	for _, table := range []string{"part", "part_released"} {
+		var collation string
+		if err := pool.QueryRow(ctx, "SELECT collation_name FROM information_schema.columns WHERE table_name = $1 AND column_name = 'rank'", table).Scan(&collation); err != nil || collation != "C" {
+			t.Fatalf("%s.rank has the collation %q, %v; want C", table, collation, err)
+		}
+	}
+	var byRank []string
+	rows, err := pool.Query(ctx, "SELECT heading FROM part WHERE ref_id = $1::uuid ORDER BY rank", draft.Id.ToUUID())
+	if err != nil {
+		t.Fatalf("read the parts by rank: %v", err)
+	}
+	for rows.Next() {
+		var heading string
+		if err := rows.Scan(&heading); err != nil {
+			t.Fatal(err)
+		}
+		byRank = append(byRank, heading)
+	}
+	rows.Close()
+	if !reflect.DeepEqual(byRank, []string{"Mix", "Knead", "Bake"}) {
+		t.Fatalf("ORDER BY rank reads %v, want the core's order Mix, Knead, Bake", byRank)
+	}
 	arranged, err := g.Arrange(ctx, *draft.Id, saved.Ref.Version, types.RecipeEntityKind_Part, nil, []types.IdentityUUID{bake, mix, knead})
 	if err != nil {
 		t.Fatalf("Arrange: %v", err)

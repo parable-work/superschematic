@@ -19,7 +19,8 @@ adopted while it differs takes plans that fail; the diff says what to
 change, by hand or by renaming with @table and @column, first.
 
 A database names a constraint, an index or a trigger as Postgres does,
-and a column's type and default as format_type and pg_get_expr write them;
+and a column's type and default as format_type and pg_get_expr write them,
+a type followed by the column's COLLATE when it is not the type's own;
 the diff compares a model's in those forms. SQLite names no constraint, so
 on SQLite it compares the tables, their columns and the indexes alone. The
 runner's own tables are not the service's, and are left out.
@@ -348,8 +349,8 @@ func readPostgres(ctx context.Context, conn Conn, m driftModel) (*liveSchema, er
 					live.tables[cols[0]] = map[string]liveColumn{}
 				}
 			}},
-		{6, `SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod), CASE WHEN a.attnotnull THEN 'no' ELSE 'yes' END, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), CASE WHEN a.attgenerated <> '' THEN 'yes' ELSE 'no' END
-			FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+		{6, `SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod) || CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN ' COLLATE ' || quote_ident(co.collname) ELSE '' END, CASE WHEN a.attnotnull THEN 'no' ELSE 'yes' END, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), CASE WHEN a.attgenerated <> '' THEN 'yes' ELSE 'no' END
+			FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_type t ON t.oid = a.atttypid LEFT JOIN pg_collation co ON co.oid = a.attcollation LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 			WHERE c.relnamespace = current_schema()::regnamespace AND c.relkind IN ('r', 'p') AND NOT c.relispartition AND a.attnum > 0 AND NOT a.attisdropped`, nil,
 			func(cols []string) {
 				if columns := live.tables[cols[0]]; columns != nil {
