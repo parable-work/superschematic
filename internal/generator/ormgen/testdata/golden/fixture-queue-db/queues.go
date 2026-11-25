@@ -303,7 +303,7 @@ var orderChangedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO order_changed_queue`,
-		dueIn:    `now() + make_interval(secs => $1)`,
+		dueIn:    `clock_timestamp() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
 		expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -481,7 +481,7 @@ var orderPlacedQueue = queueTable{
 	retain:     3600 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO order_placed_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -679,7 +679,7 @@ var pingQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ping_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -842,7 +842,7 @@ var stockCheckedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO stock_checked_queue`,
-		dueIn:    `now() + make_interval(secs => $1)`,
+		dueIn:    `clock_timestamp() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
 		expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -1005,7 +1005,7 @@ var stockMovedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO stock_moved_queue`,
-		dueIn:    `now() + make_interval(secs => $1)`,
+		dueIn:    `clock_timestamp() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
 		expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -1174,7 +1174,7 @@ var syncRequestedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO sync_requested_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

@@ -118,7 +118,7 @@ export const projectChangeQueue: QueueDefinition<ProjectChange> = {
   ],
   statements: {
     insert: `INSERT INTO project_change_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE project_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -182,7 +182,7 @@ export const taskChangeQueue: QueueDefinition<TaskChange> = {
   ],
   statements: {
     insert: `INSERT INTO task_change_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE task_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

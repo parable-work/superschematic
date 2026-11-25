@@ -49,7 +49,7 @@ function statements(table: string, columns: string[]): QueueStatements {
   const claimed = `WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`;
   return {
     insert: `INSERT INTO ${table}`,
-    dueIn: 'now() + make_interval(secs => $1)',
+    dueIn: 'clock_timestamp() + make_interval(secs => $1)',
     expire: `UPDATE ${table} SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -348,14 +348,14 @@ describe('enqueue', () => {
     await enqueue(client, definition(), { orderId: 'o-1', quantity: 3, shipTo: { line1: '1 Main St', city: 'Springfield' }, tags: [], note: null }, { delaySeconds: 90.5 });
     expect(client.queries).toEqual([
       {
-        text: 'INSERT INTO order_placed_queue (due_at, order_id, priority, quantity, ship_to, tags) VALUES (now() + make_interval(secs => $1), $2, $3, $4, $5, $6)',
+        text: 'INSERT INTO order_placed_queue (due_at, order_id, priority, quantity, ship_to, tags) VALUES (clock_timestamp() + make_interval(secs => $1), $2, $3, $4, $5, $6)',
         values: [90.5, 'o-1', 'low', 3, '{"line1":"1 Main St","city":"Springfield"}', []],
       },
     ]);
     // A message that sets no column still writes when it is due.
     const ping: QueueDefinition<{ sentAt?: Date }> = { ...definition(), fields: [{ name: 'sentAt', column: 'sent_at' }], statements: statements('ping_queue', ['sent_at']) };
     await enqueue(client, ping, {}, { delaySeconds: 5 });
-    expect(client.queries[1]).toEqual({ text: 'INSERT INTO ping_queue (due_at) VALUES (now() + make_interval(secs => $1))', values: [5] });
+    expect(client.queries[1]).toEqual({ text: 'INSERT INTO ping_queue (due_at) VALUES (clock_timestamp() + make_interval(secs => $1))', values: [5] });
     // No delay, and a delay of zero, are an enqueue as it always was: due_at takes its column's default.
     await enqueue(client, ping, {}, { delaySeconds: 0 });
     await enqueue(client, ping, {}, {});
@@ -730,6 +730,35 @@ describe.skipIf(dsn === '')('on Postgres', () => {
     } finally {
       await pool.end();
       await other.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test("a delayed enqueue late in a long transaction is due its delay after the statement, not after the transaction's start (D80)", async () => {
+    const schema = `queue_due_in_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.query('CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public');
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(createTable('order_placed_queue'));
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // The transaction has run for a second and a half when it enqueues
+        // with a delay of two seconds: the message is due three and a half
+        // seconds after the transaction began, not two.
+        await client.query('SELECT pg_sleep(1.5)');
+        await enqueue(client, definition(), { orderId: '6f1c2b8e-1d5a-4a8e-9a43-0f3a2c1e7b9d', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } }, { delaySeconds: 2 });
+        const { rows } = await client.query<{ late: boolean }>(`SELECT due_at >= now() + interval '3 seconds' AS late FROM order_placed_queue`);
+        expect(rows).toEqual([{ late: true }]);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+    } finally {
+      await pool.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);
       await admin.end();
     }

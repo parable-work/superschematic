@@ -36,7 +36,7 @@ pub const RECOUNT_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO recount_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE recount_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM recount_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE recount_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sku",
     "complete": "UPDATE recount_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
@@ -92,7 +92,7 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO stock_low_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE stock_low_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM stock_low_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE stock_low_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.product_id, q.level, q.urgency, q.warehouses, q.note",
     "complete": "UPDATE stock_low_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",

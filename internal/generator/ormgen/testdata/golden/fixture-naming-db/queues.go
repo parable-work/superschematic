@@ -301,7 +301,7 @@ var linePostedQueue = queueTable{
 	retain:     604800 * time.Second,
 	statements: queueStatements{
 		insert:   `INSERT INTO "linePosted"`,
-		dueIn:    `now() + make_interval(secs => $1)`,
+		dueIn:    `clock_timestamp() + make_interval(secs => $1)`,
 		conflict: `ON CONFLICT ("lineId") WHERE state = 'ready' DO UPDATE SET "amountCents" = excluded."amountCents", due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
 		expire: `UPDATE "linePosted" SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()

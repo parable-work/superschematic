@@ -268,7 +268,10 @@ func TestQueueDueIn(t *testing.T) {
 	plain := QueueSpec{Table: "ping_queue", Columns: []string{"sent_at"}, KeepDone: true}
 	keyed := QueueSpec{Table: "q", Columns: []string{"k", "v"}, KeepDone: true, Keys: []string{"k"}, OnDuplicate: ir.QueueOnDuplicateReplace}
 	for _, spec := range []QueueSpec{plain, keyed} {
-		if got, want := PostgresQueueStatements(spec).DueIn, "now() + make_interval(secs => $1)"; got != want {
+		// The statement's clock, not the transaction's: now() is when the
+		// transaction began, so an enqueue late in a long one would be due
+		// early.
+		if got, want := PostgresQueueStatements(spec).DueIn, "clock_timestamp() + make_interval(secs => $1)"; got != want {
 			t.Errorf("postgres dueIn = %s, want %s", got, want)
 		}
 		const sqlite = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?1) || ' seconds')"

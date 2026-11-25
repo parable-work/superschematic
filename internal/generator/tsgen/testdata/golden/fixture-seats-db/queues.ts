@@ -118,7 +118,7 @@ export const sandboxDeadlineQueue: QueueDefinition<SandboxDeadline> = {
   ],
   statements: {
     insert: `INSERT INTO sandbox_deadline_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE sandbox_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

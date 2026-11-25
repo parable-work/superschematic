@@ -283,9 +283,12 @@ a retry of your own in ten minutes and a debounce are each a delay.
 The delay may hold a fraction of a second. Zero is an enqueue with none,
 and a negative one is refused. The due time is the database's, not the
 caller's: the enqueue writes `due_at` as the queue's `dueIn` statement,
-`now() + make_interval(secs => $1)` on Postgres, which each language's
-client takes from the queue's definition as it takes the others, so the
-three write one due time.
+`clock_timestamp() + make_interval(secs => $1)` on Postgres, which each
+language's client takes from the queue's definition as it takes the
+others, so the three write one due time. The delay counts from the
+enqueue's statement, not from the start of its transaction, which is what
+`now()` would give: an enqueue late in a long transaction is still due its
+whole delay later. SQLite's clock is the statement's already.
 
 On a queue that [replaces](#one-message-per-key) the waiting message of a
 key, that message takes the new one's due time with its fields. So an

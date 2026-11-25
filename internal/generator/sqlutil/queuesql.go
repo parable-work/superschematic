@@ -39,7 +39,11 @@ type QueueStatements struct {
 
 	// DueIn is the value an enqueue gives due_at for a message that is due
 	// later (D80, amended): the database's clock plus the seconds of its
-	// one parameter, $1 (?1 on SQLite), which may hold a fraction. An
+	// one parameter, $1 (?1 on SQLite), which may hold a fraction. The
+	// clock is the statement's, not its transaction's: on Postgres
+	// clock_timestamp(), since now() is when the transaction began, and an
+	// enqueue late in a long transaction would be due early; SQLite's
+	// 'now' is the statement's already. An
 	// enqueue with a delay writes due_at first, with this value, and
 	// numbers the columns its message sets from $2; one with none leaves
 	// due_at to its column's default, the database's clock, so the message
@@ -312,7 +316,7 @@ func PostgresQueueStatements(spec QueueSpec) QueueStatements {
 	}
 	s := QueueStatements{
 		Insert: "INSERT INTO " + table,
-		DueIn:  "now() + make_interval(secs => $1)",
+		DueIn:  "clock_timestamp() + make_interval(secs => $1)",
 		Slot:   fmt.Sprintf("SELECT pg_try_advisory_lock(hashtext(%s), $1::int)", QuoteLiteral(QueueDrainLock(spec.Table))),
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),

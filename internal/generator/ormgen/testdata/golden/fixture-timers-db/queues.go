@@ -301,7 +301,7 @@ var invoiceChangeQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO invoice_change_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE invoice_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -492,7 +492,7 @@ var invoiceDeadlineQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO invoice_deadline_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE invoice_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -669,7 +669,7 @@ var ticketChangeQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ticket_change_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE ticket_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -860,7 +860,7 @@ var ticketDeadlineQueue = queueTable{
 	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ticket_deadline_queue`,
-		dueIn:  `now() + make_interval(secs => $1)`,
+		dueIn:  `clock_timestamp() + make_interval(secs => $1)`,
 		expire: `UPDATE ticket_deadline_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

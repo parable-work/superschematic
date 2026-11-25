@@ -122,7 +122,7 @@ export const orderChangedQueue: QueueDefinition<OrderChanged> = {
   ],
   statements: {
     insert: `INSERT INTO order_changed_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
     expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -233,7 +233,7 @@ export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {
   ],
   statements: {
     insert: `INSERT INTO order_placed_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -328,7 +328,7 @@ export const pingQueue: QueueDefinition<Ping> = {
   ],
   statements: {
     insert: `INSERT INTO ping_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
@@ -425,7 +425,7 @@ export const stockCheckedQueue: QueueDefinition<StockChecked> = {
   ],
   statements: {
     insert: `INSERT INTO stock_checked_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
     expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -529,7 +529,7 @@ export const stockMovedQueue: QueueDefinition<StockMoved> = {
   ],
   statements: {
     insert: `INSERT INTO stock_moved_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     conflict: `ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
     expire: `UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
@@ -636,7 +636,7 @@ export const syncRequestedQueue: QueueDefinition<SyncRequested> = {
   ],
   statements: {
     insert: `INSERT INTO sync_requested_queue`,
-    dueIn: `now() + make_interval(secs => $1)`,
+    dueIn: `clock_timestamp() + make_interval(secs => $1)`,
     expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
   last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
 WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,

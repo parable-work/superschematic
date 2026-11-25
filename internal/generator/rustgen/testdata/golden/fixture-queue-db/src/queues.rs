@@ -51,7 +51,7 @@ pub const ORDER_CHANGED_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO order_changed_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "conflict": "ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()",
     "expire": "UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT m.id FROM order_changed_queue AS m\n  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n    AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS o WHERE o.order_id = m.order_id AND o.id <> m.id\n      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))\n  ORDER BY m.due_at, m.id\n  LIMIT $1\n  FOR UPDATE OF m SKIP LOCKED\n)\nUPDATE order_changed_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.line_id, q.priority",
@@ -143,7 +143,7 @@ pub const ORDER_PLACED_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO order_placed_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM order_placed_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE order_placed_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.placed_at, q.priority, q.quantity, q.note, q.ship_to, q.tags",
     "complete": "UPDATE order_placed_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
@@ -203,7 +203,7 @@ pub const PING_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO ping_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM ping_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at",
     "complete": "DELETE FROM ping_queue\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
@@ -267,7 +267,7 @@ pub const STOCK_CHECKED_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO stock_checked_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "conflict": "ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING",
     "expire": "UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM stock_checked_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE stock_checked_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sku, q.quantity",
@@ -340,7 +340,7 @@ pub const STOCK_MOVED_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO stock_moved_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "conflict": "ON CONFLICT (warehouse, sku) WHERE state = 'ready' DO UPDATE SET quantity = excluded.quantity, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()",
     "expire": "UPDATE stock_moved_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT m.id FROM stock_moved_queue AS m\n  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n    AND NOT EXISTS (SELECT 1 FROM stock_moved_queue AS o WHERE o.warehouse = m.warehouse AND o.sku = m.sku AND o.id <> m.id\n      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))\n  ORDER BY m.due_at, m.id\n  LIMIT $1\n  FOR UPDATE OF m SKIP LOCKED\n)\nUPDATE stock_moved_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.warehouse, q.sku, q.quantity",
@@ -408,7 +408,7 @@ pub const SYNC_REQUESTED_QUEUE: &str = r#"{
   ],
   "statements": {
     "insert": "INSERT INTO sync_requested_queue",
-    "dueIn": "now() + make_interval(secs => $1)",
+    "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT m.id FROM sync_requested_queue AS m\n  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n    AND NOT EXISTS (SELECT 1 FROM sync_requested_queue AS o WHERE o.account_id = m.account_id AND o.id <> m.id\n      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))\n  ORDER BY m.due_at, m.id\n  LIMIT $1\n  FOR UPDATE OF m SKIP LOCKED\n)\nUPDATE sync_requested_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.account_id, q.reason",
     "complete": "UPDATE sync_requested_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
