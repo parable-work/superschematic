@@ -3,6 +3,7 @@ package apigen
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -89,8 +90,9 @@ func idempotencyOpenAPIParameter(endpoint EndpointInfo) map[string]interface{} {
 
 // addIdempotencyResponses declares, on an @idempotent operation's
 // responses, the refusals its key meets and the header of a repeat's
-// answer (D140). A status the operation already declares keeps its
-// description, with the key's refusal after it.
+// answer on each success it declares, whatever its status (D140). A
+// status the operation already declares keeps its description, with the
+// key's refusal after it.
 func addIdempotencyResponses(responses map[string]interface{}) {
 	refusals := []struct{ status, description string }{
 		{"409", "The first request under this Idempotency-Key is still running (code `idempotency_in_flight`): send it again after Retry-After seconds."},
@@ -114,14 +116,18 @@ func addIdempotencyResponses(responses map[string]interface{}) {
 		}
 		responses[refusal.status] = response
 	}
-	if success, ok := responses["200"].(map[string]interface{}); ok {
+	for status, declared := range responses {
+		success, ok := declared.(map[string]interface{})
+		if !ok || !strings.HasPrefix(status, "2") {
+			continue
+		}
 		headers, _ := success["headers"].(map[string]interface{})
 		if headers == nil {
 			headers = map[string]interface{}{}
 			success["headers"] = headers
 		}
 		headers[IdempotencyReplayHeader] = map[string]interface{}{
-			"description": "true when this is the answer of an earlier request under the same Idempotency-Key, which ran the operation; absent when this request ran it",
+			"description": "true when this is the answer of an earlier request under the same Idempotency-Key, which ran the operation; absent when this request ran it. A replay keeps the first answer's status, a refusal under 500 included, and carries this header whatever the status",
 			"schema":      map[string]interface{}{"type": "string", "enum": []string{"true"}},
 		}
 	}

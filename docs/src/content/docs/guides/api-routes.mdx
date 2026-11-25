@@ -991,7 +991,8 @@ repeat could not be answered as the first call was:
 
 The OpenAPI document declares the header on each such operation,
 required where the operation requires it, the 409 and the 422, and the
-`Idempotent-Replay` header of its 200. A generated SDK's method sends a
+`Idempotent-Replay` header of each success it declares, whatever its
+status. A generated SDK's method sends a
 key for each call
 ([Client SDKs](/superschematic/guides/client-sdks/#an-idempotency-key)).
 On the TypeScript server's MCP endpoint a tool call has no headers, so the

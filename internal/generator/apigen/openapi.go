@@ -531,12 +531,6 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			operation["responses"].(map[string]interface{})["304"] = fileNotModifiedResponse()
 		}
 
-		// An @idempotent operation declares what its key is refused with,
-		// and the header that marks a repeat's answer (D140).
-		if endpoint.Idempotent != nil {
-			addIdempotencyResponses(operation["responses"].(map[string]interface{}))
-		}
-
 		// A user model operation declares the errors the identity runtime
 		// answers it with (D50), beside the 400 and 500 of every route.
 		if endpoint.IdentityOperation != "" {
@@ -555,6 +549,12 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 				"description": "The user waits for an administrator's approval: pending is true and no session started",
 				"content":     success["content"],
 			}
+		}
+		// An @idempotent operation declares what its key is refused with,
+		// and the header that marks a repeat's answer on each success it
+		// declares (D140).
+		if endpoint.Idempotent != nil {
+			addIdempotencyResponses(operation["responses"].(map[string]interface{}))
 		}
 
 		if security := operationSecurity(endpoint); security != nil {
