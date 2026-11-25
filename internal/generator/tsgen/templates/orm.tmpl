@@ -232,7 +232,7 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
   {{.Type}}Relations{{if .Preconditions}},
   {{.Type}}Preconditions{{end}}
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
-  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Merge}} & MergeableRepository<{{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
 
 /** The {{.Table}} table, as the runtime reads and writes it. */
 export const {{.Const}}: TableDefinition = {
@@ -254,6 +254,33 @@ export const {{.Const}}: TableDefinition = {
 {{- end}}
 {{- if .HistoryActor}}
   historyActor: true,
+{{- end}}
+{{- with .Merge}}
+  merge: {
+    lock: {{jsonString .Lock}},
+{{- if .HistoryActor}}
+    historyActor: true,
+{{- end}}
+    steps: [
+{{- range .Steps}}
+      {
+        source: {{jsonString .Source}},
+        field: {{jsonString .Field}},
+{{- if .SelfReference}}
+        selfReference: {{jsonString .SelfReference}},
+{{- end}}
+{{- if .Collisions}}
+        collisions: [
+{{- range .Collisions}}
+          { sql: {{jsonString .SQL}}{{if .Actor}}, actor: {{jsonString .Actor}}{{end}} },
+{{- end}}
+        ],
+{{- end}}
+        repoint: { sql: {{jsonString .Repoint.SQL}}{{if .Repoint.Actor}}, actor: {{jsonString .Repoint.Actor}}{{end}} },
+      },
+{{- end}}
+    ],
+  },
 {{- end}}
 {{- if .Fences}}
   fences: [

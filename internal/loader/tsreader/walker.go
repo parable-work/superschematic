@@ -889,6 +889,11 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 					w.applyIdentityTrait(td, trait, t)
 					continue
 				}
+				// Mergeable is core IR too (mergeable.go, D147).
+				if w.mergeableEntry(t) {
+					w.applyMergeable(td, t)
+					continue
+				}
 				raw.Implements = append(raw.Implements, text)
 				id, typeArgs, ok := w.traitHeritageTarget(t, true)
 				if !ok {
@@ -1160,6 +1165,10 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				}
 				// The user model's traits carry no fields.
 				if _, core := w.identityTraitEntry(t); core {
+					continue
+				}
+				// Nor does Mergeable (D147).
+				if w.mergeableEntry(t) {
 					continue
 				}
 				// Implements entries may name the trait through the

@@ -17,7 +17,7 @@ func (e *emitter) emitQuery(def *ir.TypeDef) {
 		e.failf("type %s: Query role without a query declaration", def.Name)
 		return
 	}
-	if len(def.Fields) > 0 || def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.User != nil || def.UserRole != nil ||
+	if len(def.Fields) > 0 || def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.User != nil || def.UserRole != nil || def.Mergeable ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil || len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField ||
 		def.Versioned || def.Optimistic || def.EnvVars || def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.SQLName != "" {
 		e.failf("type %s: a query class carries @query alone, and no fields", def.Name)

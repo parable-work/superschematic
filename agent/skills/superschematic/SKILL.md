@@ -228,6 +228,15 @@ path for when the store is unavailable.
   caller, so it writes as `deps.orm.asSystem()` or `orm.AsSystem(ctx)`,
   the system actor `outputs.sql.systemActor` names; don't invent a user
   row for it.
+- **Two rows that are one are merged, not rewritten by hand.** Put
+  `implements Mergeable` on a table of things people type (labels,
+  customers, tags) and call `orm.label.mergeInto({ from, into })`
+  (`MergeInto(ctx, from, into)` in Go): one transaction repoints every
+  relation of the schema that references `from`, deletes a referencing
+  row a unique key would then refuse, and deletes `from` (D147). Don't
+  write the repointing against the relations you remember: the build
+  enumerates them. It copies no field of `from`, so update `into` first
+  with what to keep.
 - **Payloads you don't control gain keys.** A `@webhook`'s input drops the
   keys its type does not declare; mark any other such type
   `@allowUnknownFields`, rather than a manual route to read the body.

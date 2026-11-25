@@ -1647,22 +1647,45 @@ label and cost cap, which stay D74's.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
-Applications keep registries of names people type: labels, customers,
-tags. The same three things are written each time. A name is unique
-without regard to case. A renamed row is still found by its old name. Two
-rows that turn out to be one thing are merged, and everything that pointed
-at one points at the other.
+Built: `implements Mergeable`, a core trait of `@superschematic/db`
+(`TypeDef.Mergeable`, `mergeable: true` in the data forms). The Go and the
+TypeScript repository of such a table gain `MergeInto` and
+`mergeInto({ from, into })` on Postgres. They run the statements
+`sqlutil.MergePlanOf` writes from the schema's to-one relations and the
+unique keys of the tables that hold them, in one transaction: lock both
+rows, delete the referencing rows a unique key would refuse once
+repointed, repoint the rest, delete `from` as the repository's delete
+does, and answer the rows repointed and deleted by table
+(`docs/src/content/docs/guides/database-tables.mdx`, Merging rows). The
+commit that built it names D147. It settled what the text left open: a
+refused row is stamped deleted where its table deletes softly and the
+index holds live rows alone, and removed anywhere else; a behavior's
+sub-tables are not repointed; a merge into a row that references `from`
+through a relation of the table to itself is refused; and the counts
+leave `from` out.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A field typed `Aliased<T, { normalize? }>` is a name with aliases. `normalize` is `lower` (the default) or `slug`. The behavior adds a sub-table of aliases, each unique in its normalized form across the table's names and aliases together. | A unique index and a second table per application |
-| Its operations: `rename({ name })`, which keeps the old name as an alias; `addAlias` and `removeAlias`; and on the table, `resolve({ name })`, which answers the row whose name or alias matches. A name that another row holds, as a name or an alias, is refused with that row's key. The rules are in the behaviors' core. | Rules written per language |
-| A table that `implements Mergeable` gains `mergeInto({ from, into })` on its repository. In one transaction it repoints every relation of the database that references `from` to `into`, which the build enumerates; where that would break a unique index of the referencing table, it deletes the row that pointed at `from`; it moves `from`'s aliases and adds its name as one when the table has an `Aliased` field; then it deletes `from`, softly when the table deletes softly. It answers how many rows of each table it repointed and deleted. | A merge each application writes against the relations it remembers |
-| TypeScript and Go repositories on Postgres first. | |
+Left: `Aliased`, whole. A field typed `Aliased<T, { normalize? }>` is a
+name with aliases, `normalize` being `lower` (the default) or `slug`. The
+behavior keeps a table of the names, each unique in its normalized form
+across the table's names and aliases together. Its operations are
+`rename({ name })`, which keeps the old name as an alias, `addAlias` and
+`removeAlias`, and on the table `resolve({ name })`, which answers the row
+whose name or alias matches. A name another row holds, as a name or an
+alias, is refused with that row's key. The rules are the behaviors'
+core's, and a merge of a table with such a field moves `from`'s aliases to
+`into` and adds its name as one, a statement of `sqlutil.MergePlan`.
 
-Build: the behaviors' core and its declarations, `behaviorlayout`,
-`ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
-guide.
+Two things it waits on in the core. A field anchor's field is its
+behavior's alone (`anchored_writes` refuses it in a create), so a name a
+create gives needs a field anchor whose value a create hands the behavior,
+or the use on the type naming an own field. And uniqueness across rows
+needs a key the database holds: a use's shared table keyed by the
+normalized name serves it (`ReadRequest::SharedRow`), but the core deletes
+no shared row and reads no sub-table across rows, so a removed alias and
+a deleted row's names need one of the two.
+
+Also left: `merge_into` in the Rust repositories, SQLite and D1, and a
+route that serves a table's `mergeInto`.
 
 ## D148. A bucket's settings take CORS rules (D54 amended)
 

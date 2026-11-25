@@ -157,6 +157,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// its fences, which the runtime's repositories advance, and Depot's
 		// soft deletes carry the bump.
 		{service: "fixture-fenced-db", sqlite: true},
+		// Tables that implement Mergeable (D147): their repositories are a
+		// MergeableRepository, and each one's definition in orm.ts holds
+		// its merge, the statements of every relation that references it.
+		{service: "fixture-merge-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

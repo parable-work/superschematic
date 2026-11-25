@@ -821,6 +821,7 @@ export interface TypeDef {
   isTrait?: boolean;
   jsonField?: boolean;
   kind?: string;
+  mergeable?: boolean;
   name: string;
   optimistic?: boolean;
   owner?: string;
