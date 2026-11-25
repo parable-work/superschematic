@@ -2,9 +2,28 @@
 
 import type {
   JSDate,
+  GenericInt64,
   IdentityUUID,
   TemporalDateTime,
 } from './scalars';
+
+/**
+ * Address - An address of a customer, which declares no relation back: the build
+ * adds its customer_id from Customer's addresses.
+ */
+export interface Address {
+  id?: IdentityUUID | null;
+  line: string;
+}
+
+/**
+ * Board - A board of labels, through a join table the build adds (board_label).
+ */
+export interface Board {
+  id?: IdentityUUID | null;
+  title: string;
+  labels: Label[];
+}
 
 /**
  * Customer - A customer, merged when two records are one person. Its status is a
@@ -14,6 +33,7 @@ import type {
 export interface Customer {
   id?: IdentityUUID | null;
   name: string;
+  addresses: Address[];
   /** The state the instance is in. */
   status: string;
   /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
@@ -74,14 +94,54 @@ export interface LabelCode {
 
 /**
  * LabelNote - A note about a label, which says who changed it last and when: a merge
- * stamps both on the notes it repoints.
+ * stamps both on the notes it repoints. Its revision is a fence over the
+ * label and the text, which the merge's repoint advances.
  */
 export interface LabelNote {
   id?: IdentityUUID | null;
   label: Label;
   text: string;
+  revision: GenericInt64;
   updatedAt: TemporalDateTime;
   updatedBy?: IdentityUUID | null;
+}
+
+/**
+ * LabelNoteDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<LabelNote> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const LabelNoteDefaults: Partial<LabelNote> = {
+  revision: 0 as GenericInt64,
+};
+
+/**
+ * makeLabelNote returns a LabelNote initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makeLabelNote(overrides?: Partial<LabelNote>): LabelNote {
+  return { ...LabelNoteDefaults, ...(overrides || {}) } as LabelNote;
+}
+
+/**
+ * LabelPair - Two labels that go together, once per pair: two relations of one table
+ * to the merged table, and a key that holds both.
+ */
+export interface LabelPair {
+  id?: IdentityUUID | null;
+  first: Label;
+  second: Label;
+}
+
+/**
+ * LabelSlot - A label's place on a shelf, once per slot while it is open, and once
+ * with no slot: its unique index is partial and holds nulls alike.
+ */
+export interface LabelSlot {
+  id?: IdentityUUID | null;
+  label: Label;
+  slot?: string | null;
+  open: boolean;
 }
 
 /**

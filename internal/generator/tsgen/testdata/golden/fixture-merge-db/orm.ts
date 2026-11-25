@@ -49,8 +49,227 @@ column or a sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, MergeableRepository, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, RulesLayout, SoftDeleteRepository, StringFilter, TableDefinition, UseOperations, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, MergeableRepository, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, RulesLayout, SoftDeleteRepository, StringFilter, TableDefinition, UseOperations, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
+
+/**
+ * A row of Address, the address table: An address of a customer, which declares no relation back: the build
+ * adds its customer_id from Customer's addresses.
+ */
+export interface AddressRow {
+  id: T.IdentityUUID;
+  line: string;
+}
+
+/** What a create of a row of Address sets; a member left unset takes its column's default, or the schema's. */
+export interface AddressCreate {
+  id?: T.IdentityUUID | null;
+  line: string;
+}
+
+/** What an update of a row of Address sets: each member set, null setting a column that may be null to NULL. */
+export interface AddressUpdate {
+  line?: string;
+}
+
+/** The rows of Address a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface AddressFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  line?: StringFilter<string>;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly AddressFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly AddressFilter[];
+}
+
+/** The members findOne and findMany order rows of Address by. */
+export type AddressOrderField = "id" | "line";
+
+/** The members findPage orders rows of Address by (D60, amended); ties break by id. */
+export type AddressSortField = "id" | "line";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type AddressUniqueKey = readonly ["id"];
+
+/** The position of a row of Address in a findPage order: its id. */
+export interface AddressPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Address includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface AddressRelations {
+}
+
+/** The repository of Address. */
+export type AddressRepository = Repository<
+  AddressRow,
+  AddressCreate,
+  AddressUpdate,
+  AddressFilter,
+  AddressOrderField,
+  AddressSortField,
+  AddressUniqueKey,
+  T.IdentityUUID,
+  AddressPageKey,
+  AddressRelations
+>;
+
+/** The address table, as the runtime reads and writes it. */
+export const addressTable: TableDefinition = {
+  name: "Address",
+  table: "address",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "address.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "line", column: "line", field: "line", qualified: "address.line", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"line\"",
+    qualifiedColumns: "\"address\".\"id\", \"address\".\"line\"",
+    selectColumn: "\"address\".\"%s\"",
+    getOne: "SELECT \"id\", \"line\" FROM address WHERE id = $1",
+    getOneFields: "SELECT %s FROM address WHERE id = $1",
+    getMany: "SELECT \"id\", \"line\" FROM address WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM address%s%s LIMIT 1",
+    findMany: "SELECT %s FROM address%s%s%s",
+    count: "SELECT COUNT(*) FROM address%s",
+    page: "SELECT %s FROM address%s%s LIMIT %d",
+    pageAfterKey: "address.id %s %s",
+    pageAfter: "(%s, address.id) %s ((SELECT %s FROM address AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM address AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", address.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM address WHERE address.id = $1)",
+    insert: "INSERT INTO address (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO address (%s) VALUES %s RETURNING %s",
+    update: "UPDATE address SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"line\"",
+    updateMany: "UPDATE address SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO address (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"line\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM address WHERE id = $1",
+    deleteMany: "DELETE FROM address%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = address.id", rows: "SELECT \"id\", \"line\" FROM address WHERE (id) IN (%s)" },
+  },
+};
+
+/**
+ * A row of Board, the board table: A board of labels, through a join table the build adds (board_label).
+ */
+export interface BoardRow {
+  id: T.IdentityUUID;
+  title: string;
+}
+
+/** What a create of a row of Board sets; a member left unset takes its column's default, or the schema's. */
+export interface BoardCreate {
+  id?: T.IdentityUUID | null;
+  title: string;
+}
+
+/** What an update of a row of Board sets: each member set, null setting a column that may be null to NULL. */
+export interface BoardUpdate {
+  title?: string;
+}
+
+/** The rows of Board a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface BoardFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  title?: StringFilter<string>;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly BoardFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly BoardFilter[];
+}
+
+/** The members findOne and findMany order rows of Board by. */
+export type BoardOrderField = "id" | "title";
+
+/** The members findPage orders rows of Board by (D60, amended); ties break by id. */
+export type BoardSortField = "id" | "title";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type BoardUniqueKey = readonly ["id"];
+
+/** The position of a row of Board in a findPage order: its id. */
+export interface BoardPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Board includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface BoardRelations {
+}
+
+/** The repository of Board. */
+export type BoardRepository = Repository<
+  BoardRow,
+  BoardCreate,
+  BoardUpdate,
+  BoardFilter,
+  BoardOrderField,
+  BoardSortField,
+  BoardUniqueKey,
+  T.IdentityUUID,
+  BoardPageKey,
+  BoardRelations
+>;
+
+/** The board table, as the runtime reads and writes it. */
+export const boardTable: TableDefinition = {
+  name: "Board",
+  table: "board",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "board.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "board.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"title\"",
+    qualifiedColumns: "\"board\".\"id\", \"board\".\"title\"",
+    selectColumn: "\"board\".\"%s\"",
+    getOne: "SELECT \"id\", \"title\" FROM board WHERE id = $1",
+    getOneFields: "SELECT %s FROM board WHERE id = $1",
+    getMany: "SELECT \"id\", \"title\" FROM board WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM board%s%s LIMIT 1",
+    findMany: "SELECT %s FROM board%s%s%s",
+    count: "SELECT COUNT(*) FROM board%s",
+    page: "SELECT %s FROM board%s%s LIMIT %d",
+    pageAfterKey: "board.id %s %s",
+    pageAfter: "(%s, board.id) %s ((SELECT %s FROM board AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM board AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", board.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM board WHERE board.id = $1)",
+    insert: "INSERT INTO board (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO board (%s) VALUES %s RETURNING %s",
+    update: "UPDATE board SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"title\"",
+    updateMany: "UPDATE board SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM board WHERE id = $1",
+    deleteMany: "DELETE FROM board%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = board.id", rows: "SELECT \"id\", \"title\" FROM board WHERE (id) IN (%s)" },
+  },
+};
 
 /**
  * A row of Customer, the customer table: A customer, merged when two records are one person. Its status is a
@@ -192,6 +411,11 @@ export const customerTable: TableDefinition = {
   merge: {
     lock: "SELECT (id = $1) FROM customer WHERE id IN ($1, $2) ORDER BY id FOR UPDATE",
     steps: [
+      {
+        source: "Address",
+        field: "customer_id",
+        repoint: { sql: "UPDATE address SET customer_id = $2 WHERE address.customer_id = $1" },
+      },
       {
         source: "CustomerProfile",
         field: "customer",
@@ -623,8 +847,14 @@ export interface LabelFilter {
   referencedByLabelCodeLabel?: ReferencedByFilter;
   /** The rows a LabelNote row's label points at, or none does. */
   referencedByLabelNoteLabel?: ReferencedByFilter;
+  /** The rows a LabelPair row's first points at, or none does. */
+  referencedByLabelPairFirst?: ReferencedByFilter;
+  /** The rows a LabelPair row's second points at, or none does. */
+  referencedByLabelPairSecond?: ReferencedByFilter;
   /** The rows a Label row's parent points at, or none does. */
   referencedByLabelParent?: ReferencedByFilter;
+  /** The rows a LabelSlot row's label points at, or none does. */
+  referencedByLabelSlotLabel?: ReferencedByFilter;
   /** The rows a Subscription row's label points at, or none does. */
   referencedBySubscriptionLabel?: ReferencedByFilter;
   /** The rows whose parent is among the live Label rows the filter finds; a row whose parent is null is not among them (D90). */
@@ -655,7 +885,10 @@ export interface LabelRelations {
   readonly documentLabels: Related<DocumentLabelRow, DocumentLabelRelations, 'many'>;
   readonly labelCodes: Related<LabelCodeRow, LabelCodeRelations, 'many'>;
   readonly labelNotes: Related<LabelNoteRow, LabelNoteRelations, 'many'>;
+  readonly labelPairsByFirst: Related<LabelPairRow, LabelPairRelations, 'many'>;
+  readonly labelPairsBySecond: Related<LabelPairRow, LabelPairRelations, 'many'>;
   readonly labels: Related<LabelRow, LabelRelations, 'many'>;
+  readonly labelSlots: Related<LabelSlotRow, LabelSlotRelations, 'many'>;
   readonly subscriptions: Related<SubscriptionRow, SubscriptionRelations, 'many'>;
 }
 
@@ -722,7 +955,16 @@ export const labelTable: TableDefinition = {
   softDelete: true,
   merge: {
     lock: "SELECT (id = $1) FROM label WHERE id IN ($1, $2) AND deleted_at IS NULL ORDER BY id FOR UPDATE",
+    requiresUser: true,
     steps: [
+      {
+        source: "Board.labels",
+        field: "label_id",
+        collisions: [
+          { sql: "DELETE FROM board_label AS moved WHERE moved.label_id = $1 AND EXISTS (SELECT 1 FROM board_label AS held WHERE held.label_id = $2 AND held.board_id = moved.board_id)" },
+        ],
+        repoint: { sql: "UPDATE board_label SET label_id = $2 WHERE label_id = $1" },
+      },
       {
         source: "DocumentLabel",
         field: "label",
@@ -748,13 +990,37 @@ export const labelTable: TableDefinition = {
       {
         source: "LabelNote",
         field: "label",
-        repoint: { sql: "UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by) WHERE label_note.label_id = $1", actor: "uuid" },
+        repoint: { sql: "UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by), revision = label_note.revision + 1 WHERE label_note.label_id = $1", actor: "uuid" },
+      },
+      {
+        source: "LabelPair",
+        field: "first",
+        collisions: [
+          { sql: "WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $1), held AS (SELECT label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
+        ],
+        repoint: { sql: "UPDATE label_pair SET first_id = $2 WHERE label_pair.first_id = $1" },
+      },
+      {
+        source: "LabelPair",
+        field: "second",
+        collisions: [
+          { sql: "WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $1), held AS (SELECT label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
+        ],
+        repoint: { sql: "UPDATE label_pair SET second_id = $2 WHERE label_pair.second_id = $1" },
+      },
+      {
+        source: "LabelSlot",
+        field: "label",
+        collisions: [
+          { sql: "WITH moved AS (SELECT label_slot.id AS merge_key, label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $1 AND (open)), held AS (SELECT label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $2 AND (open)) DELETE FROM label_slot WHERE label_slot.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 IS NOT DISTINCT FROM held.k1))" },
+        ],
+        repoint: { sql: "UPDATE label_slot SET label_id = $2 WHERE label_slot.label_id = $1" },
       },
       {
         source: "Subscription",
         field: "label",
         collisions: [
-          { sql: "WITH moved AS (SELECT subscription.id AS merge_key, subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $1 AND (deleted_at IS NULL)), held AS (SELECT subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $2 AND (deleted_at IS NULL)) UPDATE subscription SET deleted_at = now(), deleted_by = $3 WHERE subscription.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))", actor: "uuid" },
+          { sql: "WITH moved AS (SELECT subscription.id AS merge_key, subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $1 AND (deleted_at IS NULL)), held AS (SELECT subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $2 AND (deleted_at IS NULL)) UPDATE subscription SET deleted_at = now(), deleted_by = $3, label_id = $2 WHERE subscription.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))", actor: "uuid" },
         ],
         repoint: { sql: "UPDATE subscription SET label_id = $2 WHERE subscription.label_id = $1" },
       },
@@ -767,7 +1033,10 @@ export const labelTable: TableDefinition = {
     { filter: "referencedByDocumentLabelLabel", probe: "SELECT 1 FROM document_label WHERE document_label.label_id = label.id" },
     { filter: "referencedByLabelCodeLabel", probe: "SELECT 1 FROM label_code WHERE label_code.label_id = label.id" },
     { filter: "referencedByLabelNoteLabel", probe: "SELECT 1 FROM label_note WHERE label_note.label_id = label.id" },
+    { filter: "referencedByLabelPairFirst", probe: "SELECT 1 FROM label_pair WHERE label_pair.first_id = label.id" },
+    { filter: "referencedByLabelPairSecond", probe: "SELECT 1 FROM label_pair WHERE label_pair.second_id = label.id" },
     { filter: "referencedByLabelParent", probe: "SELECT 1 FROM label WHERE label.parent_id = label.id", live: " AND label.deleted_at IS NULL" },
+    { filter: "referencedByLabelSlotLabel", probe: "SELECT 1 FROM label_slot WHERE label_slot.label_id = label.id" },
     { filter: "referencedBySubscriptionLabel", probe: "SELECT 1 FROM subscription WHERE subscription.label_id = label.id", live: " AND subscription.deleted_at IS NULL" },
   ],
   relations: [
@@ -777,7 +1046,10 @@ export const labelTable: TableDefinition = {
     { name: "documentLabels", target: "documentLabel", column: "labelId" },
     { name: "labelCodes", target: "labelCode", column: "labelId" },
     { name: "labelNotes", target: "labelNote", column: "labelId" },
+    { name: "labelPairsByFirst", target: "labelPair", column: "firstId" },
+    { name: "labelPairsBySecond", target: "labelPair", column: "secondId" },
     { name: "labels", target: "label", column: "parentId" },
+    { name: "labelSlots", target: "labelSlot", column: "labelId" },
     { name: "subscriptions", target: "subscription", column: "labelId" },
   ],
 };
@@ -906,12 +1178,14 @@ export const labelCodeTable: TableDefinition = {
 
 /**
  * A row of LabelNote, the label_note table: A note about a label, which says who changed it last and when: a merge
- * stamps both on the notes it repoints.
+ * stamps both on the notes it repoints. Its revision is a fence over the
+ * label and the text, which the merge's repoint advances.
  */
 export interface LabelNoteRow {
   id: T.IdentityUUID;
   labelId: T.IdentityUUID;
   text: string;
+  revision: T.GenericInt64;
   updatedAt: T.TemporalDateTime;
   updatedBy: T.IdentityUUID | null;
 }
@@ -921,12 +1195,14 @@ export interface LabelNoteCreate {
   id?: T.IdentityUUID | null;
   labelId: T.IdentityUUID;
   text: string;
+  revision?: T.GenericInt64 | null;
 }
 
 /** What an update of a row of LabelNote sets: each member set, null setting a column that may be null to NULL. */
 export interface LabelNoteUpdate {
   labelId?: T.IdentityUUID;
   text?: string;
+  revision?: T.GenericInt64;
   /** Who made the update, the acting user unless set. */
   updatedBy?: T.IdentityUUID;
 }
@@ -936,6 +1212,7 @@ export interface LabelNoteFilter {
   id?: UuidFilter<T.IdentityUUID>;
   labelId?: UuidFilter<T.IdentityUUID>;
   text?: StringFilter<string>;
+  revision?: NumberFilter<T.GenericInt64>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedBy?: UuidFilter<T.IdentityUUID> & NullFilter;
   /** The rows whose label is among the live Label rows the filter finds (D90). */
@@ -947,10 +1224,10 @@ export interface LabelNoteFilter {
 }
 
 /** The members findOne and findMany order rows of LabelNote by. */
-export type LabelNoteOrderField = "id" | "text" | "updatedAt" | "updatedBy";
+export type LabelNoteOrderField = "id" | "text" | "revision" | "updatedAt" | "updatedBy";
 
 /** The members findPage orders rows of LabelNote by (D60, amended); ties break by id. */
-export type LabelNoteSortField = "id" | "text" | "updatedAt";
+export type LabelNoteSortField = "id" | "text" | "revision" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type LabelNoteUniqueKey = readonly ["id"];
@@ -988,16 +1265,17 @@ export const labelNoteTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "label_note.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
     { name: "labelId", column: "label_id", field: "label", qualified: "label_note.label_id", uuid: true, required: true, relation: "Label", filter: ["eq", "ne", "in", "notIn", "isNull"] },
     { name: "text", column: "text", field: "text", qualified: "label_note.text", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "revision", column: "revision", field: "revision", qualified: "label_note.revision", int64: true, required: true, default: 0, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "label_note.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "label_note.updated_by", uuid: true, audit: "updatedBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
   ],
   statements: {
-    columns: "\"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\"",
-    qualifiedColumns: "\"label_note\".\"id\", \"label_note\".\"label_id\", \"label_note\".\"text\", \"label_note\".\"updated_at\", \"label_note\".\"updated_by\"",
+    columns: "\"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\"",
+    qualifiedColumns: "\"label_note\".\"id\", \"label_note\".\"label_id\", \"label_note\".\"text\", \"label_note\".\"revision\", \"label_note\".\"updated_at\", \"label_note\".\"updated_by\"",
     selectColumn: "\"label_note\".\"%s\"",
-    getOne: "SELECT \"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\" FROM label_note WHERE id = $1",
+    getOne: "SELECT \"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\" FROM label_note WHERE id = $1",
     getOneFields: "SELECT %s FROM label_note WHERE id = $1",
-    getMany: "SELECT \"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\" FROM label_note WHERE id IN (%s)",
+    getMany: "SELECT \"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\" FROM label_note WHERE id IN (%s)",
     live: "",
     liveWhere: "",
     liveCondition: "",
@@ -1015,21 +1293,277 @@ export const labelNoteTable: TableDefinition = {
     insert: "INSERT INTO label_note (%s) VALUES (%s) RETURNING %s",
     insertMany: "INSERT INTO label_note (%s) VALUES %s RETURNING %s",
     update: "UPDATE label_note SET %s WHERE id = $%d",
-    returning: " RETURNING \"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\"",
+    returning: " RETURNING \"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\"",
     updateMany: "UPDATE label_note SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\", (xmax = 0) AS _inserted",
+    upsert: "INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM label_note WHERE id = $1",
     deleteMany: "DELETE FROM label_note%s",
   },
+  fences: [
+    { column: "revision", covers: ["label_id", "text"], bump: "revision = label_note.revision + 1" },
+  ],
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = label_note.id", rows: "SELECT \"id\", \"label_id\", \"text\", \"updated_at\", \"updated_by\" FROM label_note WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = label_note.id", rows: "SELECT \"id\", \"label_id\", \"text\", \"revision\", \"updated_at\", \"updated_by\" FROM label_note WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "label", column: "labelId", target: "label", probe: "label_note.label_id IN (SELECT label.id FROM label%s)" },
+  ],
+};
+
+/**
+ * A row of LabelPair, the label_pair table: Two labels that go together, once per pair: two relations of one table
+ * to the merged table, and a key that holds both.
+ */
+export interface LabelPairRow {
+  id: T.IdentityUUID;
+  firstId: T.IdentityUUID;
+  secondId: T.IdentityUUID;
+}
+
+/** What a create of a row of LabelPair sets; a member left unset takes its column's default, or the schema's. */
+export interface LabelPairCreate {
+  id?: T.IdentityUUID | null;
+  firstId: T.IdentityUUID;
+  secondId: T.IdentityUUID;
+}
+
+/** What an update of a row of LabelPair sets: each member set, null setting a column that may be null to NULL. */
+export interface LabelPairUpdate {
+  firstId?: T.IdentityUUID;
+  secondId?: T.IdentityUUID;
+}
+
+/** The rows of LabelPair a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface LabelPairFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  firstId?: UuidFilter<T.IdentityUUID>;
+  secondId?: UuidFilter<T.IdentityUUID>;
+  /** The rows whose first is among the live Label rows the filter finds (D90). */
+  first?: LabelFilter;
+  /** The rows whose second is among the live Label rows the filter finds (D90). */
+  second?: LabelFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly LabelPairFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly LabelPairFilter[];
+}
+
+/** The members findOne and findMany order rows of LabelPair by. */
+export type LabelPairOrderField = "id";
+
+/** The members findPage orders rows of LabelPair by (D60, amended); ties break by id. */
+export type LabelPairSortField = "id";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type LabelPairUniqueKey = readonly ["id"] | readonly ["first", "second"];
+
+/** The position of a row of LabelPair in a findPage order: its id. */
+export interface LabelPairPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of LabelPair includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface LabelPairRelations {
+  readonly first: Related<LabelRow, LabelRelations, 'optional'>;
+  readonly second: Related<LabelRow, LabelRelations, 'optional'>;
+}
+
+/** The repository of LabelPair. */
+export type LabelPairRepository = Repository<
+  LabelPairRow,
+  LabelPairCreate,
+  LabelPairUpdate,
+  LabelPairFilter,
+  LabelPairOrderField,
+  LabelPairSortField,
+  LabelPairUniqueKey,
+  T.IdentityUUID,
+  LabelPairPageKey,
+  LabelPairRelations
+>;
+
+/** The label_pair table, as the runtime reads and writes it. */
+export const labelPairTable: TableDefinition = {
+  name: "LabelPair",
+  table: "label_pair",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "label_pair.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "firstId", column: "first_id", field: "first", qualified: "label_pair.first_id", uuid: true, required: true, relation: "Label", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "secondId", column: "second_id", field: "second", qualified: "label_pair.second_id", uuid: true, required: true, relation: "Label", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"first_id\", \"second_id\"",
+    qualifiedColumns: "\"label_pair\".\"id\", \"label_pair\".\"first_id\", \"label_pair\".\"second_id\"",
+    selectColumn: "\"label_pair\".\"%s\"",
+    getOne: "SELECT \"id\", \"first_id\", \"second_id\" FROM label_pair WHERE id = $1",
+    getOneFields: "SELECT %s FROM label_pair WHERE id = $1",
+    getMany: "SELECT \"id\", \"first_id\", \"second_id\" FROM label_pair WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM label_pair%s%s LIMIT 1",
+    findMany: "SELECT %s FROM label_pair%s%s%s",
+    count: "SELECT COUNT(*) FROM label_pair%s",
+    page: "SELECT %s FROM label_pair%s%s LIMIT %d",
+    pageAfterKey: "label_pair.id %s %s",
+    pageAfter: "(%s, label_pair.id) %s ((SELECT %s FROM label_pair AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM label_pair AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", label_pair.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM label_pair WHERE label_pair.id = $1)",
+    insert: "INSERT INTO label_pair (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO label_pair (%s) VALUES %s RETURNING %s",
+    update: "UPDATE label_pair SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"first_id\", \"second_id\"",
+    updateMany: "UPDATE label_pair SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO label_pair (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"first_id\", \"second_id\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM label_pair WHERE id = $1",
+    deleteMany: "DELETE FROM label_pair%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = label_pair.id", rows: "SELECT \"id\", \"first_id\", \"second_id\" FROM label_pair WHERE (id) IN (%s)" },
+    "first,second": { conflict: "(first_id, second_id)", keep: "first_id = label_pair.first_id", rows: "SELECT \"id\", \"first_id\", \"second_id\" FROM label_pair WHERE (first_id, second_id) IN (%s)" },
+  },
+  relations: [
+    { field: "first", column: "firstId", target: "label", probe: "label_pair.first_id IN (SELECT label.id FROM label%s)" },
+    { field: "second", column: "secondId", target: "label", probe: "label_pair.second_id IN (SELECT label.id FROM label%s)" },
+  ],
+};
+
+/**
+ * A row of LabelSlot, the label_slot table: A label's place on a shelf, once per slot while it is open, and once
+ * with no slot: its unique index is partial and holds nulls alike.
+ */
+export interface LabelSlotRow {
+  id: T.IdentityUUID;
+  labelId: T.IdentityUUID;
+  slot: string | null;
+  open: boolean;
+}
+
+/** What a create of a row of LabelSlot sets; a member left unset takes its column's default, or the schema's. */
+export interface LabelSlotCreate {
+  id?: T.IdentityUUID | null;
+  labelId: T.IdentityUUID;
+  slot?: string | null;
+  open: boolean;
+}
+
+/** What an update of a row of LabelSlot sets: each member set, null setting a column that may be null to NULL. */
+export interface LabelSlotUpdate {
+  labelId?: T.IdentityUUID;
+  slot?: string | null;
+  open?: boolean;
+}
+
+/** The rows of LabelSlot a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface LabelSlotFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  labelId?: UuidFilter<T.IdentityUUID>;
+  slot?: StringFilter<string> & NullFilter;
+  open?: BoolFilter;
+  /** The rows whose label is among the live Label rows the filter finds (D90). */
+  label?: LabelFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly LabelSlotFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly LabelSlotFilter[];
+}
+
+/** The members findOne and findMany order rows of LabelSlot by. */
+export type LabelSlotOrderField = "id" | "slot" | "open";
+
+/** The members findPage orders rows of LabelSlot by (D60, amended); ties break by id. */
+export type LabelSlotSortField = "id" | "slot";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type LabelSlotUniqueKey = readonly ["id"] | readonly ["label", "slot"];
+
+/** The position of a row of LabelSlot in a findPage order: its id. */
+export interface LabelSlotPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of LabelSlot includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface LabelSlotRelations {
+  readonly label: Related<LabelRow, LabelRelations, 'optional'>;
+}
+
+/** The repository of LabelSlot. */
+export type LabelSlotRepository = Repository<
+  LabelSlotRow,
+  LabelSlotCreate,
+  LabelSlotUpdate,
+  LabelSlotFilter,
+  LabelSlotOrderField,
+  LabelSlotSortField,
+  LabelSlotUniqueKey,
+  T.IdentityUUID,
+  LabelSlotPageKey,
+  LabelSlotRelations
+>;
+
+/** The label_slot table, as the runtime reads and writes it. */
+export const labelSlotTable: TableDefinition = {
+  name: "LabelSlot",
+  table: "label_slot",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "label_slot.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "labelId", column: "label_id", field: "label", qualified: "label_slot.label_id", uuid: true, required: true, relation: "Label", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "slot", column: "slot", field: "slot", qualified: "label_slot.slot", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "open", column: "open", field: "open", qualified: "label_slot.open", boolean: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"label_id\", \"slot\", \"open\"",
+    qualifiedColumns: "\"label_slot\".\"id\", \"label_slot\".\"label_id\", \"label_slot\".\"slot\", \"label_slot\".\"open\"",
+    selectColumn: "\"label_slot\".\"%s\"",
+    getOne: "SELECT \"id\", \"label_id\", \"slot\", \"open\" FROM label_slot WHERE id = $1",
+    getOneFields: "SELECT %s FROM label_slot WHERE id = $1",
+    getMany: "SELECT \"id\", \"label_id\", \"slot\", \"open\" FROM label_slot WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM label_slot%s%s LIMIT 1",
+    findMany: "SELECT %s FROM label_slot%s%s%s",
+    count: "SELECT COUNT(*) FROM label_slot%s",
+    page: "SELECT %s FROM label_slot%s%s LIMIT %d",
+    pageAfterKey: "label_slot.id %s %s",
+    pageAfter: "(%s, label_slot.id) %s ((SELECT %s FROM label_slot AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM label_slot AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", label_slot.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM label_slot WHERE label_slot.id = $1)",
+    insert: "INSERT INTO label_slot (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO label_slot (%s) VALUES %s RETURNING %s",
+    update: "UPDATE label_slot SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"label_id\", \"slot\", \"open\"",
+    updateMany: "UPDATE label_slot SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO label_slot (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"label_id\", \"slot\", \"open\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM label_slot WHERE id = $1",
+    deleteMany: "DELETE FROM label_slot%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = label_slot.id", rows: "SELECT \"id\", \"label_id\", \"slot\", \"open\" FROM label_slot WHERE (id) IN (%s)" },
+    "label,slot": { conflict: "(label_id, slot) WHERE open", keep: "label_id = label_slot.label_id", rows: "SELECT \"id\", \"label_id\", \"slot\", \"open\" FROM label_slot WHERE (label_id, slot) IN (%s) AND (open)" },
+  },
+  relations: [
+    { field: "label", column: "labelId", target: "label", probe: "label_slot.label_id IN (SELECT label.id FROM label%s)" },
   ],
 };
 
@@ -1283,6 +1817,8 @@ export const subscriptionTable: TableDefinition = {
 
 /** The repositories of fixture-merge-db, by table. */
 export interface FixtureMergeDbRepositories {
+  readonly address: AddressRepository;
+  readonly board: BoardRepository;
   readonly customer: CustomerRepository;
   readonly customerProfile: CustomerProfileRepository;
   readonly document: DocumentRepository;
@@ -1290,6 +1826,8 @@ export interface FixtureMergeDbRepositories {
   readonly label: LabelRepository;
   readonly labelCode: LabelCodeRepository;
   readonly labelNote: LabelNoteRepository;
+  readonly labelPair: LabelPairRepository;
+  readonly labelSlot: LabelSlotRepository;
   readonly purchase: PurchaseRepository;
   readonly subscription: SubscriptionRepository;
 }
@@ -1424,6 +1962,8 @@ export const fixtureMergeDbOrm: OrmDefinition = {
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {
+    address: addressTable,
+    board: boardTable,
     customer: customerTable,
     customerProfile: customerProfileTable,
     document: documentTable,
@@ -1431,6 +1971,8 @@ export const fixtureMergeDbOrm: OrmDefinition = {
     label: labelTable,
     labelCode: labelCodeTable,
     labelNote: labelNoteTable,
+    labelPair: labelPairTable,
+    labelSlot: labelSlotTable,
     purchase: purchaseTable,
     subscription: subscriptionTable,
   },

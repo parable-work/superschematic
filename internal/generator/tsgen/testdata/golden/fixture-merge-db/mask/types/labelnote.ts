@@ -14,6 +14,7 @@ export function maskSecretsLabelNote(value: LabelNote): LabelNote {
     id: value.id,
     label: maskSecretsLabel(value.label),
     text: value.text,
+    revision: value.revision,
     updatedAt: value.updatedAt,
     updatedBy: value.updatedBy,
   };

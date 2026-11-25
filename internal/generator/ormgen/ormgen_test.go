@@ -301,9 +301,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// every relation that references it, and the collisions of each
 		// unique key that holds the relation's column.
 		{mergeFixture, []string{
-			"repository_customer.go", "repository_customer_profile.go", "repository_document.go", "repository_document_label.go",
-			"repository_label.go", "repository_label_code.go", "repository_label_note.go", "repository_purchase.go",
-			"repository_subscription.go", "merge.go", "rules.go",
+			"repository_address.go", "repository_board.go", "repository_customer.go", "repository_customer_profile.go",
+			"repository_document.go", "repository_document_label.go", "repository_label.go", "repository_label_code.go",
+			"repository_label_note.go", "repository_label_pair.go", "repository_label_slot.go", "repository_purchase.go",
+			"repository_subscription.go", "fences.go", "merge.go", "rules.go",
 		}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {

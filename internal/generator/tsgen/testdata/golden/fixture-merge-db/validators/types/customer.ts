@@ -4,18 +4,21 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectNumber, expectString } from '../primitives';
+import { expectList, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
-import type { Customer, JSDate } from '../../types';
+import type { Customer, JSDate, Address } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
+
+import { parseAddressFromJSON, validateAddress } from './address';
 
 /**
  * Validates a Customer object
@@ -39,6 +42,46 @@ export function validateCustomer(value: Customer | null | undefined): Validation
   }
 
   expectString(errors, "name", value.name);
+
+  expectList(errors, "addresses", value.addresses);
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
+        return;
+      }
+      const nestedErrors = validateAddress(nested as Address);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    if (Array.isArray(value.addresses)) {
+      value.addresses.forEach((item, index) => validateNested(item, `addresses[${index}]`));
+    }
+
+  }
+
+  if (value.addresses === null || value.addresses === undefined) {
+    addFieldError(errors, "addresses", "required", "required field");
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.addresses)) {
+    value.addresses.forEach((item, index) => {
+      if (item === null || item === undefined) {
+        setFieldErrors(errors, `addresses[${index}]`, [{ validator: "required", message: "required field" }]);
+      }
+    });
+  }
 
   if (value.status === null || value.status === undefined) {
     addFieldError(errors, "status", "required", "required field");
@@ -74,6 +117,7 @@ export function validateCustomerRequired(value: Customer | null | undefined): Sc
 const CustomerKnownFields = new Set<string>([
   'id',
   'name',
+  'addresses',
   'status',
   'statusEnteredAt',
   '_version',
@@ -166,6 +210,10 @@ export function parseCustomerFromJSON(input: unknown): Customer {
   const obj = input as Record<string, unknown>;
   return {
     ...(obj as unknown as Customer),
+
+    addresses: Array.isArray(obj.addresses)
+      ? (obj.addresses as unknown[]).map((item) => parseAddressFromJSON(item))
+      : (obj.addresses as Address[]),
 
     statusEnteredAt: obj.statusEnteredAt != null
       ? (parseTemporalDateTimeFromLib(obj.statusEnteredAt as string) as JSDate)

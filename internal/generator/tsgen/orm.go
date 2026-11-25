@@ -353,6 +353,7 @@ var encryptedStatements = []string{"stale", "reseal"}
 type ORMMerge struct {
 	Lock         string
 	HistoryActor bool
+	RequiresUser bool
 	Steps        []ORMMergeStep
 }
 
@@ -400,7 +401,7 @@ func ormMerge(schema *ir.Schema, models []sqlutil.TableModel, tables []ORMTable,
 		}
 		return out
 	}
-	out := &ORMMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor}
+	out := &ORMMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser}
 	for _, step := range plan.Steps {
 		s := ORMMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
 		for _, collision := range step.Collisions {

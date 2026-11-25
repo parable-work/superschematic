@@ -30,11 +30,20 @@ type MergePlan struct {
 	// it does not return.
 	Lock string
 
-	// Steps are the relations of the schema's tables that reference the
-	// table, one per to-one relation, by source type and then field. A
-	// behavior's sub-table is left out: its rows are the behavior's state
-	// of `from`, and go with it.
+	// Steps are the foreign keys of the schema that reference the table,
+	// by source and then field: one per to-one relation of a table; one
+	// per @hasMany of the table whose target declares no relation back,
+	// whose column the build adds to the target; and one per @manyToMany
+	// that names the table or that the table declares, whose rows are a
+	// join table's. A behavior's sub-table is left out: its rows are the
+	// behavior's state of `from`, and go with it.
 	Steps []MergeStep
+
+	// RequiresUser reports that the merge stamps a row deleted, the row
+	// merged away on a soft-deletable table or a refused row of one, which
+	// needs an acting user as the repository's own soft delete does: the
+	// merge refuses to start without one.
+	RequiresUser bool
 
 	// HistoryActor reports that a step deletes rows of a @versioned table
 	// whose tombstone records its actor, which the repository sets for the
@@ -44,7 +53,12 @@ type MergePlan struct {
 
 // MergeStep is one relation that references the merged table.
 type MergeStep struct {
-	// Source is the referencing table's type, and Field its relation.
+	// Source is what the counts name the step's rows by, and Field what
+	// holds the reference: the referencing table's type and its relation;
+	// for a @hasMany's back-reference the target's type and the column
+	// the build adds; and for a join table the declaring type with its
+	// @manyToMany field, dotted (Board.labels), and the join table's
+	// column.
 	Source string
 	Field  string
 
@@ -62,7 +76,8 @@ type MergeStep struct {
 
 	// Repoint moves every row that references `from` to `into`, deleted
 	// rows among them, stamping updatedAt and updatedBy where the source
-	// keeps them.
+	// keeps them. A row a collision stamped deleted is repointed by that
+	// statement, so no row is counted by both.
 	Repoint MergeStatement
 }
 
@@ -94,6 +109,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 		plan.Lock += " AND " + target.AuditQuoted(AuditDeletedAt) + " IS NULL"
 	}
 	plan.Lock += " ORDER BY " + key + " FOR UPDATE"
+	plan.RequiresUser = target.SoftDelete
 
 	for i := range tables {
 		source := &tables[i]
@@ -106,6 +122,12 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 			if column.Relation != name {
 				continue
 			}
+			if td.GraphMember != nil || td.VersionGraph != nil {
+				// A commit holds the rows of a graph's tables as they
+				// were: one made before the merge would bring back a
+				// reference to the row merged away.
+				return nil, fmt.Errorf("sqlutil: %s.%s references %s, which implements Mergeable, and %s is a version graph's table, whose rows a commit versions: a merge writes rows in place, so a commit made before it would still reference the row merged away; keep the reference in a table outside the graph, or leave Mergeable off %s (D147)", source.Type, column.Field, name, source.Type, name)
+			}
 			step, err := mergeStep(td, source, column, name)
 			if err != nil {
 				return nil, err
@@ -116,10 +138,16 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 				if source.HistoryActor != "" && strings.Contains(collision.SQL, " DELETE FROM ") {
 					plan.HistoryActor = true
 				}
+				// A stamp of a soft-deletable table's row needs a user, as
+				// that table's own delete does.
+				if strings.Contains(collision.SQL, " UPDATE ") {
+					plan.RequiresUser = true
+				}
 			}
 			plan.Steps = append(plan.Steps, step)
 		}
 	}
+	plan.Steps = append(plan.Steps, mergeHiddenSteps(schema, tables, target)...)
 	sort.SliceStable(plan.Steps, func(a, b int) bool {
 		if plan.Steps[a].Source != plan.Steps[b].Source {
 			return plan.Steps[a].Source < plan.Steps[b].Source
@@ -145,10 +173,16 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 	seen := map[string]bool{}
 	add := func(fields []string, idx *ir.IndexDef) error {
 		keyName := strings.Join(fields, ",")
-		if seen[keyName] {
+		// Two unique indexes over the same fields, apart in their where
+		// or their expression, each hold rows of their own.
+		seenAs := keyName
+		if idx != nil {
+			seenAs = fmt.Sprintf("%s|%s|%s|%t", keyName, idx.Where, idx.Expression, idx.NullsNotDistinct)
+		}
+		if seen[seenAs] {
 			return nil
 		}
-		seen[keyName] = true
+		seen[seenAs] = true
 		var columns []*ColumnModel
 		holds := false
 		deletedAt := false
@@ -239,6 +273,11 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 				written = append(written, deletedByColumn)
 				statement.Actor = AuditDeletedBy
 			}
+			// The stamped row is repointed here too: it is no live row, so
+			// the index no longer holds it, and Repoint, which no longer
+			// finds it, counts only the rows that stay.
+			stamps += ", " + column.Quoted + " = $2"
+			written = append(written, column.Quoted)
 			statement.SQL = collide + " UPDATE " + t + " SET " + stamps + source.fenced(written...) + rows
 		} else {
 			statement.SQL = collide + " DELETE FROM " + t + rows
@@ -257,15 +296,42 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 		}
 	}
 	for i := range td.Indexes {
-		if idx := &td.Indexes[i]; idx.Unique && len(idx.Keys) > 0 {
-			if err := add(append([]string(nil), idx.Keys...), idx); err != nil {
-				return MergeStep{}, err
-			}
+		idx := &td.Indexes[i]
+		if !idx.Unique {
+			continue
+		}
+		if len(idx.Keys) == 0 {
+			// An index that lists no key gives the plan no way to tell
+			// whether it holds the relation's column: a merge that met it
+			// would fail on the database's unique violation.
+			return MergeStep{}, fmt.Errorf("sqlutil: %s has a unique @index that lists no keys%s, and %s.%s references %s, which implements Mergeable: a merge cannot tell whether the index holds that relation's column; list the fields the index reads in its keys (D147)", source.Type, indexLabel(idx), source.Type, column.Field, name)
+		}
+		if err := add(append([]string(nil), idx.Keys...), idx); err != nil {
+			return MergeStep{}, err
 		}
 	}
+	step.Repoint = repointOf(source, column.Quoted, ref)
+	return step, nil
+}
 
-	sets := column.Quoted + " = $2"
-	written := []string{column.Quoted}
+// indexLabel names an index in a refusal: its name, or its expression.
+func indexLabel(idx *ir.IndexDef) string {
+	switch {
+	case idx.Name != "":
+		return " (" + idx.Name + ")"
+	case idx.Expression != "":
+		return " (over " + idx.Expression + ")"
+	}
+	return ""
+}
+
+// repointOf writes the statement that moves every row of source whose
+// column references `from` to `into`, stamping updatedAt and updatedBy
+// where source keeps them and advancing each fence the write covers.
+func repointOf(source *TableModel, quoted, qualified string) MergeStatement {
+	var out MergeStatement
+	sets := quoted + " = $2"
+	written := []string{quoted}
 	if updatedAt := source.AuditQuoted(AuditUpdatedAt); source.AuditColumn(AuditUpdatedAt) != nil {
 		sets += ", " + updatedAt + " = now()"
 		written = append(written, updatedAt)
@@ -275,8 +341,70 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 		// update of the repository's does.
 		sets += ", " + updatedBy + " = COALESCE($3, " + updatedBy + ")"
 		written = append(written, updatedBy)
-		step.Repoint.Actor = AuditUpdatedBy
+		out.Actor = AuditUpdatedBy
 	}
-	step.Repoint.SQL = "UPDATE " + t + " SET " + sets + source.fenced(written...) + " WHERE " + ref + " = $1"
-	return step, nil
+	out.SQL = "UPDATE " + source.Quoted + " SET " + sets + source.fenced(written...) + " WHERE " + qualified + " = $1"
+	return out
+}
+
+// mergeHiddenSteps are the steps of the foreign keys that reference target
+// and that no table's columns model (D147), as sqlgen writes them: the
+// column a @hasMany of target adds to a table that declares no relation
+// back, <target's table>_id, and the two columns of a @manyToMany's join
+// table, <declaring table>_<named table>, each <table>_id. A row of a join
+// table is its pair, so a pair that would repeat is deleted and the rest
+// repointed.
+func mergeHiddenSteps(schema *ir.Schema, tables []TableModel, target *TableModel) []MergeStep {
+	byType := map[string]*TableModel{}
+	for i := range tables {
+		byType[tables[i].Type] = &tables[i]
+	}
+	var steps []MergeStep
+	for i := range tables {
+		owner := &tables[i]
+		td := schema.Types[owner.Type]
+		if td == nil || td.BehaviorTable != nil {
+			continue
+		}
+		for _, f := range td.Fields {
+			other := byType[f.TypeRef.Name]
+			if other == nil || f.JsonField || f.TypeRef.IsMap || !f.TypeRef.IsArray {
+				continue
+			}
+			switch {
+			case f.ManyToMany:
+				join := QuoteIdentifier(owner.Name + "_" + other.Name)
+				left, right := QuoteIdentifier(owner.Name+"_id"), QuoteIdentifier(other.Name+"_id")
+				if left == right {
+					// A table's @manyToMany to itself names both columns
+					// alike, which no DDL can hold.
+					continue
+				}
+				side := func(moved, kept string) MergeStep {
+					return MergeStep{
+						Source:     owner.Type + "." + f.Name,
+						Field:      strings.Trim(moved, `"`),
+						Collisions: []MergeStatement{{SQL: "DELETE FROM " + join + " AS moved WHERE moved." + moved + " = $1 AND EXISTS (SELECT 1 FROM " + join + " AS held WHERE held." + moved + " = $2 AND held." + kept + " = moved." + kept + ")"}},
+						Repoint:    MergeStatement{SQL: "UPDATE " + join + " SET " + moved + " = $2 WHERE " + moved + " = $1"},
+					}
+				}
+				if other.Type == target.Type {
+					steps = append(steps, side(right, left))
+				}
+				if owner.Type == target.Type {
+					steps = append(steps, side(left, right))
+				}
+			case f.HasMany && owner.Type == target.Type:
+				column := owner.Name + "_id"
+				if other.Column(column) != nil {
+					// The target declares the relation: its column is a
+					// step of its own.
+					continue
+				}
+				quoted := QuoteIdentifier(column)
+				steps = append(steps, MergeStep{Source: other.Type, Field: column, Repoint: repointOf(other, quoted, Qualify(other.Name, column))})
+			}
+		}
+	}
+	return steps
 }

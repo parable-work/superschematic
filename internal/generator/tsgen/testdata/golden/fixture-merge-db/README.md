@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { IdentityUUID, TemporalDateTime, Customer, CustomerProfile, Document, DocumentLabel, Label, LabelCode, LabelNote, Purchase, Subscription,  } from '@schemas/fixture-merge-db-types/types';
+import type { GenericInt64, IdentityUUID, TemporalDateTime, Address, Board, Customer, CustomerProfile, Document, DocumentLabel, Label, LabelCode, LabelNote, LabelPair, LabelSlot, Purchase, Subscription,  } from '@schemas/fixture-merge-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-merge-db-types';
@@ -76,7 +76,13 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (2)
+### Scalars (3)
+
+
+- **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
+  - TypeScript type: `number`
+  - Minimum: -9007199254740991
+  - Maximum: 9007199254740991
 
 
 - **Identity.UUID** - UUID v4 with automatic base62 encoding for client-facing APIs
@@ -94,8 +100,13 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (9)
+### Types (13)
 
+
+- **Address** - An address of a customer, which declares no relation back: the build
+adds its customer_id from Customer's addresses.
+
+- **Board** - A board of labels, through a join table the build adds (board_label).
 
 - **Customer** - A customer, merged when two records are one person. Its status is a
 Workflow, so its rows are deleted through the behaviors' core, and a
@@ -117,7 +128,14 @@ label may sit under another. A delete sets deletedAt.
 its unique index is over an expression that reads the relation's column.
 
 - **LabelNote** - A note about a label, which says who changed it last and when: a merge
-stamps both on the notes it repoints.
+stamps both on the notes it repoints. Its revision is a fence over the
+label and the text, which the merge's repoint advances.
+
+- **LabelPair** - Two labels that go together, once per pair: two relations of one table
+to the merged table, and a key that holds both.
+
+- **LabelSlot** - A label's place on a shelf, once per slot while it is open, and once
+with no slot: its unique index is partial and holds nulls alike.
 
 - **Purchase** - An order of a customer.
 

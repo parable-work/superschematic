@@ -20,6 +20,10 @@ var mergeORMCases = []string{
 	"a table that deletes for good loses the row merged away, through the core",
 	"a merge of a row into itself, of a row that is gone, and into a row that references it is refused and writes nothing",
 	"a merge in a transaction rolls back with it",
+	"a @manyToMany's join table has its pairs repointed, and one that would repeat deleted",
+	"two relations of one table, a partial index and an index that holds nulls alike each find their collisions",
+	"a merge that stamps a row deleted needs an acting user before it writes, and one that stamps none does not",
+	"two merges of one pair at once: one folds, and the other finds its row gone",
 }
 
 // TestMergeIntoOnPostgres holds the generated Go ORM of a database whose
@@ -78,6 +82,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -208,6 +213,10 @@ func TestMergeIntoOnPostgres(t *testing.T) {
 		if n := count(t, "SELECT count(*) FROM label_note WHERE label_id = $1 AND updated_by = $2 AND updated_at > $3", bug.ToUUID(), ada, old.Add(time.Minute)); n != 2 {
 			t.Errorf("%d notes of bug are stamped by ada, want 2", n)
 		}
+		// The notes' fence covers the label, so the repoint advanced it.
+		if n := count(t, "SELECT count(*) FROM label_note WHERE label_id = $1 AND revision = 1", bug.ToUUID()); n != 2 {
+			t.Errorf("%d notes of bug advanced their revision, want 2", n)
+		}
 		// defect is deleted softly, by ada, and no live row.
 		if n := count(t, "SELECT count(*) FROM label WHERE id = $1 AND deleted_at IS NOT NULL AND deleted_by = $2", defect.ToUUID(), ada); n != 1 {
 			t.Errorf("defect is not stamped deleted by ada")
@@ -256,9 +265,9 @@ func TestMergeIntoOnPostgres(t *testing.T) {
 		if err != nil {
 			t.Fatalf("merge rest into api: %v", err)
 		}
-		// grace's row of rest is stamped, then repointed with linus's and
-		// alan's old one.
-		want(t, result, map[string]int{"Subscription": 3}, map[string]int{"Subscription": 1})
+		// grace's row of rest is stamped and repointed as one deleted
+		// row; linus's and alan's old one are the rows repointed.
+		want(t, result, map[string]int{"Subscription": 2}, map[string]int{"Subscription": 1})
 		if n := count(t, "SELECT count(*) FROM subscription WHERE subscriber = 'grace' AND label_id = $1 AND deleted_at IS NULL", api.ToUUID()); n != 1 {
 			t.Errorf("grace follows api %d times, want once", n)
 		}
@@ -293,11 +302,17 @@ func TestMergeIntoOnPostgres(t *testing.T) {
 		acme, acmeInc := customer(t, "Acme"), customer(t, "Acme Inc")
 		exec(t, "INSERT INTO customer_profile (id, customer_id, bio) VALUES (gen_random_uuid(), $1, 'kept'), (gen_random_uuid(), $2, 'dropped')", acme.ToUUID(), acmeInc.ToUUID())
 		exec(t, "INSERT INTO purchase (id, customer_id, total) VALUES (gen_random_uuid(), $1, 10), (gen_random_uuid(), $1, 20)", acmeInc.ToUUID())
+		// An address declares no relation: its customer_id is the column
+		// Customer's addresses adds, which no table's fields model.
+		exec(t, "INSERT INTO address (id, line, customer_id) VALUES (gen_random_uuid(), '1 Main St', $1)", acmeInc.ToUUID())
 		result, err := db.Customer.MergeInto(ctx, acmeInc, acme)
 		if err != nil {
 			t.Fatalf("merge Acme Inc into Acme: %v", err)
 		}
-		want(t, result, map[string]int{"Purchase": 2}, map[string]int{"CustomerProfile": 1})
+		want(t, result, map[string]int{"Address": 1, "Purchase": 2}, map[string]int{"CustomerProfile": 1})
+		if n := count(t, "SELECT count(*) FROM address WHERE customer_id = $1", acme.ToUUID()); n != 1 {
+			t.Errorf("Acme holds %d addresses, want the one of Acme Inc", n)
+		}
 		if n := count(t, "SELECT count(*) FROM customer WHERE id = $1", acmeInc.ToUUID()); n != 0 {
 			t.Errorf("Acme Inc is still a row")
 		}
@@ -393,6 +408,127 @@ func TestMergeIntoOnPostgres(t *testing.T) {
 		}
 		if n := count(t, "SELECT count(*) FROM document WHERE id = $1 AND title = 'still kept'", other.ToUUID()); n != 1 {
 			t.Errorf("the transaction a merge was refused in lost its own write")
+		}
+	})
+
+	t.Run("a @manyToMany's join table has its pairs repointed, and one that would repeat deleted", func(t *testing.T) {
+		red, crimson := label(t, "red"), label(t, "crimson")
+		board := func(title string, labels ...types.IdentityUUID) types.IdentityUUID {
+			row, err := db.Board.CreateOne(ctx, &types.Board{Title: title})
+			if err != nil {
+				t.Fatalf("create the board %s: %v", title, err)
+			}
+			for _, of := range labels {
+				exec(t, "INSERT INTO board_label (board_id, label_id) VALUES ($1, $2)", row.Id.ToUUID(), of.ToUUID())
+			}
+			return *row.Id
+		}
+		both, only := board("both", red, crimson), board("only", crimson)
+		result, err := db.Label.MergeInto(ctx, crimson, red)
+		if err != nil {
+			t.Fatalf("merge crimson into red: %v", err)
+		}
+		want(t, result, map[string]int{"Board.labels": 1}, map[string]int{"Board.labels": 1})
+		if n := count(t, "SELECT count(*) FROM board_label WHERE board_id = $1 AND label_id = $2", both.ToUUID(), red.ToUUID()); n != 1 {
+			t.Errorf("the board that carried both carries red %d times, want once", n)
+		}
+		if n := count(t, "SELECT count(*) FROM board_label WHERE board_id = $1 AND label_id = $2", only.ToUUID(), red.ToUUID()); n != 1 {
+			t.Errorf("the board that carried crimson does not carry red")
+		}
+		if n := count(t, "SELECT count(*) FROM board_label WHERE label_id = $1", crimson.ToUUID()); n != 0 {
+			t.Errorf("%d pairs still reference crimson", n)
+		}
+	})
+
+	t.Run("two relations of one table, a partial index and an index that holds nulls alike each find their collisions", func(t *testing.T) {
+		from, into, other, more := label(t, "pair-from"), label(t, "pair-into"), label(t, "pair-other"), label(t, "pair-more")
+		pair := "INSERT INTO label_pair (id, first_id, second_id) VALUES (gen_random_uuid(), $1, $2)"
+		exec(t, pair, from.ToUUID(), other.ToUUID())
+		exec(t, pair, into.ToUUID(), other.ToUUID())
+		exec(t, pair, other.ToUUID(), from.ToUUID())
+		exec(t, pair, more.ToUUID(), from.ToUUID())
+		slot := "INSERT INTO label_slot (id, label_id, slot, open) VALUES (gen_random_uuid(), $1, $2, $3)"
+		exec(t, slot, from.ToUUID(), nil, true)
+		exec(t, slot, into.ToUUID(), nil, true)
+		// A closed slot is outside the index, so it cannot collide.
+		exec(t, slot, from.ToUUID(), "x", false)
+		exec(t, slot, into.ToUUID(), "x", true)
+		exec(t, slot, from.ToUUID(), "y", true)
+		result, err := db.Label.MergeInto(ctx, from, into)
+		if err != nil {
+			t.Fatalf("merge: %v", err)
+		}
+		want(t, result, map[string]int{"LabelPair": 2, "LabelSlot": 2}, map[string]int{"LabelPair": 1, "LabelSlot": 1})
+		if n := count(t, "SELECT count(*) FROM label_pair WHERE first_id = $1 AND second_id = $2", into.ToUUID(), other.ToUUID()); n != 1 {
+			t.Errorf("the pair of into and other is held %d times, want once", n)
+		}
+		if n := count(t, "SELECT count(*) FROM label_pair WHERE second_id = $1", into.ToUUID()); n != 2 {
+			t.Errorf("%d pairs end at into, want the two that ended at from", n)
+		}
+		if n := count(t, "SELECT count(*) FROM label_slot WHERE label_id = $1 AND slot IS NULL", into.ToUUID()); n != 1 {
+			t.Errorf("into holds %d open slots with no name, want one", n)
+		}
+		if n := count(t, "SELECT count(*) FROM label_slot WHERE label_id = $1 AND slot = 'x'", into.ToUUID()); n != 2 {
+			t.Errorf("into holds %d slots x, want its open one and the closed one of from", n)
+		}
+	})
+
+	t.Run("a merge that stamps a row deleted needs an acting user before it writes, and one that stamps none does not", func(t *testing.T) {
+		keep, drop := label(t, "keep"), label(t, "drop")
+		doc := document(t, "unsigned")
+		tag(t, doc, drop)
+		if _, err := db.Label.MergeInto(background, drop, keep); !errors.Is(err, ErrNoUserInContext) {
+			t.Errorf("a merge of a soft-deletable table with no user = %v, want ErrNoUserInContext", err)
+		}
+		if n := count(t, "SELECT count(*) FROM document_label WHERE document_id = $1 AND label_id = $2", doc.ToUUID(), drop.ToUUID()); n != 1 {
+			t.Errorf("a merge refused for want of a user moved the document's label")
+		}
+		// A customer is deleted for good and nothing of its merge is
+		// stamped, so no user is needed.
+		one, two := customer(t, "One"), customer(t, "Two")
+		exec(t, "INSERT INTO purchase (id, customer_id, total) VALUES (gen_random_uuid(), $1, 5)", two.ToUUID())
+		result, err := db.Customer.MergeInto(background, two, one)
+		if err != nil {
+			t.Fatalf("merge customers with no user: %v", err)
+		}
+		want(t, result, map[string]int{"Purchase": 1}, map[string]int{})
+	})
+
+	t.Run("two merges of one pair at once: one folds, and the other finds its row gone", func(t *testing.T) {
+		for round := 0; round < 5; round++ {
+			left, right := label(t, fmt.Sprintf("left-%d", round)), label(t, fmt.Sprintf("right-%d", round))
+			doc := document(t, fmt.Sprintf("raced-%d", round))
+			tag(t, doc, left)
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for i, pair := range [][2]types.IdentityUUID{{left, right}, {right, left}} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, errs[i] = db.Label.MergeInto(ctx, pair[0], pair[1])
+				}()
+			}
+			wg.Wait()
+			won, lost := 0, 0
+			for _, err := range errs {
+				switch {
+				case err == nil:
+					won++
+				case errors.Is(err, ErrNotFound):
+					lost++
+				default:
+					t.Fatalf("a merge raced against its reverse = %v", err)
+				}
+			}
+			if won != 1 || lost != 1 {
+				t.Fatalf("%d merges folded and %d found their row gone, want one of each", won, lost)
+			}
+			if n := count(t, "SELECT count(*) FROM label WHERE id IN ($1, $2) AND deleted_at IS NULL", left.ToUUID(), right.ToUUID()); n != 1 {
+				t.Fatalf("%d of the two labels are live, want one", n)
+			}
+			if n := count(t, "SELECT count(*) FROM document_label d JOIN label l ON l.id = d.label_id WHERE d.document_id = $1 AND l.deleted_at IS NULL", doc.ToUUID()); n != 1 {
+				t.Fatalf("the document carries %d live labels, want the one that stayed", n)
+			}
 		}
 	})
 }

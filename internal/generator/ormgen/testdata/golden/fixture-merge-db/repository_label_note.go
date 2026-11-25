@@ -24,6 +24,7 @@ type LabelNoteRepository struct {
 var LabelNoteAllowedFields = map[string]bool{
 	"id":         true,
 	"text":       true,
+	"revision":   true,
 	"updated_at": true,
 	"updated_by": true,
 	"label_id":   true,
@@ -33,6 +34,7 @@ var LabelNoteAllowedFields = map[string]bool{
 var LabelNoteQuotedFields = map[string]string{
 	"id":         `id`,
 	"text":       `text`,
+	"revision":   `revision`,
 	"updated_at": `updated_at`,
 	"updated_by": `updated_by`,
 	"label_id":   `label_id`,
@@ -49,6 +51,7 @@ var labelNoteSortColumns = map[LabelNoteSortField]struct {
 }{
 	LabelNoteSortById:        {`label_note.id`, `page_key.id`, false},
 	LabelNoteSortByText:      {`label_note.text`, `page_key.text`, false},
+	LabelNoteSortByRevision:  {`label_note.revision`, `page_key.revision`, false},
 	LabelNoteSortByUpdatedAt: {`label_note.updated_at`, `page_key.updated_at`, false},
 }
 
@@ -199,6 +202,9 @@ func (r *LabelNoteRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 		if opts.Fields.Text {
 			fieldStrings = append(fieldStrings, "text")
 		}
+		if opts.Fields.Revision {
+			fieldStrings = append(fieldStrings, "revision")
+		}
 		if opts.Fields.UpdatedAt {
 			fieldStrings = append(fieldStrings, "updated_at")
 		}
@@ -213,7 +219,7 @@ func (r *LabelNoteRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 		query = fmt.Sprintf(`SELECT %s FROM label_note WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "label_id", "text", "updated_at", "updated_by" FROM label_note WHERE id = $1`
+		query = `SELECT "id", "label_id", "text", "revision", "updated_at", "updated_by" FROM label_note WHERE id = $1`
 	}
 
 	// Execute query
@@ -244,6 +250,8 @@ func (r *LabelNoteRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 				scanDest[i] = &result.Id
 			case "text":
 				scanDest[i] = &result.Text
+			case "revision":
+				scanDest[i] = &result.Revision
 			case "updated_at":
 				scanDest[i] = &result.UpdatedAt
 			case "updated_by":
@@ -276,6 +284,8 @@ func (r *LabelNoteRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 			&tempRelLabel,
 
 			&result.Text,
+
+			&result.Revision,
 
 			&result.UpdatedAt,
 
@@ -353,7 +363,7 @@ func (r *LabelNoteRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "label_id", "text", "updated_at", "updated_by" FROM label_note WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "label_id", "text", "revision", "updated_at", "updated_by" FROM label_note WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 
 	// Execute query
 	var rows pgx.Rows
@@ -386,6 +396,8 @@ func (r *LabelNoteRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 			&tempRelLabel,
 
 			&entity.Text,
+
+			&entity.Revision,
 
 			&entity.UpdatedAt,
 
@@ -434,6 +446,9 @@ func (r *LabelNoteRepository) FindOne(ctx context.Context, filter *LabelNoteFilt
 		if opts.Fields.Text {
 			fieldStrings = append(fieldStrings, "text")
 		}
+		if opts.Fields.Revision {
+			fieldStrings = append(fieldStrings, "revision")
+		}
 		if opts.Fields.UpdatedAt {
 			fieldStrings = append(fieldStrings, "updated_at")
 		}
@@ -447,7 +462,7 @@ func (r *LabelNoteRepository) FindOne(ctx context.Context, filter *LabelNoteFilt
 		selectFields = buildSelectFieldsTyped(fieldStrings, "label_note")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "label_id", "text", "updated_at", "updated_by"`
+		selectFields = `"id", "label_id", "text", "revision", "updated_at", "updated_by"`
 		if opts == nil {
 			opts = &LabelNoteFindOptions{}
 		}
@@ -492,6 +507,8 @@ func (r *LabelNoteRepository) FindOne(ctx context.Context, filter *LabelNoteFilt
 				scanDest[i] = &result.Id
 			case "text":
 				scanDest[i] = &result.Text
+			case "revision":
+				scanDest[i] = &result.Revision
 			case "updated_at":
 				scanDest[i] = &result.UpdatedAt
 			case "updated_by":
@@ -527,6 +544,8 @@ func (r *LabelNoteRepository) FindOne(ctx context.Context, filter *LabelNoteFilt
 			&tempRelLabel,
 
 			&result.Text,
+
+			&result.Revision,
 
 			&result.UpdatedAt,
 
@@ -674,6 +693,9 @@ func labelNoteFieldStrings(fields LabelNoteFields) []string {
 	if fields.Text {
 		fieldStrings = append(fieldStrings, "text")
 	}
+	if fields.Revision {
+		fieldStrings = append(fieldStrings, "revision")
+	}
 	if fields.UpdatedAt {
 		fieldStrings = append(fieldStrings, "updated_at")
 	}
@@ -721,6 +743,8 @@ func (r *LabelNoteRepository) findRows(ctx context.Context, method, query string
 				scanDest[i] = &result.Id
 			case "text":
 				scanDest[i] = &result.Text
+			case "revision":
+				scanDest[i] = &result.Revision
 			case "updated_at":
 				scanDest[i] = &result.UpdatedAt
 			case "updated_by":
@@ -827,7 +851,7 @@ func (r *LabelNoteRepository) FindPage(ctx context.Context, filter *LabelNoteFil
 	}
 	column, ok := labelNoteSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: LabelNote sorts by id, text and updatedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: LabelNote sorts by id, text, revision and updatedAt, not %q", string(field))
 	}
 	byKey := field == LabelNoteSortById
 
@@ -958,6 +982,11 @@ func (r *LabelNoteRepository) CreateOne(ctx context.Context, input *types.LabelN
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 	values = append(values, input.Text)
+	// Required field: revision
+	fields = append(fields, `revision`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Revision)
 	// Optional field: updatedBy - only add if set
 	{
 		if input.UpdatedBy != nil {
@@ -981,7 +1010,7 @@ func (r *LabelNoteRepository) CreateOne(ctx context.Context, input *types.LabelN
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "label_id", "text", "updated_at", "updated_by"`
+	returningClause := `"id", "label_id", "text", "revision", "updated_at", "updated_by"`
 	query := fmt.Sprintf(
 		`INSERT INTO label_note (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -1013,6 +1042,8 @@ func (r *LabelNoteRepository) CreateOne(ctx context.Context, input *types.LabelN
 
 		&result.Text,
 
+		&result.Revision,
+
 		&result.UpdatedAt,
 
 		&result.UpdatedBy,
@@ -1041,7 +1072,7 @@ var labelNoteUniqueKeys = map[LabelNoteUniqueKey]struct {
 	conflict, keep, rows, held string
 	columns                    []string
 }{
-	LabelNoteUniqueById: {`(id)`, `id = label_note.id`, `SELECT "id", "label_id", "text", "updated_at", "updated_by" FROM label_note WHERE (id) IN (%s)`, ``, []string{`id`}},
+	LabelNoteUniqueById: {`(id)`, `id = label_note.id`, `SELECT "id", "label_id", "text", "revision", "updated_at", "updated_by" FROM label_note WHERE (id) IN (%s)`, ``, []string{`id`}},
 }
 
 // labelNoteKeyOf is the text of row's values of the unique key on, as
@@ -1080,6 +1111,8 @@ func (r *LabelNoteRepository) scanReturned(row pgx.Row, inserted *bool) (*types.
 		&tempRelLabel,
 
 		&result.Text,
+
+		&result.Revision,
 
 		&result.UpdatedAt,
 
@@ -1192,6 +1225,11 @@ func (r *LabelNoteRepository) upsertRow(ctx context.Context, input *types.LabelN
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 	values = append(values, input.Text)
+	// Required field: revision
+	fields = append(fields, `revision`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Revision)
 	// Optional field: updatedBy - only add if set
 	{
 		if input.UpdatedBy != nil {
@@ -1223,6 +1261,13 @@ func (r *LabelNoteRepository) upsertRow(ctx context.Context, input *types.LabelN
 		compareCurrent = append(compareCurrent, `label_note.text`)
 		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Text)
+	}
+	if update.Revision != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`revision = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `label_note.revision`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Revision)
 	}
 	// Handle relationship foreign key: label
 	if update.LabelID != nil {
@@ -1256,10 +1301,13 @@ func (r *LabelNoteRepository) upsertRow(ctx context.Context, input *types.LabelN
 			values = append(values, GetUserID(ctx))
 		}
 
+		// Each fence the update's columns advance moves on by one (D119).
+		setClauses = append(setClauses, fenceBumps(labelNoteFences, setClauses)...)
+
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label_id", "text", "updated_at", "updated_by", (xmax = 0) AS _inserted`,
+		`INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label_id", "text", "revision", "updated_at", "updated_by", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
 		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
@@ -1340,7 +1388,7 @@ func (r *LabelNoteRepository) UpsertMany(ctx context.Context, inputs []*types.La
 	if update.UpdatedBy {
 		return nil, fmt.Errorf("orm: UpsertMany of LabelNote sets the fields an update sets, not updatedBy")
 	}
-	batch, err := upsertBatch("LabelNote", opts.Batch, 16383)
+	batch, err := upsertBatch("LabelNote", opts.Batch, 13106)
 	if err != nil {
 		return nil, err
 	}
@@ -1378,6 +1426,11 @@ func (r *LabelNoteRepository) upsertBatches(ctx context.Context, inputs []*types
 		compareCurrent = append(compareCurrent, `label_note.text`)
 		compareNext = append(compareNext, `EXCLUDED.text`)
 	}
+	if update.Revision {
+		setClauses = append(setClauses, `revision = EXCLUDED.revision`)
+		compareCurrent = append(compareCurrent, `label_note.revision`)
+		compareNext = append(compareNext, `EXCLUDED.revision`)
+	}
 	if update.Label {
 		setClauses = append(setClauses, `label_id = EXCLUDED.label_id`)
 		compareCurrent = append(compareCurrent, `label_note.label_id`)
@@ -1407,6 +1460,12 @@ func (r *LabelNoteRepository) upsertBatches(ctx context.Context, inputs []*types
 			{
 				cell := batchInsertCell{column: `text`, set: true}
 				cell.value = input.Text
+				row = append(row, cell)
+			}
+			// Required field: revision
+			{
+				cell := batchInsertCell{column: `revision`, set: true}
+				cell.value = input.Revision
 				row = append(row, cell)
 			}
 			// Optional field: updatedBy
@@ -1445,9 +1504,12 @@ func (r *LabelNoteRepository) upsertBatches(ctx context.Context, inputs []*types
 				values = append(values, GetUserID(ctx))
 				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
 			}
+			// Each fence the update's columns advance moves on by one
+			// (D119).
+			assignments = append(assignments, fenceBumps(labelNoteFences, assignments)...)
 		}
 		query := fmt.Sprintf(
-			`INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label_id", "text", "updated_at", "updated_by", (xmax = 0) AS _inserted`,
+			`INSERT INTO label_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label_id", "text", "revision", "updated_at", "updated_by", (xmax = 0) AS _inserted`,
 			strings.Join(fieldNames, ", "),
 			strings.Join(valuePlaceholders, ", "),
 			key.conflict,
@@ -1663,6 +1725,12 @@ func (r *LabelNoteRepository) CreateMany(ctx context.Context, inputs []*types.La
 			cell.value = input.Text
 			row = append(row, cell)
 		}
+		// Required field: revision
+		{
+			cell := batchInsertCell{column: `revision`, set: true}
+			cell.value = input.Revision
+			row = append(row, cell)
+		}
 		// Optional field: updatedBy
 		{
 			cell := batchInsertCell{column: `updated_by`}
@@ -1688,7 +1756,7 @@ func (r *LabelNoteRepository) CreateMany(ctx context.Context, inputs []*types.La
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "label_id", "text", "updated_at", "updated_by"`
+	returningClauseMany := `"id", "label_id", "text", "revision", "updated_at", "updated_by"`
 	query := fmt.Sprintf(
 		`INSERT INTO label_note (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
@@ -1727,6 +1795,8 @@ func (r *LabelNoteRepository) CreateMany(ctx context.Context, inputs []*types.La
 
 			&result.Text,
 
+			&result.Revision,
+
 			&result.UpdatedAt,
 
 			&result.UpdatedBy,
@@ -1751,7 +1821,9 @@ func (r *LabelNoteRepository) CreateMany(ctx context.Context, inputs []*types.La
 	return results, nil
 }
 
-// UpdateOne updates a single LabelNote record by ID
+// UpdateOne updates a single LabelNote record by ID.
+// It advances each @fenced field that covers a column the update sets by
+// one, and writes one the update sets itself as it stands (D119).
 func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, update *LabelNoteUpdate) (*types.LabelNote, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1761,6 +1833,11 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`text = $%d`, paramNum))
 		values = append(values, *update.Text)
+	}
+	if update.Revision != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`revision = $%d`, paramNum))
+		values = append(values, *update.Revision)
 	}
 	// Handle relationship foreign key: label
 	if update.LabelID != nil {
@@ -1785,6 +1862,9 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 		values = append(values, GetUserID(ctx))
 	}
 
+	// Each fence the update's columns advance moves on by one (D119).
+	setClauses = append(setClauses, fenceBumps(labelNoteFences, setClauses)...)
+
 	if len(setClauses) == 0 {
 		return nil, fmt.Errorf("no fields to update")
 	}
@@ -1799,7 +1879,7 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 	)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "label_id", "text", "updated_at", "updated_by"`
+	query += ` RETURNING "id", "label_id", "text", "revision", "updated_at", "updated_by"`
 
 	// Execute query
 	var row pgx.Row
@@ -1825,6 +1905,8 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 
 		&result.Text,
 
+		&result.Revision,
+
 		&result.UpdatedAt,
 
 		&result.UpdatedBy,
@@ -1845,7 +1927,10 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 	return result, nil
 }
 
-// UpdateMany updates multiple LabelNote records matching the filter
+// UpdateMany updates multiple LabelNote records matching the filter.
+// It advances each @fenced field that covers a column the update sets by
+// one in every row it updates, and writes one the update sets itself as
+// it stands (D119), so a filter on that field compares what a caller read.
 func (r *LabelNoteRepository) UpdateMany(ctx context.Context, filter *LabelNoteFilter, update *LabelNoteUpdate) (int, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1855,6 +1940,11 @@ func (r *LabelNoteRepository) UpdateMany(ctx context.Context, filter *LabelNoteF
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`text = $%d`, paramNum))
 		values = append(values, *update.Text)
+	}
+	if update.Revision != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`revision = $%d`, paramNum))
+		values = append(values, *update.Revision)
 	}
 	// Handle relationship foreign key: label
 	if update.LabelID != nil {
@@ -1878,6 +1968,9 @@ func (r *LabelNoteRepository) UpdateMany(ctx context.Context, filter *LabelNoteF
 		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
 		values = append(values, GetUserID(ctx))
 	}
+
+	// Each fence the update's columns advance moves on by one (D119).
+	setClauses = append(setClauses, fenceBumps(labelNoteFences, setClauses)...)
 
 	if len(setClauses) == 0 {
 		return 0, fmt.Errorf("no fields to update")

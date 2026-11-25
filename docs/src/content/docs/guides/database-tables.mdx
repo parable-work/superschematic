@@ -838,15 +838,19 @@ result, err := db.Label.MergeInto(ctx, defect, bug)
 // result.Repointed["DocumentLabel"] == 2, result.Deleted["DocumentLabel"] == 1
 ```
 
-The build writes the merge from the schema: every to-one relation of the
-schema's tables that references the table, the table's own to itself
-among them, and every unique key of a referencing table that holds the
-relation's column. So a merge reaches the relations the schema has, not
+The build writes the merge from the schema: every foreign key of the
+schema that references the table, and every unique key of a referencing
+table that holds its column. The foreign keys are each to-one relation of
+a table, the table's own to itself among them; the two columns of a
+`ManyToMany`'s join table, whichever side the table is on; and the column
+a `HasMany` of the table adds to a target that declares no relation back. So a merge reaches the relations the schema has, not
 the ones a caller remembers, and a new relation is merged from the build
 that adds it. In one transaction, the repository's own when it runs in
 one, `mergeInto`:
 
-1. Locks the two rows, in key order. Each must be a live row.
+1. Locks the two rows, in key order. Each must be a live row. Two merges
+   of one pair wait for one another: of A into B against B into A, one
+   folds and the other finds its row gone.
 2. For each relation, deletes the rows that reference `from` and that a
    unique key of their table would refuse once they referenced `into`: a
    document that carries both labels keeps the one that pointed at
@@ -855,7 +859,8 @@ one, `mergeInto`:
    column too, each with its `where` and its `nullsNotDistinct`. Where the
    referencing table deletes softly and the index holds live rows alone,
    the row is stamped deleted, with `deletedBy`, as its own delete would
-   stamp it. Anywhere else it is removed.
+   stamp it. Anywhere else it is removed. A pair of a join table that
+   would repeat is removed.
 3. Repoints every other row that references `from` to `into`, deleted
    rows among them, stamping `updatedAt`, and `updatedBy` when a user
    acts, where the referencing table keeps them.
@@ -864,16 +869,29 @@ one, `mergeInto`:
    behaviors, whose guards may refuse it.
 
 It answers how many rows of each table, by its type's name, it repointed
-and deleted. `from` itself is in neither count. A merge that fails writes
+and deleted. No row is in both: one stamped deleted is counted as
+deleted. The rows of a join table are under the declaring type and its
+field, dotted (`Board.labels`). `from` itself is in neither count. A merge that fails writes
 nothing: in a caller's transaction it runs in a savepoint, so the
 transaction goes on without it. It is refused when `from` and `into` are
 one row (`ErrMergeSelf`, a `MergeError` with code `self`), when either is
 no live row (`ErrNotFound`, `NotFoundError`), and when `into` references
 `from` through a relation of the table to itself, which the repoint would
 turn on itself (`ErrMergeSelfReference`, code `self_reference`): point
-`into` elsewhere first.
+`into` elsewhere first. A merge that stamps a row deleted, `from` on a
+soft-deletable table or a refused row of one, needs an acting user as a
+soft delete does, and fails before it writes without one
+(`ErrNoUserInContext`, `NoUserError`).
 
 What a merge does not do:
+
+- It checks no cycle longer than that one. With `C` under `from` and
+  `into` under `C`, the merge leaves `into` under `C` and `C` under
+  `into`: a tree kept in a relation of the table to itself is yours to
+  check before you merge.
+- A Derived field of a referencing table whose input is the repointed
+  relation is not hashed again by the merge: it is stale at its row's
+  next write through the core, as after any set-based write.
 
 - It copies no field of `from` onto `into`. Read `from` and update `into`
   first, in the same transaction, for the values worth keeping.
@@ -889,7 +907,12 @@ What a merge does not do:
   does to it.
 
 The trait is for a DB table: the build refuses it on an engine type, a
-queue, a view and a version graph's table. The repositories run it on
+queue, a view and a version graph's table. It also refuses two shapes a
+merge could not carry out. A version graph's table that references the
+table: a commit made before a merge would still reference the row merged
+away. And a unique `@index` that lists no `keys` on a table that
+references it: the merge could not tell whether the index holds the
+relation's column, so list the fields its `expression` reads. The repositories run it on
 Postgres, in Go and in TypeScript.
 
 ## State machines

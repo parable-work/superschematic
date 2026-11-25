@@ -10,9 +10,11 @@ import type { ScalarValidationResult, ValidationResult } from 'superscalar/valid
 import { expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
-import type { LabelNote, JSDate, Label } from '../../types';
+import type { LabelNote, JSDate, Label, GenericInt64 } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
+
+import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
@@ -70,6 +72,13 @@ export function validateLabelNote(value: LabelNote | null | undefined): Validati
   expectString(errors, "text", value.text);
 
   {
+    const [valid, fieldErrors] = validateGenericInt64Required(value.revision);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "revision", fieldErrors);
+    }
+  }
+
+  {
     const [valid, fieldErrors] = validateTemporalDateTimeRequired(value.updatedAt);
     if (!valid && fieldErrors) {
       setFieldErrors(errors, "updatedAt", fieldErrors);
@@ -103,6 +112,7 @@ const LabelNoteKnownFields = new Set<string>([
   'id',
   'label',
   'text',
+  'revision',
   'updatedAt',
   'updatedBy',
 ]);
@@ -136,6 +146,10 @@ function parseLabelNoteInput(
   const candidate = parsed as Record<string, unknown>;
 
   // Apply @default values from the schema for keys absent from the payload.
+
+  if (candidate["revision"] === undefined || candidate["revision"] === null) {
+    candidate["revision"] = 0 as GenericInt64;
+  }
 
   if (strict) {
     const unknownFields = Object.keys(candidate).filter(

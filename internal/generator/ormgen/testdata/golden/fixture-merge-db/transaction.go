@@ -65,6 +65,8 @@ func (o TxOptions) begin() (string, error) {
 // repositories bound to it.
 func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped := &Tx{tx: tx, db: db, depth: depth}
+	wrapped.Address = &AddressRepository{tx: tx, txDB: db}
+	wrapped.Board = &BoardRepository{tx: tx, txDB: db}
 	wrapped.Customer = &CustomerRepository{tx: tx, txDB: db}
 	wrapped.CustomerProfile = &CustomerProfileRepository{tx: tx, txDB: db}
 	wrapped.Document = &DocumentRepository{tx: tx, txDB: db}
@@ -72,6 +74,8 @@ func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped.Label = &LabelRepository{tx: tx, txDB: db}
 	wrapped.LabelCode = &LabelCodeRepository{tx: tx, txDB: db}
 	wrapped.LabelNote = &LabelNoteRepository{tx: tx, txDB: db}
+	wrapped.LabelPair = &LabelPairRepository{tx: tx, txDB: db}
+	wrapped.LabelSlot = &LabelSlotRepository{tx: tx, txDB: db}
 	wrapped.Purchase = &PurchaseRepository{tx: tx, txDB: db}
 	wrapped.Subscription = &SubscriptionRepository{tx: tx, txDB: db}
 	return wrapped

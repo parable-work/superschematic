@@ -1,6 +1,6 @@
-import { Identity, Temporal } from "superscalar";
-import { Nullable } from "@superschematic/schema";
-import { AutoGenerate, Mergeable, Relation, Workflow, index, key, unique } from "@superschematic/db";
+import { Generic, Identity, Temporal } from "superscalar";
+import { Default, Nullable, fenced } from "@superschematic/schema";
+import { AutoGenerate, HasMany, ManyToMany, Mergeable, Relation, Workflow, index, key, unique } from "@superschematic/db";
 
 // A label people put on documents. Two labels that turn out to be one are
 // merged (D147): everything that pointed at one points at the other. A
@@ -45,14 +45,46 @@ export abstract class Subscription {
 }
 
 // A note about a label, which says who changed it last and when: a merge
-// stamps both on the notes it repoints.
+// stamps both on the notes it repoints. Its revision is a fence over the
+// label and the text, which the merge's repoint advances.
+@fenced<LabelNote>({ field: "revision", covers: ["label", "text"] })
 export abstract class LabelNote {
   @key
   id: AutoGenerate<Identity.UUID>;
   label: Relation<Label>;
   text: string;
+  revision: Default<Generic.Int64, 0>;
   updatedAt: Temporal.DateTime;
   updatedBy: Nullable<Identity.UUID>;
+}
+
+// Two labels that go together, once per pair: two relations of one table
+// to the merged table, and a key that holds both.
+@index<LabelPair>(["first", "second"], { unique: true })
+export abstract class LabelPair {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  first: Relation<Label>;
+  second: Relation<Label>;
+}
+
+// A label's place on a shelf, once per slot while it is open, and once
+// with no slot: its unique index is partial and holds nulls alike.
+@index<LabelSlot>(["label", "slot"], { unique: true, name: "label_slot_open", where: "open", nullsNotDistinct: true })
+export abstract class LabelSlot {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  label: Relation<Label>;
+  slot: Nullable<string>;
+  open: boolean;
+}
+
+// A board of labels, through a join table the build adds (board_label).
+export abstract class Board {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  labels: ManyToMany<Label>;
 }
 
 // A label's code in another system, once per label without regard to case:
@@ -72,10 +104,19 @@ export abstract class Customer implements Mergeable {
   @key
   id: AutoGenerate<Identity.UUID>;
   name: string;
+  addresses: HasMany<Address>;
   status: Workflow<{
     states: ["active", "closed"];
     transitions: [{ from: "active"; to: "closed" }];
   }>;
+}
+
+// An address of a customer, which declares no relation back: the build
+// adds its customer_id from Customer's addresses.
+export abstract class Address {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  line: string;
 }
 
 // One profile per customer: a merge keeps the profile of the customer that

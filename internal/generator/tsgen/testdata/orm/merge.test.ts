@@ -16,7 +16,7 @@
 // and refuses, writing nothing, a merge of a row into itself, of a row that
 // is gone and into a row that references the one merged away.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { MergeError, NotFoundError } from '@superschematic/http-runtime/postgres';
+import { MergeError, NoUserError, NotFoundError } from '@superschematic/http-runtime/postgres';
 import { createOrm, type FixtureMergeDbOrm } from './orm';
 import { alice, aliceHyphenated, database, dsn, type TestDatabase } from './harness';
 
@@ -62,6 +62,8 @@ describe.skipIf(dsn === '')('Postgres', () => {
     expect(note.labelId).toBe(bug);
     expect(note.updatedBy).toBe(alice);
     expect(Date.now() - note.updatedAt.getTime()).toBeLessThan(10 * 60 * 1000);
+    // The notes' fence covers the label, so the repoint advanced it.
+    expect(await count(`SELECT count(*) AS n FROM label_note n JOIN label l ON l.id = n.label_id WHERE l.name = 'bug' AND n.revision = 1`)).toBe(2);
     // defect is deleted softly, by alice, and no live row.
     await expect(orm.label.getOne(defect)).rejects.toThrow(NotFoundError);
     expect(await count(`SELECT count(*) AS n FROM label WHERE name = 'defect' AND deleted_at IS NOT NULL AND deleted_by = $1`, [aliceHyphenated])).toBe(1);
@@ -93,8 +95,8 @@ describe.skipIf(dsn === '')('Postgres', () => {
     const alansOld = await follow('alan', rest);
     await orm.subscription.deleteOne(alansOld.id);
     await follow('alan', api);
-    // grace's row of rest is stamped, then repointed with linus's and alan's old one.
-    expect(await orm.label.mergeInto({ from: rest, into: api })).toEqual({ repointed: { Subscription: 3 }, deleted: { Subscription: 1 } });
+    // grace's row of rest is stamped and repointed as one deleted row; linus's and alan's old one are the rows repointed.
+    expect(await orm.label.mergeInto({ from: rest, into: api })).toEqual({ repointed: { Subscription: 2 }, deleted: { Subscription: 1 } });
     const live = (await orm.subscription.findMany({ labelId: { eq: api } } as never)).rows as { subscriber: string }[];
     expect(live.map(row => row.subscriber).sort()).toEqual(['alan', 'grace', 'linus']);
     await expect(orm.subscription.getOne(gracesOld.id)).rejects.toThrow(NotFoundError);
@@ -119,7 +121,10 @@ describe.skipIf(dsn === '')('Postgres', () => {
     await orm.customerProfile.createOne({ customerId: acmeInc, bio: 'dropped' } as never);
     await orm.purchase.createOne({ customerId: acmeInc, total: 10 } as never);
     await orm.purchase.createOne({ customerId: acmeInc, total: 20 } as never);
-    expect(await orm.customer.mergeInto({ from: acmeInc, into: acme })).toEqual({ repointed: { Purchase: 2 }, deleted: { CustomerProfile: 1 } });
+    // An address declares no relation: its customer_id is the column Customer's addresses adds, which no table's fields model.
+    await db.pool.query(`INSERT INTO address (id, line, customer_id) SELECT gen_random_uuid(), '1 Main St', id FROM customer WHERE name = 'Acme Inc'`);
+    expect(await orm.customer.mergeInto({ from: acmeInc, into: acme })).toEqual({ repointed: { Address: 1, Purchase: 2 }, deleted: { CustomerProfile: 1 } });
+    expect(await count(`SELECT count(*) AS n FROM address a JOIN customer c ON c.id = a.customer_id WHERE c.name = 'Acme'`)).toBe(1);
     await expect(orm.customer.getOne(acmeInc)).rejects.toThrow(NotFoundError);
     expect(await count(`SELECT count(*) AS n FROM customer WHERE name = 'Acme Inc'`)).toBe(0);
     const profiles = (await orm.customerProfile.findMany({ customerId: { eq: acme } } as never)).rows as { bio: string }[];
@@ -180,5 +185,78 @@ describe.skipIf(dsn === '')('Postgres', () => {
     });
     expect((await orm.documentLabel.findMany({ documentId: { eq: other }, labelId: { eq: stays } } as never)).rows.length).toBe(1);
     expect((await orm.document.getOne(other)) as { title: string }).toMatchObject({ title: 'still kept' });
+  });
+
+  test("a @manyToMany's join table has its pairs repointed, and one that would repeat deleted, on Postgres", async () => {
+    const red = await label('red');
+    const crimson = await label('crimson');
+    const board = async (title: string, ...labels: string[]): Promise<void> => {
+      await orm.board.createOne({ title } as never);
+      for (const name of labels) {
+        await db.pool.query(`INSERT INTO board_label (board_id, label_id) SELECT b.id, l.id FROM board b, label l WHERE b.title = $1 AND l.name = $2`, [title, name]);
+      }
+    };
+    await board('both', 'red', 'crimson');
+    await board('only', 'crimson');
+    expect(await orm.label.mergeInto({ from: crimson, into: red })).toEqual({ repointed: { 'Board.labels': 1 }, deleted: { 'Board.labels': 1 } });
+    const carried = `SELECT count(*) AS n FROM board_label p JOIN board b ON b.id = p.board_id JOIN label l ON l.id = p.label_id WHERE b.title = $1 AND l.name = $2`;
+    expect(await count(carried, ['both', 'red'])).toBe(1);
+    expect(await count(carried, ['only', 'red'])).toBe(1);
+    expect(await count(`SELECT count(*) AS n FROM board_label p JOIN label l ON l.id = p.label_id WHERE l.name = 'crimson'`)).toBe(0);
+  });
+
+  test('two relations of one table, a partial index and an index that holds nulls alike each find their collisions, on Postgres', async () => {
+    const from = await label('pair-from');
+    const into = await label('pair-into');
+    const other = await label('pair-other');
+    const more = await label('pair-more');
+    const pair = (firstId: string, secondId: string) => orm.labelPair.createOne({ firstId, secondId } as never);
+    await pair(from, other);
+    await pair(into, other);
+    await pair(other, from);
+    await pair(more, from);
+    const slot = (labelId: string, name: string | null, open: boolean) => orm.labelSlot.createOne({ labelId, slot: name, open } as never);
+    await slot(from, null, true);
+    await slot(into, null, true);
+    // A closed slot is outside the index, so it cannot collide.
+    await slot(from, 'x', false);
+    await slot(into, 'x', true);
+    await slot(from, 'y', true);
+    expect(await orm.label.mergeInto({ from, into })).toEqual({ repointed: { LabelPair: 2, LabelSlot: 2 }, deleted: { LabelPair: 1, LabelSlot: 1 } });
+    expect((await orm.labelPair.findMany({ firstId: { eq: into }, secondId: { eq: other } } as never)).rows.length).toBe(1);
+    expect((await orm.labelPair.findMany({ secondId: { eq: into } } as never)).rows.length).toBe(2);
+    const slots = (await orm.labelSlot.findMany({ labelId: { eq: into } } as never)).rows as { slot: string | null; open: boolean }[];
+    expect(slots.map(row => `${row.slot}:${row.open}`).sort()).toEqual(['null:true', 'x:false', 'x:true', 'y:true']);
+  });
+
+  test('a merge that stamps a row deleted needs an acting user before it writes, and one that stamps none does not, on Postgres', async () => {
+    const keep = await label('keep');
+    const drop = await label('drop');
+    const doc = await document('unsigned');
+    await tag(doc, drop);
+    const nobody = createOrm(db.pool);
+    await expect(nobody.label.mergeInto({ from: drop, into: keep })).rejects.toThrow(NoUserError);
+    expect((await orm.documentLabel.findMany({ documentId: { eq: doc }, labelId: { eq: drop } } as never)).rows.length).toBe(1);
+    // A customer is deleted for good and nothing of its merge is stamped, so no user is needed.
+    const one = await customer('One');
+    const two = await customer('Two');
+    await orm.purchase.createOne({ customerId: two, total: 5 } as never);
+    expect(await nobody.customer.mergeInto({ from: two, into: one })).toEqual({ repointed: { Purchase: 1 }, deleted: {} });
+  });
+
+  test('two merges of one pair at once: one folds, and the other finds its row gone, on Postgres', async () => {
+    for (let round = 0; round < 5; round++) {
+      const left = await label(`left-${round}`);
+      const right = await label(`right-${round}`);
+      const doc = await document(`raced-${round}`);
+      await tag(doc, left);
+      const outcomes = await Promise.allSettled([orm.label.mergeInto({ from: left, into: right }), orm.label.mergeInto({ from: right, into: left })]);
+      expect(outcomes.filter(outcome => outcome.status === 'fulfilled').length).toBe(1);
+      const lost = outcomes.find(outcome => outcome.status === 'rejected') as PromiseRejectedResult;
+      expect(lost.reason).toBeInstanceOf(NotFoundError);
+      const live = (await orm.label.findMany({ id: { in: [left, right] } } as never)).rows as { id: string }[];
+      expect(live.length).toBe(1);
+      expect((await orm.documentLabel.findMany({ documentId: { eq: doc }, labelId: { eq: live[0]!.id } } as never)).rows.length).toBe(1);
+    }
   });
 });

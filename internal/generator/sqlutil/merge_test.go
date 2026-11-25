@@ -10,6 +10,7 @@ import (
 	. "github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // mergePlan loads fixture and writes the merge of its table of type name,
@@ -59,7 +60,7 @@ func TestMergePlanOfEnumeratesRelationsAndKeys(t *testing.T) {
 		steps = append(steps, step.Source+"."+step.Field)
 		byStep[step.Source+"."+step.Field] = step
 	}
-	if want := []string{"DocumentLabel.label", "Label.parent", "LabelCode.label", "LabelNote.label", "Subscription.label"}; !slices.Equal(steps, want) {
+	if want := []string{"Board.labels.label_id", "DocumentLabel.label", "Label.parent", "LabelCode.label", "LabelNote.label", "LabelPair.first", "LabelPair.second", "LabelSlot.label", "Subscription.label"}; !slices.Equal(steps, want) {
 		t.Fatalf("steps = %v, want %v", steps, want)
 	}
 
@@ -92,7 +93,7 @@ func TestMergePlanOfEnumeratesRelationsAndKeys(t *testing.T) {
 	for _, want := range []string{
 		"WHERE subscription.label_id = $1 AND (deleted_at IS NULL)",
 		"WHERE subscription.label_id = $2 AND (deleted_at IS NULL)",
-		" UPDATE subscription SET deleted_at = now(), deleted_by = $3 WHERE subscription.id IN (",
+		" UPDATE subscription SET deleted_at = now(), deleted_by = $3, label_id = $2 WHERE subscription.id IN (",
 		"WHERE moved.k1 = held.k1",
 	} {
 		if !strings.Contains(followed.Collisions[0].SQL, want) {
@@ -123,8 +124,28 @@ func TestMergePlanOfEnumeratesRelationsAndKeys(t *testing.T) {
 	// The audit fields a source keeps are stamped: updatedBy only when a
 	// user acts.
 	noted := byStep["LabelNote.label"]
-	if want := "UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by) WHERE label_note.label_id = $1"; noted.Repoint.SQL != want || noted.Repoint.Actor != AuditUpdatedBy {
+	if want := "UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by), revision = label_note.revision + 1 WHERE label_note.label_id = $1"; noted.Repoint.SQL != want || noted.Repoint.Actor != AuditUpdatedBy {
 		t.Errorf("LabelNote's repoint = %+v, want %s", noted.Repoint, want)
+	}
+
+	// A @manyToMany's join table: a pair that would repeat is deleted,
+	// and the rest repointed, under the declaring type and its field.
+	boards := byStep["Board.labels.label_id"]
+	if boards.Source != "Board.labels" || len(boards.Collisions) != 1 ||
+		boards.Collisions[0].SQL != "DELETE FROM board_label AS moved WHERE moved.label_id = $1 AND EXISTS (SELECT 1 FROM board_label AS held WHERE held.label_id = $2 AND held.board_id = moved.board_id)" ||
+		boards.Repoint.SQL != "UPDATE board_label SET label_id = $2 WHERE label_id = $1" {
+		t.Errorf("Board.labels' step = %+v", boards)
+	}
+	// A partial index that holds nulls alike: both sides meet its where,
+	// and a null matches a null.
+	slotted := byStep["LabelSlot.label"]
+	if len(slotted.Collisions) != 1 || !strings.Contains(slotted.Collisions[0].SQL, "WHERE label_slot.label_id = $1 AND (open)") || !strings.Contains(slotted.Collisions[0].SQL, "moved.k1 IS NOT DISTINCT FROM held.k1") {
+		t.Errorf("LabelSlot.label = %+v, want its where on both sides and nulls held alike", slotted)
+	}
+	// Two relations of one table: a step each, and the key that holds
+	// both is a collision of each.
+	if first, second := byStep["LabelPair.first"], byStep["LabelPair.second"]; len(first.Collisions) != 1 || len(second.Collisions) != 1 {
+		t.Errorf("LabelPair's steps = %+v and %+v, want one collision each", first, second)
 	}
 
 	// A @unique relation: every row that references the row merged away
@@ -133,7 +154,15 @@ func TestMergePlanOfEnumeratesRelationsAndKeys(t *testing.T) {
 	if want := "SELECT (id = $1) FROM customer WHERE id IN ($1, $2) ORDER BY id FOR UPDATE"; customers.Lock != want {
 		t.Errorf("Customer's lock = %s, want %s", customers.Lock, want)
 	}
-	profile := customers.Steps[0]
+	if customers.RequiresUser || !plan.RequiresUser {
+		t.Errorf("RequiresUser = %t for Customer and %t for Label; a merge needs a user when it stamps a row deleted, which only Label's does", customers.RequiresUser, plan.RequiresUser)
+	}
+	// A @hasMany whose target declares no relation back: the column the
+	// build adds to the target is repointed, and no key holds it.
+	if address := customers.Steps[0]; address.Source != "Address" || address.Field != "customer_id" || len(address.Collisions) != 0 || address.Repoint.SQL != "UPDATE address SET customer_id = $2 WHERE address.customer_id = $1" {
+		t.Errorf("Customer.addresses' step = %+v, want the repoint of address.customer_id", address)
+	}
+	profile := customers.Steps[1]
 	if profile.Source != "CustomerProfile" || len(profile.Collisions) != 1 || !strings.Contains(profile.Collisions[0].SQL, "WHERE EXISTS (SELECT 1 FROM held))") {
 		t.Errorf("CustomerProfile.customer = %+v, want one collision of every row", profile)
 	}
@@ -165,5 +194,52 @@ func TestMergePlanOfLeavesBehaviorSubTablesOut(t *testing.T) {
 	}
 	if _, err := MergePlanOf(schema, nil, "Ticket"); err == nil || !strings.Contains(err.Error(), "the Mergeable type Ticket is no table of") {
 		t.Errorf("MergePlanOf without the table = %v, want it refused", err)
+	}
+}
+
+// TestMergePlanOfUniqueIndexes: a version graph's table that references a
+// Mergeable one is refused at the build; two unique indexes over the same fields,
+// apart in their where, are a collision each, since each holds rows of its
+// own; and a unique index that lists no keys on a table that references a
+// Mergeable one is refused at the build, since a merge could not tell
+// whether it holds the relation's column and would fail on the database's
+// unique violation (D147).
+func TestMergePlanOfUniqueIndexes(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-merge-db"), loader.WithRegistry(registry.New(naming.Default())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagged := schema.Types["DocumentLabel"]
+	tagged.Indexes = append(tagged.Indexes, ir.IndexDef{Keys: []string{"document", "label"}, Unique: true, Name: "pinned", Where: "document_id IS NOT NULL"})
+	tables, err := TablesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := MergePlanOf(schema, tables, "Label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range plan.Steps {
+		if step.Source != "DocumentLabel" {
+			continue
+		}
+		if len(step.Collisions) != 2 || !strings.Contains(step.Collisions[1].SQL, "AND (document_id IS NOT NULL)") {
+			t.Errorf("DocumentLabel.label has the collisions %+v, want one per unique index over its fields", step.Collisions)
+		}
+	}
+
+	// A version graph's table that references the merged table is refused:
+	// a commit made before a merge would still reference the row merged
+	// away.
+	tagged.GraphMember = &ir.GraphMemberConfig{}
+	if _, err := MergePlanOf(schema, tables, "Label"); err == nil || !strings.Contains(err.Error(), "DocumentLabel.label references Label, which implements Mergeable, and DocumentLabel is a version graph's table") {
+		t.Errorf("MergePlanOf with a graph member that references the table = %v, want it refused", err)
+	}
+	tagged.GraphMember = nil
+
+	coded := schema.Types["LabelCode"]
+	coded.Indexes = append(coded.Indexes, ir.IndexDef{Unique: true, Name: "code_only", Expression: "lower(code)"})
+	if _, err := MergePlanOf(schema, tables, "Label"); err == nil || !strings.Contains(err.Error(), "LabelCode has a unique @index that lists no keys (code_only), and LabelCode.label references Label, which implements Mergeable") {
+		t.Errorf("MergePlanOf with a unique index that lists no keys = %v, want it refused", err)
 	}
 }

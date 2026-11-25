@@ -2,7 +2,9 @@
 
 import type {
   Customer,
+  Address,
 } from '../../types';
+import { maskSecretsAddress } from './address';
 
 /**
  * Returns a copy of Customer with fields marked @secret cleared.
@@ -11,6 +13,7 @@ export function maskSecretsCustomer(value: Customer): Customer {
   return {
     id: value.id,
     name: value.name,
+    addresses: Array.isArray(value.addresses) ? value.addresses.map((item: Address) => maskSecretsAddress(item)) : [],
     status: value.status,
     statusEnteredAt: value.statusEnteredAt,
     _version: value._version,

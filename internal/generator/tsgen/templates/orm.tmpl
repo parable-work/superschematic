@@ -261,6 +261,9 @@ export const {{.Const}}: TableDefinition = {
 {{- if .HistoryActor}}
     historyActor: true,
 {{- end}}
+{{- if .RequiresUser}}
+    requiresUser: true,
+{{- end}}
     steps: [
 {{- range .Steps}}
       {

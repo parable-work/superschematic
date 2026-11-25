@@ -224,6 +224,354 @@ var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 // Type-Safe Field Selectors and Options
 // ========================================
 
+// AddressFields specifies which Address fields to select
+type AddressFields struct {
+	Id   bool
+	Line bool
+}
+
+// ToStringSlice converts AddressFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f AddressFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Line {
+		fields = append(fields, "line")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f AddressFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a AddressFields with all fields selected
+func (AddressFields) All() AddressFields {
+	return AddressFields{
+		Id:   true,
+		Line: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (AddressFields) Minimal() AddressFields {
+	return AddressFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (AddressFields) WithoutAudit() AddressFields {
+	return AddressFields{
+		Id:   true,
+		Line: true,
+	}
+}
+
+// AddressOrderByField represents a field that can be used for ordering
+type AddressOrderByField string
+
+const (
+	AddressOrderById   AddressOrderByField = "id"
+	AddressOrderByLine AddressOrderByField = "line"
+)
+
+// AddressOrderBy specifies ordering for Address queries
+type AddressOrderBy struct {
+	Field AddressOrderByField
+	Desc  bool
+}
+
+// AddressGetOptions contains options for Address GetOne operations
+type AddressGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields AddressFields
+}
+
+// AddressFindOptions contains options for Address Find operations
+type AddressFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields AddressFields
+	// OrderBy specifies sorting order
+	OrderBy []AddressOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// AddressSortField is a field FindPage orders Address rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type AddressSortField string
+
+const (
+	AddressSortById   AddressSortField = "id"
+	AddressSortByLine AddressSortField = "line"
+)
+
+// AddressSort is the order FindPage reads Address rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type AddressSort struct {
+	Field AddressSortField
+	Desc  bool
+}
+
+// ParseAddressSort reads a sort as a page request writes it, "line" or
+// "-line": an error for a field Address cannot be sorted by.
+func ParseAddressSort(text string) (AddressSort, error) {
+	parsed := AddressSort{Field: AddressSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case AddressSortById, AddressSortByLine:
+		return parsed, nil
+	}
+	return AddressSort{}, fmt.Errorf("orm: Address sorts by id and line, not %q", text)
+}
+
+// AddressUniqueKey names a unique key of Address that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type AddressUniqueKey string
+
+const (
+	AddressUniqueById AddressUniqueKey = "id"
+)
+
+// AddressPageKey is the position of a Address row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type AddressPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *AddressPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Address key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// addressPageKeyOf is row's key: its id.
+func addressPageKeyOf(row *types.Address) *AddressPageKey {
+	key := &AddressPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// AddressPageOptions are FindPage's options.
+type AddressPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields AddressFields
+	// Sort is the order the rows are read in.
+	Sort AddressSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *AddressPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// AddressPage is a page of Address rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type AddressPage struct {
+	Rows []*types.Address
+	Next *AddressPageKey
+}
+
+// BoardFields specifies which Board fields to select
+type BoardFields struct {
+	Id    bool
+	Title bool
+}
+
+// ToStringSlice converts BoardFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f BoardFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Title {
+		fields = append(fields, "title")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f BoardFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a BoardFields with all fields selected
+func (BoardFields) All() BoardFields {
+	return BoardFields{
+		Id:    true,
+		Title: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (BoardFields) Minimal() BoardFields {
+	return BoardFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (BoardFields) WithoutAudit() BoardFields {
+	return BoardFields{
+		Id:    true,
+		Title: true,
+	}
+}
+
+// BoardOrderByField represents a field that can be used for ordering
+type BoardOrderByField string
+
+const (
+	BoardOrderById    BoardOrderByField = "id"
+	BoardOrderByTitle BoardOrderByField = "title"
+)
+
+// BoardOrderBy specifies ordering for Board queries
+type BoardOrderBy struct {
+	Field BoardOrderByField
+	Desc  bool
+}
+
+// BoardGetOptions contains options for Board GetOne operations
+type BoardGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields BoardFields
+}
+
+// BoardFindOptions contains options for Board Find operations
+type BoardFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields BoardFields
+	// OrderBy specifies sorting order
+	OrderBy []BoardOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// BoardSortField is a field FindPage orders Board rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type BoardSortField string
+
+const (
+	BoardSortById    BoardSortField = "id"
+	BoardSortByTitle BoardSortField = "title"
+)
+
+// BoardSort is the order FindPage reads Board rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type BoardSort struct {
+	Field BoardSortField
+	Desc  bool
+}
+
+// ParseBoardSort reads a sort as a page request writes it, "title" or
+// "-title": an error for a field Board cannot be sorted by.
+func ParseBoardSort(text string) (BoardSort, error) {
+	parsed := BoardSort{Field: BoardSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case BoardSortById, BoardSortByTitle:
+		return parsed, nil
+	}
+	return BoardSort{}, fmt.Errorf("orm: Board sorts by id and title, not %q", text)
+}
+
+// BoardUniqueKey names a unique key of Board that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type BoardUniqueKey string
+
+const (
+	BoardUniqueById BoardUniqueKey = "id"
+)
+
+// BoardPageKey is the position of a Board row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type BoardPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *BoardPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Board key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// boardPageKeyOf is row's key: its id.
+func boardPageKeyOf(row *types.Board) *BoardPageKey {
+	key := &BoardPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// BoardPageOptions are FindPage's options.
+type BoardPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields BoardFields
+	// Sort is the order the rows are read in.
+	Sort BoardSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *BoardPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// BoardPage is a page of Board rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type BoardPage struct {
+	Rows []*types.Board
+	Next *BoardPageKey
+}
+
 // CustomerFields specifies which Customer fields to select
 type CustomerFields struct {
 	Id              bool
@@ -231,6 +579,8 @@ type CustomerFields struct {
 	Status          bool
 	StatusEnteredAt bool
 	Version         bool
+	// AddressesNested selects fields for related Address records
+	AddressesNested *AddressFields
 }
 
 // ToStringSlice converts CustomerFields to []string for internal use.
@@ -258,6 +608,9 @@ func (f CustomerFields) ToStringSlice() []string {
 // IsZero returns true if no fields are selected
 func (f CustomerFields) IsZero() bool {
 	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if f.AddressesNested != nil {
 		return false
 	}
 	return true
@@ -1359,6 +1712,7 @@ type LabelCodePage struct {
 type LabelNoteFields struct {
 	Id        bool
 	Text      bool
+	Revision  bool
 	UpdatedAt bool
 	UpdatedBy bool
 	// Label selects the label_id foreign key field
@@ -1379,6 +1733,9 @@ func (f LabelNoteFields) ToStringSlice() []string {
 	}
 	if f.Text {
 		fields = append(fields, "text")
+	}
+	if f.Revision {
+		fields = append(fields, "revision")
 	}
 	if f.UpdatedAt {
 		fields = append(fields, "updated_at")
@@ -1405,6 +1762,7 @@ func (LabelNoteFields) All() LabelNoteFields {
 	return LabelNoteFields{
 		Id:        true,
 		Text:      true,
+		Revision:  true,
 		UpdatedAt: true,
 		UpdatedBy: true,
 		Label:     true,
@@ -1421,8 +1779,9 @@ func (LabelNoteFields) Minimal() LabelNoteFields {
 // WithoutAudit returns all non-audit fields
 func (LabelNoteFields) WithoutAudit() LabelNoteFields {
 	return LabelNoteFields{
-		Id:   true,
-		Text: true,
+		Id:       true,
+		Text:     true,
+		Revision: true,
 	}
 }
 
@@ -1432,6 +1791,7 @@ type LabelNoteOrderByField string
 const (
 	LabelNoteOrderById        LabelNoteOrderByField = "id"
 	LabelNoteOrderByText      LabelNoteOrderByField = "text"
+	LabelNoteOrderByRevision  LabelNoteOrderByField = "revision"
 	LabelNoteOrderByUpdatedAt LabelNoteOrderByField = "updated_at"
 	LabelNoteOrderByUpdatedBy LabelNoteOrderByField = "updated_by"
 )
@@ -1473,6 +1833,7 @@ type LabelNoteSortField string
 const (
 	LabelNoteSortById        LabelNoteSortField = "id"
 	LabelNoteSortByText      LabelNoteSortField = "text"
+	LabelNoteSortByRevision  LabelNoteSortField = "revision"
 	LabelNoteSortByUpdatedAt LabelNoteSortField = "updatedAt"
 )
 
@@ -1489,10 +1850,10 @@ type LabelNoteSort struct {
 func ParseLabelNoteSort(text string) (LabelNoteSort, error) {
 	parsed := LabelNoteSort{Field: LabelNoteSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case LabelNoteSortById, LabelNoteSortByText, LabelNoteSortByUpdatedAt:
+	case LabelNoteSortById, LabelNoteSortByText, LabelNoteSortByRevision, LabelNoteSortByUpdatedAt:
 		return parsed, nil
 	}
-	return LabelNoteSort{}, fmt.Errorf("orm: LabelNote sorts by id, text and updatedAt, not %q", text)
+	return LabelNoteSort{}, fmt.Errorf("orm: LabelNote sorts by id, text, revision and updatedAt, not %q", text)
 }
 
 // LabelNoteUniqueKey names a unique key of LabelNote that UpsertOne and
@@ -1551,6 +1912,388 @@ type LabelNotePageOptions struct {
 type LabelNotePage struct {
 	Rows []*types.LabelNote
 	Next *LabelNotePageKey
+}
+
+// LabelPairFields specifies which LabelPair fields to select
+type LabelPairFields struct {
+	Id bool
+	// First selects the first_id foreign key field
+	First bool
+	// FirstNested selects fields for the related Label
+	FirstNested LabelFields
+	// Second selects the second_id foreign key field
+	Second bool
+	// SecondNested selects fields for the related Label
+	SecondNested LabelFields
+}
+
+// ToStringSlice converts LabelPairFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f LabelPairFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.First {
+		fields = append(fields, "first_id")
+	}
+	if f.Second {
+		fields = append(fields, "second_id")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f LabelPairFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.FirstNested.IsZero() {
+		return false
+	}
+	if !f.SecondNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a LabelPairFields with all fields selected
+func (LabelPairFields) All() LabelPairFields {
+	return LabelPairFields{
+		Id:     true,
+		First:  true,
+		Second: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (LabelPairFields) Minimal() LabelPairFields {
+	return LabelPairFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (LabelPairFields) WithoutAudit() LabelPairFields {
+	return LabelPairFields{
+		Id: true,
+	}
+}
+
+// LabelPairOrderByField represents a field that can be used for ordering
+type LabelPairOrderByField string
+
+const (
+	LabelPairOrderById LabelPairOrderByField = "id"
+)
+
+// LabelPairOrderBy specifies ordering for LabelPair queries
+type LabelPairOrderBy struct {
+	Field LabelPairOrderByField
+	Desc  bool
+}
+
+// LabelPairGetOptions contains options for LabelPair GetOne operations
+type LabelPairGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields LabelPairFields
+}
+
+// LabelPairFindOptions contains options for LabelPair Find operations
+type LabelPairFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields LabelPairFields
+	// OrderBy specifies sorting order
+	OrderBy []LabelPairOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// LabelPairSortField is a field FindPage orders LabelPair rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type LabelPairSortField string
+
+const (
+	LabelPairSortById LabelPairSortField = "id"
+)
+
+// LabelPairSort is the order FindPage reads LabelPair rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type LabelPairSort struct {
+	Field LabelPairSortField
+	Desc  bool
+}
+
+// ParseLabelPairSort reads a sort as a page request writes it, "id" or
+// "-id": an error for a field LabelPair cannot be sorted by.
+func ParseLabelPairSort(text string) (LabelPairSort, error) {
+	parsed := LabelPairSort{Field: LabelPairSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case LabelPairSortById:
+		return parsed, nil
+	}
+	return LabelPairSort{}, fmt.Errorf("orm: LabelPair sorts by id, not %q", text)
+}
+
+// LabelPairUniqueKey names a unique key of LabelPair that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type LabelPairUniqueKey string
+
+const (
+	LabelPairUniqueById          LabelPairUniqueKey = "id"
+	LabelPairUniqueByFirstSecond LabelPairUniqueKey = "first,second"
+)
+
+// LabelPairPageKey is the position of a LabelPair row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type LabelPairPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *LabelPairPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the LabelPair key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// labelPairPageKeyOf is row's key: its id.
+func labelPairPageKeyOf(row *types.LabelPair) *LabelPairPageKey {
+	key := &LabelPairPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// LabelPairPageOptions are FindPage's options.
+type LabelPairPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields LabelPairFields
+	// Sort is the order the rows are read in.
+	Sort LabelPairSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *LabelPairPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// LabelPairPage is a page of LabelPair rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type LabelPairPage struct {
+	Rows []*types.LabelPair
+	Next *LabelPairPageKey
+}
+
+// LabelSlotFields specifies which LabelSlot fields to select
+type LabelSlotFields struct {
+	Id   bool
+	Slot bool
+	Open bool
+	// Label selects the label_id foreign key field
+	Label bool
+	// LabelNested selects fields for the related Label
+	LabelNested LabelFields
+}
+
+// ToStringSlice converts LabelSlotFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f LabelSlotFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Label {
+		fields = append(fields, "label_id")
+	}
+	if f.Slot {
+		fields = append(fields, "slot")
+	}
+	if f.Open {
+		fields = append(fields, "open")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f LabelSlotFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.LabelNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a LabelSlotFields with all fields selected
+func (LabelSlotFields) All() LabelSlotFields {
+	return LabelSlotFields{
+		Id:    true,
+		Slot:  true,
+		Open:  true,
+		Label: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (LabelSlotFields) Minimal() LabelSlotFields {
+	return LabelSlotFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (LabelSlotFields) WithoutAudit() LabelSlotFields {
+	return LabelSlotFields{
+		Id:   true,
+		Slot: true,
+		Open: true,
+	}
+}
+
+// LabelSlotOrderByField represents a field that can be used for ordering
+type LabelSlotOrderByField string
+
+const (
+	LabelSlotOrderById   LabelSlotOrderByField = "id"
+	LabelSlotOrderBySlot LabelSlotOrderByField = "slot"
+	LabelSlotOrderByOpen LabelSlotOrderByField = "open"
+)
+
+// LabelSlotOrderBy specifies ordering for LabelSlot queries
+type LabelSlotOrderBy struct {
+	Field LabelSlotOrderByField
+	Desc  bool
+}
+
+// LabelSlotGetOptions contains options for LabelSlot GetOne operations
+type LabelSlotGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields LabelSlotFields
+}
+
+// LabelSlotFindOptions contains options for LabelSlot Find operations
+type LabelSlotFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields LabelSlotFields
+	// OrderBy specifies sorting order
+	OrderBy []LabelSlotOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// LabelSlotSortField is a field FindPage orders LabelSlot rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type LabelSlotSortField string
+
+const (
+	LabelSlotSortById   LabelSlotSortField = "id"
+	LabelSlotSortBySlot LabelSlotSortField = "slot"
+)
+
+// LabelSlotSort is the order FindPage reads LabelSlot rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type LabelSlotSort struct {
+	Field LabelSlotSortField
+	Desc  bool
+}
+
+// ParseLabelSlotSort reads a sort as a page request writes it, "slot" or
+// "-slot": an error for a field LabelSlot cannot be sorted by.
+func ParseLabelSlotSort(text string) (LabelSlotSort, error) {
+	parsed := LabelSlotSort{Field: LabelSlotSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case LabelSlotSortById, LabelSlotSortBySlot:
+		return parsed, nil
+	}
+	return LabelSlotSort{}, fmt.Errorf("orm: LabelSlot sorts by id and slot, not %q", text)
+}
+
+// LabelSlotUniqueKey names a unique key of LabelSlot that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type LabelSlotUniqueKey string
+
+const (
+	LabelSlotUniqueById        LabelSlotUniqueKey = "id"
+	LabelSlotUniqueByLabelSlot LabelSlotUniqueKey = "label,slot"
+)
+
+// LabelSlotPageKey is the position of a LabelSlot row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type LabelSlotPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *LabelSlotPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the LabelSlot key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// labelSlotPageKeyOf is row's key: its id.
+func labelSlotPageKeyOf(row *types.LabelSlot) *LabelSlotPageKey {
+	key := &LabelSlotPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// LabelSlotPageOptions are FindPage's options.
+type LabelSlotPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields LabelSlotFields
+	// Sort is the order the rows are read in.
+	Sort LabelSlotSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *LabelSlotPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// LabelSlotPage is a page of LabelSlot rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type LabelSlotPage struct {
+	Rows []*types.LabelSlot
+	Next *LabelSlotPageKey
 }
 
 // PurchaseFields specifies which Purchase fields to select
@@ -1939,6 +2682,384 @@ type SubscriptionPage struct {
 // ========================================
 // Filters and Update Structs
 // ========================================
+
+// AddressFilter provides filtering for Address queries
+type AddressFilter struct {
+	Id   *UUIDFilter
+	Line *StringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []AddressFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []AddressFilter
+}
+
+// AddressUpdate provides fields that can be updated
+type AddressUpdate struct {
+	Line *string
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewAddressSnapshotUpdate maps every mutable field from a complete
+// Address value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewAddressSnapshotUpdate(input *types.Address) *AddressUpdate {
+	update := &AddressUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Line = &input.Line
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *AddressUpdate) ApplyTo(row *types.Address) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Line != nil {
+		row.Line = *u.Line
+	}
+}
+
+// AddressFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func AddressFilterConditions(filter *AddressFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a AddressFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *AddressFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *AddressFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`address.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`address.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`address.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(address.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `address.id IS NULL`)
+			} else {
+				conditions = append(conditions, `address.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Line != nil {
+		if f.Line.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`address.line = $%d`, paramNum))
+			*args = append(*args, *f.Line.Eq)
+		}
+		if f.Line.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`address.line IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Line.Ne)
+		}
+		if len(f.Line.In) > 0 {
+			placeholders := make([]string, len(f.Line.In))
+			for i, value := range f.Line.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`address.line IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Line.NotIn) > 0 {
+			placeholders := make([]string, len(f.Line.NotIn))
+			for i, value := range f.Line.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(address.line IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Line.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`address.line ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Line.ILike+"%")
+		}
+		if f.Line.IsNull != nil {
+			if *f.Line.IsNull {
+				conditions = append(conditions, `address.line IS NULL`)
+			} else {
+				conditions = append(conditions, `address.line IS NOT NULL`)
+			}
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// BoardFilter provides filtering for Board queries
+type BoardFilter struct {
+	Id    *UUIDFilter
+	Title *StringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []BoardFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []BoardFilter
+}
+
+// BoardUpdate provides fields that can be updated
+type BoardUpdate struct {
+	Title *string
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewBoardSnapshotUpdate maps every mutable field from a complete
+// Board value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewBoardSnapshotUpdate(input *types.Board) *BoardUpdate {
+	update := &BoardUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Title = &input.Title
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *BoardUpdate) ApplyTo(row *types.Board) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Title != nil {
+		row.Title = *u.Title
+	}
+}
+
+// BoardFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func BoardFilterConditions(filter *BoardFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a BoardFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *BoardFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *BoardFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`board.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`board.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`board.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(board.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `board.id IS NULL`)
+			} else {
+				conditions = append(conditions, `board.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Title != nil {
+		if f.Title.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`board.title = $%d`, paramNum))
+			*args = append(*args, *f.Title.Eq)
+		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`board.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
+		if len(f.Title.In) > 0 {
+			placeholders := make([]string, len(f.Title.In))
+			for i, value := range f.Title.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`board.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(board.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Title.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`board.title ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Title.ILike+"%")
+		}
+		if f.Title.IsNull != nil {
+			if *f.Title.IsNull {
+				conditions = append(conditions, `board.title IS NULL`)
+			} else {
+				conditions = append(conditions, `board.title IS NOT NULL`)
+			}
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
 
 // CustomerFilter provides filtering for Customer queries
 type CustomerFilter struct {
@@ -3050,9 +4171,18 @@ type LabelFilter struct {
 	// ReferencedByLabelNoteLabel filters on the presence or absence of a
 	// LabelNote whose label points at this row.
 	ReferencedByLabelNoteLabel *ReferencedByFilter
+	// ReferencedByLabelPairFirst filters on the presence or absence of a
+	// LabelPair whose first points at this row.
+	ReferencedByLabelPairFirst *ReferencedByFilter
+	// ReferencedByLabelPairSecond filters on the presence or absence of a
+	// LabelPair whose second points at this row.
+	ReferencedByLabelPairSecond *ReferencedByFilter
 	// ReferencedByLabelParent filters on the presence or absence of a
 	// Label whose parent points at this row.
 	ReferencedByLabelParent *ReferencedByFilter
+	// ReferencedByLabelSlotLabel filters on the presence or absence of a
+	// LabelSlot whose label points at this row.
+	ReferencedByLabelSlotLabel *ReferencedByFilter
 	// ReferencedBySubscriptionLabel filters on the presence or absence of a
 	// Subscription whose label points at this row.
 	ReferencedBySubscriptionLabel *ReferencedByFilter
@@ -3291,12 +4421,36 @@ func (f *LabelFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
+	if f.ReferencedByLabelPairFirst != nil {
+		probe := `SELECT 1 FROM label_pair WHERE label_pair.first_id = label.id`
+		if f.ReferencedByLabelPairFirst.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByLabelPairSecond != nil {
+		probe := `SELECT 1 FROM label_pair WHERE label_pair.second_id = label.id`
+		if f.ReferencedByLabelPairSecond.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
 	if f.ReferencedByLabelParent != nil {
 		probe := `SELECT 1 FROM label WHERE label.parent_id = label.id`
 		if !f.ReferencedByLabelParent.IncludeDeleted {
 			probe += ` AND label.deleted_at IS NULL`
 		}
 		if f.ReferencedByLabelParent.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByLabelSlotLabel != nil {
+		probe := `SELECT 1 FROM label_slot WHERE label_slot.label_id = label.id`
+		if f.ReferencedByLabelSlotLabel.Exists {
 			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
@@ -3601,6 +4755,7 @@ func (f *LabelCodeFilter) conditions(args *[]interface{}, paramOffset int) []str
 type LabelNoteFilter struct {
 	Id        *UUIDFilter
 	Text      *StringFilter
+	Revision  *Int64Filter
 	UpdatedAt *DateTimeFilter
 	UpdatedBy *UUIDFilter
 	// LabelID allows filtering by foreign key
@@ -3624,7 +4779,8 @@ type LabelNoteFilter struct {
 
 // LabelNoteUpdate provides fields that can be updated
 type LabelNoteUpdate struct {
-	Text *string
+	Text     *string
+	Revision *types.GenericInt64
 	// LabelID allows updating the foreign key for label
 	LabelID *types.IdentityUUID
 	// UpdatedBy is automatically set if not provided and user is in context
@@ -3640,6 +4796,7 @@ func NewLabelNoteSnapshotUpdate(input *types.LabelNote) *LabelNoteUpdate {
 		return update
 	}
 	update.Text = &input.Text
+	update.Revision = &input.Revision
 	return update
 }
 
@@ -3651,6 +4808,9 @@ func (u *LabelNoteUpdate) ApplyTo(row *types.LabelNote) {
 	}
 	if u.Text != nil {
 		row.Text = *u.Text
+	}
+	if u.Revision != nil {
+		row.Revision = *u.Revision
 	}
 	if u.LabelID != nil {
 		row.Label.Id = u.LabelID
@@ -3763,6 +4923,71 @@ func (f *LabelNoteFilter) conditions(args *[]interface{}, paramOffset int) []str
 				conditions = append(conditions, `label_note.text IS NULL`)
 			} else {
 				conditions = append(conditions, `label_note.text IS NOT NULL`)
+			}
+		}
+	}
+	if f.Revision != nil {
+		if f.Revision.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision = $%d`, paramNum))
+			*args = append(*args, *f.Revision.Eq)
+		}
+		if f.Revision.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Revision.Ne)
+		}
+		if f.Revision.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision > $%d`, paramNum))
+			*args = append(*args, *f.Revision.Gt)
+		}
+		if f.Revision.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision >= $%d`, paramNum))
+			*args = append(*args, *f.Revision.Gte)
+		}
+		if f.Revision.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision < $%d`, paramNum))
+			*args = append(*args, *f.Revision.Lt)
+		}
+		if f.Revision.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision <= $%d`, paramNum))
+			*args = append(*args, *f.Revision.Lte)
+		}
+		if f.Revision.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision >= $%d`, paramNum))
+			*args = append(*args, f.Revision.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision <= $%d`, paramNum))
+			*args = append(*args, f.Revision.Between.Max)
+		}
+		if len(f.Revision.In) > 0 {
+			placeholders := make([]string, len(f.Revision.In))
+			for i, value := range f.Revision.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_note.revision IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Revision.NotIn) > 0 {
+			placeholders := make([]string, len(f.Revision.NotIn))
+			for i, value := range f.Revision.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_note.revision IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Revision.IsNull != nil {
+			if *f.Revision.IsNull {
+				conditions = append(conditions, `label_note.revision IS NULL`)
+			} else {
+				conditions = append(conditions, `label_note.revision IS NOT NULL`)
 			}
 		}
 	}
@@ -3915,6 +5140,565 @@ func (f *LabelNoteFilter) conditions(args *[]interface{}, paramOffset int) []str
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`label_note.label_id IN (SELECT label.id FROM label%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// LabelPairFilter provides filtering for LabelPair queries
+type LabelPairFilter struct {
+	Id *UUIDFilter
+	// FirstID allows filtering by foreign key
+	FirstID *UUIDFilter
+	// SecondID allows filtering by foreign key
+	SecondID *UUIDFilter
+	// First keeps the rows whose first is among the live Label rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	First *LabelFilter
+	// Second keeps the rows whose second is among the live Label rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Second *LabelFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []LabelPairFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LabelPairFilter
+}
+
+// LabelPairUpdate provides fields that can be updated
+type LabelPairUpdate struct {
+	// FirstID allows updating the foreign key for first
+	FirstID *types.IdentityUUID
+	// SecondID allows updating the foreign key for second
+	SecondID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewLabelPairSnapshotUpdate maps every mutable field from a complete
+// LabelPair value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewLabelPairSnapshotUpdate(input *types.LabelPair) *LabelPairUpdate {
+	update := &LabelPairUpdate{}
+	if input == nil {
+		return update
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *LabelPairUpdate) ApplyTo(row *types.LabelPair) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.FirstID != nil {
+		row.First.Id = u.FirstID
+	}
+	if u.SecondID != nil {
+		row.Second.Id = u.SecondID
+	}
+}
+
+// LabelPairFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func LabelPairFilterConditions(filter *LabelPairFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a LabelPairFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *LabelPairFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *LabelPairFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_pair.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_pair.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `label_pair.id IS NULL`)
+			} else {
+				conditions = append(conditions, `label_pair.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.FirstID != nil {
+		if f.FirstID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.first_id = $%d`, paramNum))
+			*args = append(*args, f.FirstID.Eq.ToUUID())
+		}
+		if f.FirstID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.first_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.FirstID.Ne.ToUUID())
+		}
+		if len(f.FirstID.In) > 0 {
+			placeholders := make([]string, len(f.FirstID.In))
+			for i, id := range f.FirstID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_pair.first_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.FirstID.NotIn) > 0 {
+			placeholders := make([]string, len(f.FirstID.NotIn))
+			for i, id := range f.FirstID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_pair.first_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.FirstID.IsNull != nil {
+			if *f.FirstID.IsNull {
+				conditions = append(conditions, `label_pair.first_id IS NULL`)
+			} else {
+				conditions = append(conditions, `label_pair.first_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.SecondID != nil {
+		if f.SecondID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.second_id = $%d`, paramNum))
+			*args = append(*args, f.SecondID.Eq.ToUUID())
+		}
+		if f.SecondID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_pair.second_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.SecondID.Ne.ToUUID())
+		}
+		if len(f.SecondID.In) > 0 {
+			placeholders := make([]string, len(f.SecondID.In))
+			for i, id := range f.SecondID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_pair.second_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.SecondID.NotIn) > 0 {
+			placeholders := make([]string, len(f.SecondID.NotIn))
+			for i, id := range f.SecondID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_pair.second_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.SecondID.IsNull != nil {
+			if *f.SecondID.IsNull {
+				conditions = append(conditions, `label_pair.second_id IS NULL`)
+			} else {
+				conditions = append(conditions, `label_pair.second_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.First != nil {
+		before := len(*args)
+		through := f.First.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `label.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label_pair.first_id IN (SELECT label.id FROM label%s)`, where))
+	}
+	if f.Second != nil {
+		before := len(*args)
+		through := f.Second.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `label.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label_pair.second_id IN (SELECT label.id FROM label%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// LabelSlotFilter provides filtering for LabelSlot queries
+type LabelSlotFilter struct {
+	Id   *UUIDFilter
+	Slot *StringFilter
+	Open *BoolFilter
+	// LabelID allows filtering by foreign key
+	LabelID *UUIDFilter
+	// Label keeps the rows whose label is among the live Label rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Label *LabelFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []LabelSlotFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LabelSlotFilter
+}
+
+// LabelSlotUpdate provides fields that can be updated
+type LabelSlotUpdate struct {
+	Slot        *string
+	SlotSetNull bool
+	Open        *bool
+	// LabelID allows updating the foreign key for label
+	LabelID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewLabelSlotSnapshotUpdate maps every mutable field from a complete
+// LabelSlot value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewLabelSlotSnapshotUpdate(input *types.LabelSlot) *LabelSlotUpdate {
+	update := &LabelSlotUpdate{}
+	if input == nil {
+		return update
+	}
+	var zeroSlot string
+	if input.Slot == zeroSlot {
+		update.SlotSetNull = true
+	} else {
+		update.Slot = &input.Slot
+	}
+	update.Open = &input.Open
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *LabelSlotUpdate) ApplyTo(row *types.LabelSlot) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.SlotSetNull {
+		var zeroSlot string
+		row.Slot = zeroSlot
+	} else if u.Slot != nil {
+		row.Slot = *u.Slot
+	}
+	if u.Open != nil {
+		row.Open = *u.Open
+	}
+	if u.LabelID != nil {
+		row.Label.Id = u.LabelID
+	}
+}
+
+// LabelSlotFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func LabelSlotFilterConditions(filter *LabelSlotFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a LabelSlotFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *LabelSlotFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *LabelSlotFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_slot.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_slot.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `label_slot.id IS NULL`)
+			} else {
+				conditions = append(conditions, `label_slot.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Slot != nil {
+		if f.Slot.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.slot = $%d`, paramNum))
+			*args = append(*args, *f.Slot.Eq)
+		}
+		if f.Slot.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.slot IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Slot.Ne)
+		}
+		if len(f.Slot.In) > 0 {
+			placeholders := make([]string, len(f.Slot.In))
+			for i, value := range f.Slot.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_slot.slot IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Slot.NotIn) > 0 {
+			placeholders := make([]string, len(f.Slot.NotIn))
+			for i, value := range f.Slot.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_slot.slot IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Slot.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.slot ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Slot.ILike+"%")
+		}
+		if f.Slot.IsNull != nil {
+			if *f.Slot.IsNull {
+				conditions = append(conditions, `label_slot.slot IS NULL`)
+			} else {
+				conditions = append(conditions, `label_slot.slot IS NOT NULL`)
+			}
+		}
+	}
+	if f.Open != nil {
+		if f.Open.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.open = $%d`, paramNum))
+			*args = append(*args, *f.Open.Eq)
+		}
+		if f.Open.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.open IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Open.Ne)
+		}
+		if len(f.Open.In) > 0 {
+			placeholders := make([]string, len(f.Open.In))
+			for i, value := range f.Open.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_slot.open IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Open.NotIn) > 0 {
+			placeholders := make([]string, len(f.Open.NotIn))
+			for i, value := range f.Open.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_slot.open IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Open.IsNull != nil {
+			if *f.Open.IsNull {
+				conditions = append(conditions, `label_slot.open IS NULL`)
+			} else {
+				conditions = append(conditions, `label_slot.open IS NOT NULL`)
+			}
+		}
+	}
+	if f.LabelID != nil {
+		if f.LabelID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.label_id = $%d`, paramNum))
+			*args = append(*args, f.LabelID.Eq.ToUUID())
+		}
+		if f.LabelID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`label_slot.label_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.LabelID.Ne.ToUUID())
+		}
+		if len(f.LabelID.In) > 0 {
+			placeholders := make([]string, len(f.LabelID.In))
+			for i, id := range f.LabelID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`label_slot.label_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.LabelID.NotIn) > 0 {
+			placeholders := make([]string, len(f.LabelID.NotIn))
+			for i, id := range f.LabelID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(label_slot.label_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.LabelID.IsNull != nil {
+			if *f.LabelID.IsNull {
+				conditions = append(conditions, `label_slot.label_id IS NULL`)
+			} else {
+				conditions = append(conditions, `label_slot.label_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Label != nil {
+		before := len(*args)
+		through := f.Label.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `label.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label_slot.label_id IN (SELECT label.id FROM label%s)`, where))
 	}
 
 	// AllOf's filters' conditions are the filter's own, ANDed (D99), each

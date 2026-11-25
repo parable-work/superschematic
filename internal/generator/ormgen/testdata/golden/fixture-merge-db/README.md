@@ -12,6 +12,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
 - `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`
+- `repository_address.go` -- Address repository
+- `repository_board.go` -- Board repository
 - `repository_customer.go` -- Customer repository
 - `repository_customer_profile.go` -- CustomerProfile repository
 - `repository_document.go` -- Document repository
@@ -19,6 +21,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_label.go` -- Label repository
 - `repository_label_code.go` -- LabelCode repository
 - `repository_label_note.go` -- LabelNote repository
+- `repository_label_pair.go` -- LabelPair repository
+- `repository_label_slot.go` -- LabelSlot repository
 - `repository_purchase.go` -- Purchase repository
 - `repository_subscription.go` -- Subscription repository
 
@@ -36,7 +40,7 @@ if err != nil {
 }
 defer db.Close()
 
-record, err := db.Customer.GetOne(ctx, id, nil)
+record, err := db.Address.GetOne(ctx, id, nil)
 ```
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
@@ -56,6 +60,16 @@ that row.
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
+
+A table with a `@fenced` field keeps a counter that every write of a column
+the fence covers sets to the stored value plus one, which a trigger holds
+every writer to. `UpdateOne`, `UpdateMany` and an upsert's update advance it
+themselves when they set a covered column, and a soft delete does when the
+fence covers `deletedAt`. An update that sets the field itself is written as
+it stands: a caller that read 4 writes 5, and filters `UpdateMany` on the 4
+it read to compare and set. `New*SnapshotUpdate` sets the field from the
+value it is given, so a replacement built with it names the counter's next
+value.
 
 `<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
 column qualified by its table, for a query of your own: its values are

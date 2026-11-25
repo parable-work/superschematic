@@ -45,6 +45,10 @@ var mergeCases = []string{
 	"a table that deletes for good loses the row merged away, through the core",
 	"a merge of a row into itself, of a row that is gone, and into a row that references it is refused and writes nothing",
 	"a merge in a transaction rolls back with it",
+	"a @manyToMany's join table has its pairs repointed, and one that would repeat deleted",
+	"two relations of one table, a partial index and an index that holds nulls alike each find their collisions",
+	"a merge that stamps a row deleted needs an acting user before it writes, and one that stamps none does not",
+	"two merges of one pair at once: one folds, and the other finds its row gone",
 }
 
 // TestMergeIntoOnPostgres holds the merge the generator writes into a

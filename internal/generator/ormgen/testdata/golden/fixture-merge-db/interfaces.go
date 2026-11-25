@@ -10,6 +10,42 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// AddressRepositoryInterface defines the contract for Address data access.
+type AddressRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *AddressGetOptions) (*types.Address, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Address, error)
+	FindOne(ctx context.Context, filter *AddressFilter, opts *AddressFindOptions) (*types.Address, error)
+	FindMany(ctx context.Context, filter *AddressFilter, opts *AddressFindOptions) ([]*types.Address, int, error)
+	FindPage(ctx context.Context, filter *AddressFilter, opts *AddressPageOptions) (*AddressPage, error)
+	CreateOne(ctx context.Context, input *types.Address) (*types.Address, error)
+	CreateMany(ctx context.Context, inputs []*types.Address) ([]*types.Address, error)
+	UpsertOne(ctx context.Context, input *types.Address, on AddressUniqueKey, update *AddressUpdate) (*types.Address, error)
+	UpsertOneResult(ctx context.Context, input *types.Address, on AddressUniqueKey, update *AddressUpdate, opts *UpsertOptions) (UpsertResult[*types.Address], error)
+	UpsertMany(ctx context.Context, inputs []*types.Address, on AddressUniqueKey, update AddressFields, opts *UpsertOptions) ([]UpsertResult[*types.Address], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *AddressUpdate) (*types.Address, error)
+	UpdateMany(ctx context.Context, filter *AddressFilter, update *AddressUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *AddressFilter) (int, error)
+}
+
+// BoardRepositoryInterface defines the contract for Board data access.
+type BoardRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BoardGetOptions) (*types.Board, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Board, error)
+	FindOne(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) (*types.Board, error)
+	FindMany(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, int, error)
+	FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error)
+	CreateOne(ctx context.Context, input *types.Board) (*types.Board, error)
+	CreateMany(ctx context.Context, inputs []*types.Board) ([]*types.Board, error)
+	UpsertOne(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate) (*types.Board, error)
+	UpsertOneResult(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate, opts *UpsertOptions) (UpsertResult[*types.Board], error)
+	UpsertMany(ctx context.Context, inputs []*types.Board, on BoardUniqueKey, update BoardFields, opts *UpsertOptions) ([]UpsertResult[*types.Board], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *BoardUpdate) (*types.Board, error)
+	UpdateMany(ctx context.Context, filter *BoardFilter, update *BoardUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *BoardFilter) (int, error)
+}
+
 // CustomerRepositoryInterface defines the contract for Customer data access.
 type CustomerRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerGetOptions) (*types.Customer, error)
@@ -140,6 +176,42 @@ type LabelNoteRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *LabelNoteFilter) (int, error)
 }
 
+// LabelPairRepositoryInterface defines the contract for LabelPair data access.
+type LabelPairRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelPairGetOptions) (*types.LabelPair, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelPair, error)
+	FindOne(ctx context.Context, filter *LabelPairFilter, opts *LabelPairFindOptions) (*types.LabelPair, error)
+	FindMany(ctx context.Context, filter *LabelPairFilter, opts *LabelPairFindOptions) ([]*types.LabelPair, int, error)
+	FindPage(ctx context.Context, filter *LabelPairFilter, opts *LabelPairPageOptions) (*LabelPairPage, error)
+	CreateOne(ctx context.Context, input *types.LabelPair) (*types.LabelPair, error)
+	CreateMany(ctx context.Context, inputs []*types.LabelPair) ([]*types.LabelPair, error)
+	UpsertOne(ctx context.Context, input *types.LabelPair, on LabelPairUniqueKey, update *LabelPairUpdate) (*types.LabelPair, error)
+	UpsertOneResult(ctx context.Context, input *types.LabelPair, on LabelPairUniqueKey, update *LabelPairUpdate, opts *UpsertOptions) (UpsertResult[*types.LabelPair], error)
+	UpsertMany(ctx context.Context, inputs []*types.LabelPair, on LabelPairUniqueKey, update LabelPairFields, opts *UpsertOptions) ([]UpsertResult[*types.LabelPair], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *LabelPairUpdate) (*types.LabelPair, error)
+	UpdateMany(ctx context.Context, filter *LabelPairFilter, update *LabelPairUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *LabelPairFilter) (int, error)
+}
+
+// LabelSlotRepositoryInterface defines the contract for LabelSlot data access.
+type LabelSlotRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelSlotGetOptions) (*types.LabelSlot, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelSlot, error)
+	FindOne(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotFindOptions) (*types.LabelSlot, error)
+	FindMany(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotFindOptions) ([]*types.LabelSlot, int, error)
+	FindPage(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotPageOptions) (*LabelSlotPage, error)
+	CreateOne(ctx context.Context, input *types.LabelSlot) (*types.LabelSlot, error)
+	CreateMany(ctx context.Context, inputs []*types.LabelSlot) ([]*types.LabelSlot, error)
+	UpsertOne(ctx context.Context, input *types.LabelSlot, on LabelSlotUniqueKey, update *LabelSlotUpdate) (*types.LabelSlot, error)
+	UpsertOneResult(ctx context.Context, input *types.LabelSlot, on LabelSlotUniqueKey, update *LabelSlotUpdate, opts *UpsertOptions) (UpsertResult[*types.LabelSlot], error)
+	UpsertMany(ctx context.Context, inputs []*types.LabelSlot, on LabelSlotUniqueKey, update LabelSlotFields, opts *UpsertOptions) ([]UpsertResult[*types.LabelSlot], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *LabelSlotUpdate) (*types.LabelSlot, error)
+	UpdateMany(ctx context.Context, filter *LabelSlotFilter, update *LabelSlotUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *LabelSlotFilter) (int, error)
+}
+
 // PurchaseRepositoryInterface defines the contract for Purchase data access.
 type PurchaseRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *PurchaseGetOptions) (*types.Purchase, error)
@@ -183,6 +255,8 @@ type DatabaseInterface interface {
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
+	GetAddressRepository() AddressRepositoryInterface
+	GetBoardRepository() BoardRepositoryInterface
 	GetCustomerRepository() CustomerRepositoryInterface
 	GetCustomerProfileRepository() CustomerProfileRepositoryInterface
 	GetDocumentRepository() DocumentRepositoryInterface
@@ -190,6 +264,8 @@ type DatabaseInterface interface {
 	GetLabelRepository() LabelRepositoryInterface
 	GetLabelCodeRepository() LabelCodeRepositoryInterface
 	GetLabelNoteRepository() LabelNoteRepositoryInterface
+	GetLabelPairRepository() LabelPairRepositoryInterface
+	GetLabelSlotRepository() LabelSlotRepositoryInterface
 	GetPurchaseRepository() PurchaseRepositoryInterface
 	GetSubscriptionRepository() SubscriptionRepositoryInterface
 }
@@ -199,6 +275,8 @@ type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	GetAddressRepository() AddressRepositoryInterface
+	GetBoardRepository() BoardRepositoryInterface
 	GetCustomerRepository() CustomerRepositoryInterface
 	GetCustomerProfileRepository() CustomerProfileRepositoryInterface
 	GetDocumentRepository() DocumentRepositoryInterface
@@ -206,6 +284,8 @@ type TxInterface interface {
 	GetLabelRepository() LabelRepositoryInterface
 	GetLabelCodeRepository() LabelCodeRepositoryInterface
 	GetLabelNoteRepository() LabelNoteRepositoryInterface
+	GetLabelPairRepository() LabelPairRepositoryInterface
+	GetLabelSlotRepository() LabelSlotRepositoryInterface
 	GetPurchaseRepository() PurchaseRepositoryInterface
 	GetSubscriptionRepository() SubscriptionRepositoryInterface
 }
@@ -213,6 +293,8 @@ type TxInterface interface {
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
 	tx              *NoOpTx
+	Address         *NoOpAddressRepository
+	Board           *NoOpBoardRepository
 	Customer        *NoOpCustomerRepository
 	CustomerProfile *NoOpCustomerProfileRepository
 	Document        *NoOpDocumentRepository
@@ -220,12 +302,16 @@ type NoOpDatabase struct {
 	Label           *NoOpLabelRepository
 	LabelCode       *NoOpLabelCodeRepository
 	LabelNote       *NoOpLabelNoteRepository
+	LabelPair       *NoOpLabelPairRepository
+	LabelSlot       *NoOpLabelSlotRepository
 	Purchase        *NoOpPurchaseRepository
 	Subscription    *NoOpSubscriptionRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
+	Address         *NoOpAddressRepository
+	Board           *NoOpBoardRepository
 	Customer        *NoOpCustomerRepository
 	CustomerProfile *NoOpCustomerProfileRepository
 	Document        *NoOpDocumentRepository
@@ -233,6 +319,8 @@ type NoOpTx struct {
 	Label           *NoOpLabelRepository
 	LabelCode       *NoOpLabelCodeRepository
 	LabelNote       *NoOpLabelNoteRepository
+	LabelPair       *NoOpLabelPairRepository
+	LabelSlot       *NoOpLabelSlotRepository
 	Purchase        *NoOpPurchaseRepository
 	Subscription    *NoOpSubscriptionRepository
 }
@@ -241,6 +329,10 @@ type NoOpTx struct {
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.Address = &NoOpAddressRepository{}
+	tx.Address = db.Address
+	db.Board = &NoOpBoardRepository{}
+	tx.Board = db.Board
 	db.Customer = &NoOpCustomerRepository{}
 	tx.Customer = db.Customer
 	db.CustomerProfile = &NoOpCustomerProfileRepository{}
@@ -255,6 +347,10 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.LabelCode = db.LabelCode
 	db.LabelNote = &NoOpLabelNoteRepository{}
 	tx.LabelNote = db.LabelNote
+	db.LabelPair = &NoOpLabelPairRepository{}
+	tx.LabelPair = db.LabelPair
+	db.LabelSlot = &NoOpLabelSlotRepository{}
+	tx.LabelSlot = db.LabelSlot
 	db.Purchase = &NoOpPurchaseRepository{}
 	tx.Purchase = db.Purchase
 	db.Subscription = &NoOpSubscriptionRepository{}
@@ -305,6 +401,154 @@ func (noOpRows) Close()                        {}
 func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+func (db *NoOpDatabase) GetAddressRepository() AddressRepositoryInterface {
+	return db.Address
+}
+
+func (tx *NoOpTx) GetAddressRepository() AddressRepositoryInterface {
+	return tx.Address
+}
+
+// NoOpAddressRepository provides deterministic no-op repository behavior.
+type NoOpAddressRepository struct{}
+
+func (r *NoOpAddressRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *AddressGetOptions) (*types.Address, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpAddressRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Address, error) {
+	return map[types.IdentityUUID]*types.Address{}, nil
+}
+
+func (r *NoOpAddressRepository) FindOne(_ context.Context, _ *AddressFilter, _ *AddressFindOptions) (*types.Address, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpAddressRepository) FindMany(_ context.Context, _ *AddressFilter, _ *AddressFindOptions) ([]*types.Address, int, error) {
+	return []*types.Address{}, 0, nil
+}
+
+func (r *NoOpAddressRepository) FindPage(_ context.Context, _ *AddressFilter, _ *AddressPageOptions) (*AddressPage, error) {
+	return &AddressPage{Rows: []*types.Address{}}, nil
+}
+
+func (r *NoOpAddressRepository) CreateOne(_ context.Context, input *types.Address) (*types.Address, error) {
+	return input, nil
+}
+
+func (r *NoOpAddressRepository) CreateMany(_ context.Context, inputs []*types.Address) ([]*types.Address, error) {
+	if inputs == nil {
+		return []*types.Address{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpAddressRepository) UpsertOne(_ context.Context, input *types.Address, _ AddressUniqueKey, _ *AddressUpdate) (*types.Address, error) {
+	return input, nil
+}
+
+func (r *NoOpAddressRepository) UpsertOneResult(_ context.Context, input *types.Address, _ AddressUniqueKey, _ *AddressUpdate, _ *UpsertOptions) (UpsertResult[*types.Address], error) {
+	return UpsertResult[*types.Address]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpAddressRepository) UpsertMany(_ context.Context, inputs []*types.Address, _ AddressUniqueKey, _ AddressFields, _ *UpsertOptions) ([]UpsertResult[*types.Address], error) {
+	results := make([]UpsertResult[*types.Address], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Address]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpAddressRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *AddressUpdate) (*types.Address, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpAddressRepository) UpdateMany(_ context.Context, _ *AddressFilter, _ *AddressUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpAddressRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpAddressRepository) DeleteMany(_ context.Context, _ *AddressFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetBoardRepository() BoardRepositoryInterface {
+	return db.Board
+}
+
+func (tx *NoOpTx) GetBoardRepository() BoardRepositoryInterface {
+	return tx.Board
+}
+
+// NoOpBoardRepository provides deterministic no-op repository behavior.
+type NoOpBoardRepository struct{}
+
+func (r *NoOpBoardRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *BoardGetOptions) (*types.Board, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpBoardRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Board, error) {
+	return map[types.IdentityUUID]*types.Board{}, nil
+}
+
+func (r *NoOpBoardRepository) FindOne(_ context.Context, _ *BoardFilter, _ *BoardFindOptions) (*types.Board, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpBoardRepository) FindMany(_ context.Context, _ *BoardFilter, _ *BoardFindOptions) ([]*types.Board, int, error) {
+	return []*types.Board{}, 0, nil
+}
+
+func (r *NoOpBoardRepository) FindPage(_ context.Context, _ *BoardFilter, _ *BoardPageOptions) (*BoardPage, error) {
+	return &BoardPage{Rows: []*types.Board{}}, nil
+}
+
+func (r *NoOpBoardRepository) CreateOne(_ context.Context, input *types.Board) (*types.Board, error) {
+	return input, nil
+}
+
+func (r *NoOpBoardRepository) CreateMany(_ context.Context, inputs []*types.Board) ([]*types.Board, error) {
+	if inputs == nil {
+		return []*types.Board{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpBoardRepository) UpsertOne(_ context.Context, input *types.Board, _ BoardUniqueKey, _ *BoardUpdate) (*types.Board, error) {
+	return input, nil
+}
+
+func (r *NoOpBoardRepository) UpsertOneResult(_ context.Context, input *types.Board, _ BoardUniqueKey, _ *BoardUpdate, _ *UpsertOptions) (UpsertResult[*types.Board], error) {
+	return UpsertResult[*types.Board]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpBoardRepository) UpsertMany(_ context.Context, inputs []*types.Board, _ BoardUniqueKey, _ BoardFields, _ *UpsertOptions) ([]UpsertResult[*types.Board], error) {
+	results := make([]UpsertResult[*types.Board], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Board]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpBoardRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *BoardUpdate) (*types.Board, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpBoardRepository) UpdateMany(_ context.Context, _ *BoardFilter, _ *BoardUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpBoardRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpBoardRepository) DeleteMany(_ context.Context, _ *BoardFilter) (int, error) {
+	return 0, nil
+}
 
 func (db *NoOpDatabase) GetCustomerRepository() CustomerRepositoryInterface {
 	return db.Customer
@@ -851,6 +1095,154 @@ func (r *NoOpLabelNoteRepository) DeleteMany(_ context.Context, _ *LabelNoteFilt
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetLabelPairRepository() LabelPairRepositoryInterface {
+	return db.LabelPair
+}
+
+func (tx *NoOpTx) GetLabelPairRepository() LabelPairRepositoryInterface {
+	return tx.LabelPair
+}
+
+// NoOpLabelPairRepository provides deterministic no-op repository behavior.
+type NoOpLabelPairRepository struct{}
+
+func (r *NoOpLabelPairRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *LabelPairGetOptions) (*types.LabelPair, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelPairRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelPair, error) {
+	return map[types.IdentityUUID]*types.LabelPair{}, nil
+}
+
+func (r *NoOpLabelPairRepository) FindOne(_ context.Context, _ *LabelPairFilter, _ *LabelPairFindOptions) (*types.LabelPair, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelPairRepository) FindMany(_ context.Context, _ *LabelPairFilter, _ *LabelPairFindOptions) ([]*types.LabelPair, int, error) {
+	return []*types.LabelPair{}, 0, nil
+}
+
+func (r *NoOpLabelPairRepository) FindPage(_ context.Context, _ *LabelPairFilter, _ *LabelPairPageOptions) (*LabelPairPage, error) {
+	return &LabelPairPage{Rows: []*types.LabelPair{}}, nil
+}
+
+func (r *NoOpLabelPairRepository) CreateOne(_ context.Context, input *types.LabelPair) (*types.LabelPair, error) {
+	return input, nil
+}
+
+func (r *NoOpLabelPairRepository) CreateMany(_ context.Context, inputs []*types.LabelPair) ([]*types.LabelPair, error) {
+	if inputs == nil {
+		return []*types.LabelPair{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpLabelPairRepository) UpsertOne(_ context.Context, input *types.LabelPair, _ LabelPairUniqueKey, _ *LabelPairUpdate) (*types.LabelPair, error) {
+	return input, nil
+}
+
+func (r *NoOpLabelPairRepository) UpsertOneResult(_ context.Context, input *types.LabelPair, _ LabelPairUniqueKey, _ *LabelPairUpdate, _ *UpsertOptions) (UpsertResult[*types.LabelPair], error) {
+	return UpsertResult[*types.LabelPair]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpLabelPairRepository) UpsertMany(_ context.Context, inputs []*types.LabelPair, _ LabelPairUniqueKey, _ LabelPairFields, _ *UpsertOptions) ([]UpsertResult[*types.LabelPair], error) {
+	results := make([]UpsertResult[*types.LabelPair], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.LabelPair]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpLabelPairRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *LabelPairUpdate) (*types.LabelPair, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelPairRepository) UpdateMany(_ context.Context, _ *LabelPairFilter, _ *LabelPairUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpLabelPairRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpLabelPairRepository) DeleteMany(_ context.Context, _ *LabelPairFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetLabelSlotRepository() LabelSlotRepositoryInterface {
+	return db.LabelSlot
+}
+
+func (tx *NoOpTx) GetLabelSlotRepository() LabelSlotRepositoryInterface {
+	return tx.LabelSlot
+}
+
+// NoOpLabelSlotRepository provides deterministic no-op repository behavior.
+type NoOpLabelSlotRepository struct{}
+
+func (r *NoOpLabelSlotRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *LabelSlotGetOptions) (*types.LabelSlot, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelSlotRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelSlot, error) {
+	return map[types.IdentityUUID]*types.LabelSlot{}, nil
+}
+
+func (r *NoOpLabelSlotRepository) FindOne(_ context.Context, _ *LabelSlotFilter, _ *LabelSlotFindOptions) (*types.LabelSlot, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelSlotRepository) FindMany(_ context.Context, _ *LabelSlotFilter, _ *LabelSlotFindOptions) ([]*types.LabelSlot, int, error) {
+	return []*types.LabelSlot{}, 0, nil
+}
+
+func (r *NoOpLabelSlotRepository) FindPage(_ context.Context, _ *LabelSlotFilter, _ *LabelSlotPageOptions) (*LabelSlotPage, error) {
+	return &LabelSlotPage{Rows: []*types.LabelSlot{}}, nil
+}
+
+func (r *NoOpLabelSlotRepository) CreateOne(_ context.Context, input *types.LabelSlot) (*types.LabelSlot, error) {
+	return input, nil
+}
+
+func (r *NoOpLabelSlotRepository) CreateMany(_ context.Context, inputs []*types.LabelSlot) ([]*types.LabelSlot, error) {
+	if inputs == nil {
+		return []*types.LabelSlot{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpLabelSlotRepository) UpsertOne(_ context.Context, input *types.LabelSlot, _ LabelSlotUniqueKey, _ *LabelSlotUpdate) (*types.LabelSlot, error) {
+	return input, nil
+}
+
+func (r *NoOpLabelSlotRepository) UpsertOneResult(_ context.Context, input *types.LabelSlot, _ LabelSlotUniqueKey, _ *LabelSlotUpdate, _ *UpsertOptions) (UpsertResult[*types.LabelSlot], error) {
+	return UpsertResult[*types.LabelSlot]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpLabelSlotRepository) UpsertMany(_ context.Context, inputs []*types.LabelSlot, _ LabelSlotUniqueKey, _ LabelSlotFields, _ *UpsertOptions) ([]UpsertResult[*types.LabelSlot], error) {
+	results := make([]UpsertResult[*types.LabelSlot], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.LabelSlot]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpLabelSlotRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *LabelSlotUpdate) (*types.LabelSlot, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpLabelSlotRepository) UpdateMany(_ context.Context, _ *LabelSlotFilter, _ *LabelSlotUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpLabelSlotRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpLabelSlotRepository) DeleteMany(_ context.Context, _ *LabelSlotFilter) (int, error) {
+	return 0, nil
+}
+
 func (db *NoOpDatabase) GetPurchaseRepository() PurchaseRepositoryInterface {
 	return db.Purchase
 }
@@ -1008,6 +1400,10 @@ var (
 	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
 	_ TxInterface                        = (*Tx)(nil)
 	_ TxInterface                        = (*NoOpTx)(nil)
+	_ AddressRepositoryInterface         = (*AddressRepository)(nil)
+	_ AddressRepositoryInterface         = (*NoOpAddressRepository)(nil)
+	_ BoardRepositoryInterface           = (*BoardRepository)(nil)
+	_ BoardRepositoryInterface           = (*NoOpBoardRepository)(nil)
 	_ CustomerRepositoryInterface        = (*CustomerRepository)(nil)
 	_ CustomerRepositoryInterface        = (*NoOpCustomerRepository)(nil)
 	_ CustomerProfileRepositoryInterface = (*CustomerProfileRepository)(nil)
@@ -1022,6 +1418,10 @@ var (
 	_ LabelCodeRepositoryInterface       = (*NoOpLabelCodeRepository)(nil)
 	_ LabelNoteRepositoryInterface       = (*LabelNoteRepository)(nil)
 	_ LabelNoteRepositoryInterface       = (*NoOpLabelNoteRepository)(nil)
+	_ LabelPairRepositoryInterface       = (*LabelPairRepository)(nil)
+	_ LabelPairRepositoryInterface       = (*NoOpLabelPairRepository)(nil)
+	_ LabelSlotRepositoryInterface       = (*LabelSlotRepository)(nil)
+	_ LabelSlotRepositoryInterface       = (*NoOpLabelSlotRepository)(nil)
 	_ PurchaseRepositoryInterface        = (*PurchaseRepository)(nil)
 	_ PurchaseRepositoryInterface        = (*NoOpPurchaseRepository)(nil)
 	_ SubscriptionRepositoryInterface    = (*SubscriptionRepository)(nil)

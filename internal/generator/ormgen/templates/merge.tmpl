@@ -23,8 +23,10 @@ import (
 // MergeResult is what a merge did to the tables that referenced the row
 // merged away, each by its type's name: the rows it repointed to the row
 // that stays, and the rows it deleted because a unique index of their table
-// would have refused them once repointed. The row merged away is in
-// neither.
+// would have refused them once repointed. No row is in both: one stamped
+// deleted is counted as deleted. The rows of a @manyToMany's join table are
+// under the declaring type and its field, dotted (Board.labels). The row
+// merged away is in neither.
 type MergeResult struct {
 	Repointed map[string]int
 	Deleted   map[string]int
@@ -60,8 +62,9 @@ func (s mergeStatement) run(ctx context.Context, tx pgx.Tx, from, into, actor an
 	return int(tag.RowsAffected()), nil
 }
 
-// mergeStep is one relation that references a merged table: the type of
-// the table that holds it, its field, the read that finds the row that
+// mergeStep is one foreign key that references a merged table: what the
+// counts name its rows by, the type of the table that holds it or a
+// @manyToMany field for a join table's, what holds the reference, the read that finds the row that
 // stays referencing the row merged away through it ("" but for a relation
 // of the table to itself), the statements that delete the rows a unique
 // index would refuse, and the statement that repoints the rest.
@@ -96,11 +99,18 @@ var {{ lowerFirst .TypeName }}MergeSteps = []mergeStep{
 {{- end }}
 }
 
-{{ docComment "" (printf "MergeInto folds the %s row from into the row into (D147), in one transaction, the repository's own when it runs in one. It locks both rows, and for each relation of the schema that references %s it deletes the rows that reference from and that a unique index of their table would refuse once they referenced into, stamping one deleted where its table deletes softly and the index holds live rows alone, then repoints every other row that references from to into, deleted rows among them. Then it deletes from as DeleteOne does%s%s. It returns how many rows of each table it repointed and deleted. It returns ErrMergeSelf, wrapped, when from and into are one row, ErrNotFound, wrapped, when either is no%s row, and ErrMergeSelfReference, wrapped, when into references from through a relation of %s to itself. A refused merge writes nothing. A relation of another schema's table, or of a table outside the schema, is not repointed: its foreign key decides what the delete of from does to it." .TypeName .TypeName (or (and .HasSoftDelete ", softly") "") (or (and .HasBehaviors ", through the behaviors' core") "") (or (and .HasSoftDelete " live") "") .TypeName) }}
+{{ docComment "" (printf "MergeInto folds the %s row from into the row into (D147), in one transaction, the repository's own when it runs in one. It locks both rows, and for each relation of the schema that references %s it deletes the rows that reference from and that a unique index of their table would refuse once they referenced into, stamping one deleted where its table deletes softly and the index holds live rows alone, then repoints every other row that references from to into, deleted rows among them; the rows of a @manyToMany's join table and a @hasMany's back-reference are relations too. Then it deletes from as DeleteOne does%s%s. It returns how many rows of each table it repointed and deleted. It returns ErrMergeSelf, wrapped, when from and into are one row,%s ErrNotFound, wrapped, when either is no%s row, and ErrMergeSelfReference, wrapped, when into references from through a relation of %s to itself; it checks no longer cycle. A refused merge writes nothing. A relation of another schema's table, or of a table outside the schema, is not repointed: its foreign key decides what the delete of from does to it." .TypeName .TypeName (or (and .HasSoftDelete ", softly") "") (or (and .HasBehaviors ", through the behaviors' core") "") (or (and .Merge.RequiresUser " ErrNoUserInContext when the context names no user, since the merge stamps a row deleted,") "") (or (and .HasSoftDelete " live") "") .TypeName) }}
 func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyType }}) (*MergeResult, error) {
 	if from == into {
 		return nil, fmt.Errorf("merge {{ .TypeName }} %v: %w", from, ErrMergeSelf)
 	}
+	{{- if .Merge.RequiresUser }}
+	// The merge stamps a row deleted, which records who deleted it: it
+	// needs an acting user before it writes, as a soft delete does.
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
 	fromKey, intoKey := any(from{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}), any(into{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
 	var actor any
 	if HasUserID(ctx) {
@@ -115,6 +125,10 @@ func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyTy
 			return nil, fmt.Errorf("merge {{ .TypeName }}: open a savepoint: %w", err)
 		}
 		defer func() {
+			if p := recover(); p != nil {
+				_ = tx.Rollback(ctx)
+				panic(p)
+			}
 			if err != nil {
 				_ = tx.Rollback(ctx)
 				return

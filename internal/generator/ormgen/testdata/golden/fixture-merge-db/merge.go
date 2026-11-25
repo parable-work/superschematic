@@ -21,8 +21,10 @@ import (
 // MergeResult is what a merge did to the tables that referenced the row
 // merged away, each by its type's name: the rows it repointed to the row
 // that stays, and the rows it deleted because a unique index of their table
-// would have refused them once repointed. The row merged away is in
-// neither.
+// would have refused them once repointed. No row is in both: one stamped
+// deleted is counted as deleted. The rows of a @manyToMany's join table are
+// under the declaring type and its field, dotted (Board.labels). The row
+// merged away is in neither.
 type MergeResult struct {
 	Repointed map[string]int
 	Deleted   map[string]int
@@ -58,8 +60,9 @@ func (s mergeStatement) run(ctx context.Context, tx pgx.Tx, from, into, actor an
 	return int(tag.RowsAffected()), nil
 }
 
-// mergeStep is one relation that references a merged table: the type of
-// the table that holds it, its field, the read that finds the row that
+// mergeStep is one foreign key that references a merged table: what the
+// counts name its rows by, the type of the table that holds it or a
+// @manyToMany field for a join table's, what holds the reference, the read that finds the row that
 // stays referencing the row merged away through it ("" but for a relation
 // of the table to itself), the statements that delete the rows a unique
 // index would refuse, and the statement that repoints the rest.
@@ -73,6 +76,11 @@ type mergeStep struct {
 
 // customerMergeSteps are the relations of the schema that reference Customer.
 var customerMergeSteps = []mergeStep{
+	{
+		source:  "Address",
+		field:   "customer_id",
+		repoint: mergeStatement{sql: `UPDATE address SET customer_id = $2 WHERE address.customer_id = $1`},
+	},
 	{
 		source: "CustomerProfile",
 		field:  "customer",
@@ -94,14 +102,16 @@ var customerMergeSteps = []mergeStep{
 // rows that reference from and that a unique index of their table would
 // refuse once they referenced into, stamping one deleted where its table
 // deletes softly and the index holds live rows alone, then repoints every
-// other row that references from to into, deleted rows among them. Then it
-// deletes from as DeleteOne does, through the behaviors' core. It returns how
-// many rows of each table it repointed and deleted. It returns ErrMergeSelf,
-// wrapped, when from and into are one row, ErrNotFound, wrapped, when either
-// is no row, and ErrMergeSelfReference, wrapped, when into references from
-// through a relation of Customer to itself. A refused merge writes nothing. A
-// relation of another schema's table, or of a table outside the schema, is
-// not repointed: its foreign key decides what the delete of from does to it.
+// other row that references from to into, deleted rows among them; the rows
+// of a @manyToMany's join table and a @hasMany's back-reference are relations
+// too. Then it deletes from as DeleteOne does, through the behaviors' core.
+// It returns how many rows of each table it repointed and deleted. It returns
+// ErrMergeSelf, wrapped, when from and into are one row, ErrNotFound,
+// wrapped, when either is no row, and ErrMergeSelfReference, wrapped, when
+// into references from through a relation of Customer to itself; it checks no
+// longer cycle. A refused merge writes nothing. A relation of another
+// schema's table, or of a table outside the schema, is not repointed: its
+// foreign key decides what the delete of from does to it.
 func (r *CustomerRepository) MergeInto(ctx context.Context, from, into types.IdentityUUID) (*MergeResult, error) {
 	if from == into {
 		return nil, fmt.Errorf("merge Customer %v: %w", from, ErrMergeSelf)
@@ -120,6 +130,10 @@ func (r *CustomerRepository) MergeInto(ctx context.Context, from, into types.Ide
 			return nil, fmt.Errorf("merge Customer: open a savepoint: %w", err)
 		}
 		defer func() {
+			if p := recover(); p != nil {
+				_ = tx.Rollback(ctx)
+				panic(p)
+			}
 			if err != nil {
 				_ = tx.Rollback(ctx)
 				return
@@ -200,6 +214,14 @@ func (r *CustomerRepository) MergeInto(ctx context.Context, from, into types.Ide
 // labelMergeSteps are the relations of the schema that reference Label.
 var labelMergeSteps = []mergeStep{
 	{
+		source: "Board.labels",
+		field:  "label_id",
+		collisions: []mergeStatement{
+			{sql: `DELETE FROM board_label AS moved WHERE moved.label_id = $1 AND EXISTS (SELECT 1 FROM board_label AS held WHERE held.label_id = $2 AND held.board_id = moved.board_id)`},
+		},
+		repoint: mergeStatement{sql: `UPDATE board_label SET label_id = $2 WHERE label_id = $1`},
+	},
+	{
 		source: "DocumentLabel",
 		field:  "label",
 		collisions: []mergeStatement{
@@ -224,13 +246,37 @@ var labelMergeSteps = []mergeStep{
 	{
 		source:  "LabelNote",
 		field:   "label",
-		repoint: mergeStatement{sql: `UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by) WHERE label_note.label_id = $1`, actor: true},
+		repoint: mergeStatement{sql: `UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by), revision = label_note.revision + 1 WHERE label_note.label_id = $1`, actor: true},
+	},
+	{
+		source: "LabelPair",
+		field:  "first",
+		collisions: []mergeStatement{
+			{sql: `WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $1), held AS (SELECT label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))`},
+		},
+		repoint: mergeStatement{sql: `UPDATE label_pair SET first_id = $2 WHERE label_pair.first_id = $1`},
+	},
+	{
+		source: "LabelPair",
+		field:  "second",
+		collisions: []mergeStatement{
+			{sql: `WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $1), held AS (SELECT label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))`},
+		},
+		repoint: mergeStatement{sql: `UPDATE label_pair SET second_id = $2 WHERE label_pair.second_id = $1`},
+	},
+	{
+		source: "LabelSlot",
+		field:  "label",
+		collisions: []mergeStatement{
+			{sql: `WITH moved AS (SELECT label_slot.id AS merge_key, label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $1 AND (open)), held AS (SELECT label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $2 AND (open)) DELETE FROM label_slot WHERE label_slot.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 IS NOT DISTINCT FROM held.k1))`},
+		},
+		repoint: mergeStatement{sql: `UPDATE label_slot SET label_id = $2 WHERE label_slot.label_id = $1`},
 	},
 	{
 		source: "Subscription",
 		field:  "label",
 		collisions: []mergeStatement{
-			{sql: `WITH moved AS (SELECT subscription.id AS merge_key, subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $1 AND (deleted_at IS NULL)), held AS (SELECT subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $2 AND (deleted_at IS NULL)) UPDATE subscription SET deleted_at = now(), deleted_by = $3 WHERE subscription.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))`, actor: true},
+			{sql: `WITH moved AS (SELECT subscription.id AS merge_key, subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $1 AND (deleted_at IS NULL)), held AS (SELECT subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $2 AND (deleted_at IS NULL)) UPDATE subscription SET deleted_at = now(), deleted_by = $3, label_id = $2 WHERE subscription.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))`, actor: true},
 		},
 		repoint: mergeStatement{sql: `UPDATE subscription SET label_id = $2 WHERE subscription.label_id = $1`},
 	},
@@ -242,17 +288,25 @@ var labelMergeSteps = []mergeStep{
 // rows that reference from and that a unique index of their table would
 // refuse once they referenced into, stamping one deleted where its table
 // deletes softly and the index holds live rows alone, then repoints every
-// other row that references from to into, deleted rows among them. Then it
-// deletes from as DeleteOne does, softly. It returns how many rows of each
-// table it repointed and deleted. It returns ErrMergeSelf, wrapped, when from
-// and into are one row, ErrNotFound, wrapped, when either is no live row, and
-// ErrMergeSelfReference, wrapped, when into references from through a
-// relation of Label to itself. A refused merge writes nothing. A relation of
-// another schema's table, or of a table outside the schema, is not repointed:
-// its foreign key decides what the delete of from does to it.
+// other row that references from to into, deleted rows among them; the rows
+// of a @manyToMany's join table and a @hasMany's back-reference are relations
+// too. Then it deletes from as DeleteOne does, softly. It returns how many
+// rows of each table it repointed and deleted. It returns ErrMergeSelf,
+// wrapped, when from and into are one row, ErrNoUserInContext when the
+// context names no user, since the merge stamps a row deleted, ErrNotFound,
+// wrapped, when either is no live row, and ErrMergeSelfReference, wrapped,
+// when into references from through a relation of Label to itself; it checks
+// no longer cycle. A refused merge writes nothing. A relation of another
+// schema's table, or of a table outside the schema, is not repointed: its
+// foreign key decides what the delete of from does to it.
 func (r *LabelRepository) MergeInto(ctx context.Context, from, into types.IdentityUUID) (*MergeResult, error) {
 	if from == into {
 		return nil, fmt.Errorf("merge Label %v: %w", from, ErrMergeSelf)
+	}
+	// The merge stamps a row deleted, which records who deleted it: it
+	// needs an acting user before it writes, as a soft delete does.
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
 	}
 	fromKey, intoKey := any(from.ToUUID()), any(into.ToUUID())
 	var actor any
@@ -268,6 +322,10 @@ func (r *LabelRepository) MergeInto(ctx context.Context, from, into types.Identi
 			return nil, fmt.Errorf("merge Label: open a savepoint: %w", err)
 		}
 		defer func() {
+			if p := recover(); p != nil {
+				_ = tx.Rollback(ctx)
+				panic(p)
+			}
 			if err != nil {
 				_ = tx.Rollback(ctx)
 				return

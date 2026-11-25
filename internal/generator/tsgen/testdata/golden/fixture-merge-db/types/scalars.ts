@@ -2,6 +2,7 @@
 
 export type {
   JSDate,
+  GenericInt64,
   IdentityUUID,
   TemporalDateTime,
 } from 'superscalar/scalars';

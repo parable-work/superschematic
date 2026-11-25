@@ -1642,8 +1642,11 @@ refused, and names its schemas over a database that has both. The commit
 that built it names D146.
 
 Left: a Rust and a Go deriver of tables, which the build refuses; a wake
-on a write, where the loop pulls again every five seconds; and D74's model
-label and cost cap, which stay D74's.
+on a write, where the loop pulls again every five seconds, and each pull
+is a scan of the table's rows with their derivations sub-table, since the
+core keeps no index of stale fields; an item the core skips without
+counting an attempt, which is answered again at every pull while its
+guard holds it; and D74's model label and cost cap, which stay D74's.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
@@ -1652,8 +1655,9 @@ Built: `implements Mergeable`, a core trait of `@superschematic/db`
 TypeScript repository of such a table gain `MergeInto` and
 `mergeInto({ from, into })` on Postgres. They run the statements
 `sqlutil.MergePlanOf` writes from the schema's to-one relations and the
-unique keys of the tables that hold them, in one transaction: lock both
-rows, delete the referencing rows a unique key would refuse once
+unique keys of the tables that hold them, with the two columns of a
+`@manyToMany`'s join table and the column a `@hasMany` adds to a target
+that declares no relation back, in one transaction: lock both rows, delete the referencing rows a unique key would refuse once
 repointed, repoint the rest, delete `from` as the repository's delete
 does, and answer the rows repointed and deleted by table
 (`docs/src/content/docs/guides/database-tables.mdx`, Merging rows). The
@@ -1661,8 +1665,11 @@ commit that built it names D147. It settled what the text left open: a
 refused row is stamped deleted where its table deletes softly and the
 index holds live rows alone, and removed anywhere else; a behavior's
 sub-tables are not repointed; a merge into a row that references `from`
-through a relation of the table to itself is refused; and the counts
-leave `from` out.
+through a relation of the table to itself is refused, and no longer
+cycle is checked; a merge that stamps a row deleted needs an acting user
+before it writes; a version graph's table that references the table, and
+a unique index that lists no keys on a referencing table, are refused at
+the build; and the counts are disjoint and leave `from` out.
 
 Left: `Aliased`, whole. A field typed `Aliased<T, { normalize? }>` is a
 name with aliases, `normalize` being `lower` (the default) or `slug`. The
@@ -1684,8 +1691,12 @@ normalized name serves it (`ReadRequest::SharedRow`), but the core deletes
 no shared row and reads no sub-table across rows, so a removed alias and
 a deleted row's names need one of the two.
 
-Also left: `merge_into` in the Rust repositories, SQLite and D1, and a
-route that serves a table's `mergeInto`.
+Also left: `merge_into` in the Rust repositories, SQLite and D1; a route
+that serves a table's `mergeInto`; a merge that repoints a version graph's
+table, which needs the merge as a commit; a Derived field whose input is
+a repointed relation, which the merge does not hash again (Derived hears
+no set-based write); and a check of cycles longer than `into` under
+`from` in a relation of the table to itself.
 
 ## D148. A bucket's settings take CORS rules (D54 amended)
 

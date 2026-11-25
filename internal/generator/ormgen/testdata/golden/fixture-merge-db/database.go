@@ -24,6 +24,8 @@ const (
 // Database represents the ORM database connection
 type Database struct {
 	pool            *pgxpool.Pool
+	Address         *AddressRepository
+	Board           *BoardRepository
 	Customer        *CustomerRepository
 	CustomerProfile *CustomerProfileRepository
 	Document        *DocumentRepository
@@ -31,6 +33,8 @@ type Database struct {
 	Label           *LabelRepository
 	LabelCode       *LabelCodeRepository
 	LabelNote       *LabelNoteRepository
+	LabelPair       *LabelPairRepository
+	LabelSlot       *LabelSlotRepository
 	Purchase        *PurchaseRepository
 	Subscription    *SubscriptionRepository
 }
@@ -42,6 +46,8 @@ type Tx struct {
 	// it is nested in, 0 for a transaction of its own (D89).
 	db              *Database
 	depth           int
+	Address         *AddressRepository
+	Board           *BoardRepository
 	Customer        *CustomerRepository
 	CustomerProfile *CustomerProfileRepository
 	Document        *DocumentRepository
@@ -49,6 +55,8 @@ type Tx struct {
 	Label           *LabelRepository
 	LabelCode       *LabelCodeRepository
 	LabelNote       *LabelNoteRepository
+	LabelPair       *LabelPairRepository
+	LabelSlot       *LabelSlotRepository
 	Purchase        *PurchaseRepository
 	Subscription    *SubscriptionRepository
 }
@@ -79,6 +87,8 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.Address = &AddressRepository{db: db}
+	db.Board = &BoardRepository{db: db}
 	db.Customer = &CustomerRepository{db: db}
 	db.CustomerProfile = &CustomerProfileRepository{db: db}
 	db.Document = &DocumentRepository{db: db}
@@ -86,6 +96,8 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.Label = &LabelRepository{db: db}
 	db.LabelCode = &LabelCodeRepository{db: db}
 	db.LabelNote = &LabelNoteRepository{db: db}
+	db.LabelPair = &LabelPairRepository{db: db}
+	db.LabelSlot = &LabelSlotRepository{db: db}
 	db.Purchase = &PurchaseRepository{db: db}
 	db.Subscription = &SubscriptionRepository{db: db}
 
@@ -107,6 +119,8 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.Address = &AddressRepository{db: db}
+	db.Board = &BoardRepository{db: db}
 	db.Customer = &CustomerRepository{db: db}
 	db.CustomerProfile = &CustomerProfileRepository{db: db}
 	db.Document = &DocumentRepository{db: db}
@@ -114,6 +128,8 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.Label = &LabelRepository{db: db}
 	db.LabelCode = &LabelCodeRepository{db: db}
 	db.LabelNote = &LabelNoteRepository{db: db}
+	db.LabelPair = &LabelPairRepository{db: db}
+	db.LabelSlot = &LabelSlotRepository{db: db}
 	db.Purchase = &PurchaseRepository{db: db}
 	db.Subscription = &SubscriptionRepository{db: db}
 
@@ -123,6 +139,16 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 // Close closes the database connection
 func (db *Database) Close() {
 	db.pool.Close()
+}
+
+// GetAddressRepository returns the Address repository interface.
+func (db *Database) GetAddressRepository() AddressRepositoryInterface {
+	return db.Address
+}
+
+// GetBoardRepository returns the Board repository interface.
+func (db *Database) GetBoardRepository() BoardRepositoryInterface {
+	return db.Board
 }
 
 // GetCustomerRepository returns the Customer repository interface.
@@ -160,6 +186,16 @@ func (db *Database) GetLabelNoteRepository() LabelNoteRepositoryInterface {
 	return db.LabelNote
 }
 
+// GetLabelPairRepository returns the LabelPair repository interface.
+func (db *Database) GetLabelPairRepository() LabelPairRepositoryInterface {
+	return db.LabelPair
+}
+
+// GetLabelSlotRepository returns the LabelSlot repository interface.
+func (db *Database) GetLabelSlotRepository() LabelSlotRepositoryInterface {
+	return db.LabelSlot
+}
+
 // GetPurchaseRepository returns the Purchase repository interface.
 func (db *Database) GetPurchaseRepository() PurchaseRepositoryInterface {
 	return db.Purchase
@@ -168,6 +204,16 @@ func (db *Database) GetPurchaseRepository() PurchaseRepositoryInterface {
 // GetSubscriptionRepository returns the Subscription repository interface.
 func (db *Database) GetSubscriptionRepository() SubscriptionRepositoryInterface {
 	return db.Subscription
+}
+
+// GetAddressRepository returns the Address transaction repository interface.
+func (tx *Tx) GetAddressRepository() AddressRepositoryInterface {
+	return tx.Address
+}
+
+// GetBoardRepository returns the Board transaction repository interface.
+func (tx *Tx) GetBoardRepository() BoardRepositoryInterface {
+	return tx.Board
 }
 
 // GetCustomerRepository returns the Customer transaction repository interface.
@@ -205,6 +251,16 @@ func (tx *Tx) GetLabelNoteRepository() LabelNoteRepositoryInterface {
 	return tx.LabelNote
 }
 
+// GetLabelPairRepository returns the LabelPair transaction repository interface.
+func (tx *Tx) GetLabelPairRepository() LabelPairRepositoryInterface {
+	return tx.LabelPair
+}
+
+// GetLabelSlotRepository returns the LabelSlot transaction repository interface.
+func (tx *Tx) GetLabelSlotRepository() LabelSlotRepositoryInterface {
+	return tx.LabelSlot
+}
+
 // GetPurchaseRepository returns the Purchase transaction repository interface.
 func (tx *Tx) GetPurchaseRepository() PurchaseRepositoryInterface {
 	return tx.Purchase
@@ -225,6 +281,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper := &Tx{tx: tx, db: db}
 
 	// Initialize transaction repositories with parent database reference
+	txWrapper.Address = &AddressRepository{tx: tx, txDB: db}
+	txWrapper.Board = &BoardRepository{tx: tx, txDB: db}
 	txWrapper.Customer = &CustomerRepository{tx: tx, txDB: db}
 	txWrapper.CustomerProfile = &CustomerProfileRepository{tx: tx, txDB: db}
 	txWrapper.Document = &DocumentRepository{tx: tx, txDB: db}
@@ -232,6 +290,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.Label = &LabelRepository{tx: tx, txDB: db}
 	txWrapper.LabelCode = &LabelCodeRepository{tx: tx, txDB: db}
 	txWrapper.LabelNote = &LabelNoteRepository{tx: tx, txDB: db}
+	txWrapper.LabelPair = &LabelPairRepository{tx: tx, txDB: db}
+	txWrapper.LabelSlot = &LabelSlotRepository{tx: tx, txDB: db}
 	txWrapper.Purchase = &PurchaseRepository{tx: tx, txDB: db}
 	txWrapper.Subscription = &SubscriptionRepository{tx: tx, txDB: db}
 

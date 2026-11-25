@@ -316,7 +316,12 @@ export interface MergeStatement {
   readonly actor?: 'uuid' | 'text';
 }
 
-/** One relation of the schema that references a Mergeable table: the type of the table that holds it and its field. */
+/**
+ * One foreign key of the schema that references a Mergeable table. source
+ * is what the counts name its rows by: the type of the table that holds
+ * it, or for a @manyToMany's join table the declaring type and the field,
+ * dotted (Board.labels). field is what holds the reference.
+ */
 export interface MergeStep {
   readonly source: string;
   readonly field: string;
@@ -334,6 +339,8 @@ export interface MergeDefinition {
   readonly lock: string;
   /** A step deletes rows of a @versioned table, whose tombstone records the acting user. */
   readonly historyActor?: boolean;
+  /** The merge stamps a row deleted, so it needs an acting user before it writes, as a soft delete does. */
+  readonly requiresUser?: boolean;
   readonly steps: readonly MergeStep[];
 }
 
@@ -341,7 +348,10 @@ export interface MergeDefinition {
  * What a merge did to the tables that referenced the row merged away, each
  * by its type's name: the rows it repointed to the row that stays, and the
  * rows it deleted because a unique index of their table would have refused
- * them once repointed. The row merged away is in neither.
+ * them once repointed. No row is in both: one stamped deleted is counted
+ * as deleted. The rows of a @manyToMany's join table are under the
+ * declaring type and its field, dotted (Board.labels). The row merged away
+ * is in neither.
  */
 export interface MergeResult {
   readonly repointed: Readonly<Record<string, number>>;
@@ -357,9 +367,12 @@ export interface MergeableRepository<Key> {
    * that a unique index of their table would refuse once they referenced
    * into, stamping one deleted where the index holds live rows alone, then
    * repoints every other row that references from, deleted rows among
-   * them. Then it deletes from as deleteOne does. NotFoundError when either is no live row;
-   * MergeError when they are one row, or when into references from through
-   * a relation of the table to itself. Its writes of the referencing
+   * them, the rows of a @manyToMany's join table and a @hasMany's
+   * back-reference too. Then it deletes from as deleteOne does.
+   * NotFoundError when either is no live row; MergeError when they are one
+   * row, or when into references from through a relation of the table to
+   * itself (it checks no longer cycle); NoUserError, before it writes, when
+   * it stamps a row deleted and no user acts. Its writes of the referencing
    * tables are set-based, as updateMany's are, and do not go through the
    * behaviors' core.
    */
@@ -2545,6 +2558,8 @@ class TableRepository {
     const from = this.encode(input.from, keyColumn, 'from');
     const into = this.encode(input.into, keyColumn, 'into');
     if (String(from) === String(into)) throw new MergeError('self', `${this.def.name} ${String(input.from)} cannot be merged into itself`);
+    // The merge stamps a row deleted, which records who deleted it.
+    if (merge.requiresUser) this.requireUser();
     const fold = async (repo: TableRepository): Promise<MergeResult> => {
       const runner = repo.runner;
       // Both rows, locked in key order, so two merges of one pair wait for one another.
