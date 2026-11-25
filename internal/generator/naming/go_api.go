@@ -55,7 +55,25 @@ type GoAPIConfig struct {
 	// body of an input the operation does not require as the empty object
 	// {}, which the input type then decodes and validates.
 	OptionalInputEmptyBody string `toml:"optional_input_empty_body"`
+
+	// StrictInputRefusals is "route" (default) or "decoder". "route"
+	// refuses a @strictJSON input's undeclared key with the problem of
+	// every generated server and a string an enum lacks as an "enum" field
+	// error. "decoder" names the type to the runtime (bodyargs.StrictType),
+	// so each refusal is the type's decoder's: the runtime names the type
+	// in the refusal of an undeclared key, and a string an enum lacks does
+	// not match the declared type.
+	StrictInputRefusals string `toml:"strict_input_refusals"`
 }
+
+// The values of strict_input_refusals.
+const (
+	GoAPIRoute   = "route"
+	GoAPIDecoder = "decoder"
+)
+
+// NamesStrictInputs reports whether strict_input_refusals is "decoder".
+func (c GoAPIConfig) NamesStrictInputs() bool { return c.StrictInputRefusals == GoAPIDecoder }
 
 // GoAPIObject is the "object" value of optional_input_empty_body.
 const GoAPIObject = "object"
@@ -124,6 +142,9 @@ func (c GoAPIConfig) check() error {
 		return err
 	}
 	if err := checkGoAPIChoice("optional_input_empty_body", c.OptionalInputEmptyBody, GoAPIRefuse, GoAPIObject); err != nil {
+		return err
+	}
+	if err := checkGoAPIChoice("strict_input_refusals", c.StrictInputRefusals, GoAPIRoute, GoAPIDecoder); err != nil {
 		return err
 	}
 	for from, to := range c.ValidatorNames {

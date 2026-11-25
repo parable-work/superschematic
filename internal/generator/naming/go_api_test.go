@@ -29,6 +29,7 @@ path_param_error = "{name} is not a segment"
 undeclared_input_keys = "keep"
 input_trailing_data = "ignore"
 optional_input_empty_body = "object"
+strict_input_refusals = "decoder"
 
 [go_api.validator_names]
 minLength = "min_length"
@@ -43,6 +44,7 @@ minLength = "min_length"
 		UndeclaredInputKeys:    GoAPIKeep,
 		InputTrailingData:      GoAPIIgnore,
 		OptionalInputEmptyBody: GoAPIObject,
+		StrictInputRefusals:    GoAPIDecoder,
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -61,6 +63,7 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 		{"[go_api]\nundeclared_input_keys = \"drop\"\n", `go_api.undeclared_input_keys is "drop": use "refuse" or "keep"`},
 		{"[go_api]\ninput_trailing_data = \"keep\"\n", `go_api.input_trailing_data is "keep": use "refuse" or "ignore"`},
 		{"[go_api]\noptional_input_empty_body = \"null\"\n", `go_api.optional_input_empty_body is "null": use "refuse" or "object"`},
+		{"[go_api]\nstrict_input_refusals = \"type\"\n", `go_api.strict_input_refusals is "type": use "route" or "decoder"`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

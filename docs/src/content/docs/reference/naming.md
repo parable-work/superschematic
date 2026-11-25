@@ -1056,6 +1056,19 @@ and validates. A required input's empty body is refused under either
 value, and a multipart route reads no input from an empty JSON body under
 either value. Any other value fails the load.
 
+### `go_api.strict_input_refusals`
+
+Default: `route`
+
+`route` refuses a `@strictJSON` input's undeclared key with the problem of
+every generated server, and a string an enum lacks as an `enum` field
+error at its path. `decoder` makes each refusal the type's decoder's: the
+route names the type to the runtime (`bodyargs.StrictType`), which names
+it in `details.type` of the refusal of an undeclared key, and a string an
+enum lacks does not match the declared type. A runtime with its own
+answers words them from the type's name. An open type's answers do not
+change. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

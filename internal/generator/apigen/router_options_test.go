@@ -27,6 +27,7 @@ var routerOptions = naming.GoAPIConfig{
 	UndeclaredInputKeys:    naming.GoAPIKeep,
 	InputTrailingData:      naming.GoAPIIgnore,
 	OptionalInputEmptyBody: naming.GoAPIObject,
+	StrictInputRefusals:    naming.GoAPIDecoder,
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,

@@ -1132,7 +1132,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			}
 			{{- end }}
 			if err := json.Unmarshal(checked, &input); err != nil {
-				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(checked, &input, err))
+				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(checked, &input, err{{ decodeRefusalOptions $endpoint }}))
 				return
 			}
 		}
@@ -1183,7 +1183,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			// A string an enum lacks, which its decoder refuses, is "enum"
 			// at its path beside the type's other rules, as every server
 			// answers it.
-			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err{{ decodeRefusalOptions $endpoint }}))
 			return
 		}
 

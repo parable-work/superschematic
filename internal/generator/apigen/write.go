@@ -340,6 +340,7 @@ func templateFuncs(provider AuthProvider, router naming.GoAPIConfig) (template.F
 		"renamesValidators":       func() bool { return len(router.ValidatorNames) > 0 },
 		"readInputOptions":        func(endpoint EndpointInfo) string { return readInputOptions(router, endpoint) },
 		"readInputNote":           func(endpoint EndpointInfo) string { return readInputNote(router, endpoint) },
+		"decodeRefusalOptions":    func(endpoint EndpointInfo) string { return decodeRefusalOptions(router, endpoint) },
 		"base":                    filepath.Base,
 		"toGoName":                codegen.ToPascalCase,
 		"toKebabCase":             codegen.ToKebabCase,

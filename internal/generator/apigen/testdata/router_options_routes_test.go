@@ -59,11 +59,14 @@ func (s *widgets) FindWidget(_ context.Context, id string, label *string, codes 
 }
 
 // answer is what a caller sees of one response: its status, and of a
-// problem its code, its detail and each field error as path=validator.
+// problem its code, its detail, the reason and type of its details, and
+// each field error as path=validator.
 type answer struct {
 	Status int
 	Code   string
 	Detail string
+	Reason string
+	Type   string
 	Errors string
 }
 
@@ -80,14 +83,19 @@ func read(t *testing.T, rec *httptest.ResponseRecorder) answer {
 		return got
 	}
 	var problem struct {
-		Code   string                       `json:"code"`
-		Detail string                       `json:"detail"`
-		Errors map[string][]json.RawMessage `json:"errors"`
+		Code    string                       `json:"code"`
+		Detail  string                       `json:"detail"`
+		Errors  map[string][]json.RawMessage `json:"errors"`
+		Details struct {
+			Reason string `json:"reason"`
+			Type   string `json:"type"`
+		} `json:"details"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("problem %q is not JSON: %v", rec.Body.String(), err)
 	}
 	got.Code, got.Detail = problem.Code, problem.Detail
+	got.Reason, got.Type = problem.Details.Reason, problem.Details.Type
 	var errs []string
 	for path, list := range problem.Errors {
 		for _, raw := range list {
@@ -201,8 +209,45 @@ func TestValidatorNames(t *testing.T) {
 
 // unknownKeys is the answer of a body with undeclared keys, which every
 // generated server refuses.
-func unknownKeys(errors string) answer {
-	return answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Errors: errors}
+func unknownKeys(key string) answer {
+	return answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "unknown fields: " + key, Errors: key + "=unknown"}
+}
+
+// of is a with the input type the refusal names.
+func (a answer) of(inputType string) answer {
+	a.Type = inputType
+	return a
+}
+
+// TestStrictInputRefusals: under go_api.strict_input_refusals = "decoder"
+// the refusal of a closed type's undeclared key names the type, and a
+// string its enum lacks does not match the declared type, where the core
+// answers it as an "enum" field error. An open type's answers stay.
+func TestStrictInputRefusals(t *testing.T) {
+	mismatch := answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "does not match the declared type"}
+	enumError := answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "validation failed", Errors: "size=enum"}
+	runCases(t, []routerCase{
+		{
+			name: "an undeclared key of a closed type", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1,"extra":true}`,
+			defaults: unknownKeys("extra"),
+			options:  unknownKeys("extra").of("StrictWidgetInput"),
+		},
+		{
+			name: "a string a closed type's enum lacks", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1,"size":"huge"}`,
+			defaults: enumError,
+			options:  mismatch,
+		},
+		{
+			name: "a string an open type's enum lacks", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1,"size":"huge"}`,
+			defaults: enumError,
+			options:  enumError,
+		},
+		{
+			name: "a closed type's valid body", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1,"size":"large"}`,
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+	})
 }
 
 // TestUndeclaredInputKeys: under go_api.undeclared_input_keys = "keep" an
@@ -213,23 +258,23 @@ func TestUndeclaredInputKeys(t *testing.T) {
 	runCases(t, []routerCase{
 		{
 			name: "an undeclared key", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1,"extra":true}`,
-			defaults: unknownKeys("extra=unknown"),
+			defaults: unknownKeys("extra"),
 			options:  answer{Status: 200},
 		},
 		{
 			name: "a key in another case", method: http.MethodPost, target: "/api/widgets", body: `{"Name":"ab","count":1}`,
-			defaults: unknownKeys("Name=unknown"),
+			defaults: unknownKeys("Name"),
 			options:  answer{Status: 200},
 		},
 		{
 			name: "an undeclared key of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: `{"name":"ab","count":1,"extra":true}`,
-			defaults: unknownKeys("extra=unknown"),
+			defaults: unknownKeys("extra"),
 			options:  answer{Status: 200},
 		},
 		{
 			name: "an undeclared key of a closed type", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1,"extra":true}`,
-			defaults: unknownKeys("extra=unknown"),
-			options:  unknownKeys("extra=unknown"),
+			defaults: unknownKeys("extra"),
+			options:  unknownKeys("extra").of("StrictWidgetInput"),
 		},
 		{
 			name: "a declared body", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1,"size":"small","tags":["a"]}`,
@@ -286,13 +331,13 @@ func TestOptionalInputEmptyBody(t *testing.T) {
 		{
 			name: "an empty body of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: "",
 			defaults: bodyRequired,
-			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input",
+			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "validation failed",
 				Errors: "count=min name=minLength"},
 		},
 		{
 			name: "white space of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: " \n",
 			defaults: bodyRequired,
-			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input",
+			options: answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Reason: "validation failed",
 				Errors: "count=min name=minLength"},
 		},
 		{

@@ -1,6 +1,7 @@
 package apigen
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -38,7 +39,29 @@ func readInputOptions(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	if readsEmptyBodyAsObject(router, endpoint) {
 		opts = append(opts, "bodyargs.EmptyBodyAsObject()")
 	}
+	if namesStrictType(router, endpoint) {
+		opts = append(opts, strictTypeOption(endpoint))
+	}
 	return joinOptions(opts)
+}
+
+// namesStrictType reports whether the route of endpoint names its
+// @strictJSON input type to the runtime (go_api.strict_input_refusals).
+func namesStrictType(router naming.GoAPIConfig, endpoint EndpointInfo) bool {
+	return router.NamesStrictInputs() && endpoint.InputStrictJSON
+}
+
+func strictTypeOption(endpoint EndpointInfo) string {
+	return "bodyargs.StrictType(" + strconv.Quote(endpoint.InputType) + ")"
+}
+
+// decodeRefusalOptions are the bodyargs.ReadOption arguments, each after a
+// comma, the route of endpoint passes to bodyargs.DecodeRefusal.
+func decodeRefusalOptions(router naming.GoAPIConfig, endpoint EndpointInfo) string {
+	if namesStrictType(router, endpoint) {
+		return joinOptions([]string{strictTypeOption(endpoint)})
+	}
+	return ""
 }
 
 // readInputNote is the comment line that says how the [go_api] table
@@ -53,6 +76,9 @@ func readInputNote(router naming.GoAPIConfig, endpoint EndpointInfo) string {
 	}
 	if readsEmptyBodyAsObject(router, endpoint) {
 		notes = append(notes, "an empty body is the empty object")
+	}
+	if namesStrictType(router, endpoint) {
+		notes = append(notes, "the refusals of the closed type are its decoder's")
 	}
 	if len(notes) == 0 {
 		return ""
