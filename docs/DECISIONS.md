@@ -1498,7 +1498,13 @@ builds one class for every table, so the object still carries the writes;
 it exposes the reads alone when `TableDefinition` takes a `readOnly` flag
 and tsgen writes it. No fixture declares a projection over a released
 table or a `@tableOperation` read or list of one: they go through the
-paths every table has, untested here.
+paths every table has, untested here. A soft delete of the root leaves its
+released rows, which only a hard delete removes: the released
+repositories do not yet leave out the rows of a soft-deleted root, and a
+soft delete does not clear them. Either is a change to the three ORMs (or
+a trigger the sql generator writes), and a restore of the root has to see
+the rows again, so until then a reader of a released table filters on its
+root as it would on any child table.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 
