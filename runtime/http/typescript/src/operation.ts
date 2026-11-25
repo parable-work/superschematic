@@ -1,6 +1,7 @@
 import type { Principal } from './auth.js';
 import type { ParamSpec } from './params.js';
 import type { ServiceCaller } from './serviceauth.js';
+import type { OperationIdempotency } from './idempotency.js';
 
 /*
 The operation table the generated router carries. One OperationSpec per @rest
@@ -133,6 +134,13 @@ export interface OperationSpec {
    * RouterRuntimeOptions.principalRateLimitStore under `<METHOD> <path>`.
    */
   readonly rateLimitKey?: 'principal';
+  /**
+   * @idempotent (D140): a request that sends Idempotency-Key runs once per
+   * key, and a repeat is answered what the first request was, from
+   * RouterRuntimeOptions.idempotencyStore. Absent for an operation that is
+   * not @idempotent.
+   */
+  readonly idempotent?: OperationIdempotency;
   /** @timeout: seconds the operation may take before the adapter answers 504 (the Go runtime's Timeout middleware). */
   readonly timeoutSeconds?: number;
   /** @hmacVerified: the provider whose webhook verifier checks the request before every other step. */

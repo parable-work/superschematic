@@ -563,6 +563,30 @@ try {
 }
 ```
 
+## An idempotency key
+
+A method of an [`@idempotent`](/superschematic/guides/api-routes/#a-call-that-runs-once)
+operation sends an `Idempotency-Key` with every call (D140). Given none,
+it makes a UUID for the call, so the SDK's own retries of that call, after
+a 401 it refreshed a token for or a 429 it waited out, send the same key
+and run the operation once. Name a key to retry across calls, or across a
+restart of the client: the same key with the same arguments is answered
+what the first call was.
+
+| Language | Naming the key |
+| --- | --- |
+| TypeScript | `sdk.orders.placeOrder(input, { idempotencyKey: "order-7" })`, a member of the method's `RequestOptions` |
+| Go | `client.OrdersNamespace.PlaceOrder(runtime.WithIdempotencyKey(ctx, "order-7"), input)`, from the SDK's `runtime` package |
+| Python | `sdk.orders.place_order(input, idempotency_key="order-7")` |
+| Rust | not built yet: the Rust SDK sends no key |
+
+A method of any other operation sends no key, and the Python one takes no
+`idempotency_key`. The answer of a repeat is the first call's, so a
+method returns it as it returned the first. A key used for another
+request is the API's 422 `idempotency_key_reused`, and a repeat while the
+first call is still running its 409 `idempotency_in_flight`, each the
+SDK's API error with that code.
+
 ## Install them
 
 Until the packages are published, a service uses the generated packages

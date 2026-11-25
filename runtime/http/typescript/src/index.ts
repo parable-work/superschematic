@@ -207,6 +207,31 @@ export {
 } from './client-version.js';
 export type { ClientTooOld, MinClientVersions } from './client-version.js';
 export {
+  DEFAULT_IDEMPOTENCY_IN_FLIGHT_SECONDS,
+  DEFAULT_IDEMPOTENCY_TTL_SECONDS,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENT_REPLAY_HEADER,
+  IdempotencyCode,
+  idempotencyLookup,
+  idempotencyRequestHash,
+  isIdempotencyKey,
+  memoryIdempotencyStore,
+  postgresIdempotencyStore,
+  runIdempotent,
+  sqlIdempotencyStore,
+  sqliteIdempotencyStore,
+} from './idempotency.js';
+export type {
+  IdempotencyAttempt,
+  IdempotencyBegin,
+  IdempotencyPgQueryable,
+  IdempotencySql,
+  IdempotencyStore,
+  IdempotencyTable,
+  IdempotentRequest,
+  OperationIdempotency,
+} from './idempotency.js';
+export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
   CREDENTIAL_SOURCES,

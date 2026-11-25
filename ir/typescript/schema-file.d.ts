@@ -262,6 +262,7 @@ export interface FieldDef {
   httpBinaryStream?: HTTPBinaryStreamDef;
   httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   icon?: string;
+  idempotent?: IdempotentConfig;
   inheritedFrom?: string;
   internalMetadata?: boolean;
   jsonField?: boolean;
@@ -366,6 +367,14 @@ export interface GraphParent {
 export interface HTTPBinaryStreamDef {
   contentType: string;
   responseHeaders?: string[];
+}
+
+export interface IdempotencyKeysTrait {
+}
+
+export interface IdempotentConfig {
+  required?: boolean;
+  ttlSeconds?: number;
 }
 
 export interface IdentityFirstUser {
@@ -824,6 +833,7 @@ export interface TypeDef {
   fences?: Fence[];
   fields?: FieldDef[];
   graphMember?: GraphMemberConfig;
+  idempotencyKeys?: IdempotencyKeysTrait;
   implements?: TraitRef[];
   indexes?: IndexDef[];
   isTrait?: boolean;

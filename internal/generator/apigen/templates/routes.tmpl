@@ -60,6 +60,9 @@ import (
 {{- if .Deps.RateLimitStore }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
 {{- end }}
+{{- if .HasIdempotent }}
+	runtimeidempotency "{{ $.Naming.HTTPRuntimeGoModule }}/idempotency"
+{{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
 {{- if .HasServiceCallers }}
@@ -169,6 +172,13 @@ type Config struct {
 	// replicas. Required: RegisterRoutes refuses to start without one.
 	PrincipalRateLimitStore runtimemiddleware.PrincipalRateLimitStore
 {{- end }}
+{{- if .HasIdempotent }}
+
+	// IdempotencyStore keeps the keys of every @idempotent route (D140),
+	// in the table of the API's database IdempotencyTable names. Required:
+	// RegisterRoutes refuses to start without one.
+	IdempotencyStore runtimeidempotency.Store
+{{- end }}
 {{- if .Deps.RateLimitStore }}
 
 	// RateLimitStore is {{ .Deps.RateLimitStore }}, the memory store the API's config names
@@ -266,11 +276,24 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("Config.PrincipalRateLimitStore is required for routes whose @rateLimit counts per principal")
 	}
 {{- end }}
+{{- if .HasIdempotent }}
+	if c.IdempotencyStore == nil {
+		return fmt.Errorf("Config.IdempotencyStore is required for @idempotent routes")
+	}
+{{- end }}
 	if err := c.Implementations.ValidateImplementations(); err != nil {
 		return err
 	}
 	return nil
 }
+{{- if .HasIdempotent }}
+
+// IdempotencyTable names the table of the API's database that keeps the
+// keys of its @idempotent operations, and its columns (D140): what the
+// entrypoint builds Config.IdempotencyStore over
+// (idempotency.NewSQLStore).
+var IdempotencyTable = {{ .IdempotencyTableLiteral }}
+{{- end }}
 
 // RegisterRoutes registers all API routes on the provided chi router.
 // The router should already have base middleware applied (RequestID, RealIP, etc.).
@@ -399,9 +422,9 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
-{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. An @idempotent route then keeps the request's key, around the timeout (D140). The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
 {{- define "routeMiddlewares" }}
-			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
+			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .Idempotent .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
 			Middlewares: []runtimerouting.Middleware{
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
@@ -433,6 +456,12 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- end }}
 				{{- if .Encrypted }}
 				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
+				{{- end }}
+				{{- if .Idempotent }}
+				// After the permission check, so a key is read for a caller it
+				// let in alone, and around the timeout, whose 504 stores
+				// nothing (D140).
+				runtimeidempotency.Middleware(runtimeidempotency.Options{Store: cfg.IdempotencyStore, Operation: {{ printf "%q" .IdempotencyOperation }}, TTL: {{ .IdempotencyTTLSeconds }} * time.Second, Required: {{ .Idempotent.Required }}{{ if .Timeout }}, InFlight: {{ .Timeout }} * time.Second{{ end }}, Principal: runtimeidempotency.CallerPrincipal}),
 				{{- end }}
 				{{- if .Timeout }}
 				runtimemiddleware.Timeout({{ .Timeout }}*time.Second, LoggerFromContext),

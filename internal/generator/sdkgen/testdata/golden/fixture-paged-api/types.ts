@@ -242,6 +242,16 @@ export interface RequestOptions {
   signal?: AbortSignal;
 
   /**
+   * The Idempotency-Key of a call to an @idempotent operation (D140): a
+   * retry that sends the same key is answered what the first call was,
+   * and runs nothing twice. Without it the method makes a UUID for each
+   * call, which covers the client's own retries of that call. Name one to
+   * retry across calls, or across restarts. An operation that is not
+   * @idempotent sends none.
+   */
+  idempotencyKey?: string;
+
+  /**
    * Forward this end user: the call sends `Authorization: Bearer` with its
    * token, or no Authorization when it has none, instead of the configured
    * auth, and does not refresh on a 401.

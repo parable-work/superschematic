@@ -503,6 +503,12 @@ type TypeScriptAPI struct {
 	// clientVersions.
 	MinClientVersions string
 
+	// IdempotencyStore is the expression that builds the store of its
+	// @idempotent operations' keys over its database, on the table the API
+	// package names, which its router options carry (D140); empty for an
+	// API with none.
+	IdempotencyStore string
+
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
 	Secrets []string
@@ -964,6 +970,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 			api.Database = d
+			if o.IdempotencyTable != nil && !background {
+				// A job or a worker serves no request, so it keeps no key.
+				store := "postgresIdempotencyStore"
+				if d.SQLite {
+					store = "sqliteIdempotencyStore"
+				}
+				api.IdempotencyStore = fmt.Sprintf("%s(%s, %s.idempotencyTable)", store, d.Var, api.Module)
+			}
 			if o.DepsORM() && !d.SQLite {
 				api.ORM = true
 				// orm.ts of a database whose fields are behaviors imports
@@ -1195,6 +1209,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its routes turn away a client under its minimum (D143).
 		out = append(out, "minClientVersions: "+a.MinClientVersions)
 	}
+	if a.IdempotencyStore != "" {
+		// Its @idempotent routes keep their keys in its database (D140).
+		out = append(out, "idempotencyStore: "+a.IdempotencyStore)
+	}
 	if a.Behaviors {
 		// Its behavior operations (D103) and its table operations (D106)
 		// run through the repositories Deps holds.
@@ -1272,6 +1290,12 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}) {
 		// Deps holds a content bucket over the bucket main.ts opens (D142).
 		out = append(out, "contentBucket")
+	}
+	for _, store := range []string{"postgresIdempotencyStore", "sqliteIdempotencyStore"} {
+		// The store of an API's idempotency keys, over its database (D140).
+		if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return strings.HasPrefix(a.IdempotencyStore, store+"(") }) {
+			out = append(out, store)
+		}
 	}
 	return out
 }

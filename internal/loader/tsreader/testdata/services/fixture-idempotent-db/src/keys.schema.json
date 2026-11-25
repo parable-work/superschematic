@@ -1,0 +1,12 @@
+{
+  "name": "fixture-idempotent-db",
+  "kind": "DB",
+  "types": {
+    "IdempotencyKey": {
+      "name": "IdempotencyKey",
+      "comment": "The keys of the @idempotent operations of the APIs over this database (D140): the reserved class, whose key and columns the loader adds.",
+      "role": "DBTable",
+      "idempotencyKeys": {}
+    }
+  }
+}

@@ -4719,6 +4719,9 @@
           "default": "",
           "type": "string"
         },
+        "idempotent": {
+          "$ref": "#/$defs/IdempotentConfig"
+        },
         "inheritedFrom": {
           "default": "",
           "type": "string"
@@ -5101,6 +5104,25 @@
       "required": [
         "contentType"
       ],
+      "type": "object"
+    },
+    "IdempotencyKeysTrait": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "IdempotentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "ttlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "IdentityFirstUser": {
@@ -6894,6 +6916,9 @@
         },
         "graphMember": {
           "$ref": "#/$defs/GraphMemberConfig"
+        },
+        "idempotencyKeys": {
+          "$ref": "#/$defs/IdempotencyKeysTrait"
         },
         "implements": {
           "default": [],

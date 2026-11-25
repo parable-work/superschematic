@@ -24,6 +24,7 @@ import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type PrincipalRateL
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 import { CLIENT_VERSION_HEADER, clientTooOld, clientTooOldProblem, type MinClientVersions } from './client-version.js';
 import { downloadResponse } from './download.js';
+import { runIdempotent, type IdempotencyStore } from './idempotency.js';
 import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
 
 // What an operation runs within: its caller, whom an ORM opened with no
@@ -136,6 +137,13 @@ export interface RouterRuntimeOptions {
    * for an API whose config says clientVersions.
    */
   minClientVersions?: MinClientVersions;
+  /**
+   * Keeps the keys of every route declared @idempotent (D140): the
+   * reserved table of the API's database, which a generated entrypoint
+   * opens (postgresIdempotencyStore, sqliteIdempotencyStore). Mounting
+   * such a route without one throws.
+   */
+  idempotencyStore?: IdempotencyStore;
 }
 
 export interface MountOptions {
@@ -304,6 +312,13 @@ async function admitPrincipal(ctx: RequestContext, limitPerMinute: number, store
 }
 
 /** Throws when a route that counts per principal is mounted without the store it counts in (D131). */
+/** A route declared @idempotent is never mounted without the store of its keys, so a missing one fails at startup. */
+function requireIdempotencyStore(spec: OperationSpec, options: RouterRuntimeOptions): void {
+  if (spec.idempotent && !options.idempotencyStore) {
+    throw new Error(`${spec.name} is @idempotent and was mounted without an idempotencyStore, which keeps its keys (D140)`);
+  }
+}
+
 function requirePrincipalStore(spec: OperationSpec, rateLimitPerMinute: number | undefined, options: RouterRuntimeOptions): void {
   if (rateLimitPerMinute && spec.rateLimitKey === 'principal' && !options.principalRateLimitStore) {
     throw new Error(`${spec.namespace}.${spec.name}: its @rateLimit counts per principal, and principalRateLimitStore is required`);
@@ -578,6 +593,8 @@ interface RouteSteps {
   readonly rateLimitPerMinute: number | undefined;
   readonly bodyLimitBytes: number | undefined;
   readonly timeoutSeconds: number | undefined;
+  /** The route's check (D98), which runs no implementation and so keeps no idempotency key. */
+  readonly check?: boolean;
 }
 
 /**
@@ -652,11 +669,38 @@ async function runRoute<E extends Env>(
   if (rateLimitPerMinute && perPrincipal && principalStore) {
     middleware.push(refusing(ctx => admitPrincipal(ctx, rateLimitPerMinute, principalStore)));
   }
+  const idempotent = steps.check ? undefined : spec.idempotent;
+  const idempotencyStore = options.idempotencyStore;
   try {
     return await through(c, middleware, async () => {
       const ctx = contextOf();
+      const respond = async (): Promise<Response> => {
+        try {
+          return await withTimeout(steps.timeoutSeconds, deadline, () => work(ctx));
+        } catch (error) {
+          return failureResponse(error, ctx, options);
+        }
+      };
+      if (!idempotent || !idempotencyStore) return respond();
+      // After the permission gate, so a key is read for a caller it let
+      // in alone, and around the timeout, whose 504 stores nothing (D140).
       try {
-        return await withTimeout(steps.timeoutSeconds, deadline, () => work(ctx));
+        const url = new URL(ctx.raw.url);
+        return await runIdempotent(
+          {
+            operation: `${spec.namespace}.${spec.name}`,
+            principal: ctx.principal?.subject ?? (ctx.serviceCaller ? `service:${ctx.serviceCaller.deployable}` : ''),
+            method: ctx.method,
+            pathAndQuery: url.pathname + url.search,
+            headers: ctx.headers,
+            body: async () => new Uint8Array(await ctx.raw.clone().arrayBuffer()),
+            requestId: ctx.requestId,
+            timeoutSeconds: steps.timeoutSeconds,
+          },
+          idempotent,
+          idempotencyStore,
+          respond
+        );
       } catch (error) {
         return failureResponse(error, ctx, options);
       }
@@ -699,7 +743,7 @@ function addRouteCheck<E extends Env>(
   steps: RouteSteps,
   work: (ctx: RequestContext) => void | Promise<void>
 ): void {
-  const checkSteps: RouteSteps = { ...steps, rateLimitPerMinute: undefined };
+  const checkSteps: RouteSteps = { ...steps, rateLimitPerMinute: undefined, check: true };
   const run = (c: Context<E>) =>
     runRoute(c, spec, options, checkSteps, async ctx => {
       await work(ctx);
@@ -773,6 +817,7 @@ export function mountOperation<E extends Env>(
     mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? (spec.uploads ? uploadBodyLimitBytes(spec.uploads, jsonLimitBytes) : jsonLimitBytes);
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
   requirePrincipalStore(spec, rateLimitPerMinute, options);
+  requireIdempotencyStore(spec, options);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),
     rateLimitPerMinute,
@@ -810,6 +855,7 @@ export function mountManualOperation<E extends Env>(
 ): void {
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
   requirePrincipalStore(spec, rateLimitPerMinute, options);
+  requireIdempotencyStore(spec, options);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),
     rateLimitPerMinute,

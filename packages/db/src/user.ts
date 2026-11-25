@@ -34,6 +34,17 @@ export type User<Config extends UserConfig> = NonNullable<unknown>;
  */
 export type UserRole = NonNullable<unknown>;
 
+/**
+ * Marks the DB table that keeps idempotency keys (D140):
+ * `export abstract class IdempotencyKey implements IdempotencyKeys {}`.
+ * The class declares no field: superschematic adds the table's key and
+ * columns, a row per operation, principal and key with the answer the
+ * first request got. An API over the database with an `@idempotent`
+ * operation needs it, and a schema has at most one. Like UserRole, it
+ * resolves to an empty object type and takes no type argument.
+ */
+export type IdempotencyKeys = NonNullable<unknown>;
+
 /** A role `@seedRoles` declares: its name and the permissions it carries, each dotted segments such as `orders.read`. */
 export interface RoleSeed {
   readonly name: string;

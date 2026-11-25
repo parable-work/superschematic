@@ -33,6 +33,19 @@ Its entry points:
   listed client under its minimum 426 with the problem `client_too_old`
   before any other step, as the Go and Rust runtimes do
   (`runtime/http/testdata/client_version_parity.json`).
+  A route whose spec says `idempotent` runs once per `Idempotency-Key`
+  (D140): `runIdempotent` keeps an answer under 500 and answers a repeat
+  with it and `Idempotent-Replay: true`, refuses the key with another
+  request 422 `idempotency_key_reused` and a repeat while the first runs
+  409 `idempotency_in_flight` with `Retry-After`. The router's options
+  take the store, `idempotencyStore`: `postgresIdempotencyStore` over a
+  pg pool or `sqliteIdempotencyStore` over a SQLite or D1 database, on
+  the table a generated API package names (`idempotencyTable`), or
+  `memoryIdempotencyStore` in a test. `isIdempotencyKey`,
+  `idempotencyLookup` and `idempotencyRequestHash` answer as the Go
+  runtime's do (`runtime/http/testdata/idempotency_parity.json`). The MCP
+  endpoint sends a tool's `idempotencyKey` argument to such a route as the
+  header.
   `readPage` reads a `@paginated` operation's `cursor` and `limit` (D60)
   with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
   `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust

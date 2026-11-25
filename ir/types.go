@@ -185,6 +185,13 @@ type TypeDef struct {
 	// trait (D50). Nil for every other type. See [UserRoleTrait].
 	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
 
+	// IdempotencyKeys marks the DB table that keeps the keys of the
+	// @idempotent operations of the APIs over the database (D140): the one
+	// reserved class, `implements IdempotencyKeys`, whose key and fields
+	// the loader adds. Nil for every other type. See
+	// [IdempotencyKeysTrait].
+	IdempotencyKeys *IdempotencyKeysTrait `json:"idempotencyKeys,omitempty" yaml:"idempotencyKeys,omitempty"`
+
 	// SeedRoles are the roles a UserRole table's @seedRoles declares (D88),
 	// which create.sql inserts and a migration plan keeps in step. Empty
 	// for every other type. See [RoleSeed].
@@ -684,6 +691,12 @@ type FieldDef struct {
 	// Middleware holds field-level middleware overrides (nil means inherit
 	// from the OperationSet).
 	Middleware *MiddlewareConfig `json:"middleware,omitempty" yaml:"middleware,omitempty"`
+
+	// Idempotent is an operation's @idempotent (D140): a call that sends
+	// an Idempotency-Key runs once per key, and a repeat is answered what
+	// the first one was. Nil for every other operation and for data
+	// fields.
+	Idempotent *IdempotentConfig `json:"idempotent,omitempty" yaml:"idempotent,omitempty"`
 
 	// ConflictUnit is the merge unit of a graph member's field
 	// (@conflictUnit): one of the ConflictUnit* strategies. Empty means

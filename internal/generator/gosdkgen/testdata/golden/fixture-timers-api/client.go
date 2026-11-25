@@ -307,6 +307,11 @@ func (c *HTTPClient) do(
 		if c.clientVersion != "" {
 			req.Header.Set("X-Client-Version", c.clientVersion)
 		}
+		if key, ok := runtime.CallIdempotencyKey(ctx); ok {
+			// A call to an @idempotent operation: each send carries the
+			// call's one key (D140).
+			req.Header.Set("Idempotency-Key", key)
+		}
 
 		if err := c.applyAuth(ctx, req); err != nil {
 			return 0, nil, nil, err

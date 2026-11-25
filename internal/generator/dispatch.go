@@ -1105,6 +1105,10 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		return nil, err
 	}
 
+	idempotencyTable, err := r.idempotencyTable()
+	if err != nil {
+		return nil, err
+	}
 	output, err := apigen.Generate(r.Schema, apigen.Options{
 		SchemaName:         r.Config.Name,
 		ModulePath:         r.Options.Naming.GoAPIModule(r.Config.Name),
@@ -1120,6 +1124,7 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		OpenAPIHooks:       r.Registry.OpenAPIHooks(),
 		ToolHooks:          r.Registry.ToolHooks(),
 		RateLimitKeys:      r.Registry.RateLimitKeys(),
+		IdempotencyTable:   idempotencyTable,
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
 		Engine:             engine,
@@ -1432,6 +1437,30 @@ func (r run) memoryStoreDefinitions(store, lang string) (enabled, known bool, er
 		return false, false, fmt.Errorf("generator: schema config for %s: %w", store, err)
 	}
 	return outputs.TypesEnabled(lang), true, nil
+}
+
+// idempotencyTable names the table of the API's database that keeps the
+// keys of its @idempotent operations (D140), nil for an API with none. The
+// loader's check found the table in the database, which is read again
+// here for its names.
+func (r run) idempotencyTable() (*ir.IdempotencyTable, error) {
+	operations := r.Schema.IdempotentOperations()
+	if len(operations) == 0 {
+		return nil, nil
+	}
+	database, _, ok := r.Schema.Database()
+	if !ok {
+		return nil, fmt.Errorf("generator: %s has @idempotent operations (%s) and connects to no database, which keeps their keys (D140)", r.Config.Name, strings.Join(operations, ", "))
+	}
+	schema, err := r.LoadDependency(database)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load %s, the database of %s, which keeps the keys of its @idempotent operations (D140): %w", database, r.Config.Name, err)
+	}
+	table, err := sqlutil.IdempotencyTableOf(schema)
+	if err != nil {
+		return nil, fmt.Errorf("generator: the idempotency keys of %s: %w", r.Config.Name, err)
+	}
+	return table, nil
 }
 
 // contentBucket reports whether the Bucket service named bucket names its

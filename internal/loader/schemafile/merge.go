@@ -360,6 +360,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.RawHeritage == nil &&
 		def.User == nil &&
 		def.UserRole == nil &&
+		def.IdempotencyKeys == nil &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&
 		!def.JsonField &&

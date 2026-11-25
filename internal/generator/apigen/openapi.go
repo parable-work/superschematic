@@ -368,6 +368,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			parameters = append(parameters, pageOpenAPIParameters(endpoint.Page)...)
 		}
 
+		// An @idempotent operation takes the key of the request (D140).
+		if endpoint.Idempotent != nil {
+			parameters = append(parameters, idempotencyOpenAPIParameter(endpoint))
+		}
+
 		if len(parameters) > 0 {
 			operation["parameters"] = parameters
 		}
@@ -524,6 +529,12 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		}
 		if endpoint.FileDownload != nil && strings.EqualFold(endpoint.Method, "GET") {
 			operation["responses"].(map[string]interface{})["304"] = fileNotModifiedResponse()
+		}
+
+		// An @idempotent operation declares what its key is refused with,
+		// and the header that marks a repeat's answer (D140).
+		if endpoint.Idempotent != nil {
+			addIdempotencyResponses(operation["responses"].(map[string]interface{}))
 		}
 
 		// A user model operation declares the errors the identity runtime

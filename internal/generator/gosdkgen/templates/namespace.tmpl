@@ -544,6 +544,14 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	}
 	{{- end}}
 
+	{{- if .Idempotent}}
+
+	// One Idempotency-Key for the call (D140): the one ctx carries
+	// (runtime.WithIdempotencyKey), or a UUID made here, which every send
+	// of the call carries.
+	ctx = runtime.IdempotentCall(ctx)
+	{{- end}}
+
 	var requestBody any
 	{{- if .HasFileUpload}}
 	payloadData, err := runtime.StripFieldsForMultipart(input, []string{

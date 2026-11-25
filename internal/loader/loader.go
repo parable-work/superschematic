@@ -20,6 +20,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/idempotency"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -451,6 +452,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 	if schema.HasTableOperations() {
 		why = "whose tables its @tableOperation operations read and write"
 	}
+	if len(schema.IdempotentOperations()) > 0 {
+		why = "which keeps the keys of its @idempotent operations"
+	}
 	if why == "" {
 		return nil, nil
 	}
@@ -611,6 +615,17 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// A @source view of another service's table reads the fields its
 	// behaviors own as the table's own (D103).
 	behaviorfields.ExpandExternal(vin.ExternalTypes, reg)
+	// The table that keeps idempotency keys gets its key and columns
+	// before the pass, which checks it as any other table (D140).
+	keyScalars, err := idempotency.Expand(schema)
+	if err != nil {
+		return nil, err
+	}
+	if len(keyScalars) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
 	if verify.CheckBehaviors(schema, vin).Err() == nil {
 		owned, err := behaviorfields.Expand(schema, reg)
 		if err != nil {

@@ -1512,27 +1512,29 @@ page.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 
-An operation's docs may say `replayMode: idempotent` and name the
-arguments that carry its keys. That reaches the tool manifest and the
-guidance, and nothing in a generated server keeps a key. A client that
-retries a write after a timeout runs it twice unless the application
-wrote its own table of keys.
+Built: `@idempotent({ ttl?, required? })`, the reserved class
+`IdempotencyKey implements IdempotencyKeys` and its table, the check that
+refuses an API whose database lacks it, the route step in the Go and
+TypeScript runtimes and routers
+(`runtime/http/testdata/idempotency_parity.json`), the store a generated
+Go or TypeScript entrypoint builds over the database, the header and its
+refusals in OpenAPI, the key a TypeScript, Go or Python SDK method sends,
+and the `idempotencyKey` argument of a tool on the TypeScript server's MCP
+endpoint (the API routes guide, "A call that runs once"). The commit that
+built it names D140 and says where it departs from the table this entry
+held: the decorator is also refused on an encrypted operation, a manual
+route and an operation that uploads files, the request's hash covers its
+query, and a row has a UUID key and a unique hash of operation, principal
+and key.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@idempotent({ ttl?, required? })` on an operation that is a `POST`, `PUT`, `PATCH` or `DELETE` and answers the JSON envelope. `ttl` is a duration, `24h` when absent. A caller sends `Idempotency-Key`, 1 to 255 printable ASCII characters. Without the header the call runs as it does now, unless `required: true`, which answers 400. | A key in the body, which every input type would then hold; every write idempotent unasked, which stores every answer |
-| The keys live in a table of the API's database that the DB schema declares with one reserved class, as it declares `Session`: `export abstract class IdempotencyKey implements IdempotencyKeys {}`. An API with an `@idempotent` operation over a database without it is refused at `check`, with the line to add. | A table the API's build adds to another service's migrations unseen |
-| A row is keyed by operation, principal and key, and holds a SHA-256 of the method, the path and the body, a state (`running` or `done`), the answer's status and body, and when it expires. | Keying by key alone, which lets one caller read another's answer |
-| Before the handler the runtime inserts a `running` row. If it inserted, the handler runs; an answer under 500 is stored as `done`, and one of 500 or more deletes the row, so a retry runs again. If a `done` row exists with the same hash, the stored answer is returned with `Idempotent-Replay: true`. A different hash is 422, `idempotency_key_reused`. A `running` row younger than the route's time limit is 409, `idempotency_in_flight`, with `Retry-After`; an older one is taken over. | Blocking the repeat until the first ends, which holds a connection for it |
-| The row is not in the handler's transaction, which the runtime does not own. A crash after the handler commits and before the answer is stored leaves `running`, and a repeat after the time limit runs the handler again. The docs say so: it is once per key but for that window. | Wrapping every handler in one transaction, which changes what a handler may do |
-| On the MCP endpoint the key is an argument, `idempotencyKey`, since a tool call has no headers. The operation's docs get `replayMode: idempotent` and that pointer from the decorator. | A second mechanism for tools |
-| A generated SDK's method for such an operation takes `idempotencyKey` and makes a UUID when given none. | Leaving the header to each caller |
-| After an insert, at most once a minute, a server deletes up to 100 expired rows. | A job every stack must schedule |
-| A file download and a streamed answer are refused the decorator. | |
-
-Build: the registry, `ir`, the reserved class in the loader, `sqlgen`, the
-Go, TypeScript and Rust HTTP runtimes and servers, the four SDK
-generators, the tool manifest, the parity tests and the API routes guide.
+Left: the Rust runtime, router and SDK. `rustrestgen` refuses an API with
+an `@idempotent` operation, and the Rust SDK sends no key. An operation's
+docs do not get `replayMode: idempotent` and the pointer from the
+decorator, and the tool documents (`tools/schema.json`, the SDKs' tool
+invokers) do not list `idempotencyKey`: the replay contract holds a
+pointer to a required string argument of the tool, which the key is not
+unless the operation says `required`, and each SDK's invoker would have to
+pass it to the method as the key.
 
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 

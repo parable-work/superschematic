@@ -141,7 +141,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
-		def.User != nil || def.UserRole != nil ||
+		def.User != nil || def.UserRole != nil || def.IdempotencyKeys != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
 		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
@@ -622,6 +622,9 @@ func (e *emitter) identityTraits(def *ir.TypeDef) []string {
 	}
 	if def.UserRole != nil {
 		out = append(out, e.useCoreTrait("UserRole"))
+	}
+	if def.IdempotencyKeys != nil {
+		out = append(out, e.useCoreTrait(ir.IdempotencyKeysTraitName))
 	}
 	return out
 }

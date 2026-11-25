@@ -36,14 +36,36 @@ export interface EncryptedPayloadEnvelope {
  * Reads a method's last argument: an AbortSignal, which methods have always
  * taken, or RequestOptions with a signal and the end user to forward.
  */
-export function toRequestOptions(value: AbortSignal | RequestOptions | null | undefined): RequestOptions {
+export function toRequestOptions(
+  value: AbortSignal | RequestOptions | null | undefined,
+  idempotent: boolean = false
+): RequestOptions & { headers?: Record<string, string> } {
+  // An @idempotent operation's call carries one key, made here, before
+  // the client's own retries, so each of them sends the same one (D140).
+  const key = idempotent
+    ? { headers: { 'Idempotency-Key': (value && !isAbortSignal(value) ? value.idempotencyKey : undefined) ?? newIdempotencyKey() } }
+    : {};
   if (value === undefined || value === null) {
-    return {};
+    return { ...key };
   }
   if (isAbortSignal(value)) {
-    return { signal: value };
+    return { signal: value, ...key };
   }
-  return { signal: value.signal, forward: value.forward };
+  return { signal: value.signal, forward: value.forward, ...key };
+}
+
+/** A key for one call to an @idempotent operation (D140): a UUID v4. */
+export function newIdempotencyKey(): string {
+  const source = globalThis.crypto;
+  if (typeof source?.randomUUID === 'function') {
+    return source.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  source.getRandomValues(bytes);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`;
 }
 
 /**

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import re
+{{- if .Namespace.HasIdempotentEndpoints}}
+import uuid
+{{- end}}
 {{- if .Namespace.HasPagedEndpoints}}
 from collections.abc import Iterator
 {{- end}}
@@ -758,6 +761,14 @@ class {{.ClassName}}:
 
 {{- range .Namespace.Endpoints}}
     def {{.MethodName}}(self{{- range .MethodParams}}, {{if .KeywordsFollow}}*, {{end}}{{.Declaration}}{{- end}}) -> {{.OutputTypeHint}}:
+{{- if .Idempotent}}
+        # One Idempotency-Key for the call (D140): idempotency_key, or a UUID
+        # made here, which every send of the call carries. A retry that
+        # names the same key is answered what the first call was.
+        if idempotency_key is None:
+            idempotency_key = str(uuid.uuid4())
+        extra_headers = {**(extra_headers or {}), "Idempotency-Key": idempotency_key}
+{{- end}}
 {{- if .PathIsFString}}
         path = f"{{.PathTemplate}}"
 {{- else}}

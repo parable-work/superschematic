@@ -256,6 +256,7 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 		fmt.Fprintf(&e.body, "  @%s({ defaultLimit: %d, maxLimit: %d%s })\n", e.use("paginated"), op.Page.DefaultLimit, op.Page.MaxLimit, sort)
 	}
 	e.emitMiddlewareDecorators("  ", op.Middleware)
+	e.emitIdempotentDecorator("  ", op.Idempotent)
 
 	params := make([]string, 0, len(op.Arguments))
 	for _, arg := range op.Arguments {
@@ -509,4 +510,24 @@ func valueLiteral(value any) string {
 	default:
 		return quote(fmt.Sprint(v))
 	}
+}
+
+// emitIdempotentDecorator renders @idempotent (D140), with the ttl as a
+// duration of seconds and required when it is set.
+func (e *emitter) emitIdempotentDecorator(indent string, config *ir.IdempotentConfig) {
+	if config == nil {
+		return
+	}
+	var members []string
+	if config.TTLSeconds > 0 {
+		members = append(members, fmt.Sprintf("ttl: %q", fmt.Sprintf("%ds", config.TTLSeconds)))
+	}
+	if config.Required {
+		members = append(members, "required: true")
+	}
+	if len(members) == 0 {
+		fmt.Fprintf(&e.body, "%s@%s()\n", indent, e.use("idempotent"))
+		return
+	}
+	fmt.Fprintf(&e.body, "%s@%s({ %s })\n", indent, e.use("idempotent"), strings.Join(members, ", "))
 }

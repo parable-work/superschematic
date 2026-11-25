@@ -838,6 +838,9 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if endpoint.FileDownload != nil && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s answers a FileDownload; the Rust router answers JSON only yet (the Go and TypeScript routers answer the file, D81), declare it @manualRouteRegistration and answer the file in the service, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
 		}
+		if endpoint.Idempotent != nil {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s is @idempotent; the Rust router keeps no idempotency keys yet (the Go and TypeScript routers do, D140), and a route that ran a repeated call twice would break what the decorator says, so serve the API in Go or TypeScript, or drop the decorator and keep the keys in the implementation; support follows", endpoint.Namespace, endpoint.Name)
+		}
 		info := endpointInfo(endpoint, output.HasServiceCallers)
 		if info.WebhookProvider != "" {
 			webhookProviders[info.WebhookProvider] = struct{}{}

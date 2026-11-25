@@ -29,12 +29,15 @@ import (
 const (
 	userTraitName     = "User"
 	userRoleTraitName = "UserRole"
+	// idempotencyKeysTraitName is the reserved trait of the table that
+	// keeps idempotency keys (D140), read as the user model's are.
+	idempotencyKeysTraitName = ir.IdempotencyKeysTraitName
 )
 
 // identityTrait returns the name of the user model's trait id names, or
 // false when it names another symbol.
 func identityTrait(id symbolIdentity) (string, bool) {
-	if id.is("@superschematic/db", userTraitName) || id.is("@superschematic/db", userRoleTraitName) {
+	if id.is("@superschematic/db", userTraitName) || id.is("@superschematic/db", userRoleTraitName) || id.is("@superschematic/db", idempotencyKeysTraitName) {
 		return id.name, true
 	}
 	return "", false
@@ -79,6 +82,15 @@ func (w *walker) applyIdentityTrait(td *ir.TypeDef, trait string, t *astNode) {
 			w.addErr(errorAtNode(t, "%s: the UserRole trait takes no type arguments", td.Name))
 		}
 		td.UserRole = &ir.UserRoleTrait{}
+	case idempotencyKeysTraitName:
+		if td.IdempotencyKeys != nil {
+			w.addErr(errorAtNode(t, "%s: the IdempotencyKeys trait appears more than once", td.Name))
+			return
+		}
+		if len(typeArgs) > 0 {
+			w.addErr(errorAtNode(t, "%s: the IdempotencyKeys trait takes no type arguments", td.Name))
+		}
+		td.IdempotencyKeys = &ir.IdempotencyKeysTrait{}
 	}
 }
 
@@ -156,6 +168,9 @@ func identityTraits(td *ir.TypeDef) []string {
 	if td.UserRole != nil {
 		traits = append(traits, userRoleTraitName)
 	}
+	if td.IdempotencyKeys != nil {
+		traits = append(traits, idempotencyKeysTraitName)
+	}
 	return traits
 }
 
@@ -170,8 +185,11 @@ func (w *walker) checkIdentityTraitPlacement(node *astNode, td *ir.TypeDef) {
 	if len(traits) == 0 {
 		return
 	}
-	if len(traits) > 1 {
+	switch {
+	case len(traits) == 2 && td.IdempotencyKeys == nil:
 		w.addErr(errorAtNode(node, "%s: a table takes the User trait or the UserRole trait, not both", td.Name))
+	case len(traits) > 1:
+		w.addErr(errorAtNode(node, "%s: a table takes one of the User, UserRole and IdempotencyKeys traits, not %s", td.Name, strings.Join(traits, " and ")))
 	}
 	var why string
 	switch {
