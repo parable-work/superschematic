@@ -276,9 +276,14 @@ type DDLOutput struct {
 	StateGuards []StateGuard
 	// Fences are the triggers of the tables' @fenced declarations, by table
 	// and column (fence.go, D119).
-	Fences      []Fence
-	Projections []ProjectionView
-	Timestamp   string
+	Fences []Fence
+	// AudienceTriggers resolve each @audience table's effective audience,
+	// and AudienceCascades resolve a parent's children's again when it
+	// changes, by table (audience.go, D156).
+	AudienceTriggers []AudienceTrigger
+	AudienceCascades []AudienceCascade
+	Projections      []ProjectionView
+	Timestamp        string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -566,6 +571,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	audienceTriggers, audienceCascades, err := buildAudience(tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
 	if err != nil {
 		return nil, err
@@ -631,6 +640,8 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		ChangeTriggers:   changeTriggers,
 		StateGuards:      stateGuards,
 		Fences:           fences,
+		AudienceTriggers: audienceTriggers,
+		AudienceCascades: audienceCascades,
 		RoleSeeds:        roleSeeds,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),

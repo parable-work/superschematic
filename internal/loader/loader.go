@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/access"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/identity"
@@ -611,6 +612,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// A @source view of another service's table reads the fields its
 	// behaviors own as the table's own (D103).
 	behaviorfields.ExpandExternal(vin.ExternalTypes, reg)
+	// A @source view of another service's @audience table reads its
+	// audience columns as the table's own (D156).
+	access.ExpandExternal(vin.ExternalTypes)
 	if verify.CheckBehaviors(schema, vin).Err() == nil {
 		owned, err := behaviorfields.Expand(schema, reg)
 		if err != nil {
@@ -661,6 +665,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 				return nil, err
 			}
+		}
+	}
+	// Per-record access (D156): an @audience table's columns and the access
+	// tables' fields join the schema before the pass, so it reads them as
+	// the table's own.
+	if added := access.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
 		}
 	}
 	res := verify.Run(schema, vin)

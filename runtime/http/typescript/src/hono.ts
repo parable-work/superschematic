@@ -28,7 +28,7 @@ import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './uploa
 // What an operation runs within: its caller, whom an ORM opened with no
 // user acts as (D87). A manual route's handler may run its writes within
 // one too.
-export { currentCaller, withCaller, type Caller } from './caller.js';
+export { accessCallerOf, currentAccess, currentCaller, withCaller, type AccessCaller, type Caller } from './caller.js';
 
 // A built-in WebhookVerifier: a JWT carrying the body's SHA-256 (D81).
 export { INVALID_SIGNATURE_CODE, jwtBodyHashVerifier } from './webhook.js';

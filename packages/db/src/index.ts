@@ -128,3 +128,5 @@ export type {
 } from "./wrappers";
 export type { RoleSeed, User, UserConfig, UserRole } from "./user";
 export { seedRoles } from "./user";
+export { accessGrants, accessLog, audience } from "./access";
+export type { AgentAccessValue, AudienceOptions, AudienceValue } from "./access";

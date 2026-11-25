@@ -265,6 +265,12 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Search}}
   search: {{jsonString .Search}},
 {{- end}}
+{{- if .Audience}}
+  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}} },
+{{- end}}
+{{- if .Access}}
+  access: {{jsonString .Access}},
+{{- end}}
   uniqueKeys: {
 {{- range .UniqueKeys}}
     {{jsonString .Name}}: {{.Definition}},
@@ -352,6 +358,9 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Search}}
   search: {{jsonString .Search}},
   searchProbe: {{jsonString .SearchProbe}},
+{{- end}}
+{{- if .Audience}}
+  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}}, probe: {{jsonString .Audience.Probe}} },
 {{- end}}
   uniqueKeys: {},
 };

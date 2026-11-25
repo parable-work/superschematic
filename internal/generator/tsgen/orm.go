@@ -175,6 +175,14 @@ type ORMTable struct {
 	UniqueKeys   []ORMUniqueKey
 	ReferencedBy []ORMReference
 
+	// Audience is an @audience table's resolved columns, or on a
+	// projection of one its source's and the probe that holds the view to
+	// them (D156); nil for a table or view no audience holds.
+	Audience *sqlutil.AudienceModel
+	// Access is what the table is to the runtime's per-record access
+	// (sqlutil.TableModel.Access, D156): grants, log or roles.
+	Access string
+
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
@@ -435,6 +443,8 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			SoftDelete:   t.SoftDelete,
 			HistoryActor: t.HistoryActor != "",
 			Fences:       t.Fences,
+			Audience:     t.Audience,
+			Access:       t.Access,
 		}
 		if td := schema.Types[t.Type]; td != nil {
 			table.Doc = codegen.DocText(td.Description, td.Comment)
@@ -578,6 +588,7 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 			if v.Search {
 				view.Search, view.SearchProbe, view.SearchSource = v.SearchColumn, v.SearchProbe, td.Projection.Source
 			}
+			view.Audience = v.Audience
 		}
 		statements := map[string]string{}
 		for _, st := range sqlutil.TableStatementsOf(v).AllStatements() {

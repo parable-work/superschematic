@@ -1413,7 +1413,20 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		for _, use := range w.classUses[id.decl] {
 			uses = append(uses, use.ref)
 		}
-		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
+		ext := &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
+		// A table's @audience adds columns a view may read (D156), which
+		// the loader adds to the external type as the table's own load
+		// does.
+		w.suppressRecording, w.foreignClass = true, true
+		for _, d := range w.decoratorsOf(id.decl) {
+			if d.id.name == "audience" {
+				if serr := w.applyDecorator(d, registry.TargetType, registry.Node{Type: ext}); serr != nil {
+					w.addErr(serr)
+				}
+			}
+		}
+		w.suppressRecording, w.foreignClass = prevSuppress, prevForeign
+		w.externalTypes[target] = ext
 		w.flattenRelatedTypes(targetService, sourceFields)
 	}
 
