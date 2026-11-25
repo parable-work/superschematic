@@ -1805,9 +1805,10 @@ The `api` generator takes the provider `auth_provider` selects
   and the required permissions; the provider sets `IsScopedEndpoint` and
   `ScopeParamName` (the SDK generators read them) and its own `Auth` data;
 - renders the core templates, which call the provider at fixed hook points
-  through `authSnippet`. `apigen.AuthSnippets` lists the eighteen snippets
+  through `authSnippet`. `apigen.AuthSnippets` lists the twenty snippets
   (imports, context shims, store adapters, config fields, route setup, the
-  per-route permission middleware, `go.mod` lines). A provider defines every
+  per-route permission middleware, `go.mod` lines, and the principal
+  `caller.go` binds as the ORM's caller, D87). A provider defines every
   one, empty when it adds nothing. The per-route permission middleware runs
   after the route's rate and body limits and its service step (D37), and
   before its payload decryptor and timeout, so it reads the caller from the

@@ -146,6 +146,9 @@ var AuthSnippets = []string{
 	// module.tmpl
 	"moduleRequires", // extra require lines
 	"moduleReplaces", // extra replace lines
+	// caller.tmpl (an API with a Deps database, D87)
+	"callerImports",   // imports the callerPrincipal expression needs, beside the orm import
+	"callerPrincipal", // the Go expression, of type string, of the ID of the principal the auth step put on ctx; "" binds no caller
 }
 
 // HasTable reports whether upstream declares a DB table named name carrying

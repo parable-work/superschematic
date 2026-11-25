@@ -138,3 +138,10 @@ var (
 
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
+
+{{ define "callerImports" }}
+
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "callerPrincipal" }}runtimesession.GetPrincipalID(ctx){{ end }}

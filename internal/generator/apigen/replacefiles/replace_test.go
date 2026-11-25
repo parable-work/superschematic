@@ -1,6 +1,6 @@
 // Package replacefiles_test holds a test auth provider whose whole files
-// replace core files of the api generator. The provider needs its
-// templates under a
+// replace core files of the api generator, and whose caller snippets bind
+// a principal of its own. The provider needs its templates under a
 // templates/ directory of its own, so it lives in this directory, away from
 // the core's templates.
 package replacefiles_test
@@ -116,5 +116,17 @@ func TestProviderFileReplacesTheCoreFileOfItsName(t *testing.T) {
 	middleware = read(t, dir, "middleware.go")
 	if !strings.Contains(middleware, "replacedMiddleware") || strings.Contains(middleware, "LoggerMiddleware") {
 		t.Errorf("middleware.go is not the provider's file alone:\n%s", middleware)
+	}
+}
+
+// TestCallerBindsTheProvidersPrincipal: caller.go imports and calls what
+// the provider's caller snippets name, not the session runtime.
+func TestCallerBindsTheProvidersPrincipal(t *testing.T) {
+	caller := read(t, writeFixtureAPI(t, provider{}), "caller.go")
+	if !strings.Contains(caller, "return orm.WithCaller(ctx, callerID(ctx))") {
+		t.Errorf("caller.go does not bind the provider's principal:\n%s", caller)
+	}
+	if strings.Contains(caller, "session") {
+		t.Errorf("caller.go still names the session runtime:\n%s", caller)
 	}
 }

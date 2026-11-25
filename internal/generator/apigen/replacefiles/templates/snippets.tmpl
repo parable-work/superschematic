@@ -1,5 +1,6 @@
 {{/* The snippets of the replacing test provider. Its context.go is a
-     whole file of its own, so the context snippets stay empty. */}}
+     whole file of its own, so the context snippets stay empty, and it
+     binds no principal as the ORM's caller. */}}
 
 {{ define "contextImports" }}{{ end }}
 {{ define "contextAuth" }}{{ end }}
@@ -19,3 +20,5 @@
 {{ define "routePermissions" }}{{ end }}
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
+{{ define "callerImports" }}{{ end }}
+{{ define "callerPrincipal" }}callerID(ctx){{ end }}
