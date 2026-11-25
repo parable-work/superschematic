@@ -1,5 +1,6 @@
 import { isSqlDatabase, type SqlDatabase } from './d1.js';
 import { isR2BucketBinding, type R2BucketBinding } from './r2.js';
+import { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, setProcessQueueWaker, type QueueWakeBinding } from './queue-wake.js';
 import type { StackEnv } from './stackconfig.js';
 
 /*
@@ -208,3 +209,33 @@ export function perIsolate<T>(build: () => T | Promise<T>): () => Promise<T> {
     return built;
   };
 }
+
+/**
+ * Installs the process's queue waker from a Worker's bindings (D145, D151):
+ * QUEUE_WAKES, a plain_text binding the platform writes, says which wakes
+ * each queue's enqueue sends, and a wake that names a binding starts a run
+ * of the Workflow of that name the Worker holds, which waits until the
+ * message is due and drains the worker's queues. A Worker with no
+ * QUEUE_WAKES sends none. A value that is no JSON object of wakes throws
+ * here, as the entry loads, and Cloudflare refuses the version. The
+ * entrypoint hands queueWakesSettled to each invocation's waitUntil, so a
+ * wake sent near the end of a request still goes out.
+ */
+export function installQueueWakes(env: WorkersEnv): void {
+  const value = env[QUEUE_WAKES_VARIABLE];
+  const wakes = parseQueueWakes(typeof value === 'string' ? value : undefined);
+  const creates = hasMethods<QueueWakeBinding>('create');
+  setProcessQueueWaker(
+    queueWaker(wakes, {
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      warn: (message, fields) => console.warn(JSON.stringify({ level: 'warn', msg: message, ...fields })),
+      binding: name => {
+        const held = env[name];
+        return creates(held) ? held : undefined;
+      },
+    })
+  );
+}
+
+export { queueWakesSettled } from './queue-wake.js';

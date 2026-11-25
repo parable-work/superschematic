@@ -20,6 +20,7 @@ import {
   type RulesLayout,
   type RulesStore,
 } from './rules';
+import { setProcessQueueWaker } from './queue-wake';
 import { bumpVersion, columnTypes, postgresDatabase, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 import { uuidFromDb, uuidToDb } from './uuid';
 
@@ -200,6 +201,23 @@ for (const dialect of dialects) {
         { key, useId: 'Chime', kind: 'rang', at: rang, payload: null },
         { key, useId: 'Chime', kind: 'gone', at: deleted, payload: null },
       ]);
+    });
+
+    test("an event wakes its table's event queue once the unit's statements have run, and a refused command wakes nothing (D151)", async () => {
+      const woken: { queue: string; dueAt: number | undefined }[] = [];
+      setProcessQueueWaker({
+        enqueued: async (queue, dueAt) => void woken.push({ queue, dueAt }),
+        settled: async () => {},
+      });
+      try {
+        const key = freshKey();
+        await inTransaction(host => runCreate(host, 'Bell', { title: 'Vespers' }, alice, { id: key }));
+        expect(woken).toEqual([{ queue: 'BellEvent', dueAt: undefined }]);
+        await expect(inTransaction(host => runOperation(host, 'Bell', key, 'Chime', 'refuse', {}, alice))).rejects.toMatchObject({ refusal: { code: 'vetoed' } });
+        expect(woken).toHaveLength(1);
+      } finally {
+        setProcessQueueWaker(undefined);
+      }
     });
 
     test('a refused or moved command writes no event', async () => {
