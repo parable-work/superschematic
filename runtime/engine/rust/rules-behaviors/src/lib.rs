@@ -138,6 +138,7 @@ pub mod presence;
 pub mod provenance;
 pub mod reactions;
 pub mod reconcile;
+pub mod recurrence;
 pub mod retries;
 pub mod revisions;
 pub mod rollups;

@@ -40,7 +40,7 @@ test('the module imports nothing and exports the C ABI', () => {
   const module = new WebAssembly.Module(wasmBytes);
   expect(WebAssembly.Module.imports(module)).toEqual([]);
   const names = WebAssembly.Module.exports(module).map(e => e.name);
-  for (const name of ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check']) {
+  for (const name of ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand']) {
     expect(names).toContain(name);
   }
 });
@@ -114,14 +114,14 @@ function trappingModule(): Uint8Array {
   ]);
   const exports = vector([
     [...text('memory'), 2, 0],
-    ...['rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check'].map((name, i) => [...text(name), 0, i]),
+    ...['rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand'].map((name, i) => [...text(name), 0, i]),
   ]);
   const body = (code: number[]) => [code.length + 1, 0, ...code];
-  const code = vector([body([0x41, 16, 0x0b]), body([0x0b]), body([0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b])]);
+  const code = vector([body([0x41, 16, 0x0b]), body([0x0b]), body([0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b])]);
   return new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
     ...section(1, types),
-    ...section(3, vector([[0], [1], [1], [2], [2], [2]])),
+    ...section(3, vector([[0], [1], [1], [2], [2], [2], [2]])),
     ...section(5, vector([[0, 1]])),
     ...section(7, exports),
     ...section(10, code),

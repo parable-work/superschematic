@@ -36,6 +36,15 @@ superschematic-rules = { path = "../rules" }
 # as the commerce crate links it; a test's alone, so the core's builds,
 # the wasm32 one among them, link no superscalar.
 superscalar = { path = "../../../../third_party/superscalar/crates/core", default-features = false }
+# Recurrence's oracle (D152): the maintained RFC 5545 crate, which a test
+# holds the core's own expansion of a battery of rules to, date for date. A
+# test's alone: the chrono it carries turns on wasm-bindgen for
+# wasm32-unknown-unknown (its default `wasmbind`), which would give the
+# module JavaScript imports and some 2.3 MB, and the module imports nothing.
+# MIT OR Apache-2.0.
+rrule = "0.14.0"
+# The crate's date-times, which the oracle's start is made in.
+chrono = { version = "0.4.45", default-features = false }
 
 [lints]
 workspace = true
