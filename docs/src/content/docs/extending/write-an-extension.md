@@ -529,7 +529,7 @@ them. The core ships `session`. acme ships `apikey`.
 | `Endpoint(field, set, info)` | per-route scope (acme does nothing) |
 | `Templates()` | one `{{ define }}` per hook the core templates call |
 | `Funcs()` | extra template functions |
-| `Files(out)` | extra files to write (optional) |
+| `Files(out)` | extra files to write (optional); one with a core file's name, such as `context.go`, replaces it |
 | `OpenAPIParameters(out)` | parameters on authenticated routes |
 
 `Analyze` runs against the schema `authDb` names. The snippets branch on

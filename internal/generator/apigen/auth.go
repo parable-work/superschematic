@@ -42,7 +42,11 @@ type AuthProvider interface {
 	Funcs() template.FuncMap
 
 	// Files lists provider-owned whole files, rendered from Templates into
-	// the module directory next to the core files.
+	// the module directory next to the core files. A file whose condition
+	// holds and whose name is a core file's, context.go or middleware.go
+	// say, replaces that file: the core does not write it. A provider with
+	// a request context or a middleware model of its own renders the whole
+	// file this way, where the snippets do not reach.
 	Files(output *APIOutput) []codegen.ConditionalFile
 
 	// OpenAPIParameters lists header parameters the provider adds to every

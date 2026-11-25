@@ -100,9 +100,32 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{"context.tmpl", "context.go"},
 		{"deps.tmpl", "deps.go"},
 	}
+	conditionalFiles := []codegen.ConditionalFile{
+		{Condition: output.IsPublic, Template: "middleware.tmpl", Filename: "middleware.go"},
+		{Condition: output.Auth.Identity, Template: "identity.tmpl", Filename: "identity.go"},
+		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
+		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
+		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
+		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
+		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
+	}
+	// A provider file with the name of a core file replaces it when its
+	// condition holds, and leaves the core's file alone when it does not
+	// (AuthProvider.Files).
+	coreNames := make(map[string]bool, len(staticFiles)+len(conditionalFiles))
+	for _, file := range staticFiles {
+		coreNames[file.filename] = true
+	}
+	for _, file := range conditionalFiles {
+		coreNames[file.Filename] = true
+	}
+	providerFiles, replaced := providerFilesOver(output.Provider.Files(output), coreNames)
 	staticTasks := make([]func() error, 0, len(staticFiles))
 	for _, file := range staticFiles {
 		file := file
+		if replaced[file.filename] {
+			continue
+		}
 		staticTasks = append(staticTasks, func() error {
 			if err := generateFile(generator, templatesFS, file.template, filepath.Join(outputDir, file.filename), output, funcs); err != nil {
 				return fmt.Errorf("failed to write %s: %w", file.filename, err)
@@ -125,21 +148,18 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		}
 	}
 
-	conditionalFiles := []codegen.ConditionalFile{
-		{Condition: output.IsPublic, Template: "middleware.tmpl", Filename: "middleware.go"},
-		{Condition: output.Auth.Identity, Template: "identity.tmpl", Filename: "identity.go"},
-		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
-		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
-		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
-		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
-		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
+	coreFiles := conditionalFiles[:0]
+	for _, file := range conditionalFiles {
+		if !replaced[file.Filename] {
+			coreFiles = append(coreFiles, file)
+		}
 	}
-	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
+	if err := codegen.WriteConditionalFilesParallel(coreFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templatesFS, templateName, outputPath, output, funcs)
 	}); err != nil {
 		return err
 	}
-	if err := codegen.WriteConditionalFilesParallel(output.Provider.Files(output), outputDir, func(templateName, outputPath string) error {
+	if err := codegen.WriteConditionalFilesParallel(providerFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(providerGenerator, output.Provider.Templates(), templateName, outputPath, output, funcs)
 	}); err != nil {
 		return err
@@ -152,6 +172,27 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 	}
 
 	return nil
+}
+
+// providerFilesOver returns the provider files to write over the core
+// files named in coreNames, and the core files they replace. A provider
+// file whose condition holds and whose name is a core file's replaces that
+// file: the core does not write it. One whose condition does not hold is
+// dropped when the name is a core file's, so the stale-file removal of a
+// conditional file does not delete the core's copy.
+func providerFilesOver(files []codegen.ConditionalFile, coreNames map[string]bool) ([]codegen.ConditionalFile, map[string]bool) {
+	kept := make([]codegen.ConditionalFile, 0, len(files))
+	replaced := make(map[string]bool, len(files))
+	for _, file := range files {
+		switch {
+		case file.Condition:
+			replaced[file.Filename] = true
+		case coreNames[file.Filename]:
+			continue
+		}
+		kept = append(kept, file)
+	}
+	return kept, replaced
 }
 
 // WriteScaffolds writes route-impl scaffold files into scaffoldsDir, skipping

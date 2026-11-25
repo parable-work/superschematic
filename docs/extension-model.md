@@ -1823,9 +1823,14 @@ The `api` generator takes the provider `auth_provider` selects
   runtime's handlers, `identity.go`'s `NewIdentity` and route table, and
   the CORS middleware; the auth-middleware snippets render beside it;
 - renders the provider's whole files (`Files`) next to the core files and
-  adds `OpenAPIParameters` to every operation of the OpenAPI document.
+  adds `OpenAPIParameters` to every operation of the OpenAPI document. A
+  whole file whose condition holds and whose name is a core file's, such
+  as `context.go` or `middleware.go`, replaces that file: the core does
+  not write it. A provider whose request context or middleware has a
+  shape of its own renders the whole file so.
 
-The snippet hooks are the only way a provider changes a core template.
+The snippet hooks and a replacing whole file are the only ways a provider
+changes a core file.
 
 ### 8.2 The core session provider
 
