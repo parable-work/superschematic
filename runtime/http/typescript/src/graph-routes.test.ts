@@ -201,6 +201,12 @@ describe('a ref and a commit', () => {
       graphMaterialize(orm, graph, operation('materialize'), context(ANN), request({ commit: 'nowhere' })),
       graphDiff(orm, graph, operation('diff'), context(ANN), request({}, undefined, { from: 'c9', to: 'c1' })),
       graphDiff(orm, graph, operation('diff'), context(ANN), request({}, undefined, { from: 'c1', to: 'c9' })),
+      // A release's commit and a revert's are held to the root too, so a
+      // caller learns nothing of another root's commits.
+      graphRelease(orm, graph, operation('release'), context(ANN), request({}, { commit: 'c9', version: 0 })),
+      graphRelease(orm, graph, operation('release'), context(ANN), request({}, { commit: 'nowhere', version: 0 })),
+      graphRevert(orm, graph, operation('revert', true), context(ANN), request({ ref: 'draft' }, { version: 1, toCommit: 'c9' })),
+      graphRevert(orm, graph, operation('revert', true), context(ANN), request({ ref: 'draft' }, { version: 1, toCommit: 'nowhere' })),
     ]) {
       expect(await refused(run)).toEqual({ status: 404, code: 'not_found', detail: 'commit not found' });
     }

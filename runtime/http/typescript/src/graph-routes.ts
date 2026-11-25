@@ -536,13 +536,15 @@ export function graphRebase(orm: object, graph: GraphFacade, operation: GraphOpe
   });
 }
 
-/** Revert (D138): the rows that make a change set compose to the tree of the body's commit, committed. */
+/** Revert (D138): the rows that make a change set compose to the tree of the body's commit, a commit of the root, committed. */
 export function graphRevert(orm: object, graph: GraphFacade, operation: GraphOperation, ctx: RequestContext, request: GraphRequest): Promise<unknown> {
   return answered(async () => {
-    const root = await rootOf(orm, operation.graph, request);
+    const set = operation.graph;
+    const root = await rootOf(orm, set, request);
     const ref = await pathRef(orm, operation, ctx, request, root, true);
     const body = bodyOf(operation, request);
-    return writing(graph, ctx).revert(idOf(ref.id, 'ref'), body.version as number, idOf(body.toCommit, 'toCommit'));
+    const toCommit = await commitOf(orm, set, root, idOf(body.toCommit, 'toCommit'));
+    return writing(graph, ctx).revert(idOf(ref.id, 'ref'), body.version as number, toCommit);
   });
 }
 
@@ -582,12 +584,14 @@ export function graphCompose(orm: object, graph: GraphFacade, operation: GraphOp
   });
 }
 
-/** Release (D138): the root's release pointed at the body's commit, at the pointer's version. */
+/** Release (D138): the root's release pointed at the body's commit, a commit of the root, at the pointer's version. */
 export function graphRelease(orm: object, graph: GraphFacade, operation: GraphOperation, ctx: RequestContext, request: GraphRequest): Promise<unknown> {
   return answered(async () => {
-    const root = await rootOf(orm, operation.graph, request);
+    const set = operation.graph;
+    const root = await rootOf(orm, set, request);
     const body = bodyOf(operation, request);
-    return writing(graph, ctx).release(root, idOf(body.commit, 'commit'), body.version as number);
+    const commit = await commitOf(orm, set, root, idOf(body.commit, 'commit'));
+    return writing(graph, ctx).release(root, commit, body.version as number);
   });
 }
 

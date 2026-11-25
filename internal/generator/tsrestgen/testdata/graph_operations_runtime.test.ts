@@ -398,15 +398,17 @@ describe('the graph operations of fixture-graph-api', () => {
     ]) {
       expect(await refusal(call())).toMatchObject({ status: 404, code: 'not_found', detail: 'ref not found' });
     }
+    // A commit of another root is not found where the path or the body
+    // names it, so a caller learns nothing of another root's commits.
     for (const call of [
       () => sdk(ANN).recipe.materialize(stew, tagged),
       () => sdk(ANN).recipe.diff(stew, { from: tagged, to: tagged }),
       () => sdk(ANN).recipe.diff(recipe, { from: tagged, to: nowhere }),
+      () => sdk(PAT).recipe.release(stew, { commit: tagged, version: 0 }),
+      () => sdk(ANN).recipe.revert(stew, theirs.id, { version: theirs.version, toCommit: tagged }),
     ]) {
       expect(await refusal(call())).toMatchObject({ status: 404, code: 'not_found', detail: 'commit not found' });
     }
-    // A commit of another root is the engine's to refuse where the body names it.
-    expect(await refusal(sdk(PAT).recipe.release(stew, { commit: tagged, version: 0 }))).toMatchObject({ status: 409, code: 'root_mismatch' });
   });
 
   test("a caller without the route's permission is refused by the API's auth, and a write needs a caller who is a UUID", async () => {

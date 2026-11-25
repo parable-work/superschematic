@@ -1460,9 +1460,10 @@ six the text lists, since it writes a change set too, and so is a
 primary line is never discarded through the routes (409
 `primary_merge_only`), since the next branch would make it again, empty,
 though the engines' `Discard` still retires one, which a root with several
-primary lines may need; and every operation is an MCP tool without `@mcp`
-on the class, as a behavior set's are. The commits that built it name
-D138.
+primary lines may need; a release's `commit` and a revert's `toCommit` of
+another root are 404, as a path's commit is; and every operation is an MCP
+tool without `@mcp` on the class, as a behavior set's are. The commits
+that built it name D138.
 
 Left: the Go and Rust servers do not serve the set: each operation stays
 a method of the implementation to write by hand, with the same route and

@@ -2673,7 +2673,7 @@ the commit the path names, then calls the facade.
 
 | Status | Code | When |
 | --- | --- | --- |
-| 404 | `not_found` | no live row of the root holds the key, a soft-deleted one among them; the ref or the commit does not exist, is discarded, or belongs to another root; the row rule keeps the change set from the caller; the root was never released |
+| 404 | `not_found` | no live row of the root holds the key, a soft-deleted one among them; the ref or the commit does not exist, is discarded, or belongs to another root, a release's `commit` and a revert's `toCommit` among them; the row rule keeps the change set from the caller; the root was never released |
 | 409 | `version_conflict`, `ref_sealed`, `primary_merge_only`, `schema_epoch`, `name_taken`, `nothing_to_commit`, `not_tagged`, `no_parent`, `merge_into_itself`, `root_mismatch` | the engine refuses the write: a stale `version`, a sealed ref, a write to a primary line or its discard, a commit from a newer schema epoch and the rest, each under its own code |
 | 422 | `invalid_tree`, `invalid_row`, `entity_not_found`, `invalid_arrangement`, `order_not_a_key`, `invalid_resolution`, `unmatched_resolution` | the engine or its core refuses the input; `invalid_tree` carries the core's findings in `details.findings` |
 | 403 | `no_actor` | a write whose caller has no subject that is a UUID |
