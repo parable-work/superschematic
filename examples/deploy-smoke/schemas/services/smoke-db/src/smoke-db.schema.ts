@@ -1,6 +1,6 @@
 import { Contact, Embedding, Finance, Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, Reactions, Schedules, Timers, User as UserTrait, UserRole, Workflow, index, key, queue, seedRoles, unique } from "@superschematic/db";
+import { AutoGenerate, Reactions, Schedules, Timers, User as UserTrait, UserRole, Workflow, attachments, index, key, queue, references, seedRoles, unique } from "@superschematic/db";
 
 // The user model (D50), which the API signs its users in with.
 export abstract class User implements UserTrait<{ login: "email"; name: "name" }> {
@@ -26,8 +26,19 @@ export abstract class DrainLineItem {
   lineItemId: Identity.UUID;
 }
 
+// An object a line item's file named, released once its file is gone or
+// its upload expired (D154); the build fills its fields, and the worker
+// ReleaseFiles deletes the object once no file names it.
+@queue()
+export abstract class FileReleased {}
+
 // A line item, its name's embedding beside it, which an hnsw index finds
 // the nearest of by cosine (D84). drainedAt is when the worker drained it.
+// It holds files of at most 1 MiB, which a client uploads straight to the
+// bucket, and points at other line items, as a file filed onto one does
+// (D154).
+@references<LineItem>({ tables: [LineItem] })
+@attachments<LineItem>({ released: FileReleased, maxFileBytes: 1048576 })
 @index<LineItem>(["name"])
 @index<LineItem>(["embedding"], { method: "hnsw", ops: "vector_cosine_ops" })
 export abstract class LineItem {
