@@ -311,7 +311,6 @@ async function admitPrincipal(ctx: RequestContext, limitPerMinute: number, store
   }
 }
 
-/** Throws when a route that counts per principal is mounted without the store it counts in (D131). */
 /** A route declared @idempotent is never mounted without the store of its keys, so a missing one fails at startup. */
 function requireIdempotencyStore(spec: OperationSpec, options: RouterRuntimeOptions): void {
   if (spec.idempotent && !options.idempotencyStore) {
@@ -319,6 +318,7 @@ function requireIdempotencyStore(spec: OperationSpec, options: RouterRuntimeOpti
   }
 }
 
+/** Throws when a route that counts per principal is mounted without the store it counts in (D131). */
 function requirePrincipalStore(spec: OperationSpec, rateLimitPerMinute: number | undefined, options: RouterRuntimeOptions): void {
   if (rateLimitPerMinute && spec.rateLimitKey === 'principal' && !options.principalRateLimitStore) {
     throw new Error(`${spec.namespace}.${spec.name}: its @rateLimit counts per principal, and principalRateLimitStore is required`);
