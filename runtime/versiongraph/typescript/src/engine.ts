@@ -974,6 +974,7 @@ class Operations {
         }
         deletes ||= (edits[k.name]?.delete?.length ?? 0) > 0;
       }
+      this.#checkSaved(saved);
       if (deletes) {
         const { tree: composed } = yield* this.#compose(tx, r);
         const byKey = this.#index(composed);
@@ -1579,6 +1580,22 @@ class Operations {
   }
 
   /** tree in the core's order: rows by their order column, then by entity key. */
+  /**
+   * Holds the rows a save wrote to the core's rules for a row, as a compose
+   * of the ref would later: an order key that is not one is the core's
+   * invalid_row now, and the save writes nothing, rather than a row that
+   * makes every later compose, arrange and commit of the ref fail. An
+   * entity saved twice is checked as its last row.
+   */
+  #checkSaved(saved: Tree): void {
+    if (Object.keys(saved).length === 0) return;
+    const tree: Tree = {};
+    for (const [kind, rows] of this.#index(saved)) {
+      tree[kind] = [...rows.values()];
+    }
+    this.#order(tree);
+  }
+
   #order(tree: Tree): Tree {
     const output = this.#run("compose", `{"descriptor":${this.descriptor},"base":${treeJson(tree)},"overlay":{}}`);
     return decodeTree(output.get("tree")!);

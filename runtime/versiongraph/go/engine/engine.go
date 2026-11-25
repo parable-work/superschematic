@@ -339,6 +339,9 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 			}
 			deletes = deletes || len(edits[k.Name].Delete) > 0
 		}
+		if err := e.checkSaved(result.Saved); err != nil {
+			return err
+		}
 		if deletes {
 			composed, _, _, err := e.compose(ctx, tx, r)
 			if err != nil {
@@ -1279,6 +1282,29 @@ func (e *Engine) compose(ctx context.Context, tx storage.Tx, ref storage.Ref) (T
 		return nil, nil, nil, err
 	}
 	return tree, result.Findings, own, nil
+}
+
+// checkSaved holds the rows a save wrote to the core's rules for a row, as
+// a compose of the ref would later: an order key that is not one is the
+// core's invalid_row now, and the save writes nothing, rather than a row
+// that makes every later compose, arrange and commit of the ref fail. An
+// entity saved twice is checked as its last row.
+func (e *Engine) checkSaved(saved Tree) error {
+	if len(saved) == 0 {
+		return nil
+	}
+	byKey, err := e.index(saved)
+	if err != nil {
+		return err
+	}
+	tree := Tree{}
+	for kind, rows := range byKey {
+		for _, row := range rows {
+			tree.add(kind, row)
+		}
+	}
+	_, err = e.order(tree)
+	return err
 }
 
 // order returns tree in the core's order: rows by their order column, then

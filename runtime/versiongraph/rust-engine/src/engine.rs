@@ -457,6 +457,7 @@ impl Engine {
             }
             deletes = deletes || !kind_edits.delete.is_empty();
         }
+        self.check_saved(&saved)?;
         if deletes {
             let (composed, _, _) = self.compose_ref(tx, &r).await?;
             let by_key = self.index(&composed)?;
@@ -1058,6 +1059,23 @@ impl Engine {
         let own = self.own_rows(tx, &r.id).await?;
         let (tree, findings) = self.core.compose(&base, &own)?;
         Ok((tree, findings, own))
+    }
+
+    /// Holds the rows a save wrote to the core's rules for a row, as a
+    /// compose of the ref would later: an order key that is not one is the
+    /// core's `invalid_row` now, and the save writes nothing, rather than a
+    /// row that makes every later compose, arrange and commit of the ref
+    /// fail. An entity saved twice is checked as its last row.
+    fn check_saved(&self, saved: &Tree) -> Result<(), Error> {
+        if saved.is_empty() {
+            return Ok(());
+        }
+        let tree: Tree = self
+            .index(saved)?
+            .into_iter()
+            .map(|(kind, rows)| (kind, rows.into_values().collect()))
+            .collect();
+        self.order(&tree).map(|_| ())
     }
 
     /// The tree in the core's order: rows by their order column, then by

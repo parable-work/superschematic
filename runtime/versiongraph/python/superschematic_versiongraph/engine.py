@@ -428,6 +428,7 @@ class Engine:
                 for row in kind_edits.upsert:
                     saved.setdefault(k.name, []).append(self._write_row(tx, k.name, r, row, False, actor))
                 deletes = deletes or len(kind_edits.delete) > 0
+            self._check_saved(saved)
             if deletes:
                 by_key = self._index(self._compose(tx, r)[0])
                 for k in self._kinds:
@@ -1027,6 +1028,16 @@ class Engine:
             '{"descriptor":' + self._descriptor + ',"base":' + _tree_json(base) + ',"overlay":' + _tree_json(own) + "}",
         )
         return _decode_tree(output["tree"]), _decode_findings(output["findings"]), own
+
+    def _check_saved(self, saved: Tree) -> None:
+        """Holds the rows a save wrote to the core's rules for a row, as a
+        compose of the ref would later: an order key that is not one is the
+        core's invalid_row now, and the save writes nothing, rather than a
+        row that makes every later compose, arrange and commit of the ref
+        fail. An entity saved twice is checked as its last row."""
+        if not saved:
+            return
+        self._order({kind: list(rows.values()) for kind, rows in self._index(saved).items()})
 
     def _order(self, tree: Tree) -> Tree:
         """tree in the core's order: rows by their order column, then by

@@ -1,6 +1,6 @@
 {
   "name": "arrange",
-  "description": "A kind ordered by a string key reads by its order keys' bytes and then by entity key. Arrange keeps the longest run of a parent's children already in order and writes new keys for the rest alone, as the change set's own rows; arranged as it stands, it writes nothing. Two change sets that insert into one gap with one key merge, and the entity key settles them; a move merges with an edit of another column; two moves of one row to different keys conflict on its order column. A list that is not the parent's live children, a kind ordered by an integer, a stale version, a primary line and a sealed ref are refused.",
+  "description": "A kind ordered by a string key reads by its order keys' bytes and then by entity key. Arrange keeps the longest run of a parent's children already in order and writes new keys for the rest alone, as the change set's own rows; arranged as it stands, it writes nothing. Two change sets that insert into one gap with one key merge, and the entity key settles them; a move merges with an edit of another column; two moves of one row to different keys conflict on its order column. A save of a row whose order key is not one is refused and writes nothing. A list that is not the parent's live children, a kind ordered by an integer, a stale version, a primary line and a sealed ref are refused.",
   "roots": ["Bread"],
   "steps": [
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
@@ -19,6 +19,12 @@
         {"entity_key": "Bake", "position": 2, "instruction": "Bake", "timings": {}}
       ]}
     }},
+    {"op": "save", "ref": "write", "edits": {"part": {"upsert": [
+      {"entity_key": "Proof", "parent_key": "Dough", "rank": "k-2", "heading": "Proof"}
+    ]}}, "expect": {"error": "invalid_row"}},
+    {"op": "save", "ref": "write", "edits": {"part": {"upsert": [
+      {"entity_key": "Proof", "parent_key": "Dough", "rank": "", "heading": "Proof"}
+    ]}}, "expect": {"error": "invalid_row"}},
     {"op": "commit", "ref": "write"},
     {"op": "merge", "source": "write", "target": "main", "as": "c1"},
     {"op": "materialize", "commit": "c1", "expect": {"tree": {
