@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D136 is the highest so far.
+  the highest number any branch has used. D148 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -1418,3 +1418,260 @@ The commit that built it names D123.
 Left: an API's MCP endpoint, in the Go, TypeScript and Rust servers, and
 the engine's still list `annotations.readOnlyHint` alone. They take
 `destructiveHint` and `idempotentHint` when they read the resolved record.
+
+## D137 to D148. What a document library needs of the framework
+
+D137 to D148 come from one exercise: porting an application that keeps
+documents as ordered trees of parts, which several people edit at once,
+publish, search, render in a headless browser and reach from a command
+line. Each entry is a thing that application wrote by hand and another
+application would write again. They fall in four groups, and each group is
+meant to land as one change:
+
+| Group | Entries |
+|-------|---------|
+| Version graphs | D137, D138, D139 |
+| The API runtime | D140, D141, D142, D143 |
+| Stacks and deploys | D144, D145, D148, and what D80 left |
+| Behaviors | D146, D147 |
+
+Sign-in through an identity provider is not among them. It is its own
+decision.
+
+## D137. A graph member's order may be a string key, so an insert writes one row and two inserts into one gap merge (D17 amended)
+
+A member's `order` is a `Generic.Int64` field, and the core merges it as
+any other content column. An insert between two siblings therefore
+renumbers every later sibling. On a change set each renumbered row is an
+override row of its own, and a merge reports each as changed on both sides
+when the other side inserted too. A tree of forty parts with one part
+added near its head writes thirty-eight rows that say nothing, and
+conflicts with anyone who did the same.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `order` names a `Generic.Int64` field or a string field. A string order is a key: one or more characters of `0-9A-Za-z`, compared by its bytes. The descriptor declares the column's class `string`, and its version stays 3, since a descriptor that was valid means what it meant. | A sequence merge in the core that renumbers integers, which removes the conflicts and still writes every later sibling; a float, which runs out of digits between two neighbors; a scalar of its own, which waits on superscalar; descriptor version 4, which changes every engine and every generated descriptor for a member nothing reads differently |
+| Rows sort by order, then by entity key, as they do now. Two rows of one parent may hold one key, and the entity key settles them: it is what two inserts into one gap on two refs produce. `validate` adds no finding for it. Its range finding applies to an integer order alone. | Refusing equal keys, which turns two inserts into a conflict again |
+| The core gains an operation, `order_keys`, `{before?, after?, count}` to `{keys}`: `count` keys that sort strictly between `before` and `after`, evenly spread, each as short as it can be. An absent bound is the start or the end. It is in the core so that every language makes the same keys, and the vectors hold it to that. | A helper per language, which four implementations would have to keep equal |
+| Each engine gains `Arrange(ref, version, kind, parent, keys)`: the entity keys of one parent's children in the order wanted. It keeps the longest run that is already in order and gives new order keys to the rest alone, as the ref's override rows. A list that is not exactly the parent's live children is refused. The generated facades expose it and `OrderKeys`. | Leaving the choice of which rows to rewrite to each application |
+| Merge keeps its rules. The order column is one atomic unit of its row: a move on one side merges with an edit of another unit on the other, and two moves of one entity to different keys conflict on that column. | A rule of its own for order |
+
+Build: the core (`descriptor.rs`, `tree.rs`, `validate.rs`, a new
+operation and its vectors), the loader's check
+(`internal/loader/verify/versiongraph.go`), the four engines and their
+facades, the scenarios, and the reference page.
+
+## D138. `@graphOperations(Root)` serves a version graph's operations as routes with no implementation method, and a graph's commits and releases can enqueue (D17, D103, D106 amended)
+
+A graph's operations reach an application through the generated facade,
+which is a library. Every route over them is written by hand: load the
+root, check who may, call the facade, map its refusals to answers. A
+behavior's operations do not ask that: `@behaviorOperations(Table)` adds
+their routes.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A class of an API schema decorated `@graphOperations(Root, { operations?, permissions?, by?, overridePermission? })` declares a set, as `@behaviorOperations` does. The loader adds a route per operation: `branch`, `save`, `arrange`, `commit`, `seal`, `merge`, `rebase`, `revert`, `discard`, `release`, `released`, `materialize`, `diff`, `history` and `entityHistory`. `operations` narrows the set to those it lists. | A route per operation declared by hand, each a method with no body; a route for every graph of a database unasked |
+| The paths sit under the root's plural, named for its key: `POST {roots}/{id}/refs` (branch), `PUT {roots}/{id}/refs/{ref}/edits` (save), `POST {roots}/{id}/refs/{ref}/{arrange,commit,seal,merge,rebase,revert,discard}`, `GET {roots}/{id}/refs/{ref}/history`, `POST {roots}/{id}/release`, `GET {roots}/{id}/released`, `GET {roots}/{id}/commits/{commit}` (materialize), `GET {roots}/{id}/diff` with `from` and `to`, and `GET {roots}/{id}/entities/{kind}/{key}/history`. | Paths the declaration writes out, which every set would repeat |
+| The inputs and results are generated types: each kind's edits and rows are typed from the member's content columns, as the facade's are, and the rest are the facade's own (a ref, a commit, a conflict with its base, ours, theirs and authors, a resolution). They are in the OpenAPI and in every SDK. | An untyped JSON body |
+| A route runs every step an implemented route runs. The class's `@requirePermission` covers the set, and `permissions` names a permission list per operation that replaces it. `by: ["createdBy"]` keeps the operations that write a change set (save, arrange, commit, seal, rebase, discard) to the ref's creator, and `overridePermission` admits a holder past it, as a table operation's row rule does. The actor of the graph's writes is the caller's subject. | The application's policy written in a handler |
+| A route reads the root through its repository first: an absent root, or one that is soft-deleted, is 404. | Operating on a deleted root's graph |
+| A refusal of the engine is a problem: not found is 404; a stale `version`, a sealed ref, a write to a primary line and a newer schema epoch are 409, each with its code; a refused input is 422 with the core's findings. A merge or a rebase that finds conflicts answers 200 with them and writes nothing, as the facade returns them. | One status for every refusal |
+| Each engine gains `EntityHistory(root, kind, key)`: the commits of the primary line that changed the entity, newest first, each with the change's operation. | Walking `History` and `Diff` per commit in the application |
+| `@versionGraph({ enqueueOnCommit?, enqueueOnRelease? })` names a `@queue` class each. A row written to the graph's commit table, or a release pointer moved, enqueues `{root, ref?, commit, sequence?}` by the trigger `@enqueueOnChange` writes, in the transaction that made it. | An enqueue the application remembers to make after each call |
+| `@mcp` on the set makes each operation a tool. | |
+| A save that needs the application's code, such as one that parses an uploaded file into rows, stays a hand-written operation that calls the facade. | A hook inside the generated route |
+| Built for the TypeScript server first. The entry keeps the Rust and Go servers until they serve the set. | Waiting for three servers |
+
+Build: the registry and the loader (the set's expansion beside
+`@behaviorOperations`), `ir`, `apigen`, `tsrestgen`,
+`runtime/http/typescript` (a `graph-routes.ts` beside
+`behavior-routes.ts`), the OpenAPI, the four engines (`EntityHistory`),
+`sqlgen` (the two triggers), the API routes guide and the reference.
+
+## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
+
+What a graph has released is read through `Released` or `Materialize`,
+which walk commits. A member table holds each ref's rows, not the
+released ones, so nothing can index, search, join or page "what is
+published". An application that needs to copies the released rows into a
+table by hand at each release.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@graphMember({ graph, released: true })` adds a table, `<member>_released` (`<Member>Released`): the member's content columns, the root's key, the entity key, and the commit and sequence of the release. Its key is the root and the entity key. It references the root and is deleted with it. It is not `@versioned` and no ref overlays it. | A view over the member's history joined to the release pointer, which no search index covers; a materialized view, which refreshes whole; the application's own copy |
+| `Release` rewrites that root's rows in its own transaction, from the diff between the commit released before and the new one: adds and updates are upserts, deletes are deletes. A first release inserts the tree. | A job that copies after the fact, which readers see late |
+| The table carries what the member declares that a read uses: its `@searchField` fields, its `@index` and `@unique` indexes that name content columns alone, and its vectors. | Declaring them twice |
+| To the ORM it is a table that is read: a repository with reads and lists, projections over it, and `@tableOperation` reads and lists. The repository has no writes. A raw SQL write is not refused; the docs say `Release` owns the rows. | A trigger that refuses writes |
+| The descriptor gains `kinds[].releasedTable`, which the core does not read and a storage adapter does. `Sweep` leaves the table alone. | |
+
+Build: the loader (`internal/loader/versiongraph/expand.go` and its
+check), `graphdesc`, the Postgres and SQLite adapters of the four engines,
+the scenarios, the ORM generators' read-only repository, and the reference
+page.
+
+## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
+
+An operation's docs may say `replayMode: idempotent` and name the
+arguments that carry its keys. That reaches the tool manifest and the
+guidance, and nothing in a generated server keeps a key. A client that
+retries a write after a timeout runs it twice unless the application
+wrote its own table of keys.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@idempotent({ ttl?, required? })` on an operation that is a `POST`, `PUT`, `PATCH` or `DELETE` and answers the JSON envelope. `ttl` is a duration, `24h` when absent. A caller sends `Idempotency-Key`, 1 to 255 printable ASCII characters. Without the header the call runs as it does now, unless `required: true`, which answers 400. | A key in the body, which every input type would then hold; every write idempotent unasked, which stores every answer |
+| The keys live in a table of the API's database that the DB schema declares with one reserved class, as it declares `Session`: `export abstract class IdempotencyKey implements IdempotencyKeys {}`. An API with an `@idempotent` operation over a database without it is refused at `check`, with the line to add. | A table the API's build adds to another service's migrations unseen |
+| A row is keyed by operation, principal and key, and holds a SHA-256 of the method, the path and the body, a state (`running` or `done`), the answer's status and body, and when it expires. | Keying by key alone, which lets one caller read another's answer |
+| Before the handler the runtime inserts a `running` row. If it inserted, the handler runs; an answer under 500 is stored as `done`, and one of 500 or more deletes the row, so a retry runs again. If a `done` row exists with the same hash, the stored answer is returned with `Idempotent-Replay: true`. A different hash is 422, `idempotency_key_reused`. A `running` row younger than the route's time limit is 409, `idempotency_in_flight`, with `Retry-After`; an older one is taken over. | Blocking the repeat until the first ends, which holds a connection for it |
+| The row is not in the handler's transaction, which the runtime does not own. A crash after the handler commits and before the answer is stored leaves `running`, and a repeat after the time limit runs the handler again. The docs say so: it is once per key but for that window. | Wrapping every handler in one transaction, which changes what a handler may do |
+| On the MCP endpoint the key is an argument, `idempotencyKey`, since a tool call has no headers. The operation's docs get `replayMode: idempotent` and that pointer from the decorator. | A second mechanism for tools |
+| A generated SDK's method for such an operation takes `idempotencyKey` and makes a UUID when given none. | Leaving the header to each caller |
+| After an insert, at most once a minute, a server deletes up to 100 expired rows. | A job every stack must schedule |
+| A file download and a streamed answer are refused the decorator. | |
+
+Build: the registry, `ir`, the reserved class in the loader, `sqlgen`, the
+Go, TypeScript and Rust HTTP runtimes and servers, the four SDK
+generators, the tool manifest, the parity tests and the API routes guide.
+
+## D141. A file answer may be inline, carries validators, and may be sandboxed (D81 amended)
+
+`FileDownload<{ contentType, filename? }>` answers
+`Content-Disposition: attachment`. A file a page shows, an image or a
+document in a frame, has to be a manual route, which signs in its caller
+itself and writes its own headers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `FileDownload<{ contentType, contentTypes?, filename?, disposition?, cacheControl?, sandbox? }>`. `disposition` is `attachment` (the default) or `inline`. `contentTypes` lists media types the implementation may answer in place of `contentType`; one it names outside the list is a 500. | A second result type for inline files |
+| The implementation may return `etag` and `lastModified` beside `body`. The runtime sends them, and answers 304 with no body to a matching `If-None-Match`, or to `If-Modified-Since` when the request names no tag, cancelling the body it was handed unread. | Validators each implementation compares itself |
+| `cacheControl` is sent as written. Absent, a file answer says `private, no-store` as it does now. | |
+| Every file answer says `X-Content-Type-Options: nosniff`. `sandbox: true` adds `Content-Security-Policy: sandbox` and `Cross-Origin-Resource-Policy: same-origin`; a list, `sandbox: ["allow-scripts"]`, adds those tokens to the policy. | Headers a route returns freely, which the next route forgets |
+| Go and TypeScript. The Rust server still refuses files (D81). | |
+
+Build: `runtime/http/typescript/src/download.ts` and Go's, the parity
+vectors beside `content_disposition_parity.json`, the servers'
+generators, the OpenAPI and the API routes guide.
+
+## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
+
+A bucket's interface is `put`, `get`, `delete`, `list` and `signedUrl`.
+An application that stores each file once, under its hash, and asks which
+of a set of files are already there, writes the hashing, the existence
+checks and the race between two uploads of one file itself.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `put` takes `ifAbsent: true`: it writes only when no object has the name, and its result says `created`. On GCS it is `ifGenerationMatch=0`, on R2 its conditional write. | A `head` then a `put`, which two callers interleave |
+| `head(name)` returns the object's record or nothing, without its bytes. | A `get` that is cancelled |
+| A Bucket service's config may say `contentAddressed: true`, with `maxBytes` (32 MiB when absent). `Deps` then holds a content bucket: `put(body, { contentType })` reads the body whole, up to `maxBytes`, names the object `sha256/<hex>` and writes it if absent, answering `{ hash, size, created }`; `has(hash)`, `missing(hashes)`, `get(hash)` and `signedUrl(hash)` read. It has no delete. Its `raw` member is the plain interface, for the caller that needs one. | Hashing a stream into a temporary object and renaming it, which needs a server-side copy that not every provider's binding has; a signed upload the server checks afterwards, during which a wrong object is readable under a hash |
+| Go, TypeScript and Rust, over GCS, and TypeScript over an R2 binding, as the interface is today. | |
+
+Build: the three runtimes' bucket clients, the Bucket kind's config, the
+servers' `Deps`, fake-gcs-server in the tests, and the buckets guide.
+
+## D143. An API names the oldest version of each client it serves (new)
+
+An application with a command-line client or an installed app has to turn
+away a copy too old to speak to it. Nothing in a generated SDK says which
+client it is in, and nothing in a server asks.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated SDK's client takes `client: { name, version }` and sends `X-Client-Version: <name>/<version>` on every call. Without the option it sends no such header. | The SDK package's own version, which is not the application's |
+| An API service's config may say `clientVersions: true`. Its `EnvConfig` then gains an optional setting, `MIN_CLIENT_VERSIONS`, a list such as `cli=0.5.0,desktop=2.1.0`, so an environment raises a minimum with no build. | A minimum in the schema, which a build and a deploy stand between |
+| A request whose header names a listed client at a lower version is answered 426 with the problem `client_too_old` and `{ client, version, minimum }`. Versions compare as semantic versions. A request with no header, a client that is not listed, or a version that does not parse, passes: a browser sends none. | Refusing a request without the header, which locks out every other caller |
+| Each SDK raises a typed error for it, so a client can tell its user to upgrade. | |
+
+Build: the service config, `envgen`, the three HTTP runtimes, the four
+SDK generators and the client SDKs guide.
+
+## D144. A deployable's image takes system packages, and a project may extend the generated image (D30 amended)
+
+A generated Dockerfile is written whole and never edited. A workload that
+needs a program beside its runtime, a headless browser or a PDF tool or
+fonts, has no place to ask for it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A stack names an image's additions once for a deployable, not per environment, since one image serves every environment: `image: { packages?, extend? }`. | A setting per environment, which makes an image per environment |
+| `packages` are Debian package names. The final stage installs them with `apt-get install --no-install-recommends`, sorted, and removes the package lists. A stage whose base has no `apt-get` is given the Debian base the TypeScript image uses when a deployable names packages. | An arbitrary `RUN` line, which is a Dockerfile by another name |
+| `extend` is the path of a Dockerfile the project owns. The deploy builds the generated image, then builds this file with `BASE` set to it, and deploys the result. It is the escape hatch, and the docs say what belongs in `packages` first. | No way past the generator |
+| The image's identity, which decides whether a deploy rebuilds, includes the packages and the digest of the extension file. | |
+| `stack dev` runs processes on the host and installs nothing. It prints once, at the start, the packages each deployable names. | Installing on a developer's machine |
+| A platform with no image, Cloudflare's, refuses the setting as unrealizable. | Ignoring it |
+
+Build: the stack's schema and resolver, `servergen`'s three Dockerfile
+templates, `internal/stackdeploy/images.go`, `stack dev`, the targets'
+checks and the stacks guide.
+
+## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
+
+On gcp a worker is a worker pool at a fixed count, so a queue that is
+empty most of the day still pays for an instance. The scaler that would
+change the count is designed and not built, for three reasons the section
+above gives: a grant that lets its holder redeploy the worker, a field the
+next deploy resets, and a scheduled run a minute for ever.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A worker's settings take `mode`: `pool`, the default, or `drain`. In drain mode the worker's entrypoint claims as it does now and exits 0 once no message was ready or held for `idle` (`30s` when absent). | The scaler; Pub/Sub push or Cloud Tasks to a service, a second delivery system beside the queue's table whose HTTP time limit bounds a message's handling |
+| gcp lowers a drain worker as a Cloud Run job with the worker's image, account, config and connections, and no worker pool. `instances` is how many tasks may run at once, one when absent; `maxInstances` is refused beside it. | |
+| Each deployable that enqueues to the queue gets the job's name in its config and `roles/run.invoker` on that job alone. Its queue client runs the job after an enqueue, at most once per queue in five seconds per process, and logs a failure without failing the enqueue. | A grant on the project; a wake that can fail the write |
+| A drain worker takes one of `instances` advisory locks named for its queue as it starts, and exits at once when none is free, so wakes that overlap cost a start and nothing else. | Asking the platform what is running before each wake |
+| A Cloud Scheduler job runs the drain job every `tick` (`5m` when absent) with `roles/run.invoker`, as a scheduled job's does. It covers a message a trigger enqueued, a retry that is due later, a delayed message (D80) and a wake that was lost. | Trusting the wake alone |
+| `stack dev` runs a drain worker as it runs any worker. Cloudflare's drainer already drains at each Cron firing; waking it before the next one (D92) can use the same seam and is left. | |
+
+Build: `internal/stack/workers.go`, `extensions/gcp` (the worker's
+lowering, the job, the connector and its grant, the scheduler job, the
+settings schema), the workers' entrypoints in `servergen`, the three queue
+clients and the stacks and queues guides.
+
+## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
+
+A table that composes Derived has `staleDerivations` and
+`settleDerivations` on its repository. A stack's deriver, the worker that
+calls a model and settles what it answers, reads engine types alone, so a
+compiled project writes that loop itself.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@deriver({ schemas })` in an API over a database of tables names tables that compose Derived, as it names engine types over an engine database. The resolver admits it, and the generated deriver runs the same loop over the tables' repositories: read a page of stale fields, hand each to the implementation's method for that field, settle the answers by hash. | A loop per application |
+| The implementation is the `Derivers` type the API already generates: a method per derived field, typed by the field. Nothing in it says which store it runs over. | A second shape for tables |
+| TypeScript first, since that is where a table's Derived operations are served. The entry keeps Rust and Go, and D74 keeps the model label and the cost cap. | |
+
+Build: `internal/stack/derivers.go`, the deriver entrypoint in
+`servergen`, the TypeScript runtime's loop, a fixture and the stacks
+guide.
+
+## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
+
+Applications keep registries of names people type: labels, customers,
+tags. The same three things are written each time. A name is unique
+without regard to case. A renamed row is still found by its old name. Two
+rows that turn out to be one thing are merged, and everything that pointed
+at one points at the other.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field typed `Aliased<T, { normalize? }>` is a name with aliases. `normalize` is `lower` (the default) or `slug`. The behavior adds a sub-table of aliases, each unique in its normalized form across the table's names and aliases together. | A unique index and a second table per application |
+| Its operations: `rename({ name })`, which keeps the old name as an alias; `addAlias` and `removeAlias`; and on the table, `resolve({ name })`, which answers the row whose name or alias matches. A name that another row holds, as a name or an alias, is refused with that row's key. The rules are in the behaviors' core. | Rules written per language |
+| A table that `implements Mergeable` gains `mergeInto({ from, into })` on its repository. In one transaction it repoints every relation of the database that references `from` to `into`, which the build enumerates; where that would break a unique index of the referencing table, it deletes the row that pointed at `from`; it moves `from`'s aliases and adds its name as one when the table has an `Aliased` field; then it deletes `from`, softly when the table deletes softly. It answers how many rows of each table it repointed and deleted. | A merge each application writes against the relations it remembers |
+| TypeScript and Go repositories on Postgres first. | |
+
+Build: the behaviors' core and its declarations, `behaviorlayout`,
+`ormgen`, `tsgen`, the rules adapters, fixtures and the database tables
+guide.
+
+## D148. A bucket's settings take CORS rules (D54 amended)
+
+A browser that uploads to a signed URL needs the bucket to answer its
+preflight. The buckets guide lists this as not built on either target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A bucket's settings in an environment take `cors`, a list of `{ origins, methods, headers?, exposeHeaders?, maxAge? }`. gcp writes it as the bucket's `cors`, and cloudflare as the R2 bucket's CORS rules. An origin of `*` is refused beside a private bucket's signed `PUT`; the rule names its origins. | A wildcard by default |
+| `stack dev`'s fake-gcs-server allows the local sites' origins, as the servers' CORS does. | |
+
+Build: `extensions/gcp/storage.go`, the cloudflare target's bucket, their
+settings schemas, `stack dev` and the buckets guide.
