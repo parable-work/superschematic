@@ -198,6 +198,8 @@ func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
 
 {{ define "routesConfigMiddlewares" }}{{ end }}
 
+{{ define "routesConfigFields" }}{{ end }}
+
 {{ define "routesConfigValidate" }}
 	if c.APIKeys == nil {
 		return fmt.Errorf("Config.APIKeys is required")
@@ -218,9 +220,22 @@ func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
 
 {{ define "routesProtectedMiddleware" }}{{ end }}
 
+{{ define "routeMiddlewaresFirst" }}{{ end }}
+
 {{ define "routePermissions" }}
 				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
 {{- end }}
 
+{{ define "routeMiddlewaresAfterDecrypt" }}{{ end }}
+
+{{ define "routesDeclarations" }}{{ end }}
+
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
+
+{{ define "callerImports" }}
+
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "callerPrincipal" }}runtimesession.GetPrincipalID(ctx){{ end }}

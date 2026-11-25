@@ -23,6 +23,28 @@ import (
 {{ $typeName := .TypeName }}
 {{ $repoName := .Name }}
 
+// ReadOnly{{ .TypeName }}RepositoryInterface is the reads of {{ .TypeName }}RepositoryInterface (D150).
+type ReadOnly{{ .TypeName }}RepositoryInterface interface {
+	GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}GetOptions) (*types.{{ .TypeName }}, error)
+	GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error)
+	{{- if .Versioned }}
+	GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error)
+	ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error)
+	GetAsOf(ctx context.Context, id {{ .PrimaryKeyType }}, ts time.Time) (*types.{{ .TypeName }}, error)
+	{{- range .Relationships }}
+	{{- if not .IsArray }}
+	ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context, {{ lowerFirst .FieldName }}ID {{ $.UUIDGoType }}, ts time.Time, opts *{{ $typeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ $typeName }}], error)
+	{{- end }}
+	{{- end }}
+	{{- end }}
+	FindOne(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) (*types.{{ .TypeName }}, error)
+	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
+	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
+	{{- if .VectorFields }}
+	Nearest(ctx context.Context, field {{ .TypeName }}VectorField, vector types.EmbeddingVector, opts *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error)
+	{{- end }}
+}
+
 {{ if .ReadOnly -}}
 {{ docComment "" (printf "%sRepositoryInterface defines the contract for reading %s, the released rows of %s. The version graph's Release owns the rows (D139), so it has no write." .TypeName .TypeName .ReleasedOf) }}
 {{- else -}}
@@ -94,14 +116,47 @@ type {{ .TypeName }}RepositoryInterface interface {
 }
 {{- end }}
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	{{- range .Repositories }}
+	Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface
+	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
+	{{- end }}
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	{{- range .Repositories }}
+	Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface
+	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
+	{{- end }}
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
+	Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface
 	{{- end }}
 	{{- if .HasQueries }}
 	GetQueries() *Queries
@@ -115,6 +170,7 @@ type TxInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
+	Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface
 	{{- end }}
 	{{- if .HasQueries }}
 	GetQueries() *Queries
@@ -158,9 +214,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -170,6 +247,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 {{- if .HasQueries }}
 
 // GetQueries returns the declared queries, each of which reads no rows.
@@ -210,6 +297,11 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 {{- range .Repositories }}
 {{ $typeName := .TypeName }}
 {{ $repoName := .Name }}
@@ -219,7 +311,15 @@ func (db *NoOpDatabase) Get{{ .TypeName }}Repository() {{ .TypeName }}Repository
 	return db.{{ .TypeName }}
 }
 
+func (db *NoOpDatabase) Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface {
+	return db.{{ .TypeName }}
+}
+
 func (tx *NoOpTx) Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface {
+	return tx.{{ .TypeName }}
+}
+
+func (tx *NoOpTx) Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}RepositoryInterface {
 	return tx.{{ .TypeName }}
 }
 
@@ -450,12 +550,18 @@ func ({{ $use.NoOp }}) {{ .GoName }}(_ context.Context, _ {{ $keyType }}, _ {{ .
 {{- end }}
 
 var (
-	_ DatabaseInterface = (*Database)(nil)
-	_ DatabaseInterface = (*NoOpDatabase)(nil)
-	_ TxInterface       = (*Tx)(nil)
-	_ TxInterface       = (*NoOpTx)(nil)
+	_ DatabaseInterface         = (*Database)(nil)
+	_ DatabaseInterface         = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface = (*NoOpDatabase)(nil)
+	_ TxInterface               = (*Tx)(nil)
+	_ TxInterface               = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface       = (*Tx)(nil)
+	_ ReadOnlyTxInterface       = (*NoOpTx)(nil)
 	{{- range .Repositories }}
-	_ {{ .TypeName }}RepositoryInterface = (*{{ .Name }})(nil)
-	_ {{ .TypeName }}RepositoryInterface = (*NoOp{{ .Name }})(nil)
+	_ {{ .TypeName }}RepositoryInterface         = (*{{ .Name }})(nil)
+	_ {{ .TypeName }}RepositoryInterface         = (*NoOp{{ .Name }})(nil)
+	_ ReadOnly{{ .TypeName }}RepositoryInterface = (*{{ .Name }})(nil)
+	_ ReadOnly{{ .TypeName }}RepositoryInterface = (*NoOp{{ .Name }})(nil)
 	{{- end }}
 )

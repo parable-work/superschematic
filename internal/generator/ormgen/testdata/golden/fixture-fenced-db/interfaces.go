@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyCourierRepositoryInterface is the reads of CourierRepositoryInterface (D150).
+type ReadOnlyCourierRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CourierGetOptions) (*types.Courier, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Courier, error)
+	FindOne(ctx context.Context, filter *CourierFilter, opts *CourierFindOptions) (*types.Courier, error)
+	FindMany(ctx context.Context, filter *CourierFilter, opts *CourierFindOptions) ([]*types.Courier, int, error)
+	FindPage(ctx context.Context, filter *CourierFilter, opts *CourierPageOptions) (*CourierPage, error)
+}
+
 // CourierRepositoryInterface defines the contract for Courier data access.
 type CourierRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CourierGetOptions) (*types.Courier, error)
@@ -28,6 +37,15 @@ type CourierRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *CourierFilter) (int, error)
 }
 
+// ReadOnlyDeliveryRepositoryInterface is the reads of DeliveryRepositoryInterface (D150).
+type ReadOnlyDeliveryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *DeliveryGetOptions) (*types.Delivery, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Delivery, error)
+	FindOne(ctx context.Context, filter *DeliveryFilter, opts *DeliveryFindOptions) (*types.Delivery, error)
+	FindMany(ctx context.Context, filter *DeliveryFilter, opts *DeliveryFindOptions) ([]*types.Delivery, int, error)
+	FindPage(ctx context.Context, filter *DeliveryFilter, opts *DeliveryPageOptions) (*DeliveryPage, error)
+}
+
 // DeliveryRepositoryInterface defines the contract for Delivery data access.
 type DeliveryRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *DeliveryGetOptions) (*types.Delivery, error)
@@ -44,6 +62,15 @@ type DeliveryRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *DeliveryFilter, update *DeliveryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *DeliveryFilter) (int, error)
+}
+
+// ReadOnlyDepotRepositoryInterface is the reads of DepotRepositoryInterface (D150).
+type ReadOnlyDepotRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *DepotGetOptions) (*types.Depot, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Depot, error)
+	FindOne(ctx context.Context, filter *DepotFilter, opts *DepotFindOptions) (*types.Depot, error)
+	FindMany(ctx context.Context, filter *DepotFilter, opts *DepotFindOptions) ([]*types.Depot, int, error)
+	FindPage(ctx context.Context, filter *DepotFilter, opts *DepotPageOptions) (*DepotPage, error)
 }
 
 // DepotRepositoryInterface defines the contract for Depot data access.
@@ -65,6 +92,15 @@ type DepotRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyParcelRepositoryInterface is the reads of ParcelRepositoryInterface (D150).
+type ReadOnlyParcelRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ParcelGetOptions) (*types.Parcel, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Parcel, error)
+	FindOne(ctx context.Context, filter *ParcelFilter, opts *ParcelFindOptions) (*types.Parcel, error)
+	FindMany(ctx context.Context, filter *ParcelFilter, opts *ParcelFindOptions) ([]*types.Parcel, int, error)
+	FindPage(ctx context.Context, filter *ParcelFilter, opts *ParcelPageOptions) (*ParcelPage, error)
+}
+
 // ParcelRepositoryInterface defines the contract for Parcel data access.
 type ParcelRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ParcelGetOptions) (*types.Parcel, error)
@@ -83,16 +119,48 @@ type ParcelRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *ParcelFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface
+	GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface
+	GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface
+	GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface
+	GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface
+	GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface
+	GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetCourierRepository() CourierRepositoryInterface
+	GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface
 	GetDeliveryRepository() DeliveryRepositoryInterface
+	GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface
 	GetDepotRepository() DepotRepositoryInterface
+	GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface
 	GetParcelRepository() ParcelRepositoryInterface
+	GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -101,9 +169,13 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCourierRepository() CourierRepositoryInterface
+	GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface
 	GetDeliveryRepository() DeliveryRepositoryInterface
+	GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface
 	GetDepotRepository() DepotRepositoryInterface
+	GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface
 	GetParcelRepository() ParcelRepositoryInterface
+	GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -149,9 +221,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -161,6 +254,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -182,11 +285,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetCourierRepository() CourierRepositoryInterface {
 	return db.Courier
 }
 
+func (db *NoOpDatabase) GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface {
+	return db.Courier
+}
+
 func (tx *NoOpTx) GetCourierRepository() CourierRepositoryInterface {
+	return tx.Courier
+}
+
+func (tx *NoOpTx) GetCourierReadOnlyRepository() ReadOnlyCourierRepositoryInterface {
 	return tx.Courier
 }
 
@@ -260,7 +376,15 @@ func (db *NoOpDatabase) GetDeliveryRepository() DeliveryRepositoryInterface {
 	return db.Delivery
 }
 
+func (db *NoOpDatabase) GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface {
+	return db.Delivery
+}
+
 func (tx *NoOpTx) GetDeliveryRepository() DeliveryRepositoryInterface {
+	return tx.Delivery
+}
+
+func (tx *NoOpTx) GetDeliveryReadOnlyRepository() ReadOnlyDeliveryRepositoryInterface {
 	return tx.Delivery
 }
 
@@ -334,7 +458,15 @@ func (db *NoOpDatabase) GetDepotRepository() DepotRepositoryInterface {
 	return db.Depot
 }
 
+func (db *NoOpDatabase) GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface {
+	return db.Depot
+}
+
 func (tx *NoOpTx) GetDepotRepository() DepotRepositoryInterface {
+	return tx.Depot
+}
+
+func (tx *NoOpTx) GetDepotReadOnlyRepository() ReadOnlyDepotRepositoryInterface {
 	return tx.Depot
 }
 
@@ -412,7 +544,15 @@ func (db *NoOpDatabase) GetParcelRepository() ParcelRepositoryInterface {
 	return db.Parcel
 }
 
+func (db *NoOpDatabase) GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface {
+	return db.Parcel
+}
+
 func (tx *NoOpTx) GetParcelRepository() ParcelRepositoryInterface {
+	return tx.Parcel
+}
+
+func (tx *NoOpTx) GetParcelReadOnlyRepository() ReadOnlyParcelRepositoryInterface {
 	return tx.Parcel
 }
 
@@ -483,16 +623,28 @@ func (r *NoOpParcelRepository) DeleteMany(_ context.Context, _ *ParcelFilter) (i
 }
 
 var (
-	_ DatabaseInterface           = (*Database)(nil)
-	_ DatabaseInterface           = (*NoOpDatabase)(nil)
-	_ TxInterface                 = (*Tx)(nil)
-	_ TxInterface                 = (*NoOpTx)(nil)
-	_ CourierRepositoryInterface  = (*CourierRepository)(nil)
-	_ CourierRepositoryInterface  = (*NoOpCourierRepository)(nil)
-	_ DeliveryRepositoryInterface = (*DeliveryRepository)(nil)
-	_ DeliveryRepositoryInterface = (*NoOpDeliveryRepository)(nil)
-	_ DepotRepositoryInterface    = (*DepotRepository)(nil)
-	_ DepotRepositoryInterface    = (*NoOpDepotRepository)(nil)
-	_ ParcelRepositoryInterface   = (*ParcelRepository)(nil)
-	_ ParcelRepositoryInterface   = (*NoOpParcelRepository)(nil)
+	_ DatabaseInterface                   = (*Database)(nil)
+	_ DatabaseInterface                   = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface           = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface           = (*NoOpDatabase)(nil)
+	_ TxInterface                         = (*Tx)(nil)
+	_ TxInterface                         = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                 = (*Tx)(nil)
+	_ ReadOnlyTxInterface                 = (*NoOpTx)(nil)
+	_ CourierRepositoryInterface          = (*CourierRepository)(nil)
+	_ CourierRepositoryInterface          = (*NoOpCourierRepository)(nil)
+	_ ReadOnlyCourierRepositoryInterface  = (*CourierRepository)(nil)
+	_ ReadOnlyCourierRepositoryInterface  = (*NoOpCourierRepository)(nil)
+	_ DeliveryRepositoryInterface         = (*DeliveryRepository)(nil)
+	_ DeliveryRepositoryInterface         = (*NoOpDeliveryRepository)(nil)
+	_ ReadOnlyDeliveryRepositoryInterface = (*DeliveryRepository)(nil)
+	_ ReadOnlyDeliveryRepositoryInterface = (*NoOpDeliveryRepository)(nil)
+	_ DepotRepositoryInterface            = (*DepotRepository)(nil)
+	_ DepotRepositoryInterface            = (*NoOpDepotRepository)(nil)
+	_ ReadOnlyDepotRepositoryInterface    = (*DepotRepository)(nil)
+	_ ReadOnlyDepotRepositoryInterface    = (*NoOpDepotRepository)(nil)
+	_ ParcelRepositoryInterface           = (*ParcelRepository)(nil)
+	_ ParcelRepositoryInterface           = (*NoOpParcelRepository)(nil)
+	_ ReadOnlyParcelRepositoryInterface   = (*ParcelRepository)(nil)
+	_ ReadOnlyParcelRepositoryInterface   = (*NoOpParcelRepository)(nil)
 )

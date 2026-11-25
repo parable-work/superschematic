@@ -23,10 +23,13 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool      *pgxpool.Pool
-	Order     *OrderRepository
-	OrderLine *OrderLineRepository
-	Product   *ProductRepository
+	pool *pgxpool.Pool
+	// readReplica is the Database over the read replica's pool, nil when
+	// ConnectWithPools was given none (D150).
+	readReplica *Database
+	Order       *OrderRepository
+	OrderLine   *OrderLineRepository
+	Product     *ProductRepository
 }
 
 // Tx represents a database transaction with repositories
@@ -96,13 +99,59 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	return db, nil
 }
 
-// Close closes the database connection
+// ConnectWithPools creates a Database over primary, the pool that takes the
+// writes, and readReplica, a pool of a read replica of it (D150).
+// ReadReplica and ReadOnly read through the replica; every other method
+// runs on primary. When readReplica is nil or primary itself, there is no
+// replica, and they read on primary.
+func ConnectWithPools(primary, readReplica *pgxpool.Pool) (*Database, error) {
+	db, err := ConnectWithPool(primary)
+	if err != nil {
+		return nil, err
+	}
+	if readReplica != nil && readReplica != primary {
+		replica, err := ConnectWithPool(readReplica)
+		if err != nil {
+			return nil, err
+		}
+		db.readReplica = replica
+	}
+	return db, nil
+}
+
+// Close closes the database connection, and the read replica's.
 func (db *Database) Close() {
+	if db.readReplica != nil && db.readReplica.pool != db.pool {
+		db.readReplica.pool.Close()
+	}
 	db.pool.Close()
+}
+
+// HasReadReplica reports whether the Database reads through a read replica
+// of its own, a pool ConnectWithPools was given beside the primary.
+func (db *Database) HasReadReplica() bool {
+	return db != nil && db.readReplica != nil
+}
+
+// ReadReplica returns the Database over the read replica's pool, or db
+// itself when it has none. The replica's repositories, declared queries and
+// raw reads run on its pool. A write through it fails as the replica
+// refuses it: Postgres refuses a write on a standby with SQLSTATE 25006. A
+// read on the replica may lag the primary's latest commit.
+func (db *Database) ReadReplica() DatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
 }
 
 // GetOrderRepository returns the Order repository interface.
 func (db *Database) GetOrderRepository() OrderRepositoryInterface {
+	return db.Order
+}
+
+// GetOrderReadOnlyRepository returns the Order repository's reads.
+func (db *Database) GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface {
 	return db.Order
 }
 
@@ -111,8 +160,18 @@ func (db *Database) GetOrderLineRepository() OrderLineRepositoryInterface {
 	return db.OrderLine
 }
 
+// GetOrderLineReadOnlyRepository returns the OrderLine repository's reads.
+func (db *Database) GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface {
+	return db.OrderLine
+}
+
 // GetProductRepository returns the Product repository interface.
 func (db *Database) GetProductRepository() ProductRepositoryInterface {
+	return db.Product
+}
+
+// GetProductReadOnlyRepository returns the Product repository's reads.
+func (db *Database) GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface {
 	return db.Product
 }
 
@@ -121,13 +180,28 @@ func (tx *Tx) GetOrderRepository() OrderRepositoryInterface {
 	return tx.Order
 }
 
+// GetOrderReadOnlyRepository returns the Order transaction repository's reads.
+func (tx *Tx) GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface {
+	return tx.Order
+}
+
 // GetOrderLineRepository returns the OrderLine transaction repository interface.
 func (tx *Tx) GetOrderLineRepository() OrderLineRepositoryInterface {
 	return tx.OrderLine
 }
 
+// GetOrderLineReadOnlyRepository returns the OrderLine transaction repository's reads.
+func (tx *Tx) GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface {
+	return tx.OrderLine
+}
+
 // GetProductRepository returns the Product transaction repository interface.
 func (tx *Tx) GetProductRepository() ProductRepositoryInterface {
+	return tx.Product
+}
+
+// GetProductReadOnlyRepository returns the Product transaction repository's reads.
+func (tx *Tx) GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface {
 	return tx.Product
 }
 
@@ -166,6 +240,32 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	return nil
 }
 
+// ReadOnly returns the reads of the Database that ReadReplica returns: the
+// replica's, or the primary's when there is none (D150). Its interface has
+// the repositories' reads, the raw reads and ReadOnlyTransaction, and no
+// write, so a write through it does not compile.
+func (db *Database) ReadOnly() ReadOnlyDatabaseInterface {
+	if db != nil && db.readReplica != nil {
+		return db.readReplica
+	}
+	return db
+}
+
+// ReadOnlyTransaction executes fn within a read-only transaction at
+// repeatable read on the read replica, or on the primary when there is
+// none (D150): every read in it sees one snapshot, and Postgres refuses a
+// write in it with SQLSTATE 25006. It commits when fn returns nil and
+// rolls back when it returns an error.
+func (db *Database) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
+	target := db
+	if db.readReplica != nil {
+		target = db.readReplica
+	}
+	return target.TransactionWith(ctx, TxOptions{Isolation: RepeatableRead, ReadOnly: true}, func(tx TxInterface) error {
+		return fn(tx.(*Tx))
+	})
+}
+
 // Exec runs raw SQL within the open transaction. Prefer generated repository
 // methods when they exist; use this only for operations the ORM does not
 // expose (e.g. clearing soft-delete columns that UpdateOne blocks).
@@ -179,6 +279,22 @@ func (tx *Tx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.Co
 // returned rows.
 func (tx *Tx) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
 	return tx.tx.Query(ctx, sql, arguments...)
+}
+
+// Query runs one raw read on the pool, outside any transaction, for a read
+// the repositories do not express. One statement reads the same with or
+// without BEGIN, so a lone read saves the BEGIN and COMMIT that Transaction
+// sends around it. A read that needs what an earlier statement set, such
+// as a transaction-local set_config, or several statements that must
+// agree, belongs in a transaction. The caller closes the returned rows.
+func (db *Database) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
+	return db.pool.Query(ctx, sql, arguments...)
+}
+
+// QueryRow is Query for a read of at most one row. Its Scan returns
+// pgx.ErrNoRows when the read finds none.
+func (db *Database) QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row {
+	return db.pool.QueryRow(ctx, sql, arguments...)
 }
 
 // WithUserID returns a new context with the user ID set
@@ -257,6 +373,15 @@ func mustParseUserID(text string) types.IdentityUUID {
 
 // Ping checks if the database connection is alive
 func (db *Database) Ping(ctx context.Context) error {
+	return db.pool.Ping(ctx)
+}
+
+// PingReadReplica checks if the read replica's connection is alive, or the
+// primary's when the Database has no replica.
+func (db *Database) PingReadReplica(ctx context.Context) error {
+	if db.readReplica != nil {
+		return db.readReplica.pool.Ping(ctx)
+	}
 	return db.pool.Ping(ctx)
 }
 
