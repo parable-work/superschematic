@@ -1677,7 +1677,9 @@ func NoteFromYAMLNonStrict(data []byte) (*Note, error) {
 }
 
 // Part - A part of the recipe's write-up, nested under another part. Its rank is
-// a string order key, so Arrange places it among its siblings.
+// a string order key, so Arrange places it among its siblings, and the
+// parts a recipe has released are kept in a table of their own, with the
+// index a reader of them uses.
 type Part struct {
 	Id *IdentityUUID `json:"id,omitempty"`
 
@@ -2000,6 +2002,308 @@ func PartFromYAML(data []byte) (*Part, error) {
 // PartFromYAMLNonStrict builds Part from YAML using lenient decoding.
 func PartFromYAMLNonStrict(data []byte) (*Part, error) {
 	decoded := &Part{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleased - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+type PartReleased struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Recipe Recipe `json:"recipe"`
+
+	EntityKey IdentityUUID `json:"entityKey"`
+
+	ParentKey *IdentityUUID `json:"parentKey,omitempty"`
+
+	Rank string `json:"rank"`
+
+	Heading string `json:"heading"`
+
+	Commit RecipeCommit `json:"commit"`
+
+	Sequence GenericInt64 `json:"sequence"`
+}
+
+// MaskSecrets returns a copy of PartReleased with secret fields cleared.
+func (t *PartReleased) MaskSecrets() *PartReleased {
+	if t == nil {
+		return nil
+	}
+
+	masked := &PartReleased{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.EntityKey = t.EntityKey
+
+	masked.ParentKey = t.ParentKey
+
+	masked.Rank = t.Rank
+
+	masked.Heading = t.Heading
+
+	maskedValueCommit := t.Commit.MaskSecrets()
+	if maskedValueCommit != nil {
+		masked.Commit = *maskedValueCommit
+	}
+
+	masked.Sequence = t.Sequence
+
+	return masked
+}
+
+// JSONFieldNames are the keys PartReleased's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*PartReleased) JSONFieldNames() []string {
+	return []string{"id", "recipe", "entityKey", "parentKey", "rank", "heading", "commit", "sequence"}
+}
+
+// Validate validates all fields in PartReleased
+func (t *PartReleased) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate entityKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.EntityKey, true); !valid {
+		errors.SetFieldErrors("entityKey", fieldErrs)
+	}
+
+	// Validate parentKey (optional)
+
+	// Validate optional pointer field
+	if t.ParentKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.ParentKey, false); !valid {
+			errors.SetFieldErrors("parentKey", fieldErrs)
+		}
+	}
+
+	// Validate commit (required nested type)
+
+	if fieldErrs := t.Commit.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("commit", fieldErrs)
+	}
+
+	// Validate sequence (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Sequence, true); !valid {
+		errors.SetFieldErrors("sequence", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals PartReleased to JSON
+func (t *PartReleased) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias PartReleased
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals PartReleased from JSON with validation
+func (t *PartReleased) UnmarshalJSON(data []byte) error {
+	type Alias PartReleased
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts PartReleased into a map representation.
+func (t *PartReleased) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert PartReleased to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert PartReleased to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes PartReleased from a map using lenient decoding.
+func (t *PartReleased) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode PartReleased from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes PartReleased from a map and rejects unknown fields.
+func (t *PartReleased) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes PartReleased from JSON and rejects unknown fields.
+func (t *PartReleased) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes PartReleased from JSON using lenient decoding.
+func (t *PartReleased) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode PartReleased from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode PartReleased from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes PartReleased from YAML and rejects unknown fields.
+func (t *PartReleased) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes PartReleased from YAML using lenient decoding.
+func (t *PartReleased) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode PartReleased from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode PartReleased from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// PartReleasedFromMap builds PartReleased from a map using lenient decoding.
+func PartReleasedFromMap(value map[string]any) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromMapStrict builds PartReleased from a map and rejects unknown fields.
+func PartReleasedFromMapStrict(value map[string]any) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromJSON builds PartReleased from JSON and rejects unknown fields.
+func PartReleasedFromJSON(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromJSONNonStrict builds PartReleased from JSON using lenient decoding.
+func PartReleasedFromJSONNonStrict(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromYAML builds PartReleased from YAML and rejects unknown fields.
+func PartReleasedFromYAML(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromYAMLNonStrict builds PartReleased from YAML using lenient decoding.
+func PartReleasedFromYAMLNonStrict(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

@@ -169,6 +169,9 @@ class KindDescriptor(_KindDescriptorRequired, total=False):
     root: str
     """The column holding the graph root's key, which a storage adapter writes
     on every row. The core does not read it."""
+    releasedTable: str
+    """The table that holds the released tree's rows of the kind, which a
+    storage adapter rewrites at each release. The core does not read it."""
     author: str
     """The column naming who wrote the row; conflicts report it."""
     parent: ParentEdge

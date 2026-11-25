@@ -51,6 +51,11 @@ struct KindDescriptor {
     kind: String,
     table: String,
     history_table: String,
+    /// The table that holds the released tree's rows of the kind (D139),
+    /// for a storage adapter, which rewrites it at each release. The core
+    /// does not read it.
+    #[serde(default, deserialize_with = "present")]
+    released_table: Option<String>,
     key: String,
     id: String,
     #[serde(rename = "ref")]
@@ -412,7 +417,10 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
             )));
         }
     }
-    for (member, table) in [("table", &raw.table), ("historyTable", &raw.history_table)] {
+    let tables = [("table", &raw.table), ("historyTable", &raw.history_table)]
+        .into_iter()
+        .chain(raw.released_table.as_ref().map(|t| ("releasedTable", t)));
+    for (member, table) in tables {
         if table.is_empty() {
             return Err(Error::descriptor(format!(
                 "descriptor: kind {name:?} has an empty {member}"

@@ -61,7 +61,22 @@ CREATE TABLE part (
 );
 
 COMMENT ON TABLE part IS 'A part of the recipe''s write-up, nested under another part. Its rank is
-a string order key, so Arrange places it among its siblings.';
+a string order key, so Arrange places it among its siblings, and the
+parts a recipe has released are kept in a table of their own, with the
+index a reader of them uses.';
+
+CREATE TABLE part_released (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  recipe_id UUID NOT NULL,
+  entity_key UUID NOT NULL,
+  parent_key UUID,
+  rank TEXT NOT NULL,
+  heading TEXT NOT NULL,
+  commit_id UUID NOT NULL,
+  "sequence" BIGINT NOT NULL
+);
+
+COMMENT ON TABLE part_released IS 'The released rows of Part: what each root''s release of the Recipe version graph holds of it. A release rewrites them.';
 
 CREATE TABLE recipe (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -389,6 +404,18 @@ ALTER TABLE part
   REFERENCES recipe_ref(id)
   ON DELETE RESTRICT;
 
+ALTER TABLE part_released
+  ADD CONSTRAINT fk_part_released_recipe_id
+  FOREIGN KEY (recipe_id)
+  REFERENCES recipe(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE part_released
+  ADD CONSTRAINT fk_part_released_commit_id
+  FOREIGN KEY (commit_id)
+  REFERENCES recipe_commit(id)
+  ON DELETE CASCADE;
+
 ALTER TABLE recipe_commit
   ADD CONSTRAINT fk_recipe_commit_root_id
   FOREIGN KEY (root_id)
@@ -499,7 +526,13 @@ CREATE UNIQUE INDEX uq_ingredient_entity_ref ON ingredient USING BTREE (entity_k
 
 CREATE UNIQUE INDEX uq_note_entity_ref ON note USING BTREE (entity_key, ref_id);
 
+CREATE INDEX idx_part_parent_key_rank ON part USING BTREE (parent_key, rank);
+
 CREATE UNIQUE INDEX uq_part_entity_ref ON part USING BTREE (entity_key, ref_id);
+
+CREATE UNIQUE INDEX uq_part_released_root_entity ON part_released USING BTREE (recipe_id, entity_key);
+
+CREATE INDEX idx_part_released_parent_key_rank ON part_released USING BTREE (parent_key, rank);
 
 CREATE UNIQUE INDEX uq_recipe_commit_root_sequence ON recipe_commit USING BTREE (root_id, "sequence");
 

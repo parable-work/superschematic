@@ -20,10 +20,13 @@ VersionConflictError when the ref has moved on.
 A primary line (a ref with no parent) takes writes only from merge: work
 happens on a change set, which rebase catches up with its parent's head and
 merge brings back. A root's release pointer names one tagged commit, which
-release moves and released reads. A commit is snapshotted, its full pin set
-stored, when it is tagged, released, or snapshot_every commits past the
-nearest snapshot on its chain, and materialize stops at the nearest
-snapshot. sweep and run_sweeper are the graph's maintenance.
+release moves and released reads. For a kind whose descriptor names a
+releasedTable (D139), release also rewrites the root's rows in that table,
+in its transaction, from the diff between the tree released before and the
+new one. A commit is snapshotted, its full pin set stored, when it is tagged,
+released, or snapshot_every commits past the nearest snapshot on its chain,
+and materialize stops at the nearest snapshot. sweep and run_sweeper are the
+graph's maintenance.
 
 A kind whose order is a string key (D137) is put in order by arrange, which
 keeps the longest run of a parent's children already in order and writes new
@@ -69,6 +72,7 @@ from .storage import (
     RefUpdate,
     Release,
     ReleaseWrite,
+    ReleasedWrite,
     RowWrite,
     SnapshotEntry,
     Storage,
@@ -275,6 +279,9 @@ class _KindRoles:
     id: str
     tombstone: str
     version: str
+    #: Set for a kind that keeps the released tree's rows in a table of its
+    #: own (D139), which release rewrites; "" for a kind that keeps none.
+    released_table: str = ""
 
 
 @dataclass(frozen=True)
@@ -333,8 +340,11 @@ class Engine:
         parsed = json.loads(text)
         self._descriptor = text
         self._kinds = [
-            _KindRoles(k["kind"], k["key"], k["id"], k["tombstone"], k["version"]) for k in parsed["kinds"]
+            _KindRoles(k["kind"], k["key"], k["id"], k["tombstone"], k["version"], k.get("releasedTable") or "")
+            for k in parsed["kinds"]
         ]
+        # Whether any kind keeps a released table.
+        self._keeps_released = any(k.released_table for k in self._kinds)
         self._by_name = {k.name: k for k in self._kinds}
         self._storage = storage
         self._schema_epoch = schema_epoch
@@ -596,7 +606,15 @@ class Engine:
         the commit and writes no member rows, so a rollback is a release to
         an earlier tagged commit, and the pointer's history is the release
         log. An untagged commit is NotTaggedError; another root's is
-        RootMismatchError."""
+        RootMismatchError.
+
+        For each kind that keeps a released table (D139) it rewrites the
+        root's rows there in the same transaction, from the diff between the
+        tree of the commit released before and this one's: an added or
+        changed entity is written with this commit and its sequence, and a
+        deleted one removed. A root's first release writes the whole tree,
+        and so does a release of the commit already released, which rebuilds
+        the root's rows."""
         actor = _actor_id(actor)
         root = _id("id", root)
         commit = _id("id", commit)
@@ -608,9 +626,51 @@ class Engine:
             if c.sequence is None:
                 raise NotTaggedError()
             self._ensure_snapshot(tx, c.id, c.snapshot)
-            return tx.write_release(ReleaseWrite(root, c.id, version, actor))
+            before = self._released_before(tx, root)
+            release = tx.write_release(ReleaseWrite(root, c.id, version, actor))
+            self._write_released(tx, before, c)
+            return release
 
         return self._storage.transact(run)
+
+    def _released_before(self, tx: Tx, root: str) -> Optional[str]:
+        """Reads the commit root's release names before a release moves it,
+        None for a root never released, when a kind keeps a released table;
+        the engine reads nothing otherwise."""
+        if not self._keeps_released:
+            return None
+        try:
+            return tx.read_release(root).commit
+        except NotFoundError:
+            return None
+
+    def _write_released(self, tx: Tx, before: Optional[str], commit: Commit) -> None:
+        """Rewrites the released tables' rows of a commit's root for a
+        release that moved the root's pointer from before to commit."""
+        if not self._keeps_released:
+            return
+        assert commit.sequence is not None
+        # A first release, and a release of the commit already released,
+        # write the whole tree over whatever the tables hold of the root.
+        replace = before is None or before == commit.id
+        from_tree: Tree = {} if replace else self._materialize(tx, before)
+        changes = self._diff(from_tree, self._materialize(tx, commit.id))
+        for k in self._kinds:
+            if not k.released_table:
+                continue
+            upsert: List[str] = []
+            delete: List[str] = []
+            for change in changes:
+                if change.kind != k.name:
+                    continue
+                if change.operation == "DELETE":
+                    delete.append(change.entity_key)
+                else:
+                    assert change.row is not None
+                    upsert.append(change.row)
+            if not replace and not delete and not upsert:
+                continue
+            tx.write_released(k.name, ReleasedWrite(commit.root, commit.id, commit.sequence, replace, upsert, delete))
 
     def released(self, root: str) -> ReleasedResult:
         """Reads root's release pointer and the tree of the commit it names.

@@ -75,6 +75,9 @@ type kindRoles struct {
 	ID        string `json:"id"`
 	Tombstone string `json:"tombstone"`
 	Version   string `json:"version"`
+	// ReleasedTable is set for a kind that keeps the released tree's rows
+	// in a table of its own (D139), which Release rewrites.
+	ReleasedTable string `json:"releasedTable"`
 }
 
 // New returns the engine of the graph descriptor describes (version 3),
@@ -673,6 +676,13 @@ func (e *Engine) Revert(ctx context.Context, actor, ref string, version int64, t
 // the commit and writes no member rows, so a rollback is a Release to an
 // earlier tagged commit, and the pointer's history is the release log. An
 // untagged commit is ErrNotTagged; another root's is ErrRootMismatch.
+//
+// For each kind that keeps a released table (D139) it rewrites the root's
+// rows there in the same transaction, from the diff between the tree of the
+// commit released before and this one's: an added or changed entity is
+// written with this commit and its sequence, and a deleted one removed. A
+// root's first release writes the whole tree, and so does a release of the
+// commit already released, which rebuilds the root's rows.
 func (e *Engine) Release(ctx context.Context, actor, root, commit string, version int64) (storage.Release, error) {
 	actor, err := actorID(actor)
 	if err != nil {
@@ -696,10 +706,91 @@ func (e *Engine) Release(ctx context.Context, actor, root, commit string, versio
 		if _, err := e.ensureSnapshot(ctx, tx, c); err != nil {
 			return err
 		}
-		release, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: root, Commit: c.ID, Version: version, Actor: actor})
-		return err
+		before, err := e.releasedBefore(ctx, tx, root)
+		if err != nil {
+			return err
+		}
+		if release, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: root, Commit: c.ID, Version: version, Actor: actor}); err != nil {
+			return err
+		}
+		return e.writeReleased(ctx, tx, before, c)
 	})
 	return release, err
+}
+
+// keepsReleased reports whether any kind keeps a released table.
+func (e *Engine) keepsReleased() bool {
+	for _, k := range e.kinds {
+		if k.ReleasedTable != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// releasedBefore reads the commit root's release names before a release
+// moves it, "" for a root never released, when a kind keeps a released
+// table; the engine reads nothing otherwise.
+func (e *Engine) releasedBefore(ctx context.Context, tx storage.Tx, root string) (string, error) {
+	if !e.keepsReleased() {
+		return "", nil
+	}
+	held, err := tx.ReadRelease(ctx, root)
+	switch {
+	case err == nil:
+		return held.Commit, nil
+	case errors.Is(err, ErrNotFound):
+		return "", nil
+	}
+	return "", err
+}
+
+// writeReleased rewrites the released tables' rows of a commit's root
+// for a release that moved the root's pointer from before to commit.
+func (e *Engine) writeReleased(ctx context.Context, tx storage.Tx, before string, commit storage.Commit) error {
+	if !e.keepsReleased() {
+		return nil
+	}
+	// A first release, and a release of the commit already released,
+	// write the whole tree over whatever the tables hold of the root.
+	replace := before == "" || before == commit.ID
+	from := Tree{}
+	if !replace {
+		var err error
+		if from, err = e.materialize(ctx, tx, before); err != nil {
+			return err
+		}
+	}
+	to, err := e.materialize(ctx, tx, commit.ID)
+	if err != nil {
+		return err
+	}
+	changes, err := e.diff(from, to)
+	if err != nil {
+		return err
+	}
+	for _, k := range e.kinds {
+		if k.ReleasedTable == "" {
+			continue
+		}
+		write := storage.ReleasedWrite{Root: commit.Root, Commit: commit.ID, Sequence: *commit.Sequence, Replace: replace}
+		for _, change := range changes {
+			switch {
+			case change.Kind != k.Name:
+			case change.Operation == "DELETE":
+				write.Delete = append(write.Delete, change.EntityKey)
+			default:
+				write.Upsert = append(write.Upsert, change.Row)
+			}
+		}
+		if !replace && len(write.Delete) == 0 && len(write.Upsert) == 0 {
+			continue
+		}
+		if err := tx.WriteReleased(ctx, k.Name, write); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Released reads root's release pointer and the tree of the commit it

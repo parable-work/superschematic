@@ -561,6 +561,12 @@ export interface GraphMemberOptions {
   readonly order?: string;
   /** At most one live row of the kind per ref. */
   readonly singleton?: boolean;
+  /**
+   * Keeps the rows of each root's released tree of the kind in a table of
+   * their own, `<Member>Released`, which the graph's release rewrites. The
+   * ORM reads it and writes nothing to it.
+   */
+  readonly released?: boolean;
 }
 
 /**

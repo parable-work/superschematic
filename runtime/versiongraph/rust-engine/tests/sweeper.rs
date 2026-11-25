@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use superschematic_versiongraph_engine::storage::{
     Commit, CommitNode, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite,
-    RowWrite, SnapshotEntry, Storage, Tx,
+    ReleasedWrite, RowWrite, SnapshotEntry, Storage, Tx,
 };
 use superschematic_versiongraph_engine::{
     Edits, Engine, Error, KindEdits, Options, SweepOptions, SweepReport,
@@ -360,6 +360,9 @@ impl Tx for RacingTx<'_> {
     }
     async fn write_release(&mut self, write: ReleaseWrite) -> Result<Release, Error> {
         self.inner.write_release(write).await
+    }
+    async fn write_released(&mut self, kind: &str, write: ReleasedWrite) -> Result<(), Error> {
+        self.inner.write_released(kind, write).await
     }
     async fn prune(
         &mut self,

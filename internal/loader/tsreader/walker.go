@@ -494,7 +494,7 @@ func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConf
 }
 
 // graphMemberFromDecorator reads @graphMember({ graph, parent?, order?,
-// singleton? }). graph and parent.of name schema classes as values. The
+// singleton?, released? }). graph and parent.of name schema classes as values. The
 // object literal is walked here rather than evaluated whole, so each bad
 // property is reported at its value; see the registration in
 // internal/registry/core_decorators.go for why the decorator has no Apply.
@@ -533,6 +533,16 @@ func (w *walker) graphMemberFromDecorator(d decoratorRef) (*ir.GraphMemberConfig
 				return errorAtNode(value, "@graphMember singleton must be a boolean literal")
 			}
 			out.Singleton = b
+		case "released":
+			v, serr := w.evaluateExpression(value)
+			if serr != nil {
+				return serr
+			}
+			b, ok := v.(bool)
+			if !ok {
+				return errorAtNode(value, "@graphMember released must be a boolean literal")
+			}
+			out.Released = b
 		default:
 			return errorAtNode(value, "@graphMember config has unknown key %q", key)
 		}

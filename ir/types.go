@@ -177,6 +177,13 @@ type TypeDef struct {
 	// Nil for every other type. See [GraphMemberConfig].
 	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
 
+	// ReleasedOf names the graph member whose released rows this table
+	// holds (D139): the table the loader adds for a member with
+	// @graphMember({ released: true }). The graph's Release owns its rows,
+	// so the ORMs read it and write nothing to it. Empty for every other
+	// type. It is not part of the data forms: the expansion adds it.
+	ReleasedOf string `json:"releasedOf,omitempty" yaml:"releasedOf,omitempty" jsonschema:"-"`
+
 	// User marks the DB table whose rows are the project's users, the core
 	// User trait (D50). Nil for every other type. See [UserTrait].
 	User *UserTrait `json:"user,omitempty" yaml:"user,omitempty"`

@@ -38,6 +38,7 @@ __all__ = [
     "CommitNode",
     "Release",
     "ReleaseWrite",
+    "ReleasedWrite",
 ]
 
 T = TypeVar("T")
@@ -204,6 +205,22 @@ class ReleaseWrite:
     actor: str
 
 
+@dataclass(frozen=True)
+class ReleasedWrite:
+    """What a release writes of one kind into its released table (D139): the
+    root, the commit released and its sequence, the canonical rows (JSON
+    text) the release adds or changes, and the entity keys it removes.
+    replace is set for a root's first release and for a release of the
+    commit already released, which rewrite every row of the root."""
+
+    root: str
+    commit: str
+    sequence: int
+    replace: bool = False
+    upsert: Sequence[str] = ()
+    delete: Sequence[str] = ()
+
+
 class Tx(Protocol):
     """One transaction's view of a graph: the operations the engine builds
     every graph operation from."""
@@ -312,6 +329,14 @@ class Tx(Protocol):
         moves the pointer at that version. A pointer at another version, or
         one that already exists when version is 0, is VersionConflictError.
         Returns the pointer as written."""
+        ...
+
+    def write_released(self, kind: str, write: ReleasedWrite) -> None:
+        """Rewrites one kind's rows of a root in the kind's released table
+        (D139): with replace it deletes every row of the root first; it
+        deletes the entities delete names, then writes each row of upsert,
+        by entity key, with the release's commit and sequence. A kind whose
+        descriptor names no released table is refused."""
         ...
 
     def prune(self, kind: str, retention_days: int, batch_size: int) -> int:

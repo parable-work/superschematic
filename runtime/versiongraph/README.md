@@ -115,6 +115,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
 | `kinds[].kind` | The kind's name: the tree member that holds its rows. Unique. |
 | `table`, `historyTable` | The table that holds the kind's rows, and the one that holds their history images. |
+| `releasedTable` | Optional. The table that holds the released tree's rows of the kind (D139), which a storage adapter rewrites at each release ([Released rows](#released-rows)). Non-empty when present; the core does not read it. |
 | `key` | The entity key column: the logical identity rows are matched on. Its value is a non-empty string. |
 | `id` | The row id column. |
 | `ref` | The column naming the ref the row was written on. |
@@ -529,7 +530,9 @@ language's binding and reaches storage only through a storage adapter,
 which holds the transaction of each operation and returns canonical rows.
 
 Every engine keeps the same rules. A primary line takes writes only from
-merge. Arrange (D137) writes through a change set as save does: it composes
+merge. A release of a graph with a kind that names a `releasedTable` also
+rewrites that kind's released rows of the root, in the release's
+transaction ([Released rows](#released-rows)). Arrange (D137) writes through a change set as save does: it composes
 the ref, asks the core's `arrange` which of one parent's children need a new
 order key, writes each as the ref's own row, and moves the ref's version,
 also when nothing moved. Each engine also offers the core's `order_keys`,
@@ -603,6 +606,57 @@ version. An engine's errors have stable codes, shared by every language:
 
 An input the core refuses keeps the core's code (`unmatched_resolution`,
 `invalid_arrangement`, `order_not_a_key`, `no_order_key`).
+
+### Released rows
+
+A kind whose descriptor names a `releasedTable` keeps the rows of each
+root's released tree in that table (D139), so what is released can be
+indexed, searched, joined and paged without walking commits. Release owns
+the rows. In its transaction, before it moves the pointer, the engine reads
+the commit the root's release names; after the move it diffs that commit's
+tree against the new one's with the core's `diff` and hands each such kind
+its part to the adapter's `WriteReleased` (`writeReleased`,
+`write_released`): the rows of the entities added or changed, and the keys
+of the ones deleted. An entity the release did not change keeps the row an
+earlier release wrote, with that release's commit and sequence. A root's
+first release has no commit before it, so it writes the whole tree; a
+release of the commit already released does too, after deleting the root's
+rows, which rebuilds them when a kind gains a `releasedTable` after its
+roots were released, or when the table was written by hand. A release that
+is refused (a stale version, an untagged commit) writes nothing, and a
+graph with no such kind reads and writes nothing more than before. Sweep
+leaves the tables alone.
+
+On Postgres the released table is a table of the schema, as the sql
+generator writes it for `@graphMember({ released: true })`: the kind's
+content columns under their names and with their types, the kind's `root`
+column, which references the root and is deleted with it, its `key`
+column, `commit_id`, `sequence`, and a row id of its own, with a unique
+index on the root and the entity key. The adapter writes a release's rows
+in one statement, each column from the canonical row as it writes a member
+row's, and takes the content columns from the descriptor: the kind's
+`columns` less its role columns and `excluded`.
+
+On SQLite the fixed layout has no table per kind, so released rows live in
+one more table, `released`, which is not among the layout's nine: a graph
+needs it only when a kind names a `releasedTable`. The released layout
+function (`sqliteReleasedLayout`, `ReleasedLayout`, `released_layout`)
+returns its one statement, and `createTables` runs it for such a graph.
+
+| Table | Columns | Keys and indexes |
+|---|---|---|
+| `released` | `graph`, `kind`, `root_id`, `entity_key`, `commit_id`, `sequence`, `data` | primary key `(graph, kind, root_id, entity_key)`; `commit_id` references a commit |
+
+`data` is the canonical JSON object of the kind's content columns, a
+column the row lacks as `null`. The adapter refuses a release's commit that
+is another graph's or another root's, as it does the pointer's; on
+Postgres the engine has checked the commit's root, and the table's foreign
+keys hold the rest. A name function is asked to name `released` only by
+the released layout function and by an adapter of a graph that keeps
+released rows, so a host that names the layout's nine tables alone, as a
+D16 behavior does, serves every other graph unchanged. The layout has no
+root table, so nothing deletes a root's released rows with it: they stay
+until a release rewrites them.
 
 ### SQLite
 
@@ -923,7 +977,7 @@ sweep runs.
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres and in its canonical form on SQLite | The runner's backend's statement on the scenario's database; with `rows` expected, a query whose rows the step returns |
+| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres and in its canonical form on SQLite | The runner's backend's statement on the scenario's database; with `rows` expected, a query whose rows the step returns. The released scenario reads the fixture's `part_released` so, and `graph_released` on SQLite |
 
 An `sql` step's `statement` is an object of one statement per backend,
 `{"postgres": "...", "sqlite": "..."}`; a `null` statement is none. On any

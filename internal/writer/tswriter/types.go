@@ -533,6 +533,9 @@ func (e *emitter) graphMemberArgs(cfg *ir.GraphMemberConfig) string {
 	if cfg.Singleton {
 		parts = append(parts, "singleton: true")
 	}
+	if cfg.Released {
+		parts = append(parts, "released: true")
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 

@@ -54,7 +54,7 @@ func fenceBumps(fences []tableFence, sets []string) []string {
 	return bumps
 }
 {{- range .Repositories }}
-{{- if .Fences }}
+{{- if and .Fences (not .ReadOnly) }}
 
 // {{ lowerFirst .TypeName }}Fences are {{ .TypeName }}'s fences, in the order declared.
 var {{ lowerFirst .TypeName }}Fences = []tableFence{

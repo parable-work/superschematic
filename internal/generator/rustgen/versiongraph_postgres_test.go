@@ -28,6 +28,10 @@ import (
 // from the save and from the commit: each field comes back as the typed
 // value of its canonical form. The second merges, resolves a typed
 // conflict, diffs, releases, rebases and sweeps through the facade.
+//
+// The crate is built with its postgres feature, so the test that arranges
+// parts, which releases them, reads part_released through the generated
+// repository of PartReleased too, which only reads (D139).
 func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the compiled facade in -short mode")
@@ -95,7 +99,9 @@ tokio-postgres = "0.7.18"
 	if err := os.WriteFile(filepath.Join(testsDir, "facade.rs"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(cargo, "test", "--test", "facade")
+	// The crate's postgres feature builds src/orm.rs, whose repository of
+	// PartReleased a test reads the released rows through (D139).
+	cmd := exec.Command(cargo, "test", "--test", "facade", "--features", "postgres")
 	cmd.Dir = outDir
 	cmd.Env = append(os.Environ(),
 		"CARGO_TARGET_DIR="+filepath.Join(root, "target"),
@@ -281,7 +287,7 @@ fn part(heading: &str, rank: &str) -> Part {
 /// alone.
 #[tokio::test]
 async fn facade_arranges_a_kind_ordered_by_a_string_key() {
-    let (graph, _sql, root, _database) = graph("arrange").await;
+    let (graph, sql, root, database) = graph("arrange").await;
     let main = graph.create_primary(&cook(), &root, "main").await.expect("create_primary");
     let draft = graph.branch(&cook(), &uuid(&main.id), "parts").await.expect("branch");
     let keys = RecipeGraph::order_keys(None, None, 3).expect("order keys");
@@ -324,6 +330,53 @@ async fn facade_arranges_a_kind_ordered_by_a_string_key() {
         .await
         .expect_err("a primary line");
     assert_eq!(primary.code(), Some("primary_merge_only"), "{primary}");
+
+    // Part keeps its released rows (D139): a release writes them into
+    // part_released, in its transaction.
+    let tagged = CommitOptions { message: "parts".to_owned(), tag: true };
+    graph
+        .commit(&cook(), &uuid(&draft.id), arranged.ref_.version, &CommitOptions::default())
+        .await
+        .expect("commit");
+    let merged = graph
+        .merge(&cook(), &uuid(&draft.id), &uuid(&main.id), main.version, &[], &tagged)
+        .await
+        .expect("merge");
+    let commit = merged.commit.expect("a tagged merge commit");
+    let released = "SELECT heading, rank, sequence::text, commit_id::text FROM part_released WHERE recipe_id = $1::text::uuid ORDER BY rank";
+    let root_text = root.to_uuid().to_string();
+    assert!(sql.query(released, &[&root_text]).await.expect("read part_released").is_empty());
+    graph.release(&cook(), &root, &uuid(&commit.id), 0).await.expect("release");
+    let rows = sql.query(released, &[&root_text]).await.expect("read part_released");
+    let got: Vec<(String, String, String, String)> = rows.iter().map(|r| (r.get(0), r.get(1), r.get(2), r.get(3))).collect();
+    let commit_text = uuid(&commit.id).to_uuid().to_string();
+    let want: Vec<(String, String, String, String)> = [("Bake", "7"), ("Mix", "F"), ("Knead", "V")]
+        .iter()
+        .map(|(heading, rank)| (heading.to_string(), rank.to_string(), "1".to_owned(), commit_text.clone()))
+        .collect();
+    assert_eq!(got, want);
+
+    // The generated repository of PartReleased, which only reads, finds the
+    // same rows, on a connection of a pool to the test's database.
+    let mut config: tokio_postgres::Config = database.dsn.parse().expect("the database URL");
+    config.dbname(&database.name);
+    let manager = orm::postgres::deadpool_postgres::Manager::new(config, tokio_postgres::NoTls);
+    let pool = orm::postgres::deadpool_postgres::Pool::builder(manager).max_size(1).build().expect("the pool");
+    let client = pool.get().await.expect("a connection of the pool");
+    let repositories = orm::postgres::Repositories::new(&client).expect("the repositories");
+    let parts = repositories.part_released().expect("the repository of PartReleased");
+    let of_root = orm::PartReleasedFilter { recipe_id: Some(orm::Equals::eq(root)), ..Default::default() };
+    let by_rank = orm::FindOptions { order_by: vec![orm::OrderBy::asc("rank")], ..Default::default() };
+    let found = parts.find_many(Some(&of_root), &by_rank).await.expect("find the released parts");
+    assert_eq!(found.total, Some(3));
+    let read: Vec<(String, String, String, String)> = found
+        .rows
+        .iter()
+        .map(|row| (row.heading.clone(), row.rank.clone(), row.sequence.to_string(), row.commit_id.to_uuid().to_string()))
+        .collect();
+    assert_eq!(read, want);
+    let first = parts.get_one(&found.rows[0].id).await.expect("get a released part by its key");
+    assert_eq!(first, found.rows[0]);
 }
 
 fn step(position: i64, instruction: &str, entity_key: Option<IdentityUUID>) -> Step {

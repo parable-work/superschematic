@@ -347,6 +347,7 @@ export interface GraphMemberConfig {
   graph: string;
   order?: string;
   parent?: GraphParent;
+  released?: boolean;
   singleton?: boolean;
 }
 

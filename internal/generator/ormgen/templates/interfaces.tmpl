@@ -23,7 +23,11 @@ import (
 {{ $typeName := .TypeName }}
 {{ $repoName := .Name }}
 
+{{ if .ReadOnly -}}
+{{ docComment "" (printf "%sRepositoryInterface defines the contract for reading %s, the released rows of %s. The version graph's Release owns the rows (D139), so it has no write." .TypeName .TypeName .ReleasedOf) }}
+{{- else -}}
 // {{ .TypeName }}RepositoryInterface defines the contract for {{ .TypeName }} data access.
+{{- end }}
 type {{ .TypeName }}RepositoryInterface interface {
 	GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}GetOptions) (*types.{{ .TypeName }}, error)
 	GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error)
@@ -44,6 +48,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindOne(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) (*types.{{ .TypeName }}, error)
 	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
+	{{- if not .ReadOnly }}
 	CreateOne(ctx context.Context, input *{{ .CreateInput }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*{{ .CreateInput }}) ([]*types.{{ .TypeName }}, error)
 	{{- if not .NoUpsert }}
@@ -66,6 +71,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 	{{- if .EncryptedFields }}
 	Reencrypt(ctx context.Context, batch int) (int, error)
+	{{- end }}
 	{{- end }}
 	{{- if .VectorFields }}
 	Nearest(ctx context.Context, field {{ .TypeName }}VectorField, vector types.EmbeddingVector, opts *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error)
@@ -214,7 +220,11 @@ func (tx *NoOpTx) Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterf
 	return tx.{{ .TypeName }}
 }
 
+{{ if .ReadOnly -}}
+{{ docComment "" (printf "NoOp%s provides deterministic no-op repository behavior: the reads of %s, which has no write (D139)." .Name .Name) }}
+{{- else -}}
 // NoOp{{ .Name }} provides deterministic no-op repository behavior.
+{{- end }}
 type NoOp{{ .Name }} struct{}
 
 func (r *NoOp{{ .Name }}) GetOne(_ context.Context, _ {{ .PrimaryKeyType }}, _ *{{ .TypeName }}GetOptions) (*types.{{ .TypeName }}, error) {
@@ -270,6 +280,7 @@ func (r *NoOp{{ .Name }}) FindPage(_ context.Context, _ *{{ .TypeName }}Filter, 
 	return &{{ .TypeName }}Page{Rows: []*types.{{ .TypeName }}{}}, nil
 }
 
+{{- if not .ReadOnly }}
 {{- if .HasBehaviors }}
 
 func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
@@ -398,6 +409,7 @@ func (r *NoOp{{ .Name }}) HardDeleteOne(_ context.Context, _ {{ .PrimaryKeyType 
 func (r *NoOp{{ .Name }}) Reencrypt(_ context.Context, _ int) (int, error) {
 	return 0, nil
 }
+{{- end }}
 {{- end }}
 {{- if .VectorFields }}
 

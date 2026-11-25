@@ -152,6 +152,26 @@ func checkGraphMember(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 			r.errorf(td.Owner, "%s: @graphMember parent.key %q must be a UUID field that holds the parent's entityKey", td.Name, parent.Key)
 		}
 	}
+	if cfg.Released {
+		// The table of the member's released rows (D139).
+		released := td.Name + versiongraph.ReleasedSuffix
+		if definedName(schema, released) {
+			r.errorf(td.Owner, "%s: @graphMember released adds %s, which the schema already defines; rename it", td.Name, released)
+		}
+		for _, name := range versiongraph.ReleasedFields {
+			if fd := fieldNamed(td, name); fd != nil && versiongraph.ReleasedContent(fd, root.Name) {
+				r.errorf(td.Owner, "%s: field %s collides with the field @graphMember released adds to %s", td.Name, name, released)
+			}
+		}
+		for _, fd := range td.Fields {
+			// An Encrypted<T> column's envelope is bound to its table and
+			// its row's key (D85), so the copy a release writes could not
+			// be opened where it lands.
+			if fd.EncryptedAtRest && versiongraph.ReleasedContent(fd, root.Name) {
+				r.errorf(td.Owner, "%s: field %s is Encrypted<T>, whose envelope is bound to its row, and @graphMember released would copy it to %s, where it could not be opened; exclude it with @conflictUnit(\"excluded\") or leave released off", td.Name, fd.Name, released)
+			}
+		}
+	}
 	if cfg.Order != "" {
 		// An order is an integer, or a string key the core compares by its
 		// bytes (D137), which Arrange and OrderKeys make.

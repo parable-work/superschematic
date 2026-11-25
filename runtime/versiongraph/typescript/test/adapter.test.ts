@@ -2,12 +2,13 @@
 // its constructor refuses, a row with more members than a table has
 // columns, a prune that keeps pinned images, a sweep lock
 // that one transaction holds at a time, a ref lock another transaction
-// waits for, the version fences of updateRef and discardRef, and pgClient's
-// savepoint over a transaction the caller holds. The TypeScript counterpart of the Go
-// module's postgres_test.go.
+// waits for, the version fences of updateRef and discardRef, the released
+// rows writeReleased rewrites, and pgClient's savepoint over a transaction
+// the caller holds. The TypeScript counterpart of the Go module's
+// postgres_test.go.
 import { afterEach, expect, test } from "bun:test";
-import { VersionConflictError } from "../dist/engine.js";
-import type { Ref } from "../dist/engine.js";
+import { uuidCanonical, uuidHyphenated, VersionConflictError } from "../dist/engine.js";
+import type { Ref, Storage } from "../dist/engine.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
 import type { Client, Conn } from "../dist/postgres.js";
 import { descriptor, dsn, scratchSchema, type Scratch } from "./postgres.js";
@@ -86,6 +87,7 @@ async function scratch(): Promise<Scratch> {
 }
 
 const root = "00000000-0000-0000-0000-000000000001";
+const soup = "00000000-0000-0000-0000-000000000003";
 const insertRoot = `INSERT INTO recipe (id, title, created_by) VALUES ('${root}', 'Bread', '00000000-0000-0000-0000-000000000002')`;
 
 // A prune past every image's retention deletes the superseded image no
@@ -204,6 +206,112 @@ test.skipIf(dsn === "")("discardRef refuses a discarded ref", async () => {
   });
   const by = await pool.query("SELECT deleted_by::text AS by FROM recipe_ref");
   expect(by.rows.map((r) => r.by)).toEqual(["00000000-0000-0000-0000-000000000002"]);
+});
+
+// writeReleased rewrites one kind's rows of one root in the kind's released
+// table. With replace it clears the root's rows first; it deletes the
+// entities it is given, then writes each row by entity key, with the
+// release's commit and sequence and the kind's content columns alone, so a
+// row it does not name keeps what an earlier release wrote. Another root's
+// rows stay, and a kind that keeps no released table is refused before any
+// statement runs.
+test.skipIf(dsn === "")("writeReleased rewrites a root's released rows of a kind", async () => {
+  const { pool } = await scratch();
+  await pool.query(insertRoot);
+  await pool.query(`INSERT INTO recipe (id, title, created_by) VALUES ('${soup}', 'Soup', '00000000-0000-0000-0000-000000000002')`);
+  const s = new PostgresAdapter(descriptor).storage(pgPool(pool));
+  const actor = "2";
+  // Two tagged commits of a root, on a primary line of it.
+  const commitsOf = (root: string) =>
+    s.transact(async (tx) => {
+      const ref = await tx.createRef({ root, parent: null, base: null, name: "main", actor });
+      const ids: string[] = [];
+      for (const parent of [null, 0]) {
+        const commit = await tx.insertCommit({
+          root,
+          ref: ref.id,
+          parent: parent === null ? null : ids[parent]!,
+          message: "",
+          schemaEpoch: 0,
+          contentHash: "h",
+          sequence: await tx.nextSequence(root),
+          actor,
+        });
+        ids.push(commit.id);
+      }
+      return ids;
+    });
+  const [first, second] = await commitsOf("1");
+  const [stock] = await commitsOf("3");
+  // A row as the engine hands it over: the canonical row of a tree, role
+  // columns and all.
+  const part = (key: string, heading: string, parent: string | null = null): string =>
+    JSON.stringify({ _version: 3, deleted_on_ref: false, entity_key: key, heading, id: "Row", parent_key: parent, rank: "V", recipe_id: "1", ref_id: "Ref" });
+  const rows = async (): Promise<unknown[][]> => {
+    const result = await pool.query(
+      "SELECT recipe_id::text AS root, entity_key::text AS key, parent_key::text AS parent, rank, heading, commit_id::text AS commit, sequence::text AS sequence " +
+        "FROM part_released ORDER BY recipe_id, heading",
+    );
+    return result.rows.map((r) => [
+      uuidCanonical(r.root),
+      uuidCanonical(r.key),
+      r.parent === null ? null : uuidCanonical(r.parent),
+      r.rank,
+      r.heading,
+      uuidCanonical(r.commit),
+      r.sequence,
+    ]);
+  };
+  const write = (storage: Storage, kind: string, root: string, commit: string, sequence: number, replace: boolean, upsert: string[], del: string[] = []) =>
+    storage.transact((tx) => tx.writeReleased(kind, { root, commit, sequence, replace, upsert, delete: del }));
+
+  // A first release replaces nothing and writes the tree; a row that lacks
+  // its parent holds none.
+  await write(s, "part", "1", first!, 1, true, [part("Mix", "Mix"), part("Bake", "Bake", "Mix"), '{"entity_key": "Rest", "heading": "Rest", "rank": "k"}']);
+  await write(s, "part", "3", stock!, 1, true, [part("Mix", "Stock")]);
+  const soupRows = [["3", "Mix", null, "V", "Stock", stock, "1"]];
+  expect(await rows()).toEqual([
+    ["1", "Bake", "Mix", "V", "Bake", first, "1"],
+    ["1", "Mix", null, "V", "Mix", first, "1"],
+    ["1", "Rest", null, "k", "Rest", first, "1"],
+    ...soupRows,
+  ]);
+  // Each row has an id of its own, which an upsert keeps.
+  const ids = async () => (await pool.query("SELECT id::text AS id FROM part_released WHERE heading LIKE 'Mix%' AND recipe_id = $1::uuid", [root])).rows[0].id;
+  const mixID = await ids();
+
+  // A later release: an upsert of a row the root has takes the new commit,
+  // sequence and columns, one of a new entity is added, a delete removes
+  // its row and one of an entity the root lacks does nothing. An entity
+  // key given hyphenated is the same entity.
+  await write(s, "part", "1", second!, 2, false, [part("Mix", "Mix well"), part(uuidHyphenated("Knead"), "Knead")], ["Bake", "Missing"]);
+  const later = [
+    ["1", "Knead", null, "V", "Knead", second, "2"],
+    ["1", "Mix", null, "V", "Mix well", second, "2"],
+    ["1", "Rest", null, "k", "Rest", first, "1"],
+    ...soupRows,
+  ];
+  expect(await rows()).toEqual(later);
+  expect(await ids()).toBe(mixID);
+
+  // What it refuses, each leaving every row as it was: a kind that keeps
+  // no released table, before any statement; an unknown kind; a commit the
+  // graph does not hold, after the replace that came before it; a row that
+  // is no object; and a row without a column the table requires.
+  const missing = "00000000-0000-0000-0000-00000000000f";
+  await expect(write(new PostgresAdapter(descriptor).storage(noStatements), "step", "1", second!, 2, true, [])).rejects.toThrow(
+    'postgres: kind "step" keeps no released table',
+  );
+  await expect(write(s, "crumb", "1", second!, 2, true, [])).rejects.toThrow('postgres: unknown kind "crumb"');
+  await expect(write(s, "part", "1", missing, 2, true, [part("Mix", "Mix")])).rejects.toMatchObject({ code: "23503" });
+  await expect(write(s, "part", "1", second!, 2, true, ["[]"])).rejects.toThrow("postgres: a released part row is a JSON object");
+  await expect(write(s, "part", "1", second!, 2, true, ['{"entity_key": "Mix", "rank": "V"}'])).rejects.toMatchObject({ code: "23502" });
+  await expect(write(s, "part", "1", second!, 2, false, ['{"entity_key": "Mix", "rank": 7}'])).rejects.toThrow("postgres: released part column rank");
+  expect(await rows()).toEqual(later);
+
+  // A replace with no rows clears the root's rows, and no other root's.
+  await write(s, "part", "1", second!, 2, true, []);
+  expect(await rows()).toEqual(soupRows);
 });
 
 // Bound to a transaction the caller holds with savepoint set, the adapter's

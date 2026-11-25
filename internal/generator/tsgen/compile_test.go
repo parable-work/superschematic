@@ -169,7 +169,9 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-nested-arrays", schema: load("fixture-nested-arrays")},
 		{name: "fixture-nested-arrays-db", schema: load("fixture-nested-arrays-db")},
 		{name: "fixture-nested-arrays-api", schema: load("fixture-nested-arrays-api")},
-		{name: "fixture-version-graph-db", schema: load("fixture-version-graph-db")},
+		// With the file that holds the released rows' repository to its
+		// reads (D139).
+		{name: "fixture-version-graph-db", schema: load("fixture-version-graph-db"), extra: map[string]string{"released.check.ts": releasedCheck}},
 		{name: "fixture-optimistic-db", schema: load("fixture-optimistic-db")},
 		{name: "fixture-user-model-db", schema: load("fixture-user-model-db")},
 		behaviorsPackage(t),

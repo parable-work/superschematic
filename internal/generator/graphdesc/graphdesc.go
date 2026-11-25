@@ -62,9 +62,13 @@ type Kind struct {
 	Kind         string `json:"kind"`
 	Table        string `json:"table"`
 	HistoryTable string `json:"historyTable"`
-	Key          string `json:"key"`
-	ID           string `json:"id"`
-	Ref          string `json:"ref"`
+	// ReleasedTable is the table that holds the released tree's rows of
+	// the kind (D139), which a storage adapter rewrites at each release;
+	// empty for a kind that keeps none. The core does not read it.
+	ReleasedTable string `json:"releasedTable,omitempty"`
+	Key           string `json:"key"`
+	ID            string `json:"id"`
+	Ref           string `json:"ref"`
 	// Root is the column holding the graph root's key, which a storage
 	// adapter writes on every row.
 	Root      string            `json:"root"`
@@ -214,6 +218,9 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef, sqlTypes map[string]strin
 		Version:      VersionColumn,
 		Singleton:    td.GraphMember.Singleton,
 		Columns:      map[string]string{VersionColumn: ClassInteger},
+	}
+	if td.GraphMember.Released {
+		kind.ReleasedTable = table + "_released"
 	}
 	columns := map[string]string{}
 	for _, fd := range td.Fields {

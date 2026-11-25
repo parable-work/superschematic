@@ -17,6 +17,9 @@
 //!
 //! With its `postgres` feature, `postgres::Repositories::new` opens them
 //! over a tokio-postgres client, asynchronously.
+//!
+//! `PartReleased` holds the released rows of `Part`, which the graph's
+//! release owns (D139): its repository reads them and has no write.
 
 #![allow(clippy::doc_markdown, clippy::option_option)]
 
@@ -333,7 +336,9 @@ pub struct NoteFilter {
 /// A row of `Part`.
 ///
 /// A part of the recipe's write-up, nested under another part. Its rank is
-/// a string order key, so Arrange places it among its siblings.
+/// a string order key, so Arrange places it among its siblings, and the
+/// parts a recipe has released are kept in a table of their own, with the
+/// index a reader of them uses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartRow {
     pub id: IdentityUUID,
@@ -435,6 +440,61 @@ pub struct PartFilter {
     pub any_of: Vec<PartFilter>,
 }
 
+/// A row of `PartReleased`.
+///
+/// The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartReleasedRow {
+    pub id: IdentityUUID,
+    #[serde(rename = "recipeId")]
+    pub recipe_id: IdentityUUID,
+    /// The entity's logical identity, as its rows on every ref hold it.
+    #[serde(rename = "entityKey")]
+    pub entity_key: IdentityUUID,
+    #[serde(default, rename = "parentKey")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    #[serde(rename = "commitId")]
+    pub commit_id: IdentityUUID,
+    /// That commit's sequence: the published version that last changed the entity.
+    pub sequence: GenericInt64,
+}
+
+/// The rows of `PartReleased` a read finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PartReleasedFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "recipeId", skip_serializing_if = "Option::is_none")]
+    pub recipe_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<orm::Equals<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<orm::Text<String>>,
+    #[serde(rename = "commitId", skip_serializing_if = "Option::is_none")]
+    pub commit_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<orm::Ordered<GenericInt64>>,
+    /// The rows whose recipe is among the Recipe rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Box<RecipeFilter>>,
+    /// The rows whose commit is among the RecipeCommit rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<Box<RecipeCommitFilter>>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<PartReleasedFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<PartReleasedFilter>,
+}
+
 /// A row of `Recipe`.
 ///
 /// A recipe: the stable identity its steps and ingredients are versioned under.
@@ -488,6 +548,9 @@ pub struct RecipeFilter {
     /// The rows some Part row's recipe points at, or those none does.
     #[serde(rename = "referencedByPartRecipe", skip_serializing_if = "Option::is_none")]
     pub referenced_by_part_recipe: Option<orm::ReferencedBy>,
+    /// The rows some PartReleased row's recipe points at, or those none does.
+    #[serde(rename = "referencedByPartReleasedRecipe", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_part_released_recipe: Option<orm::ReferencedBy>,
     /// The rows some RecipeCommit row's root points at, or those none does.
     #[serde(rename = "referencedByRecipeCommitRoot", skip_serializing_if = "Option::is_none")]
     pub referenced_by_recipe_commit_root: Option<orm::ReferencedBy>,
@@ -617,6 +680,9 @@ pub struct RecipeCommitFilter {
     /// The rows whose parentCommit is among the RecipeCommit rows the filter finds (D90).
     #[serde(rename = "parentCommit", skip_serializing_if = "Option::is_none")]
     pub parent_commit: Option<Box<RecipeCommitFilter>>,
+    /// The rows some PartReleased row's commit points at, or those none does.
+    #[serde(rename = "referencedByPartReleasedCommit", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_part_released_commit: Option<orm::ReferencedBy>,
     /// The rows some RecipeCommit row's parentCommit points at, or those none does.
     #[serde(rename = "referencedByRecipeCommitParentCommit", skip_serializing_if = "Option::is_none")]
     pub referenced_by_recipe_commit_parent_commit: Option<orm::ReferencedBy>,
@@ -2272,6 +2338,203 @@ pub const POSTGRES: &str = r#"{
       ]
     },
     {
+      "name": "PartReleased",
+      "table": "part_released",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "part_released.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "recipeId",
+          "column": "recipe_id",
+          "field": "recipe",
+          "qualified": "part_released.recipe_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Recipe",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "entityKey",
+          "column": "entity_key",
+          "field": "entityKey",
+          "qualified": "part_released.entity_key",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "parentKey",
+          "column": "parent_key",
+          "field": "parentKey",
+          "qualified": "part_released.parent_key",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "rank",
+          "column": "rank",
+          "field": "rank",
+          "qualified": "part_released.rank",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "heading",
+          "column": "heading",
+          "field": "heading",
+          "qualified": "part_released.heading",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "commitId",
+          "column": "commit_id",
+          "field": "commit",
+          "qualified": "part_released.commit_id",
+          "uuid": true,
+          "required": true,
+          "relation": "RecipeCommit",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "sequence",
+          "column": "\"sequence\"",
+          "field": "sequence",
+          "qualified": "part_released.\"sequence\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\"",
+        "qualifiedColumns": "\"part_released\".\"id\", \"part_released\".\"recipe_id\", \"part_released\".\"entity_key\", \"part_released\".\"parent_key\", \"part_released\".\"rank\", \"part_released\".\"heading\", \"part_released\".\"commit_id\", \"part_released\".\"sequence\"",
+        "getOne": "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM part_released%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM part_released%s%s%s",
+        "count": "SELECT COUNT(*) FROM part_released%s",
+        "page": "SELECT %s FROM part_released%s%s LIMIT %d",
+        "pageAfterKey": "part_released.id %s %s",
+        "pageAfter": "(%s, part_released.id) %s ((SELECT %s FROM part_released AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM part_released AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", part_released.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM part_released WHERE part_released.id = $1)",
+        "insert": "INSERT INTO part_released (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO part_released (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE part_released SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\"",
+        "updateMany": "UPDATE part_released SET %s%s",
+        "updatedAt": "updated_at = $%d",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO part_released (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM part_released WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM part_released WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM part_released WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = part_released.id",
+          "rows": "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (id) IN (%s)"
+        },
+        "recipe,entityKey": {
+          "conflict": "(recipe_id, entity_key)",
+          "keep": "recipe_id = part_released.recipe_id",
+          "rows": "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (recipe_id, entity_key) IN (%s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "recipe",
+          "target": "Recipe",
+          "probe": "part_released.recipe_id IN (SELECT recipe.id FROM recipe%s)"
+        },
+        {
+          "field": "commit",
+          "target": "RecipeCommit",
+          "probe": "part_released.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)"
+        }
+      ]
+    },
+    {
       "name": "Recipe",
       "table": "recipe",
       "key": "id",
@@ -2405,6 +2668,10 @@ pub const POSTGRES: &str = r#"{
         {
           "filter": "referencedByPartRecipe",
           "probe": "SELECT 1 FROM part WHERE part.recipe_id = recipe.id"
+        },
+        {
+          "filter": "referencedByPartReleasedRecipe",
+          "probe": "SELECT 1 FROM part_released WHERE part_released.recipe_id = recipe.id"
         },
         {
           "filter": "referencedByRecipeCommitRoot",
@@ -2658,6 +2925,10 @@ pub const POSTGRES: &str = r#"{
         }
       },
       "referencedBy": [
+        {
+          "filter": "referencedByPartReleasedCommit",
+          "probe": "SELECT 1 FROM part_released WHERE part_released.commit_id = recipe_commit.id"
+        },
         {
           "filter": "referencedByRecipeCommitParentCommit",
           "probe": "SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id"
@@ -4496,6 +4767,53 @@ pub mod postgres {
     pub type PartRepository<'a, C> =
         orm::postgres::Typed<'a, C, PartRow, PartCreate, PartUpdate, PartFilter, IdentityUUID>;
 
+    /// The repository of `PartReleased` on a Postgres client, which only reads:
+    /// the table holds the released rows of `Part`, and the graph's
+    /// release owns them (D139).
+    pub struct PartReleasedRepository<'a, C>(
+        // The table has no create and no update, so the runtime's
+        // repository is given `()` for what each sets.
+        orm::postgres::Typed<'a, C, PartReleasedRow, (), (), PartReleasedFilter, IdentityUUID>,
+    );
+
+    impl<C: GenericClient + Sync> PartReleasedRepository<'_, C> {
+        /// The row whose key is `key`; [`Error::NotFound`] when there is
+        /// none.
+        pub async fn get_one(&self, key: &IdentityUUID) -> Result<PartReleasedRow, orm::Error> {
+            self.0.get_one(key).await
+        }
+
+        /// The first row `filter` finds, in the options' order, or none.
+        pub async fn find_one(
+            &self,
+            filter: Option<&PartReleasedFilter>,
+            options: &FindOptions,
+        ) -> Result<Option<PartReleasedRow>, orm::Error> {
+            self.0.find_one(filter, options).await
+        }
+
+        /// The rows `filter` finds, in the options' order, a limit of them
+        /// at a time, and how many it finds in all, unless the options skip
+        /// the count.
+        pub async fn find_many(
+            &self,
+            filter: Option<&PartReleasedFilter>,
+            options: &FindOptions,
+        ) -> Result<Found<PartReleasedRow>, orm::Error> {
+            self.0.find_many(filter, options).await
+        }
+
+        /// A page of the rows `filter` finds, in the sort's order, after the
+        /// key of the page before (D60, amended).
+        pub async fn find_page(
+            &self,
+            filter: Option<&PartReleasedFilter>,
+            options: &PageOptions,
+        ) -> Result<RowPage<PartReleasedRow>, orm::Error> {
+            self.0.find_page(filter, options).await
+        }
+    }
+
     /// The repository of `Recipe` on a Postgres client.
     pub type RecipeRepository<'a, C> =
         orm::postgres::Typed<'a, C, RecipeRow, RecipeCreate, RecipeUpdate, RecipeFilter, IdentityUUID>;
@@ -4614,6 +4932,12 @@ pub mod postgres {
         /// The repository of `Part`.
         pub fn part(&self) -> Result<PartRepository<'_, C>, orm::Error> {
             self.0.typed("Part")
+        }
+
+        /// The repository of `PartReleased`, which only reads: the graph's
+        /// release owns the rows (D139).
+        pub fn part_released(&self) -> Result<PartReleasedRepository<'_, C>, orm::Error> {
+            self.0.typed("PartReleased").map(PartReleasedRepository)
         }
 
         /// The repository of `Recipe`.

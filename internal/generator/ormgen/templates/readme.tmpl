@@ -18,7 +18,7 @@ Generated at: {{ .Timestamp }}
 - `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`{{ if .Rules.Preconditions }}, and `WithPreconditions`{{ end }}
 {{- end }}
 {{- range .Repositories }}
-- `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository
+- `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository{{ if .ReadOnly }}, read-only: the released rows of {{ .ReleasedOf }}{{ end }}
 {{- end }}
 {{- if .VersionGraphs }}
 {{- range .VersionGraphs }}
@@ -54,6 +54,14 @@ deletes additionally expose `HardDeleteOne`.
 Optimistic tables expose `UpdateOneIfVersion` and `DeleteOneIfVersion` too,
 but keep no history, so they have no `GetVersion`, `ListVersions`, or
 `GetAsOf`.
+{{- end }}
+{{- with .ReadOnlyRepositories }}
+
+The repository of a version graph member's released rows
+({{ range $i, $repo := . }}{{ if $i }}, {{ end }}`{{ $repo.TypeName }}`{{ end }}) is read-only: it exposes `GetOne`, `GetManyByIDs`,
+`FindOne`, `FindMany` and `FindPage` and no write, and has no `*Update`
+type. The graph's `Release` owns those rows and rewrites them at each
+release (D139); a raw SQL write of them (`Tx.Exec`) is not refused.
 {{- end }}
 
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`

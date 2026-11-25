@@ -23,7 +23,9 @@ import (
 // the Postgres at SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: a value of
 // every class through the facade and back, and the operations D19 adds
 // (a merge's message and tag, a release and a rollback, released, a rebase
-// with a conflict and without, and a sweep) through its typed methods. It
+// with a conflict and without, and a sweep) through its typed methods, and
+// a released member's rows (D139), which a release writes and the package's
+// orm.ts reads through their read-only repository. It
 // is the TypeScript counterpart of the ORM generator's
 // TestVersionGraphShellOnPostgres. The test file creates a database of its
 // own there and drops it after: the graph's sweep lock is an advisory lock,
@@ -55,7 +57,9 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := filepath.Join(dir, "graph_facade.junit.xml")
-	run := exec.Command(bunPath, "test", "./graph_facade.test.ts", "--reporter=junit", "--reporter-outfile="+report)
+	// A hook, which creates a database and runs its DDL, may take longer
+	// than bun's 5s on a loaded machine, as TestRepositoriesOnPostgres's.
+	run := exec.Command(bunPath, "test", "./graph_facade.test.ts", "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
 	run.Dir = dir
 	out, err := run.CombinedOutput()
 	if err != nil {
@@ -70,7 +74,7 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 		t.Fatalf("parse bun's report: %v\n%s", err, junit)
 	}
 	// Each test ran and passed: a testcase with no failure and no skip.
-	for _, name := range []string{"the facade keeps every class", "the facade merges, releases, rebases and sweeps"} {
+	for _, name := range []string{"the facade keeps every class", "the facade arranges a kind ordered by a string key", "the facade merges, releases, rebases and sweeps"} {
 		tc, ok := cases[name]
 		if !ok {
 			t.Fatalf("bun did not run %q:\n%s", name, junit)
@@ -153,6 +157,7 @@ import { readFileSync } from "node:fs";
 import pg from "PG_MODULE";
 import { pgPool } from "@superschematic/versiongraph/postgres";
 import { NotTaggedError, NoParentError } from "@superschematic/versiongraph/facade";
+import { createOrm } from "./orm";
 import { RecipeGraph, RecipeGraphDescriptor, RecipeGraphSnapshotEvery } from "./versiongraph";
 import { RecipeEntityKind, RecipePatchOperation, Verdict, type Part, type Step, type Tasting } from "./types";
 
@@ -267,6 +272,41 @@ test("the facade arranges a kind ordered by a string key", async () => {
     code: "order_not_a_key",
   });
   await expect(g.arrange(main.id, main.version, "part", null, [])).rejects.toMatchObject({ code: "primary_merge_only" });
+
+  // Part keeps its released rows (D139): a release writes them into
+  // part_released, in its transaction.
+  await g.commit(draft.id, arranged.ref.version, { message: "parts" });
+  const merged = await g.merge(draft.id, main.id, main.version, [], { message: "parts", tag: true });
+  const releasedParts = () =>
+    pool.query(
+      "SELECT heading, rank, sequence::text AS sequence, commit_id::text AS commit FROM part_released WHERE recipe_id = $1::uuid ORDER BY rank",
+      [root],
+    );
+  expect((await releasedParts()).rows).toEqual([]);
+  await g.release(root, merged.commit!.id, 0);
+  const commit = hyphenated(merged.commit!.id);
+  expect((await releasedParts()).rows).toEqual([
+    { heading: "Bake", rank: "7", sequence: "1", commit },
+    { heading: "Mix", rank: "F", sequence: "1", commit },
+    { heading: "Knead", rank: "V", sequence: "1", commit },
+  ]);
+
+  // The same rows through the generated ORM's repository of them, a
+  // table's reads: a filter, an order, a count and an include of the root.
+  const orm = createOrm(pool);
+  const read = await orm.partReleased.findMany(
+    { recipeId: { eq: base62(root) } },
+    { orderBy: [{ field: "rank" }], include: { recipe: true } },
+  );
+  expect(read.total).toBe(3);
+  expect(read.rows.map((p) => [p.heading, p.rank, p.sequence, p.commitId, p.recipe.title])).toEqual([
+    ["Bake", "7", 1, merged.commit!.id, "Bread"],
+    ["Mix", "F", 1, merged.commit!.id, "Bread"],
+    ["Knead", "V", 1, merged.commit!.id, "Bread"],
+  ]);
+  const page = await orm.partReleased.findPage({ recipe: { title: { eq: "Bread" } }, recipeId: { eq: base62(root) } }, { sort: { field: "rank" }, limit: 2 });
+  expect(page.rows.map((p) => p.heading)).toEqual(["Bake", "Mix"]);
+  expect((await orm.partReleased.getOne(page.rows[0]!.id)).entityKey).toBe(bake!);
 });
 
 // The operations D19 adds, through the typed facade: a merge's message and

@@ -20,7 +20,9 @@ import (
 {{- end }}
 
 	"github.com/jackc/pgx/v5"
+{{- if not .ReadOnly }}
 	"github.com/jackc/pgx/v5/pgconn"
+{{- end }}
 {{- if .NeedsPgtype }}
 	"github.com/jackc/pgx/v5/pgtype"
 {{- end }}
@@ -105,7 +107,7 @@ func {{ .JSONUnionDecoder }}(raw []byte) ({{ .ValueGoType }}, error) {
 {{- end }}
 {{- end }}
 
-{{- if .GenericJSONListFields }}
+{{- if and .GenericJSONListFields (not .ReadOnly) }}
 
 // refuseNull{{ .TypeName }}GenericJSONElements returns an error that names the
 // first null element of a Generic.JSON list of input. A list element is never
@@ -628,7 +630,11 @@ if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }} != nil {
 {{- end }}
 {{- end }}
 
+{{ if .ReadOnly -}}
+{{ docComment "" (printf "%s reads %s, the released rows of %s. The version graph's Release owns the rows and rewrites them at each release (D139), so the repository has no create, upsert, update or delete." .Name .TypeName .ReleasedOf) }}
+{{- else -}}
 // {{ .Name }} provides database operations for {{ .TypeName }}
+{{- end }}
 type {{ .Name }} struct {
 	db   *Database // Set when using Database directly
 	tx   pgx.Tx    // Set when using Transaction
@@ -2383,6 +2389,12 @@ func (r *{{ .Name }}) pageKeyExists(ctx context.Context, key any) error {
 	return nil
 }
 
+{{- /*
+A read-only repository (D139) ends here, but for database, which its
+Nearest runs on: every declaration from CreateOne to DeleteMany is a write
+or what only a write uses.
+*/}}
+{{- if not .ReadOnly }}
 {{- if .HasBehaviors }}
 {{ template "behaviorCreateOne" . }}
 {{- else }}
@@ -2665,6 +2677,8 @@ func {{ lowerFirst .TypeName }}KeyOf(on {{ .TypeName }}UniqueKey, row *types.{{ 
 	}
 	return "", false
 }
+{{- end }}
+{{- if or (not .ReadOnly) .VectorFields }}
 
 // database is the Database the repository runs on.
 func (r *{{ .Name }}) database() *Database {
@@ -2673,6 +2687,8 @@ func (r *{{ .Name }}) database() *Database {
 	}
 	return r.db
 }
+{{- end }}
+{{- if not .ReadOnly }}
 
 // scanReturned scans a row of every column of {{ .TypeName }}, as a write returns
 // it, and, with inserted, the flag an upsert returns after them (D89).
@@ -4529,6 +4545,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	return int(result.RowsAffected()), nil
 }
 
+{{- end }}
 {{- end }}
 
 {{- /*

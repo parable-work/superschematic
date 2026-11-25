@@ -4913,6 +4913,10 @@
         "parent": {
           "$ref": "#/$defs/GraphParent"
         },
+        "released": {
+          "default": false,
+          "type": "boolean"
+        },
         "singleton": {
           "default": false,
           "type": "boolean"

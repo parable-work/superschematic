@@ -6,6 +6,7 @@ import {
   Relation,
   conflictUnit,
   graphMember,
+  index,
   jsonField,
   key,
   versionGraph,
@@ -71,9 +72,12 @@ export abstract class Note {
 }
 
 // A part of the recipe's write-up, nested under another part. Its rank is
-// a string order key, so Arrange places it among its siblings.
+// a string order key, so Arrange places it among its siblings, and the
+// parts a recipe has released are kept in a table of their own, with the
+// index a reader of them uses.
 @versioned
-@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank" })
+@index<Part>(["parentKey", "rank"])
+@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank", released: true })
 export abstract class Part {
   @key
   id: AutoGenerate<Identity.UUID>;

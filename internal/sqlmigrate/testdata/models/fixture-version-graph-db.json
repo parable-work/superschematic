@@ -649,7 +649,7 @@
           "type": "BIGINT"
         }
       ],
-      "comment": "A part of the recipe's write-up, nested under another part. Its rank is\na string order key, so Arrange places it among its siblings.",
+      "comment": "A part of the recipe's write-up, nested under another part. Its rank is\na string order key, so Arrange places it among its siblings, and the\nparts a recipe has released are kept in a table of their own, with the\nindex a reader of them uses.",
       "foreignKeys": [
         {
           "columns": [
@@ -676,6 +676,14 @@
       ],
       "history": "part_history",
       "indexes": [
+        {
+          "columns": [
+            "parent_key",
+            "rank"
+          ],
+          "method": "BTREE",
+          "name": "idx_part_parent_key_rank"
+        },
         {
           "columns": [
             "entity_key",
@@ -753,6 +761,105 @@
           "history_id"
         ],
         "name": "part_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "PartReleased.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "PartReleased.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_key",
+          "origin": "PartReleased.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "parent_key",
+          "nullable": true,
+          "origin": "PartReleased.parentKey",
+          "type": "UUID"
+        },
+        {
+          "name": "rank",
+          "origin": "PartReleased.rank",
+          "type": "TEXT"
+        },
+        {
+          "name": "heading",
+          "origin": "PartReleased.heading",
+          "type": "TEXT"
+        },
+        {
+          "name": "commit_id",
+          "origin": "PartReleased.commit",
+          "type": "UUID"
+        },
+        {
+          "name": "sequence",
+          "origin": "PartReleased.sequence",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "commit_id"
+          ],
+          "name": "fk_part_released_commit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        },
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_part_released_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "parent_key",
+            "rank"
+          ],
+          "method": "BTREE",
+          "name": "idx_part_released_parent_key_rank"
+        },
+        {
+          "columns": [
+            "recipe_id",
+            "entity_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_part_released_root_entity",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "part_released",
+      "origin": "PartReleased",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "part_released_pkey"
       }
     },
     {

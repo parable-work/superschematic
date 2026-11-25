@@ -3,6 +3,7 @@ package graphdesc_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -238,6 +239,7 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 			t.Errorf("kind %s: descriptor columns %v, table columns %v", kind.Kind, described, created)
 			continue
 		}
+		checkReleasedTable(t, kind, tables, sqlTypes)
 		for column, class := range kind.Columns {
 			sqlType := sqlTypes[column]
 			element := strings.TrimSuffix(strings.TrimSuffix(class, "[]"), "[]")
@@ -267,6 +269,50 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 // delete's image names its actor in. It checks every graph the fixture
 // corpus declares, then the fixture's own facts, and variants of it that
 // give a member deleted_by or exclude its actor column.
+// checkReleasedTable holds a kind's released table (D139) to what a storage
+// adapter writes into it: a row id of its own, the kind's root and entity
+// key columns, the commit and the sequence of the release, and the kind's
+// content columns, the descriptor's columns less its role and excluded
+// ones, each stored as the kind's table stores it.
+func checkReleasedTable(t *testing.T, kind graphdesc.Kind, tables map[string]sqlgen.Table, memberTypes map[string]string) {
+	t.Helper()
+	if kind.ReleasedTable == "" {
+		return
+	}
+	released, ok := tables[kind.ReleasedTable]
+	if !ok {
+		t.Errorf("kind %s: no released table %s", kind.Kind, kind.ReleasedTable)
+		return
+	}
+	notContent := map[string]bool{kind.Key: true, kind.ID: true, kind.Ref: true, kind.Root: true, kind.Tombstone: true, kind.Version: true}
+	if kind.Author != "" {
+		notContent[kind.Author] = true
+	}
+	for _, column := range kind.Excluded {
+		notContent[column] = true
+	}
+	want := map[string]string{"id": memberTypes[kind.ID], kind.Root: memberTypes[kind.Root], kind.Key: memberTypes[kind.Key], "commit_id": memberTypes[kind.ID], "sequence": "BIGINT"}
+	for column := range kind.Columns {
+		if !notContent[column] {
+			want[column] = memberTypes[column]
+		}
+	}
+	got := map[string]string{}
+	for _, column := range released.Columns {
+		got[column.Name] = column.Type
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("kind %s: released table %s has columns %v, want %v", kind.Kind, kind.ReleasedTable, got, want)
+	}
+	unique := false
+	for _, index := range released.Indexes {
+		unique = unique || (index.Unique && reflect.DeepEqual(index.Columns, []string{kind.Root, kind.Key}))
+	}
+	if !unique {
+		t.Errorf("kind %s: released table %s has no unique index on (%s, %s), the slot a release writes", kind.Kind, kind.ReleasedTable, kind.Root, kind.Key)
+	}
+}
+
 func TestHistoryIsWhatTheTriggersKeep(t *testing.T) {
 	t.Run("fixture corpus", func(t *testing.T) {
 		dirs, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.FromSlash(fixture)), "fixture-*"))

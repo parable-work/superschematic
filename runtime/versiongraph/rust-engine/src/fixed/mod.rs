@@ -26,6 +26,15 @@
 //! nothing checks a root but the adapter, which refuses a write whose ref
 //! or commit is another graph's or another root's.
 //!
+//! A graph with a kind whose descriptor names a `releasedTable` (D139) has
+//! one more table, `released` ([`RELEASED_TABLE`]), which is not among the
+//! nine: [`released_layout`] gives the statement that creates it, and
+//! [`FixedLayout::create_tables`] runs it for such a graph alone. It holds
+//! each root's released rows of every such kind, one row per entity: the
+//! kind's content columns as one canonical JSON object, `data`, with the
+//! commit and the sequence of the release that wrote it. A release rewrites
+//! them ([`Tx::write_released`]), and nothing else does.
+//!
 //! The layout has no trigger, so the adapter does what Postgres's triggers
 //! do for sqlgen's tables, in the statements of the transaction that
 //! changes a row: it sets `_version` (1 on an insert, the old version plus
@@ -92,7 +101,7 @@ use crate::canonical;
 use crate::sqlite::{check_version, SQLITE_CONSTRAINT_UNIQUE};
 use crate::storage::{
     Commit, CommitNode, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite,
-    RowWrite, SnapshotEntry, Storage, Tx,
+    ReleasedWrite, RowWrite, SnapshotEntry, Storage, Tx,
 };
 use crate::Error;
 pub use client::{Client, ClientError, Conn, SqlValue};
@@ -141,6 +150,12 @@ pub const TABLES: [&str; 9] = [
     "member",
     "member_history",
 ];
+
+/// The local name of the table that holds released rows (D139). It is not
+/// among [`TABLES`]: [`released_layout`] creates it, for a graph with a kind
+/// that keeps its released rows, and the name function names it for such a
+/// graph alone.
+pub const RELEASED_TABLE: &str = "released";
 
 /// Names a table or an index of the layout from its local name (`"ref"`,
 /// `"member_entity"`).
@@ -453,6 +468,35 @@ pub fn layout(dialect: Dialect, table_name: &dyn Fn(&str) -> String) -> Result<V
     Ok(statements)
 }
 
+/// The statement that creates the released table (D139) in `dialect`, under
+/// the name `table_name` gives it ([`default_table_name`] for the default
+/// names). It is apart from [`layout`], whose nine tables every graph has: a
+/// graph needs this one only when a kind of its descriptor names a
+/// `releasedTable`, and [`FixedLayout::create_tables`] creates it then. A
+/// released row holds its kind's content columns as one canonical JSON
+/// object, `data`, with the commit and the sequence of the release that
+/// wrote it, one row per entity of a kind of a root. The statement may run
+/// again, and runs after the layout's, since it has a key to the commit
+/// table.
+pub fn released_layout(
+    dialect: Dialect,
+    table_name: &dyn Fn(&str) -> String,
+) -> Result<Vec<String>, Error> {
+    let released = name_of(dialect, table_name, RELEASED_TABLE)?;
+    let commit = name_of(dialect, table_name, "commit")?;
+    let (text, int, strict) = match dialect {
+        Dialect::Sqlite => ("TEXT", "INTEGER", " STRICT"),
+        Dialect::Postgres => ("TEXT COLLATE \"C\"", "BIGINT", ""),
+    };
+    Ok(vec![format!(
+        "CREATE TABLE IF NOT EXISTS {released} (\
+         graph {text} NOT NULL, kind {text} NOT NULL, root_id {text} NOT NULL, entity_key {text} NOT NULL, \
+         commit_id {text} NOT NULL REFERENCES {commit} (id), sequence {int} NOT NULL, data {text} NOT NULL, \
+         PRIMARY KEY (graph, kind, root_id, entity_key)\
+         ){strict}"
+    )])
+}
+
 /// A time in whole microseconds since the Unix epoch as a canonical
 /// date-time: UTC with `Z`, its fraction of a second without trailing zeros
 /// and left out when zero. A time outside [`MAX_MICROS`] either side of the
@@ -510,6 +554,11 @@ struct Kind {
     /// Every declared column but the role ones: what `data` holds, in name
     /// order.
     data: Vec<String>,
+    /// Whether the kind keeps its released rows (D139).
+    released: bool,
+    /// The kind's content columns, in name order: what a released row's
+    /// `data` holds.
+    content: Vec<String>,
     exclude: BTreeSet<String>,
     actor: Option<String>,
     retention_days: Option<i64>,
@@ -565,6 +614,12 @@ struct DescriptorKind {
     #[serde(default)]
     version: String,
     #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    excluded: Option<Vec<String>>,
+    #[serde(default, rename = "releasedTable")]
+    released_table: Option<String>,
+    #[serde(default)]
     history: Option<DescriptorHistory>,
     #[serde(default)]
     columns: BTreeMap<String, String>,
@@ -600,6 +655,10 @@ pub struct FixedLayout {
     graph: String,
     tables: Tables,
     layout: Vec<String>,
+    /// The released table, quoted, and the statement that creates it, for a
+    /// graph with a kind that keeps its released rows.
+    released: Option<String>,
+    released_layout: Vec<String>,
     clock: Clock,
     ids: IdBits,
     kinds: HashMap<String, Kind>,
@@ -711,6 +770,8 @@ impl FixedLayout {
                 version: k.version,
                 columns: k.columns,
                 data: Vec::new(),
+                released: k.released_table.is_some_and(|table| !table.is_empty()),
+                content: Vec::new(),
                 exclude: exclude.into_iter().collect(),
                 actor,
                 retention_days,
@@ -721,13 +782,35 @@ impl FixedLayout {
                 .filter(|column| !kind.is_role(column))
                 .cloned()
                 .collect();
+            // The content columns, as the core reads them: every column that
+            // is not a role column, the author among them, and is not
+            // excluded.
+            let excluded = k.excluded.unwrap_or_default();
+            kind.content = kind
+                .data
+                .iter()
+                .filter(|column| k.author.as_ref() != Some(*column) && !excluded.contains(*column))
+                .cloned()
+                .collect();
             kinds.insert(k.kind, kind);
         }
+        // A graph with no kind that keeps its released rows has no released
+        // table, and its name function is not asked for one.
+        let (released, released_statements) = if kinds.values().any(|kind| kind.released) {
+            (
+                Some(name_of(dialect, table_name.as_ref(), RELEASED_TABLE)?),
+                released_layout(dialect, table_name.as_ref())?,
+            )
+        } else {
+            (None, Vec::new())
+        };
         Ok(FixedLayout {
             dialect,
             graph: options.graph,
             tables: Tables::new(dialect, table_name.as_ref())?,
             layout: layout(dialect, table_name.as_ref())?,
+            released,
+            released_layout: released_statements,
             clock: options.clock.unwrap_or_else(|| Arc::new(system_clock)),
             ids: options
                 .ids
@@ -772,9 +855,17 @@ impl FixedLayout {
         &self.layout
     }
 
-    /// Creates the layout's tables and indexes where they are missing, in
-    /// one transaction of the client: its own on the connection, or a
-    /// savepoint in the caller's. On SQLite it refuses a SQLite older than
+    /// The statement that creates the released table under the adapter's
+    /// names, in its dialect ([`released_layout`]), for a graph with a kind
+    /// that keeps its released rows (D139); no statement for any other.
+    pub fn released_layout(&self) -> &[String] {
+        &self.released_layout
+    }
+
+    /// Creates the layout's tables and indexes where they are missing, and
+    /// the released table for a graph with a kind that keeps its released
+    /// rows, in one transaction of the client: its own on the connection,
+    /// or a savepoint in the caller's. On SQLite it refuses a SQLite older than
     /// [`crate::sqlite::MIN_SQLITE_VERSION`], or one whose JSON functions
     /// fail [`crate::sqlite::JSON_PROBE`], first.
     pub async fn create_tables<C: Client + ?Sized>(&self, client: &C) -> Result<(), Error> {
@@ -793,7 +884,7 @@ impl FixedLayout {
             let _ = conn.rollback().await;
             return Err(error);
         }
-        for statement in &self.layout {
+        for statement in self.layout.iter().chain(&self.released_layout) {
             if let Err(error) = conn.execute(statement, &[]).await {
                 // The statement's error is the one to report.
                 let _ = conn.rollback().await;
@@ -2350,6 +2441,89 @@ impl Tx for FixedTx<'_> {
         Ok(release)
     }
 
+    async fn write_released(&mut self, kind: &str, write: ReleasedWrite) -> Result<(), Error> {
+        let a = self.a;
+        let k = a.kind(kind)?;
+        let label = a.dialect.label();
+        let what = format!("write the released {} rows", k.name);
+        let Some(released) = a.released.as_ref().filter(|_| k.released) else {
+            return Err(Error::Invalid(format!(
+                "{label}: {what}: kind {:?} keeps no released table",
+                k.name
+            )));
+        };
+        self.require_commit(&what, &write.commit, &write.root, "the release's commit")
+            .await?;
+        if write.replace {
+            let sql =
+                format!("DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3");
+            let args = [
+                self.graph(),
+                k.name.as_str().into(),
+                write.root.as_str().into(),
+            ];
+            self.execute(&what, &sql, &args).await?;
+        }
+        for key in &write.delete {
+            let sql = format!(
+                "DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4"
+            );
+            let args = [
+                self.graph(),
+                k.name.as_str().into(),
+                write.root.as_str().into(),
+                key.as_str().into(),
+            ];
+            self.execute(&what, &sql, &args).await?;
+        }
+        for row in &write.upsert {
+            let Value::Object(row) = row else {
+                return Err(Error::Invalid(format!(
+                    "{label}: {what}: a released {} row is a JSON object",
+                    k.name
+                )));
+            };
+            let key = match row.get(&k.key) {
+                Some(value) if !value.is_null() => {
+                    value_of(a.dialect, &canonical_of(k, &k.key, value)?)?
+                }
+                _ => Value::Null,
+            };
+            let Some(key) = key.as_str().filter(|key| !key.is_empty()) else {
+                return Err(Error::Invalid(format!(
+                    "{label}: {what}: the released {} row's entity key is a string",
+                    k.name
+                )));
+            };
+            // The kind's content columns, each canonical, null where the
+            // row lacks it.
+            let mut data = BTreeMap::new();
+            for column in &k.content {
+                let value = match row.get(column) {
+                    Some(value) => canonical_of(k, column, value)?,
+                    None => "null".to_owned(),
+                };
+                data.insert(column.clone(), value);
+            }
+            let sql = format!(
+                "INSERT INTO {released} (graph, kind, root_id, entity_key, commit_id, sequence, data) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET \
+                 commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data"
+            );
+            let args = [
+                self.graph(),
+                k.name.as_str().into(),
+                write.root.as_str().into(),
+                key.into(),
+                write.commit.as_str().into(),
+                write.sequence.into(),
+                write_object(&data).into(),
+            ];
+            self.execute(&what, &sql, &args).await?;
+        }
+        Ok(())
+    }
+
     async fn prune(
         &mut self,
         kind: &str,
@@ -2638,6 +2812,61 @@ mod tests {
         let ref_table = sqlite[0].replace(" REFERENCES \"graph_commit\" (id)", "");
         assert_eq!(words[0], ref_table);
         assert_eq!(words[1..], sqlite[1..]);
+    }
+
+    /// The released table (D139) is one statement apart from the layout's,
+    /// which stays as it was: under the default names, the statement every
+    /// language's SQLite adapter gives, and on Postgres the same in
+    /// Postgres's words. An adapter has it for a graph with a kind that
+    /// keeps its released rows, and no statement for any other.
+    #[test]
+    fn the_released_layout_is_one_table_apart_from_the_layouts_nine() {
+        let sqlite = released_layout(Dialect::Sqlite, &default_table_name).expect("on SQLite");
+        assert_eq!(
+            sqlite,
+            ["CREATE TABLE IF NOT EXISTS \"graph_released\" (graph TEXT NOT NULL, kind TEXT NOT NULL, \
+              root_id TEXT NOT NULL, entity_key TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES \"graph_commit\" (id), \
+              sequence INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (graph, kind, root_id, entity_key)) STRICT"]
+        );
+        let postgres =
+            released_layout(Dialect::Postgres, &default_table_name).expect("on Postgres");
+        assert_eq!(
+            postgres,
+            ["CREATE TABLE IF NOT EXISTS \"graph_released\" (graph TEXT COLLATE \"C\" NOT NULL, \
+              kind TEXT COLLATE \"C\" NOT NULL, root_id TEXT COLLATE \"C\" NOT NULL, \
+              entity_key TEXT COLLATE \"C\" NOT NULL, commit_id TEXT COLLATE \"C\" NOT NULL REFERENCES \"graph_commit\" (id), \
+              sequence BIGINT NOT NULL, data TEXT COLLATE \"C\" NOT NULL, PRIMARY KEY (graph, kind, root_id, entity_key))"]
+        );
+        for dialect in [Dialect::Sqlite, Dialect::Postgres] {
+            let nine = layout(dialect, &default_table_name).expect("the layout");
+            assert!(
+                !nine.iter().any(|s| s.contains("graph_released")),
+                "the layout's statements are its nine tables'"
+            );
+            let named = released_layout(dialect, &|local| format!("vg_{local}")).expect("named");
+            assert!(
+                named[0].starts_with("CREATE TABLE IF NOT EXISTS \"vg_released\" (")
+                    && named[0].contains("REFERENCES \"vg_commit\" (id)"),
+                "{named:?}"
+            );
+            let mut plain = fixture();
+            let keeps = FixedLayout::with_dialect(dialect, &plain.to_string(), graph())
+                .expect("the fixture's adapter");
+            assert_eq!(
+                keeps.released_layout(),
+                released_layout(dialect, &default_table_name).expect("the released layout")
+            );
+            for kind in plain["kinds"].as_array_mut().expect("kinds") {
+                kind.as_object_mut()
+                    .expect("a kind")
+                    .remove("releasedTable");
+            }
+            let plain = FixedLayout::with_dialect(dialect, &plain.to_string(), graph())
+                .expect("an adapter of a graph with no released kind");
+            assert!(plain.released_layout().is_empty());
+            assert_eq!(plain.layout(), keeps.layout());
+            assert_eq!(plain.layout(), nine);
+        }
     }
 
     #[test]

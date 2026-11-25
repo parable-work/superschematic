@@ -80,10 +80,11 @@ the core.
 | Decorator | Meaning |
 | --- | --- |
 | `@versionGraph({ name?, schemaEpoch?, snapshotEvery? })` | Marks the root. The root is never overlaid and is in no commit. `name` prefixes the generated types (PascalCase) and tables (snake_case) and defaults to the root's name. `schemaEpoch`, default 0, is recorded on every commit. `snapshotEvery`, default 64, is how many commits past the nearest snapshot on its chain a commit is snapshotted at ([Snapshots](#snapshots)). |
-| `@graphMember({ graph, parent?, order?, singleton? })` | Marks an entity kind of the graph. `graph` is the root class. |
+| `@graphMember({ graph, parent?, order?, singleton?, released? })` | Marks an entity kind of the graph. `graph` is the root class. |
 | `parent: { key, of }` | Containment: the UUID field `key` holds the parent row's entity key, and `of` is a member of the same graph, the member itself included. Deleting a parent removes its descendants. |
 | `order` | The field that orders siblings: a `Generic.Int64`, or a `string` that holds an order key ([Order keys](#order-keys)). |
 | `singleton: true` | At most one live row of the kind per ref. |
+| `released: true` | Keeps the rows of each root's released tree of the kind in a table of their own, `<Member>Released` ([Released rows](#released-rows)). |
 | `@conflictUnit(strategy)` | On a member's field: its merge unit. The strategies are below. |
 
 Verification refuses:
@@ -100,6 +101,11 @@ Verification refuses:
 - a `parent.of` that is not a member of the same graph, a `parent.key`
   that is not a UUID field, and an `order` that is not a `Generic.Int64`
   field or a `string` field;
+- a `released` member whose `<Member>Released` the schema already defines,
+  that has a content field named `entityKey`, `commit` or `sequence`,
+  which its released table adds, or that has an `Encrypted<T>` content
+  field, whose envelope is bound to the member's row and could not be
+  opened in the copy;
 - a graph whose generated names collide with a definition of the schema or
   of another graph, and an index whose name collides with one the graph
   generates (`uq_<member>_entity_ref`, `uq_<graph>_ref_root_name`,
@@ -182,6 +188,63 @@ too. The keys the core makes never end in `0`. A key appended after the
 last one halves what is left of the gap to the end, so a list built only by
 appends gains a character about every six rows; `OrderKeys("", "", n)`
 saved over the whole list spaces it evenly again.
+
+## Released rows
+
+What a graph has released is read through `Released` or `Materialize`,
+which walk commits. A member table holds each ref's rows, not the released
+ones, so nothing can index, search, join or page what is published. A
+member with `released: true` gets a table that can:
+
+```ts
+@versioned
+@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank", released: true })
+export abstract class Part {
+  // ...
+}
+```
+
+The loader adds `PartReleased`, table `part_released`:
+
+| Field | Holds |
+| --- | --- |
+| `id` | A row id of its own, the table's key. |
+| the member's relation to its root (`recipe`) | The root whose released tree holds the row. The row is deleted with its root. |
+| `entityKey` | The entity's key. A root and an entity key name one row (`uq_part_released_root_entity`). |
+| the member's content fields | Every field of the member that is content: not its key, its audit fields or a field with `@conflictUnit("excluded")`. Each is declared as the member declares it, so its `@searchField`, its validations and its vector come with it. |
+| `commit`, `sequence` | The released commit that last wrote the row, and that commit's sequence. |
+
+The member's `@index` and `@unique` indexes that name content fields alone
+come too, under the released table's name. The table is not `@versioned`,
+and no ref overlays it.
+
+`Release` owns the rows. In the transaction that moves the root's pointer
+it diffs the tree of the commit released before against the new one's, and
+writes each added or changed entity's row and deletes each removed one's,
+so a reader never sees a pointer ahead of its rows. An entity a release did
+not change keeps its row, with the commit and sequence of the release that
+last changed it. A root's first release writes the whole tree. A rollback
+is a release, and rewrites the rows that differ. A release of the commit
+already released deletes the root's rows and writes the whole tree again:
+use it once for each released root after a member gains `released: true`,
+since releases before that wrote nothing, and to repair rows written by
+hand. `Sweep` leaves the table alone.
+
+To the ORM it is a table that is read: a repository with gets, finds, lists
+and pages, and no create, update, upsert or delete. The Go repository and
+the Rust one have no write. The TypeScript one has none in its type
+(`ReadRepository`), though the object the runtime builds still carries
+them, so do not reach past the type. A `@tableOperation` may read and list
+the table; one that writes it is refused. A raw SQL write is not refused;
+do not make one, since the next release that touches the entity overwrites
+it and no release repairs a row it does not touch, short of a release of
+the commit already released.
+
+The descriptor names the table as the kind's `releasedTable`, which the
+core does not read and each storage adapter does. On SQLite, whose layout
+has no table per kind, released rows live in one more table of the fixed
+layout, `released`, created for a graph that has such a kind
+([the contract](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#released-rows)).
 
 ## Conflict units
 
@@ -642,7 +705,7 @@ released, err := g.Released(ctx, *recipe.Id)                    // the pointer a
 | `Merge(ctx, source, target, targetVersion, resolutions, RecipeCommitOptions)` | Merges the source's head commit into the target against the source's base. Without conflicts it writes the result onto the target and commits in the same transaction, with the options' message and tag. It is the only write a primary line takes. With conflicts left after `resolutions` it returns them as `[]RecipeConflict` (kind, entity key, unit path, the base, ours and theirs values, and each side's author) and writes nothing. A `RecipeResolution` takes a side (`versiongraph.Take`) or gives a value for one conflict's path. |
 | `Rebase(ctx, draft, version, resolutions)` | Catches a change set up with its parent's head ([Rebase](#rebase)), returning a `RecipeMergeResult`: the moved change set and its commit, or the conflicts, with nothing written. `ErrNoParent` on a primary line. |
 | `Revert(ctx, ref, version, toCommit)` | Writes the rows that make a change set compose to `toCommit`'s tree, and commits. History is never rewritten. `ErrPrimaryMergeOnly` on a primary line. |
-| `Release(ctx, root, commit, version)` | Points the root's release at a tagged commit, fenced by the pointer's `_version` (0 for the first release), and returns the typed `RecipeRelease`. `ErrNotTagged` for an untagged commit. |
+| `Release(ctx, root, commit, version)` | Points the root's release at a tagged commit, fenced by the pointer's `_version` (0 for the first release), and returns the typed `RecipeRelease`. In the same transaction it rewrites the root's rows in each [released table](#released-rows). `ErrNotTagged` for an untagged commit. |
 | `Released(ctx, root)` | The release pointer and the released commit's tree, as `RecipeReleased`. `ErrNotFound` before the first release. |
 | `Materialize(ctx, commit)` | Reads a commit's tree: the nearest snapshot on its chain with each later commit's patches laid over it, the nearest winning and a `DELETE` removing the entity. |
 | `Compose(ctx, ref)` | Reads a ref's tree: its base commit's tree with its own rows laid over it. |

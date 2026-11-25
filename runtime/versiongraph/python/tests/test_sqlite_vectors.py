@@ -1,6 +1,7 @@
 """The shared SQLite vectors (runtime/versiongraph/testdata/sqlite, whose
 README gives each file's shape) through the Python adapter: its layout's
-statements are layout.json's, a database the TypeScript adapter wrote
+statements, and its released table's, are layout.json's, a database the
+TypeScript adapter wrote
 (typescript.sql) reads back through the adapter and the engine as
 typescript.json, byte for byte, through each graph's adapter nothing of the
 other graph reads, and the TypeScript script's writes, replayed through this
@@ -24,9 +25,11 @@ from superschematic_versiongraph.engine import CommitOptions, Engine, KindEdits,
 from superschematic_versiongraph.errors import error_code
 from superschematic_versiongraph.exactjson import loads, write_string
 from superschematic_versiongraph.sqlite import (
+    RELEASED_TABLE,
     SQLITE_TABLES,
     SqliteAdapter,
     default_table_name,
+    released_layout,
     sqlite_client,
     sqlite_layout,
 )
@@ -262,15 +265,18 @@ def read_vectors(connection: sqlite3.Connection) -> str:
 
 def test_the_layout_is_layout_json() -> None:
     """sqlite_layout() under the default names is layout.json's statements,
-    string for string, in order."""
-    assert sqlite_layout() == json.loads(LAYOUT.read_text(encoding="utf-8"))["statements"]
+    and released_layout() its released, string for string, in order."""
+    file = json.loads(LAYOUT.read_text(encoding="utf-8"))
+    assert sqlite_layout() == file["statements"]
+    assert released_layout() == file["released"]
 
 
 def test_typescript_sql_begins_with_the_layout() -> None:
     """The file the TypeScript adapter wrote begins with this adapter's
-    layout, so the database it loads is the one this adapter creates."""
+    layout and then its released table, so the database it loads is the one
+    this adapter creates for a graph that keeps released rows."""
     lines = SQL.read_text(encoding="utf-8").split("\n")
-    layout = sqlite_layout()
+    layout = sqlite_layout() + released_layout()
     assert lines[: len(layout)] == [statement + ";" for statement in layout]
     assert all(line == "" or line.startswith("INSERT INTO ") for line in lines[len(layout) :])
 
@@ -524,14 +530,19 @@ def write_database(connection: sqlite3.Connection) -> None:
         {"utensil": KindEdits(upsert=[row(entity_key="Knife", name="Bread knife"), row(entity_key="Board", name="Bread board")])},
     ).ref
     dinner = i.commit(ANN, dinner.id, dinner.version, CommitOptions(message="dinner")).ref
-    merged(i.merge(ANN, dinner.id, lunch.id, lunch.version, [], CommitOptions(message="supper", tag=True)))
-    # A kind ordered by a string key, as work the change set does not commit.
-    i.save(
+    lunch, _ = merged(i.merge(ANN, dinner.id, lunch.id, lunch.version, [], CommitOptions(message="supper", tag=True)))
+    # A kind ordered by a string key, which keeps its released rows: the
+    # release that moves to its commit writes the part's released row.
+    dinner = i.save(
         ANN,
         dinner.id,
         dinner.version,
         {"part": KindEdits(upsert=[row(entity_key="Intro", rank="V", heading="Before you start")])},
-    )
+    ).ref
+    dinner = i.commit(ANN, dinner.id, dinner.version, CommitOptions(message="intro")).ref
+    lunch, intro = merged(i.merge(ANN, dinner.id, lunch.id, lunch.version, [], CommitOptions(message="intro", tag=True)))
+    # The menu's pointer is at version 1, where its first release left it.
+    i.release(ANN, BREAD, intro.id, 1)
 
 
 # A character that splits a line for some reader: a control character, NEL,
@@ -554,14 +565,16 @@ def literal(value: Any, where: str) -> str:
 
 def dump_database(connection: sqlite3.Connection) -> str:
     """A database as the SQL text typescript.sql holds, as dumpDatabase
-    writes it: the layout's statements, then one INSERT per row naming every
-    column, the tables in the layout's order and each table's rows by
-    primary key."""
-    lines = [statement + ";" for statement in sqlite_layout()]
-    for local in SQLITE_TABLES:
+    writes it: the layout's statements and the released table's, then one
+    INSERT per row naming every column, the tables in the layout's order
+    with the released table last, and each table's rows by primary key."""
+    lines = [statement + ";" for statement in sqlite_layout() + released_layout()]
+    for local in SQLITE_TABLES + (RELEASED_TABLE,):
         name = default_table_name(local)
         columns = [r[0] for r in connection.execute("SELECT name FROM pragma_table_info(?1) ORDER BY cid", [name])]
         key = "history_id" if local.endswith("_history") else "id"
+        if local == RELEASED_TABLE:
+            key = "graph, kind, root_id, entity_key"
         for values in connection.execute(f"SELECT {', '.join(columns)} FROM {quote(name)} ORDER BY {key}"):
             out = ", ".join(literal(value, f"{name}.{column}") for column, value in zip(columns, values))
             lines.append(f"INSERT INTO {quote(name)} ({', '.join(columns)}) VALUES ({out});")

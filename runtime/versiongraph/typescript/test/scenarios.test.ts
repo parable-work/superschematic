@@ -50,7 +50,7 @@ import {
 } from "../dist/engine.js";
 import { init, initSync, type VersionGraph } from "../dist/index.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
-import { defaultTableName, SqliteAdapter, sqliteTables, type SqliteClient } from "../dist/sqlite.js";
+import { defaultTableName, SqliteAdapter, sqliteReleasedTable, sqliteTables, type SqliteClient } from "../dist/sqlite.js";
 import { dsn, descriptor, rawTypes, scratchSchema, type Scratch } from "./postgres.js";
 import { replayed } from "./replay.js";
 import { behaviorTable, bunBinding, checkedClient, inCallerTransaction, nodeBinding, type Binding, type Database } from "./sqlite.js";
@@ -673,9 +673,10 @@ class SqliteBackend implements Backend {
     if (callerTransaction) {
       // The layout under a behavior's names, as D16's sql.table gives them,
       // so D16's checks see the names a behavior's statements would carry;
-      // an sql step's statement names the same tables.
+      // an sql step's statement names the same tables, the released one
+      // among them.
       const adapter = new SqliteAdapter(descriptor, { graph: sqliteGraph, callerTransaction: true, tableName: behaviorTable });
-      const defaultNames = new RegExp(`\\b${defaultTableName("")}(${sqliteTables.join("|")})\\b`, "g");
+      const defaultNames = new RegExp(`\\b${defaultTableName("")}(${[...sqliteTables, sqliteReleasedTable].join("|")})\\b`, "g");
       statement = (sql) => sql.replace(defaultNames, (_, local: string) => behaviorTable(local));
       const checked: SqliteClient = checkedClient(raw, "write");
       inCallerTransaction(raw, () => adapter.createTables(checkedClient(raw, "migrate")));

@@ -13,7 +13,9 @@
 // entity_kind, entity_key, entity_id and entity_version; and a release
 // pointer's root_id, commit_id, audit columns and _version. A history table
 // keys its images on the kind's id and version columns and holds each in
-// data.
+// data. A kind's released table (D139) holds the kind's root and entity key
+// columns and its content columns under their names, with commit_id and
+// sequence.
 //
 // The adapter reaches Postgres through Client, which returns every column as
 // the text Postgres writes for it, so no driver's type parsing touches a
@@ -37,6 +39,7 @@ import {
   type Ref,
   type RefUpdate,
   type Release,
+  type ReleasedWrite,
   type ReleaseWrite,
   type RowWrite,
   type SnapshotEntry,
@@ -56,6 +59,13 @@ const createdAtColumn = "created_at";
 const createdByColumn = "created_by";
 const updatedAtColumn = "updated_at";
 const updatedByColumn = "updated_by";
+
+// The columns of a released table beside the kind's own (D139): the commit
+// and the sequence of the release that wrote the row. Its other columns are
+// the kind's root and entity key columns and its content columns, under the
+// names the kind's table gives them.
+const releasedCommitColumn = "commit_id";
+const releasedSequenceColumn = "sequence";
 
 /**
  * A statement argument: a string, a number (an integer), a boolean, a list
@@ -112,6 +122,13 @@ interface Kind {
   tombstone: string;
   version: string;
   columns: Record<string, string>;
+  /** The table that holds the released tree's rows of the kind (D139), "" for a kind that keeps none. */
+  releasedTable: string;
+  /**
+   * The kind's content columns, sorted: what a released row holds beside its
+   * root, its entity key and its release's commit and sequence.
+   */
+  content: string[];
 }
 
 /** What the adapter reads of a graph descriptor. */
@@ -133,6 +150,9 @@ interface DescriptorDoc {
     root?: string;
     tombstone?: string;
     version?: string;
+    author?: string;
+    excluded?: string[];
+    releasedTable?: string;
     columns?: Record<string, string>;
   }[];
 }
@@ -168,7 +188,8 @@ export class PostgresAdapter {
   /**
    * Reads a graph's descriptor (JSON text or an object). The core checks
    * the rest of it; the adapter needs its tables, each kind's role columns,
-   * the root column among them, and each kind's columns.
+   * the root column among them, each kind's columns, and, for a kind that
+   * keeps a released table, what makes a column content.
    */
   constructor(descriptor: string | Descriptor, options: PostgresOptions = {}) {
     const d = (typeof descriptor === "string" ? JSON.parse(descriptor) : descriptor) as unknown as DescriptorDoc;
@@ -223,6 +244,9 @@ export class PostgresAdapter {
           throw new Error(`postgres: kind ${JSON.stringify(k.kind)} ${role} column ${JSON.stringify(column)} is not in its columns`);
         }
       }
+      // The content columns, as the core reads them: every column that is
+      // not a role column and is not excluded.
+      const notContent = new Set<string | undefined>([k.key, k.id, k.ref, k.root, k.tombstone, k.version, k.author, ...(k.excluded ?? [])]);
       config.kinds.set(k.kind!, {
         name: k.kind!,
         table: k.table!,
@@ -234,6 +258,10 @@ export class PostgresAdapter {
         tombstone: k.tombstone!,
         version: k.version!,
         columns,
+        releasedTable: k.releasedTable ?? "",
+        content: Object.keys(columns)
+          .filter((column) => !notContent.has(column))
+          .sort(compareCodePoints),
       });
     }
     configs.set(this, config);
@@ -938,6 +966,77 @@ class PostgresTx implements Tx {
       throw new VersionConflictError();
     }
     return scanRelease(result.rows[0]!);
+  }
+
+  async writeReleased(kindName: string, write: ReleasedWrite): Promise<void> {
+    const k = this.#kind(kindName);
+    if (k.releasedTable === "") {
+      throw new Error(`postgres: kind ${JSON.stringify(k.name)} keeps no released table`);
+    }
+    const rootArg = uuidArg(write.root);
+    const commitArg = uuidArg(write.commit);
+    const table = quote(k.releasedTable);
+    const root = quote(k.root);
+    const key = quote(k.key);
+    if (write.replace) {
+      try {
+        await this.#query(`DELETE FROM ${table} WHERE ${root} = $1::uuid`, [rootArg]);
+      } catch (err) {
+        throw withContext(`clear ${k.releasedTable}`, err);
+      }
+    }
+    if (write.delete.length > 0) {
+      const keys = write.delete.map(uuidHyphenated);
+      try {
+        await this.#query(`DELETE FROM ${table} WHERE ${root} = $1::uuid AND ${key} = ANY($2::text[]::uuid[])`, [rootArg, keys]);
+      } catch (err) {
+        throw withContext(`delete from ${k.releasedTable}`, err);
+      }
+    }
+    if (write.upsert.length === 0) {
+      return;
+    }
+    // One statement writes every row: each column from the row's member as
+    // the kind's table takes it, the root, the commit and the sequence from
+    // the release.
+    const commitColumn = quote(releasedCommitColumn);
+    const sequenceColumn = quote(releasedSequenceColumn);
+    const names = [root, key, commitColumn, sequenceColumn];
+    const values = ["$2::uuid", "r." + key, "$3::uuid", "$4::bigint"];
+    const updates = [`${commitColumn} = EXCLUDED.${commitColumn}`, `${sequenceColumn} = EXCLUDED.${sequenceColumn}`];
+    for (const column of k.content) {
+      const q = quote(column);
+      names.push(q);
+      const valueClass = k.columns[column]!;
+      // A JSONB column takes the member itself, as upsertRow gives it.
+      values.push(valueClass === "json" || valueClass.endsWith("[][]") ? `(e.value -> ${literal(column)})` : "r." + q);
+      updates.push(`${q} = EXCLUDED.${q}`);
+    }
+    const inputs = write.upsert.map((row) => {
+      const parsed = parseJson(row);
+      if (!isJsonObject(parsed)) {
+        throw new Error(`postgres: a released ${k.name} row is a JSON object`);
+      }
+      const members: string[] = [];
+      for (const column of [k.key, ...k.content].sort(compareCodePoints)) {
+        try {
+          members.push(writeJsonString(column) + ":" + inputValue(k.columns[column]!, parsed.get(column) ?? null));
+        } catch (err) {
+          throw withContext(`released ${k.name} column ${column}`, err);
+        }
+      }
+      return "{" + members.join(",") + "}";
+    });
+    const sql =
+      `INSERT INTO ${table} (${names.join(", ")}) ` +
+      `SELECT ${values.join(", ")} FROM jsonb_array_elements($1::jsonb) AS e(value), ` +
+      `jsonb_populate_record(NULL::${table}, e.value) AS r ` +
+      `ON CONFLICT (${root}, ${key}) DO UPDATE SET ${updates.join(", ")}`;
+    try {
+      await this.#query(sql, ["[" + inputs.join(",") + "]", rootArg, commitArg, write.sequence]);
+    } catch (err) {
+      throw withContext(`write ${k.releasedTable}`, err);
+    }
   }
 
   discardedRefs(graceMs: number): Promise<Ref[]> {

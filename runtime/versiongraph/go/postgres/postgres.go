@@ -83,6 +83,12 @@ type kind struct {
 	tombstone    string
 	version      string
 	columns      map[string]string
+	// releasedTable is the table that holds the released tree's rows of
+	// the kind (D139), "" for a kind that keeps none, and content the
+	// kind's content columns, sorted: what a released row holds beside its
+	// root, its entity key and its release's commit and sequence.
+	releasedTable string
+	content       []string
 }
 
 // descriptor is what the adapter reads of a graph descriptor.
@@ -99,16 +105,19 @@ type descriptor struct {
 	ReleaseTable  string `json:"releaseTable"`
 	SnapshotTable string `json:"snapshotTable"`
 	Kinds         []struct {
-		Kind         string            `json:"kind"`
-		Table        string            `json:"table"`
-		HistoryTable string            `json:"historyTable"`
-		Key          string            `json:"key"`
-		ID           string            `json:"id"`
-		Ref          string            `json:"ref"`
-		Root         string            `json:"root"`
-		Tombstone    string            `json:"tombstone"`
-		Version      string            `json:"version"`
-		Columns      map[string]string `json:"columns"`
+		Kind          string            `json:"kind"`
+		Table         string            `json:"table"`
+		HistoryTable  string            `json:"historyTable"`
+		Key           string            `json:"key"`
+		ID            string            `json:"id"`
+		Ref           string            `json:"ref"`
+		Root          string            `json:"root"`
+		Tombstone     string            `json:"tombstone"`
+		Version       string            `json:"version"`
+		Author        string            `json:"author"`
+		Excluded      []string          `json:"excluded"`
+		ReleasedTable string            `json:"releasedTable"`
+		Columns       map[string]string `json:"columns"`
 	} `json:"kinds"`
 }
 
@@ -155,11 +164,27 @@ func New(raw json.RawMessage, opts Options) (*Adapter, error) {
 				}
 			}
 		}
-		a.kinds[k.Kind] = &kind{
+		kd := &kind{
 			name: k.Kind, table: k.Table, historyTable: k.HistoryTable,
 			key: k.Key, id: k.ID, ref: k.Ref, root: k.Root, tombstone: k.Tombstone, version: k.Version,
-			columns: k.Columns,
+			columns: k.Columns, releasedTable: k.ReleasedTable,
 		}
+		// The content columns, as the core reads them: every column that
+		// is not a role column and is not excluded.
+		notContent := map[string]bool{k.Key: true, k.ID: true, k.Ref: true, k.Root: true, k.Tombstone: true, k.Version: true}
+		if k.Author != "" {
+			notContent[k.Author] = true
+		}
+		for _, column := range k.Excluded {
+			notContent[column] = true
+		}
+		for column := range k.Columns {
+			if !notContent[column] {
+				kd.content = append(kd.content, column)
+			}
+		}
+		sort.Strings(kd.content)
+		a.kinds[k.Kind] = kd
 	}
 	return a, nil
 }
@@ -931,6 +956,105 @@ func (t *tx) WriteRelease(ctx context.Context, write storage.ReleaseWrite) (stor
 		return storage.Release{}, storage.ErrVersionConflict
 	}
 	return release, nil
+}
+
+// The columns of a released table beside the kind's own (D139): the commit
+// and the sequence of the release that wrote the row. Its other columns
+// are the kind's root and entity key columns and its content columns,
+// under the names the kind's table gives them.
+const (
+	releasedCommitColumn   = "commit_id"
+	releasedSequenceColumn = "sequence"
+)
+
+func (t *tx) WriteReleased(ctx context.Context, kindName string, write storage.ReleasedWrite) error {
+	k, err := t.kind(kindName)
+	if err != nil {
+		return err
+	}
+	if k.releasedTable == "" {
+		return fmt.Errorf("postgres: kind %q keeps no released table", k.name)
+	}
+	ids, err := uuidArgs(write.Root, write.Commit)
+	if err != nil {
+		return err
+	}
+	table, root, key := quote(k.releasedTable), quote(k.root), quote(k.key)
+	if write.Replace {
+		if _, err := t.conn.Exec(ctx, `DELETE FROM `+table+` WHERE `+root+` = $1::uuid`, ids[0]); err != nil {
+			return fmt.Errorf("postgres: clear %s: %w", k.releasedTable, err)
+		}
+	}
+	if len(write.Delete) > 0 {
+		keys, err := uuidArgs(write.Delete...)
+		if err != nil {
+			return err
+		}
+		texts := make([]string, len(keys))
+		for i, key := range keys {
+			texts[i] = key.(string)
+		}
+		if _, err := t.conn.Exec(ctx, `DELETE FROM `+table+` WHERE `+root+` = $1::uuid AND `+key+` = ANY($2::uuid[])`, ids[0], texts); err != nil {
+			return fmt.Errorf("postgres: delete from %s: %w", k.releasedTable, err)
+		}
+	}
+	if len(write.Upsert) == 0 {
+		return nil
+	}
+	// One statement writes every row: each column from the row's member as
+	// the kind's table takes it, the root, the commit and the sequence
+	// from the release.
+	names := []string{root, key, quote(releasedCommitColumn), quote(releasedSequenceColumn)}
+	values := []string{"$2::uuid", "r." + key, "$3::uuid", "$4"}
+	updates := []string{
+		quote(releasedCommitColumn) + " = EXCLUDED." + quote(releasedCommitColumn),
+		quote(releasedSequenceColumn) + " = EXCLUDED." + quote(releasedSequenceColumn),
+	}
+	for _, column := range k.content {
+		q := quote(column)
+		names = append(names, q)
+		if class := k.columns[column]; class == canonical.JSON || strings.HasSuffix(class, "[][]") {
+			// A JSONB column takes the member itself, as UpsertRow gives it.
+			values = append(values, "(e.value -> "+literal(column)+")")
+		} else {
+			values = append(values, "r."+q)
+		}
+		updates = append(updates, q+" = EXCLUDED."+q)
+	}
+	inputs := make([]json.RawMessage, 0, len(write.Upsert))
+	for _, row := range write.Upsert {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(row, &members); err != nil || members == nil {
+			return fmt.Errorf("postgres: a released %s row is a JSON object", k.name)
+		}
+		input := make(map[string]json.RawMessage, len(k.content)+1)
+		for _, column := range append([]string{k.key}, k.content...) {
+			value, ok := members[column]
+			if !ok {
+				value = json.RawMessage("null")
+			}
+			if input[column], err = inputValue(k.columns[column], value); err != nil {
+				return fmt.Errorf("postgres: released %s column %s: %w", k.name, column, err)
+			}
+		}
+		encoded, err := json.Marshal(input)
+		if err != nil {
+			return err
+		}
+		inputs = append(inputs, encoded)
+	}
+	rowsJSON, err := json.Marshal(inputs)
+	if err != nil {
+		return err
+	}
+	sql := `INSERT INTO ` + table + ` (` + strings.Join(names, ", ") + `) ` +
+		`SELECT ` + strings.Join(values, ", ") + ` FROM jsonb_array_elements($1::jsonb) AS e(value), ` +
+		`jsonb_populate_record(NULL::` + table + `, e.value) AS r ` +
+		`ON CONFLICT (` + root + `, ` + key + `) DO UPDATE SET ` + strings.Join(updates, ", ")
+	if _, err := t.conn.Exec(ctx, sql, string(rowsJSON), ids[0], ids[1], write.Sequence); err != nil {
+		return fmt.Errorf("postgres: write %s: %w", k.releasedTable, err)
+	}
+	return nil
 }
 
 // micros is a duration in whole microseconds, as a statement multiplies

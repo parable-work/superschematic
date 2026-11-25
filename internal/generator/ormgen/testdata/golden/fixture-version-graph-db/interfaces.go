@@ -113,6 +113,17 @@ type PartRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *PartFilter) (int, error)
 }
 
+// PartReleasedRepositoryInterface defines the contract for reading
+// PartReleased, the released rows of Part. The version graph's Release owns
+// the rows (D139), so it has no write.
+type PartReleasedRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *PartReleasedGetOptions) (*types.PartReleased, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.PartReleased, error)
+	FindOne(ctx context.Context, filter *PartReleasedFilter, opts *PartReleasedFindOptions) (*types.PartReleased, error)
+	FindMany(ctx context.Context, filter *PartReleasedFilter, opts *PartReleasedFindOptions) ([]*types.PartReleased, int, error)
+	FindPage(ctx context.Context, filter *PartReleasedFilter, opts *PartReleasedPageOptions) (*PartReleasedPage, error)
+}
+
 // RecipeRepositoryInterface defines the contract for Recipe data access.
 type RecipeRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeGetOptions) (*types.Recipe, error)
@@ -325,6 +336,7 @@ type DatabaseInterface interface {
 	GetIngredientRepository() IngredientRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
 	GetPartRepository() PartRepositoryInterface
+	GetPartReleasedRepository() PartReleasedRepositoryInterface
 	GetRecipeRepository() RecipeRepositoryInterface
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
@@ -345,6 +357,7 @@ type TxInterface interface {
 	GetIngredientRepository() IngredientRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
 	GetPartRepository() PartRepositoryInterface
+	GetPartReleasedRepository() PartReleasedRepositoryInterface
 	GetRecipeRepository() RecipeRepositoryInterface
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
@@ -363,6 +376,7 @@ type NoOpDatabase struct {
 	Ingredient          *NoOpIngredientRepository
 	Note                *NoOpNoteRepository
 	Part                *NoOpPartRepository
+	PartReleased        *NoOpPartReleasedRepository
 	Recipe              *NoOpRecipeRepository
 	RecipeCommit        *NoOpRecipeCommitRepository
 	RecipePatch         *NoOpRecipePatchRepository
@@ -380,6 +394,7 @@ type NoOpTx struct {
 	Ingredient          *NoOpIngredientRepository
 	Note                *NoOpNoteRepository
 	Part                *NoOpPartRepository
+	PartReleased        *NoOpPartReleasedRepository
 	Recipe              *NoOpRecipeRepository
 	RecipeCommit        *NoOpRecipeCommitRepository
 	RecipePatch         *NoOpRecipePatchRepository
@@ -403,6 +418,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.Note = db.Note
 	db.Part = &NoOpPartRepository{}
 	tx.Part = db.Part
+	db.PartReleased = &NoOpPartReleasedRepository{}
+	tx.PartReleased = db.PartReleased
 	db.Recipe = &NoOpRecipeRepository{}
 	tx.Recipe = db.Recipe
 	db.RecipeCommit = &NoOpRecipeCommitRepository{}
@@ -882,6 +899,38 @@ func (r *NoOpPartRepository) DeleteOneIfVersion(_ context.Context, _ types.Ident
 
 func (r *NoOpPartRepository) DeleteMany(_ context.Context, _ *PartFilter) (int, error) {
 	return 0, nil
+}
+
+func (db *NoOpDatabase) GetPartReleasedRepository() PartReleasedRepositoryInterface {
+	return db.PartReleased
+}
+
+func (tx *NoOpTx) GetPartReleasedRepository() PartReleasedRepositoryInterface {
+	return tx.PartReleased
+}
+
+// NoOpPartReleasedRepository provides deterministic no-op repository
+// behavior: the reads of PartReleasedRepository, which has no write (D139).
+type NoOpPartReleasedRepository struct{}
+
+func (r *NoOpPartReleasedRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *PartReleasedGetOptions) (*types.PartReleased, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpPartReleasedRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.PartReleased, error) {
+	return map[types.IdentityUUID]*types.PartReleased{}, nil
+}
+
+func (r *NoOpPartReleasedRepository) FindOne(_ context.Context, _ *PartReleasedFilter, _ *PartReleasedFindOptions) (*types.PartReleased, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpPartReleasedRepository) FindMany(_ context.Context, _ *PartReleasedFilter, _ *PartReleasedFindOptions) ([]*types.PartReleased, int, error) {
+	return []*types.PartReleased{}, 0, nil
+}
+
+func (r *NoOpPartReleasedRepository) FindPage(_ context.Context, _ *PartReleasedFilter, _ *PartReleasedPageOptions) (*PartReleasedPage, error) {
+	return &PartReleasedPage{Rows: []*types.PartReleased{}}, nil
 }
 
 func (db *NoOpDatabase) GetRecipeRepository() RecipeRepositoryInterface {
@@ -1723,6 +1772,8 @@ var (
 	_ NoteRepositoryInterface                = (*NoOpNoteRepository)(nil)
 	_ PartRepositoryInterface                = (*PartRepository)(nil)
 	_ PartRepositoryInterface                = (*NoOpPartRepository)(nil)
+	_ PartReleasedRepositoryInterface        = (*PartReleasedRepository)(nil)
+	_ PartReleasedRepositoryInterface        = (*NoOpPartReleasedRepository)(nil)
 	_ RecipeRepositoryInterface              = (*RecipeRepository)(nil)
 	_ RecipeRepositoryInterface              = (*NoOpRecipeRepository)(nil)
 	_ RecipeCommitRepositoryInterface        = (*RecipeCommitRepository)(nil)

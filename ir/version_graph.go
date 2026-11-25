@@ -71,12 +71,18 @@ type GraphMemberConfig struct {
 	// row's entityKey. Nil means the kind has no parent.
 	Parent *GraphParent `json:"parent,omitempty" yaml:"parent,omitempty"`
 
-	// Order names the Int64 field that orders siblings. Empty means the
-	// kind is unordered.
+	// Order names the field that orders siblings: a Generic.Int64, or a
+	// string that holds an order key (D137). Empty means the kind is
+	// unordered.
 	Order string `json:"order,omitempty" yaml:"order,omitempty"`
 
 	// Singleton allows at most one live row of the kind per ref.
 	Singleton bool `json:"singleton,omitempty" yaml:"singleton,omitempty"`
+
+	// Released keeps the rows of each root's released tree of the kind in
+	// a table of their own, <Member>Released, which a release rewrites
+	// (D139). The loader adds the table; see [TypeDef.ReleasedOf].
+	Released bool `json:"released,omitempty" yaml:"released,omitempty"`
 }
 
 // GraphParent is the containment edge of a graph member: the field Key

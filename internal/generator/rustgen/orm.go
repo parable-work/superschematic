@@ -122,6 +122,14 @@ type ORMTable struct {
 	// its uses that have operations, each typed.
 	Behaviors bool
 	Uses      []ORMUse
+
+	// ReadOnly is a table the repositories only read (D139): one that holds
+	// a graph member's released rows (ir.TypeDef.ReleasedOf), which the
+	// graph's release owns. Its repository has the reads and no write, and
+	// orm.rs writes no Create and no Update of it. ReleasedOf is that
+	// member, which the repository's doc names.
+	ReadOnly   bool
+	ReleasedOf string
 }
 
 // ORMMember is a member of one of a table's types.
@@ -399,6 +407,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 		if td := schema.Types[t.Type]; td != nil {
 			typed.Doc = codegen.DocText(td.Description, td.Comment)
+			typed.ReadOnly, typed.ReleasedOf = td.ReleasedOf != "", td.ReleasedOf
 		}
 		table := ormTable{
 			Name:       t.Type,
@@ -481,7 +490,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			ORMMember{Name: "any_of", Rename: "anyOf", Type: "Vec<" + t.Type + "Filter>", Doc: "The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.", EmptyList: true},
 		)
 		// The key's members, for an update that names who made it.
-		if c := t.AuditColumn(sqlutil.AuditUpdatedBy); c != nil {
+		if c := t.AuditColumn(sqlutil.AuditUpdatedBy); c != nil && !typed.ReadOnly {
 			typed.Update = append(typed.Update, ORMMember{Name: toRustFieldName(c.Field), Rename: renameOf(c.Field), Type: uuidType, Doc: "Who made the update, the acting user unless set.", Optional: true})
 		}
 
@@ -708,14 +717,16 @@ func (t *ORMTable) add(c sqlutil.ColumnModel, column ormColumn, member ORMMember
 	}
 	t.Row = append(t.Row, row)
 
+	// A table the repositories only read has no create and no update
+	// (D139).
 	owned := c.Def.Owned()
-	insertable := !c.Internal && c.Audit == "" && !owned
+	insertable := !c.Internal && c.Audit == "" && !owned && !t.ReadOnly
 	if insertable {
 		create := member
 		create.Optional = !c.Required || column.Auto || c.Key || len(column.Default) > 0
 		t.Create = append(t.Create, create)
 	}
-	if !c.Key && c.Audit == "" && !c.Internal && !owned {
+	if !c.Key && c.Audit == "" && !c.Internal && !owned && !t.ReadOnly {
 		update := member
 		update.Optional = true
 		if nullable {
@@ -854,7 +865,12 @@ func checkOperationNames(output *ModuleOutput) error {
 		methods[name] = "the repositories"
 	}
 	for _, table := range output.ORM.Tables {
-		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "Repository"} {
+		suffixes := []string{"Row", "Create", "Update", "Filter", "Repository"}
+		if table.ReadOnly {
+			// A table that is only read has no Create and no Update (D139).
+			suffixes = []string{"Row", "Filter", "Repository"}
+		}
+		for _, suffix := range suffixes {
 			types[table.Type+suffix] = "the repository of " + table.Type
 		}
 		methods[table.Fn] = "the repository of " + table.Type

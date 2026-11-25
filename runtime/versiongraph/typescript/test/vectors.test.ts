@@ -233,6 +233,7 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   kind: req(same),
   table: req(same),
   historyTable: req(same),
+  releasedTable: opt(same),
   key: req(same),
   id: req(same),
   ref: req(same),

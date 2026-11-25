@@ -128,7 +128,9 @@ export function makeNote(overrides?: Partial<Note>): Note {
 
 /**
  * Part - A part of the recipe's write-up, nested under another part. Its rank is
- * a string order key, so Arrange places it among its siblings.
+ * a string order key, so Arrange places it among its siblings, and the
+ * parts a recipe has released are kept in a table of their own, with the
+ * index a reader of them uses.
  */
 export interface Part {
   id?: IdentityUUID | null;
@@ -160,6 +162,24 @@ export const PartDefaults: Partial<Part> = {
  */
 export function makePart(overrides?: Partial<Part>): Part {
   return { ...PartDefaults, ...(overrides || {}) } as Part;
+}
+
+/**
+ * PartReleased - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+ */
+export interface PartReleased {
+  id?: IdentityUUID | null;
+  /** The root whose released tree holds the row. */
+  recipe: Recipe;
+  /** The entity's logical identity, as its rows on every ref hold it. */
+  entityKey: IdentityUUID;
+  parentKey?: IdentityUUID | null;
+  rank: string;
+  heading: string;
+  /** The released commit that last wrote the row. */
+  commit: RecipeCommit;
+  /** That commit's sequence: the published version that last changed the entity. */
+  sequence: GenericInt64;
 }
 
 /**

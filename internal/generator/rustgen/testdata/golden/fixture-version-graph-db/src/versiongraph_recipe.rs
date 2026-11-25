@@ -131,6 +131,7 @@ pub const RECIPE_GRAPH_DESCRIPTOR: &str = r#"{
       "kind": "part",
       "table": "part",
       "historyTable": "part_history",
+      "releasedTable": "part_released",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",

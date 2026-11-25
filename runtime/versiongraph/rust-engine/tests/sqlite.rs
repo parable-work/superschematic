@@ -2,6 +2,7 @@
 //! only in passing: the version fences of refs and release pointers, a taken
 //! name and a discarded ref's name free again, the history it writes, STRICT
 //! tables and foreign keys, two graphs in one file, the name function, the
+//! released table a graph has only with a kind that keeps its released rows, the
 //! clock, its ids, the write lock a second connection waits on, a dropped
 //! transaction, the caller's transaction, an operation run over a storage
 //! it borrows with no executor, arrange's arguments and a typed arrange
@@ -28,7 +29,8 @@ use superschematic_versiongraph::Op;
 use superschematic_versiongraph_engine::canonical;
 use superschematic_versiongraph_engine::sqlite::{self, Client, Rusqlite, SqlValue, SqliteStorage};
 use superschematic_versiongraph_engine::storage::{
-    NewCommit, NewRef, Patch, Pin, RefUpdate, ReleaseWrite, RowWrite, SnapshotEntry, Storage, Tx,
+    NewCommit, NewRef, Patch, Pin, RefUpdate, ReleaseWrite, ReleasedWrite, RowWrite, SnapshotEntry,
+    Storage, Tx,
 };
 use superschematic_versiongraph_engine::{
     Commit, CommitOptions, Edits, Engine, Error, KindEdits, Options, Ref, SweepOptions, TreeResult,
@@ -1123,7 +1125,7 @@ async fn every_table_is_strict_and_refuses_a_value_of_the_wrong_type() {
     .expect_err("a text time is refused");
     // SQLITE_CONSTRAINT_DATATYPE.
     assert_eq!(code(&error), Some(3091), "{error}");
-    for table in sqlite::TABLES {
+    for table in sqlite::TABLES.into_iter().chain([sqlite::RELEASED_TABLE]) {
         let name = sqlite::default_table_name(table);
         let sql = select(
             &s.client,
@@ -1207,6 +1209,13 @@ async fn foreign_keys_check_each_of_the_layouts_edges_on_a_connection_the_adapte
             ref_id,
             Box::new(|t| {
                 format!("INSERT INTO \"graph_member\" (id, graph, kind, entity_key, ref_id, root_id, tombstone, _version, data) VALUES ('{}', 'recipe', 'step', '{}', '{t}', 'Bread', 0, 1, '{{}}')", fresh(), fresh())
+            }),
+        ),
+        (
+            "a released row's commit",
+            &commit,
+            Box::new(|t| {
+                format!("INSERT INTO \"graph_released\" (graph, kind, root_id, entity_key, commit_id, sequence, data) VALUES ('recipe', 'part', 'Bread', '{}', '{t}', 1, '{{}}')", fresh())
             }),
         ),
     ];
@@ -1620,7 +1629,13 @@ async fn the_name_function_names_every_table_and_index() {
         .filter(|o| text(&o[0]) == "table")
         .map(|o| text(&o[1]))
         .collect();
-    let mut want: Vec<String> = sqlite::TABLES.iter().map(|t| format!("vg_{t}")).collect();
+    // The fixture has a kind that keeps its released rows, so the released
+    // table is there too.
+    let mut want: Vec<String> = sqlite::TABLES
+        .iter()
+        .chain([&sqlite::RELEASED_TABLE])
+        .map(|t| format!("vg_{t}"))
+        .collect();
     want.sort();
     assert_eq!(tables, want);
     let named = Regex::new("^vg_[a-z_]+$").expect("pattern");
@@ -1661,7 +1676,9 @@ async fn the_name_function_names_every_table_and_index() {
     // default's start with graph_.
     let statement = Regex::new(r#"^CREATE (UNIQUE )?(TABLE|INDEX) IF NOT EXISTS "graph_[a-z_]+" "#)
         .expect("pattern");
-    let statements = sqlite::layout(&sqlite::default_table_name).expect("the layout");
+    let mut statements = sqlite::layout(&sqlite::default_table_name).expect("the layout");
+    statements
+        .extend(sqlite::released_layout(&sqlite::default_table_name).expect("the released layout"));
     for sql in &statements {
         assert!(statement.is_match(sql), "{sql}");
     }
@@ -1674,7 +1691,158 @@ async fn the_name_function_names_every_table_and_index() {
             "the table name function named",
             &sqlite::layout(&|_: &str| bad.to_owned()),
         );
+        refused(
+            &format!("a released table named {bad:?}"),
+            "the table name function named",
+            &sqlite::released_layout(&|_: &str| bad.to_owned()),
+        );
     }
+}
+
+/// The released table (D139) is apart from the layout's nine: a graph has
+/// it only when a kind of its descriptor names a `releasedTable`. For any
+/// other graph the adapter gives no statement for it, creates no such
+/// table, never asks its name function for one, and refuses a write of
+/// released rows; and a release reads and writes nothing of it.
+#[tokio::test]
+async fn a_graph_has_the_released_table_only_with_a_kind_that_keeps_its_released_rows() {
+    // A name function that names the layout's nine tables and their indexes
+    // alone, as a host whose migrations hold those nine does.
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let names = |asked: &Arc<Mutex<Vec<String>>>| -> sqlite::TableName {
+        let asked = Arc::clone(asked);
+        Arc::new(move |local: &str| {
+            asked.lock().expect("asked").push(local.to_owned());
+            if local == sqlite::RELEASED_TABLE {
+                String::new()
+            } else {
+                format!("vg_{local}")
+            }
+        })
+    };
+    let with = |descriptor: &str| {
+        sqlite::Adapter::new(
+            descriptor,
+            sqlite::Options {
+                table_name: Some(names(&asked)),
+                ..options()
+            },
+        )
+    };
+    refused(
+        "the fixture's adapter under a function with no name for the released table",
+        "the table name function named \"released\"",
+        &with(&descriptor()),
+    );
+    let mut plain = descriptor_value();
+    for kind in plain["kinds"].as_array_mut().expect("kinds") {
+        kind.as_object_mut()
+            .expect("a kind")
+            .remove("releasedTable");
+    }
+    let plain = plain.to_string();
+    asked.lock().expect("asked").clear();
+    let adapter = Arc::new(with(&plain).expect("an adapter of a graph with no released kind"));
+    assert!(
+        !asked
+            .lock()
+            .expect("asked")
+            .iter()
+            .any(|local| local == sqlite::RELEASED_TABLE),
+        "the name function was asked for the released table"
+    );
+    assert!(adapter.released_layout().is_empty());
+    assert_eq!(
+        sqlite::Adapter::new(&descriptor(), options())
+            .expect("the fixture's adapter")
+            .released_layout(),
+        sqlite::released_layout(&sqlite::default_table_name).expect("the released layout")
+    );
+
+    let client = Arc::new(Rusqlite::new(memory()));
+    adapter
+        .create_tables(&client)
+        .await
+        .expect("create the layout");
+    let tables = select(
+        &client,
+        "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name",
+        &[],
+    )
+    .await;
+    let tables: Vec<String> = tables.iter().map(|row| text(&row[0])).collect();
+    let mut want: Vec<String> = sqlite::TABLES.iter().map(|t| format!("vg_{t}")).collect();
+    want.sort();
+    assert_eq!(tables, want);
+
+    // A release, a move and a release of the commit already released, with
+    // no released table to read or write.
+    let storage = Arc::new(
+        adapter
+            .storage(Arc::clone(&client))
+            .await
+            .expect("bind the client"),
+    );
+    let engine = engine_over(&plain, storage.clone());
+    let mut main = engine
+        .create_primary(COOK, BREAD, "main")
+        .await
+        .expect("main");
+    let mut commits = Vec::new();
+    for heading in ["Mix", "Mix well"] {
+        // A change set of its own for each, from the line's head.
+        let mut draft = engine.branch(COOK, &main.id, heading).await.expect("draft");
+        let part =
+            json!({"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": heading});
+        let saved = engine
+            .save(
+                COOK,
+                &draft.id,
+                draft.version,
+                &upserts(&[("part", vec![part])]),
+            )
+            .await
+            .expect("save");
+        draft = engine
+            .commit(
+                COOK,
+                &draft.id,
+                saved.ref_.version,
+                &CommitOptions::default(),
+            )
+            .await
+            .expect("commit")
+            .ref_;
+        let tagged = CommitOptions {
+            tag: true,
+            ..CommitOptions::default()
+        };
+        let merged = engine
+            .merge(COOK, &draft.id, &main.id, main.version, &[], &tagged)
+            .await
+            .expect("merge");
+        main = merged.ref_;
+        commits.push(merged.commit.expect("a commit").id);
+    }
+    for (version, commit) in [(0, &commits[0]), (1, &commits[1]), (2, &commits[1])] {
+        let release = engine
+            .release(COOK, BREAD, commit, version)
+            .await
+            .expect("release");
+        assert_eq!(release.version, version + 1);
+    }
+    let write = ReleasedWrite {
+        root: BREAD.to_owned(),
+        commit: commits[0].clone(),
+        sequence: 1,
+        replace: true,
+        ..ReleasedWrite::default()
+    };
+    refused(
+        "a write of released rows",
+        "keeps no released table",
+        &transact!(storage, |tx| tx.write_released("part", write).await),
+    );
 }
 
 #[tokio::test]
@@ -2859,18 +3027,21 @@ async fn the_binding_returns_rows_by_position_and_sqlites_extended_result_code()
 }
 
 /// The layout's statements under the default names equal layout.json's,
-/// string for string.
+/// string for string, and the released table's its `released`.
 #[test]
 fn the_layout_is_the_shared_vectors_layout() {
     #[derive(Deserialize)]
     struct Layout {
         statements: Vec<String>,
+        released: Vec<String>,
     }
     let text =
         std::fs::read_to_string(testdata().join("sqlite/layout.json")).expect("read layout.json");
     let want: Layout = serde_json::from_str(&text).expect("layout.json");
     let got = sqlite::layout(&sqlite::default_table_name).expect("the layout");
     assert_eq!(got, want.statements);
+    let got = sqlite::released_layout(&sqlite::default_table_name).expect("the released layout");
+    assert_eq!(got, want.released);
 }
 
 /// A database the TypeScript adapter wrote, loaded with foreign keys off.

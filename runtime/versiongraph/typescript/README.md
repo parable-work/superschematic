@@ -14,7 +14,7 @@ D32 in `docs/DECISIONS.md`).
 | `@superschematic/versiongraph` | The core: `init` and `initSync`, the operations, `VersionGraphError` and the contract's types. Runs in the browser, bun and Node, has no dependencies, and drives the module through its C ABI exports (`vg_alloc`, `vg_<op>`, `vg_free`, `vg_dealloc`) with no generated glue. |
 | `@superschematic/versiongraph/engine` | `Engine` and `SyncEngine`, the storage interfaces (`Storage` and `Tx`, `SyncStorage` and `SyncTx`), the named errors and `errorCode`, `orderKeys`, the canonical rules (`canonicalValue`, `canonicalRow`) and the exact JSON codec they read with (`parseJson`, `stringifyJson`, `JsonNumber`). |
 | `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
-| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
+| `@superschematic/versiongraph/sqlite` | `SqliteAdapter`, its `SqliteClient` interface and `SqliteError`, `sqliteLayout` and `sqliteTables`, `sqliteReleasedLayout` and `sqliteReleasedTable`, `minSqliteVersion`, and `nodeSqlite` and `bunSqlite`, which bind `node:sqlite` and `bun:sqlite`. |
 | `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, the types it returns, and `orderKeys`. |
 
 ## The core
@@ -90,6 +90,22 @@ graph's tree does and returns typed rows, and as
 `orderKeys(before, after, count)`, a method and a function of the entry,
 on the core every facade shares.
 
+`release` also keeps the released rows of each kind whose descriptor names
+a `releasedTable` (D139; `runtime/versiongraph/README.md`, "Released
+rows"). In its transaction it reads the commit the root's release names,
+moves the pointer, diffs that commit's tree against the new one's with the
+core's `diff`, and hands each such kind its part to the adapter's
+`writeReleased(kind, { root, commit, sequence, replace, upsert, delete })`:
+the rows added or changed, with the new commit and its sequence, and the
+keys deleted. A root's first release, and a release of the commit already
+released, set `replace` and write the whole tree. A graph with no such
+kind reads and writes nothing more, and its storage's `writeReleased` is
+never called. The Postgres adapter writes the kind's released table, a
+table of the schema: the kind's root and entity key columns, `commit_id`,
+`sequence`, and its content columns (its `columns` less its role columns
+and `excluded`), each value as `upsertRow` writes it, in one `INSERT ...
+ON CONFLICT` on the root and the entity key.
+
 The operations are written once, as generator functions that yield each
 storage call, and two drivers run them (D32). `Engine` awaits each call
 over `Storage` and `Tx`, whose methods return promises. `SyncEngine` makes
@@ -164,12 +180,23 @@ row lacks as `null`, so the two compare, merge and hash the same.
 `createTables` creates the layout where it is missing, and
 `sqliteLayout(tableName)` returns its statements, one each, with no trigger
 and no transaction control, for a caller that runs its own migrations.
+A graph with a kind that names a `releasedTable` has a tenth table,
+`released` (`sqliteReleasedTable`), which is not among the layout's nine:
+one row per entity of a kind of a root, keyed by `graph`, `kind`, `root_id`
+and `entity_key`, with the `commit_id` and `sequence` of the release that
+wrote it and the kind's content columns as one canonical JSON object,
+`data`, `null` for a column the row lacks. `sqliteReleasedLayout(tableName)`
+returns its one statement, `createTables` runs it for such a graph alone,
+and only that function and such a graph's adapter ask `options.tableName`
+for `released`, so a name function that knows the layout's nine tables
+serves `sqliteLayout` and every other graph. `writeReleased` refuses a
+commit that is another graph's or another root's, as `writeRelease` does.
 `runtime/versiongraph/README.md` ("SQLite") holds the layout and its rules.
 The vectors in `runtime/versiongraph/testdata/sqlite` hold every language's
 SQLite adapter to this one, so a file one writes reads the same in
-another's: the layout's statements under the default names, a database this
-adapter wrote, as SQL text, and what it reads back as through each graph's
-adapter. Their README gives each file's shape.
+another's: the layout's statements and the released table's under the
+default names, a database this adapter wrote, as SQL text, and what it
+reads back as through each graph's adapter. Their README gives each file's shape.
 
 The adapter does what Postgres's history triggers do, in the statements of
 the transaction that changes a row: it sets `_version`, writes each
@@ -232,7 +259,8 @@ holds with every statement held to D16's rules for a behavior's SQL
 bindings (`test/sqlite.test.ts`, over the cases in `test/sqlite-cases.ts`),
 checks the SQLite vectors in `runtime/versiongraph/testdata/sqlite` through
 both bindings (`test/sqlite-vectors.test.ts`, over the checks in
-`test/sqlite-vectors-cases.ts`): `sqliteLayout()` is `layout.json`,
+`test/sqlite-vectors-cases.ts`): `sqliteLayout()` and
+`sqliteReleasedLayout()` are `layout.json`,
 `typescript.sql` reads as `typescript.json`, one graph reads none of
 another's, the file holds every stored form, and the script in
 `test/sqlite-vectors.ts` still writes both files,

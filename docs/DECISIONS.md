@@ -1468,24 +1468,28 @@ Build: the registry and the loader (the set's expansion beside
 
 ## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
 
-What a graph has released is read through `Released` or `Materialize`,
-which walk commits. A member table holds each ref's rows, not the
-released ones, so nothing can index, search, join or page "what is
-published". An application that needs to copies the released rows into a
-table by hand at each release.
+Built: `@graphMember({ released: true })` and the `<Member>Released` table
+the loader adds, with the member's content fields, indexes and its
+relation to the root; the descriptor's `kinds[].releasedTable`; `Release`
+rewriting the root's rows in its transaction, in the four engines, on
+Postgres and on the SQLite layout, which gains an optional tenth table,
+`released`; the scenario `released`; a read-only repository in the Go,
+TypeScript and Rust ORMs; and a `@tableOperation` write of the table
+refused (`docs/src/content/docs/reference/version-graphs.md`, "Released
+rows", and `runtime/versiongraph/README.md`). The table's key is a row id
+of its own with a unique index on the root and the entity key, since a
+table has one key column; `Release` of the commit already released
+rewrites every row of the root, which backfills a member that gains
+`released`; and a released member with an `Encrypted<T>` content field is
+refused. The commit that built it names D139.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@graphMember({ graph, released: true })` adds a table, `<member>_released` (`<Member>Released`): the member's content columns, the root's key, the entity key, and the commit and sequence of the release. Its key is the root and the entity key. It references the root and is deleted with it. It is not `@versioned` and no ref overlays it. | A view over the member's history joined to the release pointer, which no search index covers; a materialized view, which refreshes whole; the application's own copy |
-| `Release` rewrites that root's rows in its own transaction, from the diff between the commit released before and the new one: adds and updates are upserts, deletes are deletes. A first release inserts the tree. | A job that copies after the fact, which readers see late |
-| The table carries what the member declares that a read uses: its `@searchField` fields, its `@index` and `@unique` indexes that name content columns alone, and its vectors. | Declaring them twice |
-| To the ORM it is a table that is read: a repository with reads and lists, projections over it, and `@tableOperation` reads and lists. The repository has no writes. A raw SQL write is not refused; the docs say `Release` owns the rows. | A trigger that refuses writes |
-| The descriptor gains `kinds[].releasedTable`, which the core does not read and a storage adapter does. `Sweep` leaves the table alone. | |
-
-Build: the loader (`internal/loader/versiongraph/expand.go` and its
-check), `graphdesc`, the Postgres and SQLite adapters of the four engines,
-the scenarios, the ORM generators' read-only repository, and the reference
-page.
+Left: the TypeScript repository of a released table is read-only in its
+type alone. `repositories()` in `runtime/http/typescript/src/orm.ts`
+builds one class for every table, so the object still carries the writes;
+it exposes the reads alone when `TableDefinition` takes a `readOnly` flag
+and tsgen writes it. No fixture declares a projection over a released
+table or a `@tableOperation` read or list of one: they go through the
+paths every table has, untested here.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 

@@ -742,6 +742,99 @@ pub fn parse_part(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `PartReleased` declares, by their wire names.
+pub const PART_RELEASED_FIELDS: &[&str] = &["id", "recipe", "entityKey", "parentKey", "rank", "heading", "commit", "sequence"];
+
+/// Validates a JSON value as `PartReleased`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_part_released(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("recipe");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "recipe".to_owned(), nested, validate_recipe);
+        }
+        if rt::is_absent(field) {
+            errors.push("recipe", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("entityKey");
+        errors.set_result("entityKey", scalars::validate_identity_uuid_required(field));
+    }
+    {
+        let field = value.get("parentKey");
+        if !rt::is_absent(field) {
+            errors.set_result("parentKey", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("rank");
+        if rt::is_absent(field) {
+            errors.push("rank", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "rank", field);
+    }
+    {
+        let field = value.get("heading");
+        if rt::is_absent(field) {
+            errors.push("heading", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "heading", field);
+    }
+    {
+        let field = value.get("commit");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "commit".to_owned(), nested, validate_recipe_commit);
+        }
+        if rt::is_absent(field) {
+            errors.push("commit", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("sequence");
+        errors.set_result("sequence", scalars::validate_generic_int64_required(field));
+    }
+    errors
+}
+
+/// Validates a `PartReleased` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_part_released_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_part_released)
+}
+
+/// Prepares a JSON value as `PartReleased`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_part_released` decodes.
+pub fn prepare_part_released(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, PART_RELEASED_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_part_released(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `PartReleased`: `prepare_part_released`, then decodes it.
+pub fn parse_part_released(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::PartReleased, rt::ParseError> {
+    let value = prepare_part_released(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `Recipe` declares, by their wire names.
 pub const RECIPE_FIELDS: &[&str] = &["id", "title", "createdAt", "createdBy"];
 

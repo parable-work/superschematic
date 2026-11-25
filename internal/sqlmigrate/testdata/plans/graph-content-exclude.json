@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
-  "from": "f10deb4b03a7713789fc93fa5f39e36e51574dcb13917450633f1067040ddbed",
-  "hash": "5f62cca9fc8927e33e835ce913820b6628b9b37c69ab76229c5cf06903440d4c",
+  "from": "97aaa5c4f0409baf777a06cc6894443282630824a680b8b943a05f7e3e033e34",
+  "hash": "776ef859b80ef578e3e0105d6d79e4f25766b913f8bd046e381ba4f0c4104cd7",
   "service": "fixture-version-graph-db",
   "steps": [
     {
@@ -21,7 +21,7 @@
       "transactional": true
     }
   ],
-  "to": "d810a1cbaf4db85045037cbd376ad2621632f096db31dabfc14ea19a293ce695",
+  "to": "96b4a09f7afaa96b1903c926d6a7d1ae234328854afde0c10852083faf5e0dc7",
   "toModel": null,
   "version": 1
 }

@@ -1,6 +1,7 @@
 """The Postgres adapter's own rules, which the scenarios do not reach: what
 its constructor refuses, a row with more members than a table has columns,
-a prune that keeps pinned images, a sweep lock that
+what write_released writes into a kind's released table and what it
+refuses, a prune that keeps pinned images, a sweep lock that
 one transaction holds at a time, a ref lock another transaction waits for,
 the version fences of update_ref and discard_ref, and the psycopg client's
 savepoint over a transaction the caller holds, its one transaction at a time
@@ -15,9 +16,10 @@ from typing import Any, Callable, Dict, List, Sequence, TypeVar
 import pytest
 from support import DESCRIPTOR, DSN, Scratch, requires_database
 
+from superschematic_versiongraph.canonical import uuid_canonical
 from superschematic_versiongraph.errors import NameTakenError, VersionConflictError
 from superschematic_versiongraph.postgres import Arg, Conn, PostgresAdapter, QueryResult, psycopg_client
-from superschematic_versiongraph.storage import NewCommit, NewRef, Patch, RefUpdate, RowWrite, Tx
+from superschematic_versiongraph.storage import NewCommit, NewRef, Patch, RefUpdate, ReleasedWrite, RowWrite, Tx
 
 
 def _without(path: List[str]) -> Callable[[Dict[str, Any]], None]:
@@ -88,6 +90,23 @@ def test_upsert_row_refuses_more_columns_than_a_table() -> None:
         store.transact(lambda tx: tx.upsert_row("step", RowWrite("1", "1", json.dumps(members), False, "2")))
 
 
+def test_write_released_refuses_a_kind_without_a_released_table() -> None:
+    """A kind whose descriptor names no released table is refused, and so is
+    a row that is not a JSON object, before any statement runs; a write that
+    names no row and replaces none runs no statement."""
+    store = PostgresAdapter(DESCRIPTOR).storage(_NoStatements())
+    with pytest.raises(ValueError, match='postgres: kind "step" keeps no released table'):
+        store.transact(lambda tx: tx.write_released("step", ReleasedWrite("1", "1", 1, True)))
+    with pytest.raises(ValueError, match='postgres: unknown kind "stew"'):
+        store.transact(lambda tx: tx.write_released("stew", ReleasedWrite("1", "1", 1, True)))
+    with pytest.raises(ValueError, match="postgres: a released part row is a JSON object"):
+        store.transact(lambda tx: tx.write_released("part", ReleasedWrite("1", "1", 1, False, ["[]"])))
+    with pytest.raises(ValueError, match="postgres: released part column parent_key: "):
+        row = '{"entity_key": "Mix", "parent_key": "not a uuid", "rank": "V", "heading": "Mix"}'
+        store.transact(lambda tx: tx.write_released("part", ReleasedWrite("1", "1", 1, False, [row])))
+    store.transact(lambda tx: tx.write_released("part", ReleasedWrite("1", "1", 1)))
+
+
 ROOT = "00000000-0000-0000-0000-000000000001"
 INSERT_ROOT = (
     f"INSERT INTO recipe (id, title, created_by) VALUES ('{ROOT}', 'Bread', '00000000-0000-0000-0000-000000000002')"
@@ -97,6 +116,98 @@ ACTOR = "2"
 
 def _main(tx: Tx, name: str = "main") -> Any:
     return tx.create_ref(NewRef("1", None, None, name, ACTOR))
+
+
+def _part(key: str, heading: str, rank: str = "V", **extra: Any) -> str:
+    """A part row of the fixture, as a release hands it to write_released."""
+    return json.dumps({"entity_key": key, "parent_key": None, "rank": rank, "heading": heading, **extra})
+
+
+@requires_database
+def test_write_released_replaces_upserts_and_deletes_a_roots_rows(scratch_schema: Callable[[str], Scratch]) -> None:
+    # write_released writes a release's rows of one kind of one root into
+    # the kind's released table: with replace it clears the root's rows
+    # first, it removes the entities delete names, and it writes each upsert
+    # by its entity key with the release's commit and sequence, each content
+    # column as the kind's own table takes it. A row it does not name stays
+    # as an earlier release wrote it, and so do another root's rows.
+    scratch = scratch_schema("vg_adapter_py")
+    connection = scratch.connect()
+    connection.execute(INSERT_ROOT)
+    connection.execute(INSERT_ROOT.replace(ROOT, ROOT[:-1] + "3").replace("Bread", "Soup"))
+    storage = PostgresAdapter(DESCRIPTOR).storage(psycopg_client(connection))
+
+    def commits(tx: Tx) -> Any:
+        bread = tx.create_ref(NewRef("1", None, None, "main", ACTOR))
+        soup = tx.create_ref(NewRef("3", None, None, "main", ACTOR))
+        first = tx.insert_commit(NewCommit(bread.root, bread.id, None, "", 0, "h", 1, ACTOR))
+        second = tx.insert_commit(NewCommit(bread.root, bread.id, first.id, "", 0, "h", 2, ACTOR))
+        other = tx.insert_commit(NewCommit(soup.root, soup.id, None, "", 0, "h", 1, ACTOR))
+        return bread, first.id, second.id, other.id
+
+    bread, first, second, other = storage.transact(commits)
+
+    def write(root: str, commit: str, sequence: int, replace: bool, upsert: List[str] = [], delete: List[str] = []) -> None:
+        storage.transact(lambda tx: tx.write_released("part", ReleasedWrite(root, commit, sequence, replace, upsert, delete)))
+
+    def released() -> List[Any]:
+        rows = connection.execute(
+            'SELECT recipe_id::text, entity_key::text, heading, rank, parent_key::text, "sequence", commit_id::text '
+            "FROM part_released ORDER BY recipe_id, heading"
+        ).fetchall()
+        return [
+            (uuid_canonical(r[0]), uuid_canonical(r[1]), r[2], r[3], r[4] and uuid_canonical(r[4]), r[5], uuid_canonical(r[6]))
+            for r in rows
+        ]
+
+    # A first release: the whole tree. A row arrives as the engine read it,
+    # role and excluded columns among its members.
+    whole = json.dumps(
+        {
+            "_version": 3,
+            "deleted_on_ref": False,
+            "entity_key": "Knead",
+            "heading": "Knead",
+            "id": "Row",
+            "parent_key": "Mix",
+            "rank": "V",
+            "recipe_id": "1",
+            "ref_id": bread.id,
+        }
+    )
+    write("1", first, 1, True, [_part("Mix", "Mix", "F"), whole, _part("Bake", "Bake", "k")])
+    write("3", other, 1, True, [_part("Mix", "Make the stock")])
+    soup_rows = [("3", "Mix", "Make the stock", "V", None, 1, other)]
+    assert released() == [
+        ("1", "Bake", "Bake", "k", None, 1, first),
+        ("1", "Knead", "Knead", "V", "Mix", 1, first),
+        ("1", "Mix", "Mix", "F", None, 1, first),
+    ] + soup_rows
+
+    # A later release: a changed row and an added one take its commit and
+    # sequence, a deleted one goes, and the row it does not name stays.
+    write("1", second, 2, False, [_part("Mix", "Mix well", "F"), _part("Rest", "Rest", "c")], ["Bake", "Missing"])
+    assert released() == [
+        ("1", "Knead", "Knead", "V", "Mix", 1, first),
+        ("1", "Mix", "Mix well", "F", None, 2, second),
+        ("1", "Rest", "Rest", "c", None, 2, second),
+    ] + soup_rows
+    # A row keeps the id the table gave it when a release writes it again.
+    ids = connection.execute("SELECT count(DISTINCT id), count(*) FROM part_released").fetchall()
+    assert ids == [(4, 4)]
+
+    # A replace writes the rows it is given over whatever the table holds
+    # of the root, and with none leaves the root no row.
+    write("1", first, 1, True, [_part("Rest", "Rest", "c")])
+    assert released() == [("1", "Rest", "Rest", "c", None, 1, first)] + soup_rows
+    write("1", first, 1, True)
+    assert released() == soup_rows
+
+    # A kind that keeps no released table is refused, and writes nothing.
+    with pytest.raises(ValueError, match='postgres: kind "step" keeps no released table'):
+        write_step = ReleasedWrite("1", first, 1, True, ['{"entity_key": "Mix", "position": 1}'])
+        storage.transact(lambda tx: tx.write_released("step", write_step))
+    assert released() == soup_rows
 
 
 @requires_database

@@ -423,7 +423,11 @@ export class VersionGraphFacade<
    * pointer's version: 0 for the root's first release. It writes no member
    * rows, so a rollback is a release to an earlier tagged commit, and the
    * pointer's history is the release log. An untagged commit is
-   * NotTaggedError.
+   * NotTaggedError. For each kind that keeps a released table it rewrites
+   * the root's rows there in the same transaction: the entities this commit
+   * adds or changes against the one released before, with this commit and
+   * its sequence, less the ones it deletes; a first release, and a release
+   * of the commit already released, write the whole tree.
    */
   async release(root: string, commit: string, version: number): Promise<Release> {
     return (await this.#run()).release(this.#actor, root, commit, version);

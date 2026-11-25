@@ -27,6 +27,14 @@ are two filters of an allOf (D99).
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
+{{- if .ORM.ReadOnlyTables}}
+
+The table of a graph member's released rows (D139), <Member>Released, has
+a repository of reads alone, a table's reads and none of its writes: the
+graph's release owns the rows and rewrites them, so the repository has no
+create, update, upsert or delete, and the table no create, update or
+unique key type. A raw SQL write of its rows is never refused.
+{{- end}}
 {{- if .ORM.Rules}}
 
 A table that composes behaviors (D103), status: Workflow<{ ... }> or
@@ -104,6 +112,7 @@ export interface {{.Type}}Row {
   {{.Member}}: {{.RowType}}{{if .Nullable}} | null{{end}};
 {{- end}}
 }
+{{- if not .ReadOnly}}
 
 /** What a create of a row of {{.Type}} sets; a member left unset takes its column's default, or the schema's. */
 export interface {{.Type}}Create {
@@ -122,8 +131,9 @@ export interface {{.Type}}Update {
   {{.Member}}?: {{.Type}};
 {{- end}}
 }
+{{- end}}
 
-/** The rows of {{.Type}} a read or a write finds: each member set is one condition, all of them ANDed. */
+/** The rows of {{.Type}} a read{{if not .ReadOnly}} or a write{{end}} finds: each member set is one condition, all of them ANDed. */
 export interface {{.Type}}Filter {
 {{- range .FilterColumns}}
   {{.Member}}?: {{.FilterType}};
@@ -151,9 +161,11 @@ export type {{.Type}}OrderField = {{tsUnion .OrderFields}};
 
 /** The members findPage orders rows of {{.Type}} by (D60, amended); ties break by {{.Key}}. */
 export type {{.Type}}SortField = {{tsUnion .SortFields}};
+{{- if not .ReadOnly}}
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type {{.Type}}UniqueKey ={{range $i, $k := .UniqueKeys}}{{if $i}} |{{end}} {{$k.Tuple}}{{end}};
+{{- end}}
 
 /** The position of a row of {{.Type}} in a findPage order: its {{.Key}}. */
 export interface {{.Type}}PageKey {
@@ -217,6 +229,12 @@ export interface {{.Type}}Uses {
 {{- end}}
 }
 {{- end}}
+{{- if .ReadOnly}}
+
+/** The repository of {{.Type}}, with reads alone: its rows are the released rows of {{.ReleasedOf}}, which the graph's release owns and rewrites (D139). */
+export type {{.Type}}Repository = ReadRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}OrderField, {{.Type}}SortField, {{.KeyType}}, {{.Type}}PageKey, {{.Type}}Relations>{{if .VectorFields}} &
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}};
+{{- else}}
 
 /** The repository of {{.Type}}{{if .NoUpserts}}, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103){{end}}. */
 export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .SoftDelete}}SoftDeleteRepository{{else}}Repository{{end}}<
@@ -233,8 +251,9 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
   {{.Type}}Preconditions{{end}}
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
   VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
+{{- end}}
 
-/** The {{.Table}} table, as the runtime reads and writes it. */
+/** The {{.Table}} table, as the runtime reads{{if not .ReadOnly}} and writes{{end}} it. */
 export const {{.Const}}: TableDefinition = {
   name: {{jsonString .Type}},
   table: {{jsonString .Table}},

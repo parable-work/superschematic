@@ -342,12 +342,40 @@ func TestVersionGraphDeclarations(t *testing.T) {
 			want:   `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
 		},
 		{
-			name:   "an order field that is a list of strings",
+			name: "an order field that is a list of strings",
 			mutate: func(s *ir.Schema) {
 				s.Types["Step"].Fields[2].TypeRef.Name = "string"
 				s.Types["Step"].Fields[2].TypeRef.IsArray = true
 			},
 			want: `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
+		},
+		{
+			name:   "a member that keeps its released rows",
+			mutate: func(s *ir.Schema) { s.Types["Step"].GraphMember.Released = true },
+		},
+		{
+			name: "a released member whose table the schema already defines",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Enums["StepReleased"] = &ir.EnumDef{Name: "StepReleased"}
+			},
+			want: `Step: @graphMember released adds StepReleased, which the schema already defines`,
+		},
+		{
+			name: "a released member with a content field its table adds",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "sequence", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true})
+			},
+			want: `Step: field sequence collides with the field @graphMember released adds to StepReleased`,
+		},
+		{
+			name: "a released member with an encrypted content field",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Required: true, EncryptedAtRest: true})
+			},
+			want: `Step: field secret is Encrypted<T>, whose envelope is bound to its row, and @graphMember released would copy it to StepReleased`,
 		},
 		{
 			name:   "an order that names no field",

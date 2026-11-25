@@ -13,8 +13,8 @@ use serde_json::Value;
 use crate::canonical;
 use crate::core::{Change, Conflict, Core, Finding, Resolution, Tree};
 use crate::storage::{
-    Commit, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite, RowWrite,
-    SnapshotEntry, Storage, Tx,
+    Commit, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite, ReleasedWrite,
+    RowWrite, SnapshotEntry, Storage, Tx,
 };
 use crate::Error;
 
@@ -136,8 +136,21 @@ pub(crate) struct KindRoles {
     pub id: String,
     pub tombstone: String,
     pub version: String,
+    /// Set for a kind that keeps the released tree's rows in a table of its
+    /// own (D139), which a release rewrites.
+    #[serde(default, rename = "releasedTable")]
+    pub released_table: Option<String>,
     #[serde(default)]
     pub columns: BTreeMap<String, String>,
+}
+
+impl KindRoles {
+    /// Whether the kind keeps a released table.
+    fn keeps_released(&self) -> bool {
+        self.released_table
+            .as_deref()
+            .is_some_and(|table| !table.is_empty())
+    }
 }
 
 /// One kind's edits of a ref. `upsert` writes each row as the ref's row of
@@ -655,6 +668,14 @@ impl Engine {
     /// release of an earlier tagged commit, and the pointer's history is the
     /// release log. An untagged commit is [`Error::NotTagged`]; another
     /// root's is [`Error::RootMismatch`].
+    ///
+    /// For each kind that keeps a released table (D139) it rewrites the
+    /// root's rows there in the same transaction, from the diff between the
+    /// tree of the commit released before and this one's: an added or
+    /// changed entity is written with this commit and its sequence, and a
+    /// deleted one removed. A root's first release writes the whole tree,
+    /// and so does a release of the commit already released, which rebuilds
+    /// the root's rows.
     pub async fn release(
         &self,
         actor: &str,
@@ -701,6 +722,71 @@ impl Engine {
         self.on(&*self.storage)
             .discard(actor, ref_id, version)
             .await
+    }
+
+    /// Whether any kind keeps a released table.
+    fn keeps_released(&self) -> bool {
+        self.kinds.iter().any(KindRoles::keeps_released)
+    }
+
+    /// Reads the commit `root`'s release names before a release moves it,
+    /// `None` for a root never released, when a kind keeps a released table;
+    /// the engine reads nothing otherwise.
+    async fn released_before(&self, tx: &mut dyn Tx, root: &str) -> Result<Option<String>, Error> {
+        if !self.keeps_released() {
+            return Ok(None);
+        }
+        match tx.read_release(root).await {
+            Ok(held) => Ok(Some(held.commit)),
+            Err(Error::NotFound) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Rewrites the released tables' rows of a commit's root, for a release
+    /// that moved the root's pointer from `before` to `commit`, whose
+    /// sequence is `sequence`.
+    async fn write_released(
+        &self,
+        tx: &mut dyn Tx,
+        before: Option<&str>,
+        commit: &Commit,
+        sequence: i64,
+    ) -> Result<(), Error> {
+        if !self.keeps_released() {
+            return Ok(());
+        }
+        // A first release, and a release of the commit already released,
+        // write the whole tree over whatever the tables hold of the root.
+        let replace = before.is_none_or(|before| before == commit.id);
+        let from = if replace {
+            Tree::new()
+        } else {
+            self.materialize_tree(tx, before).await?
+        };
+        let to = self.materialize_tree(tx, Some(&commit.id)).await?;
+        let changes = self.core.diff(&from, &to)?;
+        for k in self.kinds.iter().filter(|k| k.keeps_released()) {
+            let mut write = ReleasedWrite {
+                root: commit.root.clone(),
+                commit: commit.id.clone(),
+                sequence,
+                replace,
+                ..ReleasedWrite::default()
+            };
+            for change in changes.iter().filter(|change| change.kind == k.name) {
+                if change.operation == "DELETE" {
+                    write.delete.push(change.entity_key.clone());
+                } else {
+                    write.upsert.push(change.row.clone().unwrap_or(Value::Null));
+                }
+            }
+            if !replace && write.delete.is_empty() && write.upsert.is_empty() {
+                continue;
+            }
+            tx.write_released(&k.name, write).await?;
+        }
+        Ok(())
     }
 
     /// Reads a ref. With `expected` set it locks the ref's row and refuses a
@@ -1568,17 +1654,23 @@ impl<'a> EngineOn<'a> {
             if c.root != root {
                 return Err(Error::RootMismatch);
             }
-            if c.sequence.is_none() {
+            let Some(sequence) = c.sequence else {
                 return Err(Error::NotTagged);
-            }
+            };
             self.engine.ensure_snapshot(tx, &c.id, c.snapshot).await?;
-            tx.write_release(ReleaseWrite {
-                root,
-                commit: c.id,
-                version,
-                actor,
-            })
-            .await
+            let before = self.engine.released_before(tx, &root).await?;
+            let release = tx
+                .write_release(ReleaseWrite {
+                    root,
+                    commit: c.id.clone(),
+                    version,
+                    actor,
+                })
+                .await?;
+            self.engine
+                .write_released(tx, before.as_deref(), &c, sequence)
+                .await?;
+            Ok(release)
         }
         .await;
         finish(tx, result).await

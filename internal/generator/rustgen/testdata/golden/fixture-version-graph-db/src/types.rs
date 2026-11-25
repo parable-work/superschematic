@@ -130,7 +130,9 @@ fn default_part_deleted_on_ref() -> bool {
 }
 
 /// A part of the recipe's write-up, nested under another part. Its rank is
-/// a string order key, so Arrange places it among its siblings.
+/// a string order key, so Arrange places it among its siblings, and the
+/// parts a recipe has released are kept in a table of their own, with the
+/// index a reader of them uses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -168,6 +170,28 @@ impl Default for Part {
             version: Default::default(),
         }
     }
+}
+
+/// The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartReleased {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The root whose released tree holds the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    /// The entity's logical identity, as its rows on every ref hold it.
+    #[serde(rename = "entityKey")]
+    pub entity_key: IdentityUUID,
+    #[serde(default, rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The released commit that last wrote the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<RecipeCommit>,
+    /// That commit's sequence: the published version that last changed the entity.
+    pub sequence: GenericInt64,
 }
 
 /// A recipe: the stable identity its steps and ingredients are versioned under.

@@ -19,6 +19,11 @@
 //! chain, and a read stops at the nearest snapshot. [`Engine::sweep`] and
 //! [`Engine::run_sweeper`] are the graph's maintenance.
 //!
+//! A kind whose descriptor names a `releasedTable` keeps the rows of each
+//! root's released tree in that table (D139): a release rewrites them in
+//! its transaction, from the diff between the tree released before and the
+//! new one ([`storage::Tx::write_released`]).
+//!
 //! A kind whose order column is a string holds order keys (D137).
 //! [`Engine::arrange`] puts one parent's children in the order wanted and
 //! writes new keys for the fewest rows it can, and [`order_keys`] makes

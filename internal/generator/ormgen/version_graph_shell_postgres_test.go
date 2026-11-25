@@ -142,6 +142,45 @@ func TestVersionGraphFacadeArranges(t *testing.T) {
 	if _, err := g.Arrange(ctx, *main.Id, main.Version, types.RecipeEntityKind_Part, nil, nil); !errors.Is(err, ErrPrimaryMergeOnly) {
 		t.Fatalf("Arrange on a primary line = %v, want ErrPrimaryMergeOnly", err)
 	}
+
+	// Part keeps its released rows (D139): a release writes them into
+	// part_released, which the ORM reads as a table.
+	if _, err := g.Commit(ctx, *draft.Id, arranged.Ref.Version, RecipeCommitOptions{Message: "parts"}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	merged, err := g.Merge(ctx, *draft.Id, *main.Id, main.Version, nil, RecipeCommitOptions{Message: "parts", Tag: true})
+	if err != nil || merged.Commit == nil {
+		t.Fatalf("Merge = %+v, %v", merged, err)
+	}
+	everyField := &PartReleasedFindOptions{Fields: (PartReleasedFields{}).All()}
+	if rows, _, err := db.PartReleased.FindMany(ctx, nil, everyField); err != nil || len(rows) != 0 {
+		t.Fatalf("before a release part_released holds %d rows, %v", len(rows), err)
+	}
+	if _, err := g.Release(ctx, *recipe.Id, *merged.Commit.Id, 0); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	released, total, err := db.PartReleased.FindMany(ctx, nil, everyField)
+	if err != nil || total != 3 || len(released) != 3 {
+		t.Fatalf("part_released holds %d rows of %d, %v; want 3", len(released), total, err)
+	}
+	got := map[string]string{}
+	for _, row := range released {
+		if row.Sequence != 1 || row.Commit.Id == nil || *row.Commit.Id != *merged.Commit.Id || row.Recipe.Id == nil || *row.Recipe.Id != *recipe.Id {
+			t.Fatalf("a released part names another release or root: %+v", row)
+		}
+		got[row.Heading] = row.Rank
+		if row.Heading == "Bake" && row.EntityKey != bake {
+			t.Fatalf("the released Bake has entity key %v, want %v", row.EntityKey, bake)
+		}
+	}
+	if want := map[string]string{"Bake": "7", "Mix": "F", "Knead": "V"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("part_released holds %v, want %v", got, want)
+	}
+	// The repository reads a released row by its id too.
+	one, err := db.PartReleased.GetOne(ctx, *released[0].Id, nil)
+	if err != nil || one.Heading != released[0].Heading || one.EntityKey != released[0].EntityKey || one.Sequence != 1 {
+		t.Fatalf("GetOne of a released part = %+v, %v; want %+v", one, err, released[0])
+	}
 }
 
 func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {

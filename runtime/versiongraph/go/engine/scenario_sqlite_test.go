@@ -26,7 +26,7 @@ func passTableName(local string) string {
 
 // defaultNames finds each table of the layout under its default name in an
 // sql step's statement.
-var defaultNames = regexp.MustCompile(`\b` + regexp.QuoteMeta(sqlite.DefaultTableName("")) + `(` + strings.Join(sqlite.Tables(), "|") + `)\b`)
+var defaultNames = regexp.MustCompile(`\b` + regexp.QuoteMeta(sqlite.DefaultTableName("")) + `(` + strings.Join(append(sqlite.Tables(), sqlite.ReleasedTable), "|") + `)\b`)
 
 // newSQLiteRunner opens a file of the scenario's own through
 // modernc.org/sqlite, creates the SQLite adapter's layout in it, and builds

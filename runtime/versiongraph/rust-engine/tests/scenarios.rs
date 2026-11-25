@@ -440,7 +440,15 @@ impl Runner {
         connection
             .execute_batch("PRAGMA foreign_keys = ON")
             .expect("turn foreign keys on");
-        for statement in sqlite::layout(&fixed::default_table_name).expect("the layout") {
+        // The released table too: the fixture has a kind that keeps its
+        // released rows.
+        let name = &fixed::default_table_name;
+        let released = sqlite::released_layout(name).expect("the released layout");
+        for statement in sqlite::layout(name)
+            .expect("the layout")
+            .into_iter()
+            .chain(released)
+        {
             connection
                 .execute_batch(&statement)
                 .expect("create the layout");
@@ -458,8 +466,13 @@ impl Runner {
         let schema = PostgresSchema::create(dsn, "vg_rust_fixed_scenario");
         let mut client = schema.connect();
         let mut tx = client.transaction().expect("begin");
-        for statement in
-            fixed::layout(Dialect::Postgres, &fixed::default_table_name).expect("the layout")
+        let name = &fixed::default_table_name;
+        let released =
+            fixed::released_layout(Dialect::Postgres, name).expect("the released layout");
+        for statement in fixed::layout(Dialect::Postgres, name)
+            .expect("the layout")
+            .into_iter()
+            .chain(released)
         {
             tx.batch_execute(&statement).expect("create the layout");
         }

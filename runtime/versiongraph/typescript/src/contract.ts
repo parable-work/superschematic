@@ -65,6 +65,12 @@ export interface KindDescriptor {
   table: string;
   /** The table that holds the kind's history images. */
   historyTable: string;
+  /**
+   * The table that holds the released tree's rows of the kind, which a
+   * storage adapter rewrites at each release; absent for a kind that keeps
+   * none. The core does not read it.
+   */
+  releasedTable?: string;
   /** The entity key column: the logical identity rows are matched on. */
   key: string;
   /** The row id column. */

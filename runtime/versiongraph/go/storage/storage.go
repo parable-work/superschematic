@@ -116,6 +116,13 @@ type Tx interface {
 	// ErrVersionConflict. It returns the pointer as written.
 	WriteRelease(ctx context.Context, write ReleaseWrite) (Release, error)
 
+	// WriteReleased rewrites one kind's rows of a root in the kind's
+	// released table (D139): with Replace it deletes every row of the root
+	// first; it deletes the entities Delete names, then writes each row of
+	// Upsert, by entity key, with the release's commit and sequence. A
+	// kind whose descriptor names no released table is refused.
+	WriteReleased(ctx context.Context, kind string, write ReleasedWrite) error
+
 	// Prune deletes the history images of one kind older than
 	// retentionDays (0 for the kind's declared retention), keeping every
 	// image a patch or a snapshot pins, at most batchSize of them (0 for no
@@ -248,6 +255,20 @@ type CommitNode struct {
 	Parent   string
 	Tagged   bool
 	Snapshot bool
+}
+
+// ReleasedWrite is what a release writes of one kind into its released
+// table: the root, the commit released and its sequence, the canonical
+// rows the release adds or changes, and the entity keys it removes.
+// Replace is set for a root's first release and for a release of the
+// commit already released, which rewrite every row of the root.
+type ReleasedWrite struct {
+	Root     string
+	Commit   string
+	Sequence int64
+	Replace  bool
+	Upsert   []json.RawMessage
+	Delete   []string
 }
 
 // Release is a root's release pointer: the commit it names, fenced by its

@@ -35,6 +35,7 @@ type Database struct {
 	Ingredient          *IngredientRepository
 	Note                *NoteRepository
 	Part                *PartRepository
+	PartReleased        *PartReleasedRepository
 	Recipe              *RecipeRepository
 	RecipeCommit        *RecipeCommitRepository
 	RecipePatch         *RecipePatchRepository
@@ -57,6 +58,7 @@ type Tx struct {
 	Ingredient          *IngredientRepository
 	Note                *NoteRepository
 	Part                *PartRepository
+	PartReleased        *PartReleasedRepository
 	Recipe              *RecipeRepository
 	RecipeCommit        *RecipeCommitRepository
 	RecipePatch         *RecipePatchRepository
@@ -98,6 +100,7 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.Ingredient = &IngredientRepository{db: db}
 	db.Note = &NoteRepository{db: db}
 	db.Part = &PartRepository{db: db}
+	db.PartReleased = &PartReleasedRepository{db: db}
 	db.Recipe = &RecipeRepository{db: db}
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
@@ -130,6 +133,7 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.Ingredient = &IngredientRepository{db: db}
 	db.Note = &NoteRepository{db: db}
 	db.Part = &PartRepository{db: db}
+	db.PartReleased = &PartReleasedRepository{db: db}
 	db.Recipe = &RecipeRepository{db: db}
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
@@ -166,6 +170,11 @@ func (db *Database) GetNoteRepository() NoteRepositoryInterface {
 // GetPartRepository returns the Part repository interface.
 func (db *Database) GetPartRepository() PartRepositoryInterface {
 	return db.Part
+}
+
+// GetPartReleasedRepository returns the PartReleased repository interface.
+func (db *Database) GetPartReleasedRepository() PartReleasedRepositoryInterface {
+	return db.PartReleased
 }
 
 // GetRecipeRepository returns the Recipe repository interface.
@@ -233,6 +242,11 @@ func (tx *Tx) GetPartRepository() PartRepositoryInterface {
 	return tx.Part
 }
 
+// GetPartReleasedRepository returns the PartReleased transaction repository interface.
+func (tx *Tx) GetPartReleasedRepository() PartReleasedRepositoryInterface {
+	return tx.PartReleased
+}
+
 // GetRecipeRepository returns the Recipe transaction repository interface.
 func (tx *Tx) GetRecipeRepository() RecipeRepositoryInterface {
 	return tx.Recipe
@@ -292,6 +306,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.Ingredient = &IngredientRepository{tx: tx, txDB: db}
 	txWrapper.Note = &NoteRepository{tx: tx, txDB: db}
 	txWrapper.Part = &PartRepository{tx: tx, txDB: db}
+	txWrapper.PartReleased = &PartReleasedRepository{tx: tx, txDB: db}
 	txWrapper.Recipe = &RecipeRepository{tx: tx, txDB: db}
 	txWrapper.RecipeCommit = &RecipeCommitRepository{tx: tx, txDB: db}
 	txWrapper.RecipePatch = &RecipePatchRepository{tx: tx, txDB: db}

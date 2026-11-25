@@ -29,10 +29,12 @@
 // A primary line (a ref with no parent) takes writes only from merge: work
 // happens on a change set, which rebase catches up with its parent's head
 // and merge brings back. A root's release pointer names one tagged commit,
-// which release moves and released reads. A commit is snapshotted, its full
-// pin set stored, when it is tagged, released, or snapshotEvery commits past
-// the nearest snapshot on its chain, and materialize stops at the nearest
-// snapshot. sweep and runSweeper are the graph's maintenance.
+// which release moves and released reads; a release also rewrites the root's
+// rows of each kind that keeps a released table (D139). A commit is
+// snapshotted, its full pin set stored, when it is tagged, released, or
+// snapshotEvery commits past the nearest snapshot on its chain, and
+// materialize stops at the nearest snapshot. sweep and runSweeper are the
+// graph's maintenance.
 
 import { CanonicalError, uuidCanonical } from "./canonical.js";
 import type { Descriptor, Finding, OperationName, Take } from "./contract.js";
@@ -233,6 +235,8 @@ interface KindRoles {
   id: string;
   tombstone: string;
   version: string;
+  /** True for a kind that keeps a released table (D139). */
+  released: boolean;
 }
 
 /** What the engine reads of one row. */
@@ -355,6 +359,7 @@ const calls: Calls = {
   commits: call("commits"),
   readRelease: call("readRelease"),
   writeRelease: call("writeRelease"),
+  writeReleased: call("writeReleased"),
   prune: call("prune"),
   discardedRefs: call("discardedRefs"),
   idleDrafts: call("idleDrafts"),
@@ -589,6 +594,13 @@ export class Engine {
    * commit and writes no member rows, so a rollback is a release to an
    * earlier tagged commit, and the pointer's history is the release log. An
    * untagged commit is NotTaggedError; another root's is RootMismatchError.
+   *
+   * For each kind that keeps a released table (D139) it rewrites the root's
+   * rows there in the same transaction, from the diff between the tree of
+   * the commit released before and this one's: an added or changed entity
+   * is written with this commit and its sequence, and a deleted one removed.
+   * A root's first release writes the whole tree, and so does a release of
+   * the commit already released, which rebuilds the root's rows.
    */
   async release(actor: string, root: string, commit: string, version: number): Promise<Release> {
     return this.#transact(this.#ops.release(actor, root, commit, version));
@@ -806,7 +818,7 @@ export class SyncEngine {
     return this.#transact(this.#ops.revert(actor, ref, version, toCommit));
   }
 
-  /** Engine's release: points root's release at a tagged commit of root. */
+  /** Engine's release: points root's release at a tagged commit of root, and rewrites the root's released rows. */
   release(actor: string, root: string, commit: string, version: number): Release {
     return this.#transact(this.#ops.release(actor, root, commit, version));
   }
@@ -864,12 +876,14 @@ class Operations {
   readonly snapshotEvery: number;
   readonly #kinds: KindRoles[];
   readonly #byName: Map<string, KindRoles>;
+  /** Whether any kind keeps a released table. */
+  readonly #keepsReleased: boolean;
 
   constructor(core: VersionGraph, descriptor: string | Descriptor, options: EngineOptions) {
     const text = typeof descriptor === "string" ? descriptor : JSON.stringify(descriptor);
     core.run("validate", `{"descriptor":${text},"tree":{}}`);
     const parsed = JSON.parse(text) as {
-      kinds: { kind: string; key: string; id: string; tombstone: string; version: string }[];
+      kinds: { kind: string; key: string; id: string; tombstone: string; version: string; releasedTable?: string }[];
     };
     this.core = core;
     this.descriptor = text;
@@ -879,7 +893,9 @@ class Operations {
       id: k.id,
       tombstone: k.tombstone,
       version: k.version,
+      released: typeof k.releasedTable === "string" && k.releasedTable !== "",
     }));
+    this.#keepsReleased = this.#kinds.some((k) => k.released);
     this.#byName = new Map(this.#kinds.map((k) => [k.name, k]));
     this.schemaEpoch = options.schemaEpoch ?? 0;
     this.walkCeiling = options.walkCeiling !== undefined && options.walkCeiling > 0 ? options.walkCeiling : DefaultWalkCeiling;
@@ -1114,8 +1130,77 @@ class Operations {
         throw new NotTaggedError();
       }
       yield* this.#ensureSnapshot(tx, c);
-      return yield* tx.writeRelease({ root, commit: c.id, version, actor });
+      const before = yield* this.#releasedBefore(tx, root);
+      const release = yield* tx.writeRelease({ root, commit: c.id, version, actor });
+      yield* this.#writeReleased(tx, before, c);
+      return release;
     });
+  }
+
+  /**
+   * Reads the commit root's release names before a release moves it, null
+   * for a root never released, when a kind keeps a released table; the
+   * engine reads nothing otherwise.
+   */
+  *#releasedBefore(tx: Calls, root: string): Steps<string | null> {
+    if (!this.#keepsReleased) {
+      return null;
+    }
+    try {
+      return (yield* tx.readRelease(root)).commit;
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Rewrites the released tables' rows of a commit's root for a release
+   * that moved the root's pointer from before to commit.
+   */
+  *#writeReleased(tx: Calls, before: string | null, commit: Commit): Steps<void> {
+    if (!this.#keepsReleased) {
+      return;
+    }
+    // A first release, and a release of the commit already released, write
+    // the whole tree over whatever the tables hold of the root.
+    const replace = before === null || before === commit.id;
+    const from = replace ? {} : yield* this.#materialize(tx, before);
+    const to = yield* this.#materialize(tx, commit.id);
+    const changes = this.#diff(from, to);
+    for (const k of this.#kinds) {
+      if (!k.released) {
+        continue;
+      }
+      const upsert: string[] = [];
+      const deleted: string[] = [];
+      for (const change of changes) {
+        if (change.kind !== k.name) {
+          continue;
+        }
+        if (change.operation === "DELETE") {
+          deleted.push(change.entityKey);
+        } else if (change.row === undefined) {
+          throw new Error(`engine: the released ${k.name} ${change.entityKey} has no row`);
+        } else {
+          upsert.push(change.row);
+        }
+      }
+      if (!replace && upsert.length === 0 && deleted.length === 0) {
+        continue;
+      }
+      yield* tx.writeReleased(k.name, {
+        root: commit.root,
+        commit: commit.id,
+        // release refused an untagged commit before it came here.
+        sequence: commit.sequence!,
+        replace,
+        upsert,
+        delete: deleted,
+      });
+    }
   }
 
   released(root: string): Body<ReleasedResult> {

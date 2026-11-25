@@ -121,20 +121,28 @@ type kind struct {
 	exclude       map[string]bool
 	actor         string
 	retentionDays *int
+	// released is set for a kind that keeps its released rows (D139), and
+	// content is the kind's content columns, sorted: what a released row's
+	// data holds.
+	released bool
+	content  []string
 }
 
 // descriptor is what the adapter reads of a graph descriptor.
 type descriptor struct {
 	Version int `json:"version"`
 	Kinds   []struct {
-		Kind      string `json:"kind"`
-		Key       string `json:"key"`
-		ID        string `json:"id"`
-		Ref       string `json:"ref"`
-		Root      string `json:"root"`
-		Tombstone string `json:"tombstone"`
-		Version   string `json:"version"`
-		History   *struct {
+		Kind          string   `json:"kind"`
+		Key           string   `json:"key"`
+		ID            string   `json:"id"`
+		Ref           string   `json:"ref"`
+		Root          string   `json:"root"`
+		Tombstone     string   `json:"tombstone"`
+		Version       string   `json:"version"`
+		Author        string   `json:"author"`
+		Excluded      []string `json:"excluded"`
+		ReleasedTable string   `json:"releasedTable"`
+		History       *struct {
 			RetentionDays *int      `json:"retentionDays"`
 			Exclude       *[]string `json:"exclude"`
 			Actor         string    `json:"actor"`
@@ -208,10 +216,27 @@ func New(raw json.RawMessage, opts Options) (*Adapter, error) {
 			}
 		}
 		sort.Strings(kd.data)
+		// The content columns, as the core reads them: every column that
+		// is not a role column, the author among them, and is not excluded.
+		kd.released = k.ReleasedTable != ""
+		notContent := map[string]bool{k.Author: true}
+		for _, column := range k.Excluded {
+			notContent[column] = true
+		}
+		for _, column := range kd.data {
+			if !notContent[column] {
+				kd.content = append(kd.content, column)
+			}
+		}
 		for _, column := range *k.History.Exclude {
 			kd.exclude[column] = true
 		}
 		a.kinds[k.Kind] = kd
+	}
+	if a.keepsReleased() {
+		if a.t.released, err = nameOf(a.tableName, ReleasedTable); err != nil {
+			return nil, err
+		}
 	}
 	return a, nil
 }
@@ -222,6 +247,13 @@ func (a *Adapter) CreateTables(ctx context.Context, client Client) error {
 	statements, err := Layout(a.tableName)
 	if err != nil {
 		return err
+	}
+	if a.keepsReleased() {
+		released, err := ReleasedLayout(a.tableName)
+		if err != nil {
+			return err
+		}
+		statements = append(statements, released...)
 	}
 	return client.Transact(ctx, func(ctx context.Context, conn Conn) error {
 		// The layout stores no time, but its transaction reads the clock
@@ -237,6 +269,17 @@ func (a *Adapter) CreateTables(ctx context.Context, client Client) error {
 		}
 		return nil
 	})
+}
+
+// keepsReleased reports whether a kind of the graph keeps its released
+// rows, so the graph needs the released table.
+func (a *Adapter) keepsReleased() bool {
+	for _, k := range a.kinds {
+		if k.released {
+			return true
+		}
+	}
+	return false
 }
 
 // Storage binds the adapter to a client. It refuses, in one transaction of
@@ -1503,6 +1546,68 @@ func (t *tx) writeRelease(ctx context.Context, write storage.ReleaseWrite) (stor
 		return storage.Release{}, err
 	}
 	return r.release()
+}
+
+func (t *tx) WriteReleased(ctx context.Context, kindName string, write storage.ReleasedWrite) error {
+	k, err := t.kind(kindName)
+	if err != nil {
+		return err
+	}
+	if err := t.writeReleased(ctx, k, write); err != nil {
+		return fmt.Errorf("sqlite: write the released %s rows: %w", k.name, err)
+	}
+	return nil
+}
+
+func (t *tx) writeReleased(ctx context.Context, k *kind, write storage.ReleasedWrite) error {
+	if !k.released {
+		return fmt.Errorf("kind %q keeps no released table", k.name)
+	}
+	if err := t.requireCommit(ctx, write.Commit, write.Root, "the release's commit"); err != nil {
+		return err
+	}
+	released := t.a.t.released
+	if write.Replace {
+		if _, err := t.conn.Exec(ctx, `DELETE FROM `+released+` WHERE graph = ?1 AND kind = ?2 AND root_id = ?3`, t.a.graph, k.name, write.Root); err != nil {
+			return err
+		}
+	}
+	for _, key := range write.Delete {
+		if _, err := t.conn.Exec(ctx, `DELETE FROM `+released+` WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4`,
+			t.a.graph, k.name, write.Root, key); err != nil {
+			return err
+		}
+	}
+	for _, row := range write.Upsert {
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal(row, &parsed); err != nil || parsed == nil {
+			return fmt.Errorf("a released %s row is a JSON object", k.name)
+		}
+		text, err := canonicalOf(k.columns[k.key], parsed[k.key])
+		if err != nil {
+			return fmt.Errorf("column %s: %w", k.key, err)
+		}
+		var key string
+		if err := json.Unmarshal([]byte(text), &key); err != nil || key == "" {
+			return fmt.Errorf("the released %s row's entity key is a string", k.name)
+		}
+		data := make(map[string]string, len(k.content))
+		for _, column := range k.content {
+			data[column] = "null"
+			if value, ok := parsed[column]; ok {
+				if data[column], err = canonicalOf(k.columns[column], value); err != nil {
+					return fmt.Errorf("column %s: %w", column, err)
+				}
+			}
+		}
+		if _, err := t.conn.Exec(ctx, `INSERT INTO `+released+` (graph, kind, root_id, entity_key, commit_id, sequence, data) `+
+			`VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET `+
+			`commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data`,
+			t.a.graph, k.name, write.Root, key, write.Commit, write.Sequence, writeObject(data)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *tx) DiscardedRefs(ctx context.Context, grace time.Duration) ([]storage.Ref, error) {

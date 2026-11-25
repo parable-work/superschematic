@@ -122,6 +122,12 @@ pub trait Tx: Send {
     /// already exists when version is 0, is [`Error::VersionConflict`]. It
     /// returns the pointer as written.
     async fn write_release(&mut self, write: ReleaseWrite) -> Result<Release, Error>;
+    /// Rewrites one kind's rows of a root in the kind's released table
+    /// (D139): with `replace` it deletes every row of the root first; it
+    /// deletes the entities `delete` names, then writes each row of
+    /// `upsert`, by entity key, with the release's commit and sequence. A
+    /// kind whose descriptor names no released table is refused.
+    async fn write_released(&mut self, kind: &str, write: ReleasedWrite) -> Result<(), Error>;
 
     /// Deletes the history images of one kind older than `retention_days`
     /// (0 for the kind's declared retention), keeping every image a patch or
@@ -298,4 +304,19 @@ pub struct ReleaseWrite {
     pub commit: String,
     pub version: i64,
     pub actor: String,
+}
+
+/// What a release writes of one kind into its released table: the root, the
+/// commit released and its sequence, the canonical rows the release adds or
+/// changes, and the entity keys it removes. `replace` is set for a root's
+/// first release and for a release of the commit already released, which
+/// rewrite every row of the root.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReleasedWrite {
+    pub root: String,
+    pub commit: String,
+    pub sequence: i64,
+    pub replace: bool,
+    pub upsert: Vec<Value>,
+    pub delete: Vec<String>,
 }

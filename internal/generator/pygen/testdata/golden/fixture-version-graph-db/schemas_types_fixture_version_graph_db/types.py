@@ -886,7 +886,9 @@ class Note(BaseModel):
 class Part(BaseModel):
     """
     A part of the recipe's write-up, nested under another part. Its rank is
-# a string order key, so Arrange places it among its siblings.
+# a string order key, so Arrange places it among its siblings, and the
+# parts a recipe has released are kept in a table of their own, with the
+# index a reader of them uses.
     """
 
     model_config = ConfigDict(
@@ -1142,6 +1144,260 @@ class Part(BaseModel):
         return self.model_copy(update={
             "recipe": self.recipe.mask_secrets() if self.recipe is not None else None,
             "ref": self.ref.mask_secrets() if self.ref is not None else None,
+        })
+
+class PartReleased(BaseModel):
+    """
+    The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The root whose released tree holds the row.
+    recipe: Optional[Recipe] = Field(default=None, alias="recipe", serialization_alias="recipe")
+
+    # The entity's logical identity, as its rows on every ref hold it.
+    entity_key: IdentityUUID = Field(..., alias="entityKey", serialization_alias="entityKey")
+
+    parent_key: Optional[IdentityUUID] = Field(default=None, alias="parentKey", serialization_alias="parentKey")
+
+    rank: str = Field(..., alias="rank", serialization_alias="rank")
+
+    heading: str = Field(..., alias="heading", serialization_alias="heading")
+
+    # The released commit that last wrote the row.
+    commit: Optional[RecipeCommit] = Field(default=None, alias="commit", serialization_alias="commit")
+
+    # That commit's sequence: the published version that last changed the entity.
+    sequence: GenericInt64 = Field(..., alias="sequence", serialization_alias="sequence")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate recipe
+        if self.recipe is not None:
+            try:
+                TypeAdapter(Recipe).validate_python(self.recipe)
+            except PydanticValidationError as e:
+                errors.add_field_error("recipe", "invalid", str(e))
+
+        _add_model_errors(errors, "recipe", self.recipe, by_alias)
+
+        # Validate entityKey
+        if self.entity_key is None:
+            errors.add_field_error("entity_key", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+                errors.add_field_error("entity_key", "pattern", "invalid format")
+
+        # Validate parentKey
+        if self.parent_key is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.parent_key), re.ASCII) is None:
+                errors.add_field_error("parent_key", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "parent_key" or key.startswith("parent_key[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.parent_key)
+                except PydanticValidationError as e:
+                    errors.add_field_error("parent_key", "invalid", str(e))
+
+        # Validate rank
+        if self.rank is None:
+            errors.add_field_error("rank", "required", "required field")
+
+        # Validate heading
+        if self.heading is None:
+            errors.add_field_error("heading", "required", "required field")
+
+        # Validate commit
+        if self.commit is not None:
+            try:
+                TypeAdapter(RecipeCommit).validate_python(self.commit)
+            except PydanticValidationError as e:
+                errors.add_field_error("commit", "invalid", str(e))
+
+        _add_model_errors(errors, "commit", self.commit, by_alias)
+
+        # Validate sequence
+        if self.sequence is None:
+            errors.add_field_error("sequence", "required", "required field")
+        else:
+
+            if float(self.sequence) < -9007199254740991:
+                errors.add_field_error("sequence", "min", "must be at least -9007199254740991")
+            if float(self.sequence) > 9007199254740991:
+                errors.add_field_error("sequence", "max", "must be at most 9007199254740991")
+
+        if by_alias:
+            return errors._with_field_names({
+                "entity_key": "entityKey",
+                "parent_key": "parentKey",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "PartReleased":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "PartReleased":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "PartReleased":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "PartReleased":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "PartReleased":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "PartReleased":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "PartReleased":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "recipe": self.recipe.mask_secrets() if self.recipe is not None else None,
+            "commit": self.commit.mask_secrets() if self.commit is not None else None,
         })
 
 class Recipe(BaseModel):
