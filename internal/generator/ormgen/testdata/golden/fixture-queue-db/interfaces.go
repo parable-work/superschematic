@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyOrderRepositoryInterface is the reads of OrderRepositoryInterface (D150).
+type ReadOnlyOrderRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderGetOptions) (*types.Order, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Order, error)
+	FindOne(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) (*types.Order, error)
+	FindMany(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) ([]*types.Order, int, error)
+	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
+}
+
 // OrderRepositoryInterface defines the contract for Order data access.
 type OrderRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderGetOptions) (*types.Order, error)
@@ -26,6 +35,15 @@ type OrderRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *OrderFilter) (int, error)
+}
+
+// ReadOnlyOrderLineRepositoryInterface is the reads of OrderLineRepositoryInterface (D150).
+type ReadOnlyOrderLineRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderLineGetOptions) (*types.OrderLine, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error)
+	FindOne(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) (*types.OrderLine, error)
+	FindMany(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) ([]*types.OrderLine, int, error)
+	FindPage(ctx context.Context, filter *OrderLineFilter, opts *OrderLinePageOptions) (*OrderLinePage, error)
 }
 
 // OrderLineRepositoryInterface defines the contract for OrderLine data access.
@@ -46,6 +64,15 @@ type OrderLineRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *OrderLineFilter) (int, error)
 }
 
+// ReadOnlyProductRepositoryInterface is the reads of ProductRepositoryInterface (D150).
+type ReadOnlyProductRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProductGetOptions) (*types.Product, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Product, error)
+	FindOne(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) (*types.Product, error)
+	FindMany(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) ([]*types.Product, int, error)
+	FindPage(ctx context.Context, filter *ProductFilter, opts *ProductPageOptions) (*ProductPage, error)
+}
+
 // ProductRepositoryInterface defines the contract for Product data access.
 type ProductRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProductGetOptions) (*types.Product, error)
@@ -64,15 +91,44 @@ type ProductRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *ProductFilter) (int, error)
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
+	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
+	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
+	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
+	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetOrderRepository() OrderRepositoryInterface
+	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
+	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -81,8 +137,11 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetOrderRepository() OrderRepositoryInterface
+	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
+	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -124,9 +183,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -136,6 +216,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -157,11 +247,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetOrderRepository() OrderRepositoryInterface {
 	return db.Order
 }
 
+func (db *NoOpDatabase) GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface {
+	return db.Order
+}
+
 func (tx *NoOpTx) GetOrderRepository() OrderRepositoryInterface {
+	return tx.Order
+}
+
+func (tx *NoOpTx) GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface {
 	return tx.Order
 }
 
@@ -235,7 +338,15 @@ func (db *NoOpDatabase) GetOrderLineRepository() OrderLineRepositoryInterface {
 	return db.OrderLine
 }
 
+func (db *NoOpDatabase) GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface {
+	return db.OrderLine
+}
+
 func (tx *NoOpTx) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return tx.OrderLine
+}
+
+func (tx *NoOpTx) GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface {
 	return tx.OrderLine
 }
 
@@ -309,7 +420,15 @@ func (db *NoOpDatabase) GetProductRepository() ProductRepositoryInterface {
 	return db.Product
 }
 
+func (db *NoOpDatabase) GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface {
+	return db.Product
+}
+
 func (tx *NoOpTx) GetProductRepository() ProductRepositoryInterface {
+	return tx.Product
+}
+
+func (tx *NoOpTx) GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface {
 	return tx.Product
 }
 
@@ -380,14 +499,24 @@ func (r *NoOpProductRepository) DeleteMany(_ context.Context, _ *ProductFilter) 
 }
 
 var (
-	_ DatabaseInterface            = (*Database)(nil)
-	_ DatabaseInterface            = (*NoOpDatabase)(nil)
-	_ TxInterface                  = (*Tx)(nil)
-	_ TxInterface                  = (*NoOpTx)(nil)
-	_ OrderRepositoryInterface     = (*OrderRepository)(nil)
-	_ OrderRepositoryInterface     = (*NoOpOrderRepository)(nil)
-	_ OrderLineRepositoryInterface = (*OrderLineRepository)(nil)
-	_ OrderLineRepositoryInterface = (*NoOpOrderLineRepository)(nil)
-	_ ProductRepositoryInterface   = (*ProductRepository)(nil)
-	_ ProductRepositoryInterface   = (*NoOpProductRepository)(nil)
+	_ DatabaseInterface                    = (*Database)(nil)
+	_ DatabaseInterface                    = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface            = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface            = (*NoOpDatabase)(nil)
+	_ TxInterface                          = (*Tx)(nil)
+	_ TxInterface                          = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                  = (*Tx)(nil)
+	_ ReadOnlyTxInterface                  = (*NoOpTx)(nil)
+	_ OrderRepositoryInterface             = (*OrderRepository)(nil)
+	_ OrderRepositoryInterface             = (*NoOpOrderRepository)(nil)
+	_ ReadOnlyOrderRepositoryInterface     = (*OrderRepository)(nil)
+	_ ReadOnlyOrderRepositoryInterface     = (*NoOpOrderRepository)(nil)
+	_ OrderLineRepositoryInterface         = (*OrderLineRepository)(nil)
+	_ OrderLineRepositoryInterface         = (*NoOpOrderLineRepository)(nil)
+	_ ReadOnlyOrderLineRepositoryInterface = (*OrderLineRepository)(nil)
+	_ ReadOnlyOrderLineRepositoryInterface = (*NoOpOrderLineRepository)(nil)
+	_ ProductRepositoryInterface           = (*ProductRepository)(nil)
+	_ ProductRepositoryInterface           = (*NoOpProductRepository)(nil)
+	_ ReadOnlyProductRepositoryInterface   = (*ProductRepository)(nil)
+	_ ReadOnlyProductRepositoryInterface   = (*NoOpProductRepository)(nil)
 )

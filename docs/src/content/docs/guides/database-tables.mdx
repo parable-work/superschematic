@@ -1637,6 +1637,15 @@ express: `Exec` for a write, and `Query` for a read such as a keyset-paged
 join across tables. `Query` returns pgx rows, which the caller closes; the
 no-op transaction returns none.
 
+In Go, the database takes a raw read too, outside any transaction:
+`db.Query(ctx, sql, args...)` returns pgx rows, and `db.QueryRow(ctx, sql,
+args...)` one row, whose `Scan` is `pgx.ErrNoRows` when the read finds
+none. Each runs one statement on the pool, so it saves the `BEGIN` and
+`COMMIT` a transaction sends. A read that needs what an earlier statement
+set, such as a transaction-local `set_config`, or several reads that must
+agree, belongs in a transaction. The server's error and the context's
+come back as pgx returns them. The no-op database reads no rows.
+
 `TransactionWith(ctx, orm.TxOptions{Isolation: orm.Serializable, ReadOnly:
 true}, fn)` begins at an isolation level, `ReadCommitted`, the default,
 `RepeatableRead` or `Serializable`, read only or not:
@@ -1658,6 +1667,59 @@ message commits with the rows ([Queues and workers](/superschematic/guides/queue
 `transaction(fn, { isolation: 'serializable', readOnly: true })` takes the
 same options as `TransactionWith`, and `tx.transaction(fn)` nests a
 savepoint, which a throw rolls back to.
+
+## A read replica
+
+In Go, `ConnectWithPools(primary, replica)` connects the database over two
+pgx pools: `primary`, which takes the writes, and `replica`, a pool of a
+read replica of it (D150). When `replica` is nil or `primary` itself,
+there is no replica. The database's own repositories, raw reads and
+transactions run on `primary`, as they do after `ConnectWithPool`.
+
+- `db.HasReadReplica()` is true when the database has a replica of its
+  own.
+- `db.ReadReplica()` returns the database over the replica's pool, or `db`
+  itself when there is none. Its repositories, declared queries and raw
+  reads run on the replica. A write through it fails as the replica
+  refuses it: Postgres refuses a write on a standby with SQLSTATE `25006`.
+  It returns a `DatabaseInterface`, whose value is a `*Database`.
+- `db.PingReadReplica(ctx)` pings the replica, or the primary when there is
+  none.
+- `db.Close()` closes both pools.
+
+A replica can lag the primary, so a read that must see a write the request
+just made reads on the primary. `Connect` and `ConnectWithPool` take no
+replica, and the no-op database has none: its `ReadReplica` is itself.
+A database with `Encrypted<T>` fields takes its options after the two
+pools and gives both the same keys. The TypeScript repositories have no
+read replica.
+
+### Reads only
+
+A function that only reads takes the database's read-only scope, which
+has no write method, so a write through it does not compile (D150):
+
+- `db.ReadOnly()` returns a `ReadOnlyDatabaseInterface` over the
+  replica, or over the primary when there is none. It has each table's
+  reads, `GetReviewReadOnlyRepository()`, the declared queries,
+  `Query`, `QueryRow`, `Ping` and `ReadOnlyTransaction`.
+- `ReadOnlyReviewRepositoryInterface` is the reads of a table's
+  repository: `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
+  `FindPage`, a versioned table's history reads and a vector field's
+  `Nearest`. The database, a transaction and the no-op ones give it with
+  `GetReviewReadOnlyRepository()`.
+- `db.ReadOnlyTransaction(ctx, fn)` runs `fn` in a transaction on the
+  replica, or the primary when there is none, begun as
+  `TransactionWith`'s `RepeatableRead` and `ReadOnly` options begin it:
+  every read in it sees one snapshot, and Postgres refuses a write in it
+  with SQLSTATE `25006`. `fn` takes a `ReadOnlyTxInterface`: the tables'
+  reads, the declared queries and `Query`. The error `fn` returns comes
+  back after the rollback.
+
+The scope's type refuses a write. Postgres refuses one in a
+`ReadOnlyTransaction`, and on a replica. A raw statement through
+`ReadOnly()` on a database with no replica runs on the primary outside a
+transaction, so Postgres does not refuse a write in it.
 
 ## TypeScript
 

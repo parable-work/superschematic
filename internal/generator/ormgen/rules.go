@@ -516,11 +516,12 @@ var (
 // database.go's, transaction.go's, upsert.go's and rules.go's exported
 // declarations.
 var packageNames = []string{
-	"Database", "Tx", "TxInterface", "DatabaseInterface", "NoOpDatabase", "NoOpTx", "TxOptions",
+	"Database", "Tx", "TxInterface", "DatabaseInterface", "ReadOnlyTxInterface", "ReadOnlyDatabaseInterface",
+	"NoOpDatabase", "NoOpTx", "TxOptions",
 	"IsolationLevel", "UpsertOptions", "UpsertResult", "UpsertStatus", "UpsertInserted", "UpsertUpdated",
 	"UpsertUnchanged", "ErrNotFound", "ErrVersionConflict", "ErrNoUserInContext", "RulesLayout",
 	"WithBehaviorCaller", "WithPreconditions", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
-	"Connect", "ConnectWithPool",
+	"Connect", "ConnectWithPool", "ConnectWithPools",
 }
 
 // attachRules gives the repositories of the schema's tables that compose
@@ -566,6 +567,7 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 		for _, prefix := range repositoryTypePrefixes {
 			names[prefix+repo.TypeName+"Repository"] = "the repository of " + repo.TypeName
 		}
+		names["ReadOnly"+repo.TypeName+"RepositoryInterface"] = "the repository of " + repo.TypeName
 		names["New"+repo.TypeName+"SnapshotUpdate"] = "the repository of " + repo.TypeName
 		names["Parse"+repo.TypeName+"Sort"] = "the repository of " + repo.TypeName
 	}
