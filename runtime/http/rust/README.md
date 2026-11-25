@@ -183,10 +183,11 @@ TypeScript runtimes' (D51):
   the API a request with an `Origin` is, a preflight by the method it asks
   for: a preflight from an origin the policy lists is answered 204 with
   `Access-Control-Allow-Origin`, `-Credentials`, `-Methods`, `-Headers`
-  (`Accept, Authorization, Content-Type`) and `-Max-Age: 600`, and any
-  other request reaches the router, whose answer gets the policy's headers
-  where it set none (`Allow-Origin` and `Allow-Credentials` for a listed
-  origin, `Vary` always). A preflight from an origin the site's policy does
+  (`Accept, Authorization, Content-Type, Idempotency-Key,
+  X-Client-Version`) and `-Max-Age: 600`, and any other request reaches
+  the router, whose answer gets the policy's headers where it set none
+  (`Allow-Origin`, `Allow-Credentials` and `Expose-Headers:
+  Idempotent-Replay, Retry-After` for a listed origin, `Vary` always). A preflight from an origin the site's policy does
   not list reaches the router too, so `identity::CorsLayer` on the API's
   router answers the origins its identity config trusts (D55, amended).
   `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`

@@ -248,6 +248,7 @@ export {
 } from './stackconfig.js';
 export {
   CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   CORS_MAX_AGE,
   CORS_PREFLIGHT_VARY,
   CORS_VARY,
