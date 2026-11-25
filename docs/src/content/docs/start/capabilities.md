@@ -127,6 +127,7 @@ breaks your code, the type checker of each language points at the line.
 | One waiting message per key, or one running | `@queue({ key, onDuplicate: "replace", serialize: true })` | the unique indexes, the enqueue's `ON CONFLICT`, claims that hold a key to one worker | nothing | [Queues and workers](/superschematic/guides/queues/#one-message-per-key) |
 | A message whatever writes a row | `@enqueueOnChange(Queue, { on, fields, when, message })` on a DB table | a trigger on Postgres and SQLite, its migration | nothing | [Queues and workers](/superschematic/guides/queues/#enqueue-on-a-change) |
 | A message for each row already there | `backfill: true` on `@enqueueOnChange`, or `stack queue backfill` | the inserts in the migration step that adds the trigger, or in one run of the command | nothing | [Queues and workers](/superschematic/guides/queues/#backfill) |
+| A field a model fills, and the loop that fills it | `implements Derived<T, { fields, permission }>` on a DB table, and `@deriver({ schemas })` on a class of a TypeScript API | the stale, derive, settle loop as a deployable the stack runs, and a `Derivers` type with a method per derived field, typed by the field | each method: the call of your model | [Stacks](/superschematic/guides/stacks/#derivers) |
 
 ## Files, front ends and clients
 
