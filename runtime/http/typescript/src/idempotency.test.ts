@@ -278,6 +278,26 @@ describe('an @idempotent route', () => {
     expect([replay.status, replay.headers.get('idempotent-replay')]).toEqual([200, 'true']);
   });
 
+  test("answers the work's answer when the store fails to keep it", async () => {
+    const memory = memoryIdempotencyStore();
+    const failing: IdempotencyStore = {
+      ...memory,
+      begin: input => memory.begin(input),
+      abandon: (lookup, startedAt) => memory.abandon(lookup, startedAt),
+      sweep: (now, limit) => memory.sweep(now, limit),
+      finish: async () => {
+        throw new Error('connection reset');
+      },
+    };
+    const { post, runs } = serve(createOrder, failing);
+    const first = await post('tea', { 'Idempotency-Key': 'blip' });
+    expect([first.status, first.headers.get('idempotent-replay'), (await first.json()).data]).toEqual([200, null, { run: 1, sku: 'tea' }]);
+    // The row stays running: a repeat within the in-flight window is 409.
+    const again = await post('tea', { 'Idempotency-Key': 'blip' });
+    expect([again.status, (await again.json()).code]).toEqual([409, IdempotencyCode.IN_FLIGHT]);
+    expect(runs()).toBe(1);
+  });
+
   test('a route declared @idempotent mounts only with a store', () => {
     expect(() => mountOperation(new Hono(), createOrder, async () => null)).toThrow(/idempotencyStore/);
   });

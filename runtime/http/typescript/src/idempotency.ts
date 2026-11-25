@@ -403,6 +403,11 @@ export async function runIdempotent(
   }
   // The answer is the envelope or a problem: JSON, read whole.
   const body = await response.clone().text();
-  await store.finish(lookup, startedAt, response.status, body);
+  // The work is done and may have committed: a store that fails to keep
+  // its answer must not turn it into a 500, which tells the caller to
+  // retry. The row stays running, so a repeat within the in-flight window
+  // is 409 and one after it runs again, the window the docs name (Go's
+  // step ignores the error too).
+  await store.finish(lookup, startedAt, response.status, body).catch(() => undefined);
   return response;
 }
