@@ -998,6 +998,13 @@ The code of the validation problem the router sends for a path, query or
 filter value that breaks a rule. Empty, the router passes no code and the
 runtime sends its own, `bad_request`.
 
+### `go_api.path_param_error`
+
+Default: `{name} must be percent-encoded UTF-8`
+
+The detail of the 400 the router sends for a path parameter that does not
+percent-decode to UTF-8. `{name}` is the parameter's name.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

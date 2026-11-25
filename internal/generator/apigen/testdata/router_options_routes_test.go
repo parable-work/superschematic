@@ -180,3 +180,20 @@ func TestValidationErrorCode(t *testing.T) {
 		},
 	})
 }
+
+// TestPathParamError: go_api.path_param_error is the detail of the 400 of a
+// path parameter that does not decode to UTF-8.
+func TestPathParamError(t *testing.T) {
+	runCases(t, []routerCase{
+		{
+			name: "a path parameter that is not UTF-8", method: http.MethodGet, target: "/api/widgets/%ff",
+			defaults: answer{Status: 400, Detail: "id must be percent-encoded UTF-8"},
+			options:  answer{Status: 400, Detail: "id is not a path segment"},
+		},
+		{
+			name: "a percent-encoded path parameter", method: http.MethodGet, target: "/api/widgets/a%20b",
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+	})
+}

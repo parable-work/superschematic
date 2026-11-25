@@ -172,3 +172,4 @@ state_guard_refused = "{column} cannot move from % to %"
 # them.
 [go_api]
 validation_error_code = ""
+path_param_error = "{name} must be percent-encoded UTF-8"

@@ -68,7 +68,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
-	funcs, err := templateFuncs(output.Provider)
+	funcs, err := templateFuncs(output.Provider, output.Naming.GoAPI)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func WriteScaffoldsWithProfile(output *APIOutput, scaffoldsDir string, prof *pro
 	if err != nil {
 		return nil, err
 	}
-	funcs, err := templateFuncs(output.Provider)
+	funcs, err := templateFuncs(output.Provider, output.Naming.GoAPI)
 	if err != nil {
 		return nil, err
 	}
@@ -330,9 +330,11 @@ func generateFile(generator *codegen.FileGenerator, fs embed.FS, templateName, o
 
 // templateFuncs returns apigen-specific template functions merged on top of
 // the shared base set by codegen.GenerateFile, plus the provider's own and
-// authSnippet, which renders the provider's hook-point snippets.
-func templateFuncs(provider AuthProvider) (template.FuncMap, error) {
+// authSnippet, which renders the provider's hook-point snippets. router is
+// the naming file's [go_api] table, which pathParamError reads.
+func templateFuncs(provider AuthProvider, router naming.GoAPIConfig) (template.FuncMap, error) {
 	funcs := template.FuncMap{
+		"pathParamError":          router.PathParamErrorOf,
 		"base":                    filepath.Base,
 		"toGoName":                codegen.ToPascalCase,
 		"toKebabCase":             codegen.ToKebabCase,
@@ -374,7 +376,7 @@ func newRouteData(output *APIOutput, endpoint EndpointInfo) routeData {
 // provider template functions in scope. Provider tests render single
 // snippets through it.
 func AuthSnippetFunc(provider AuthProvider) (func(name string, data any) (string, error), error) {
-	funcs, err := templateFuncs(provider)
+	funcs, err := templateFuncs(provider, naming.GoAPIConfig{})
 	if err != nil {
 		return nil, err
 	}

@@ -22,6 +22,7 @@ const routerOptionsAPI = "router-options-api"
 // from its default.
 var routerOptions = naming.GoAPIConfig{
 	ValidationErrorCode: "VALIDATION-1",
+	PathParamError:      "{name} is not a path segment",
 }
 
 // TestRouterOptionsAnswerTheirRequests generates router-options-api twice,

@@ -703,7 +703,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- range .PathParams }}
 		{{ .GoName }}Str, err := runtimerouting.PathParam(r, "{{ .Name }}")
 		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must be percent-encoded UTF-8")
+			RespondError(w, r, gohttp.StatusBadRequest, {{ printf "%q" (pathParamError .Name) }})
 			return
 		}
 		{{- if .Required }}

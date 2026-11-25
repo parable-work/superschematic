@@ -18,11 +18,32 @@ type GoAPIConfig struct {
 	// Empty (default), the router passes no code and the runtime sends
 	// its own.
 	ValidationErrorCode string `toml:"validation_error_code"`
+
+	// PathParamError is the detail of the 400 the router sends for a path
+	// parameter that does not percent-decode to UTF-8. {name} is the
+	// parameter's name. Empty (default), it is DefaultPathParamError.
+	PathParamError string `toml:"path_param_error"`
+}
+
+// The placeholder of a [go_api] text and the core's texts.
+const (
+	GoAPINamePlaceholder  = "{name}"
+	DefaultPathParamError = "{name} must be percent-encoded UTF-8"
+)
+
+// PathParamErrorOf is the detail of the 400 for the path parameter name
+// that does not decode.
+func (c GoAPIConfig) PathParamErrorOf(name string) string {
+	text := c.PathParamError
+	if text == "" {
+		text = DefaultPathParamError
+	}
+	return strings.ReplaceAll(text, GoAPINamePlaceholder, name)
 }
 
 // check refuses a value the [go_api] table does not take.
 func (c GoAPIConfig) check() error {
-	for _, kv := range [][2]string{{"validation_error_code", c.ValidationErrorCode}} {
+	for _, kv := range [][2]string{{"validation_error_code", c.ValidationErrorCode}, {"path_param_error", c.PathParamError}} {
 		if err := checkGoAPIText(kv[0], kv[1]); err != nil {
 			return err
 		}

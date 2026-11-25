@@ -25,12 +25,14 @@ func TestTheGoAPITableDefaultsToTheCore(t *testing.T) {
 func TestParseReadsTheGoAPITable(t *testing.T) {
 	n, err := Parse([]byte(`[go_api]
 validation_error_code = "VL-1"
+path_param_error = "{name} is not a segment"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := GoAPIConfig{
 		ValidationErrorCode: "VL-1",
+		PathParamError:      "{name} is not a segment",
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -43,10 +45,22 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 	for _, tc := range []struct{ file, want string }{
 		{"[go_api]\nvalidation_error_code = \"a\\nb\"\n", `go_api.validation_error_code "a\nb" holds a line break`},
 		{"[go_api]\nvalidation_error_code = 'a\"b'\n", `go_api.validation_error_code "a\"b" holds a line break, a NUL, a quote or a backslash`},
+		{"[go_api]\npath_param_error = 'a\\b'\n", `go_api.path_param_error "a\\b" holds a line break`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%q: err = %v, want it to hold %q", tc.file, err, tc.want)
 		}
+	}
+}
+
+// TestPathParamErrorOf puts the parameter's name in the text, the core's
+// when the key is empty.
+func TestPathParamErrorOf(t *testing.T) {
+	if got := (GoAPIConfig{}).PathParamErrorOf("id"); got != "id must be percent-encoded UTF-8" {
+		t.Errorf("the default = %q", got)
+	}
+	if got := (GoAPIConfig{PathParamError: "{name} is not a segment"}).PathParamErrorOf("id"); got != "id is not a segment" {
+		t.Errorf("a set text = %q", got)
 	}
 }

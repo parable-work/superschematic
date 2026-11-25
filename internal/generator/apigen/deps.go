@@ -600,7 +600,7 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	funcs, err := templateFuncs(output.Provider)
+	funcs, err := templateFuncs(output.Provider, output.Naming.GoAPI)
 	if err != nil {
 		return false, err
 	}
