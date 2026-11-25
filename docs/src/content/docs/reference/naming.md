@@ -1023,6 +1023,18 @@ minLength = "min_length"
 listMax = "list_max"
 ```
 
+### `go_api.undeclared_input_keys`
+
+Default: `refuse`
+
+`refuse` refuses an input body with a top-level key its type does not
+declare, as every generated server does. `keep` passes the key on to the
+type's decoder, which ignores it or, for a key in another case, reads it
+into the field it matches, as `encoding/json` does. A closed type,
+`@strictJSON` or `@denyUnknownFields`, is refused under either value, and
+the keys of an `@allowUnknownFields` type, or of a webhook's input, are
+dropped under either value. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

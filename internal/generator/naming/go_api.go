@@ -33,7 +33,26 @@ type GoAPIConfig struct {
 	// core's name. The rules of a body, which the input type's Validate
 	// checks, are the types generator's, and keep their names.
 	ValidatorNames map[string]string `toml:"validator_names"`
+
+	// UndeclaredInputKeys is "refuse" (default) or "keep". "refuse" refuses
+	// an input body with a top-level key its type does not declare, as
+	// every generated server does (D42). "keep" passes the key on to the
+	// type's decoder, which ignores it or, for a key in another case, reads
+	// it into the field it matches, as encoding/json does. A closed type,
+	// @strictJSON or @denyUnknownFields, is refused under either value, and
+	// an @allowUnknownFields type's keys are dropped under either value.
+	UndeclaredInputKeys string `toml:"undeclared_input_keys"`
 }
+
+// The values of go_api.undeclared_input_keys.
+const (
+	GoAPIRefuse = "refuse"
+	GoAPIKeep   = "keep"
+)
+
+// KeepsUndeclaredInputKeys reports whether undeclared_input_keys is
+// "keep".
+func (c GoAPIConfig) KeepsUndeclaredInputKeys() bool { return c.UndeclaredInputKeys == GoAPIKeep }
 
 // RouteValidators are the validators of a route's own checks, which
 // ValidatorNames may rename.
@@ -71,6 +90,9 @@ func (c GoAPIConfig) check() error {
 			return err
 		}
 	}
+	if err := checkGoAPIChoice("undeclared_input_keys", c.UndeclaredInputKeys, GoAPIRefuse, GoAPIKeep); err != nil {
+		return err
+	}
 	for from, to := range c.ValidatorNames {
 		if !slices.Contains(RouteValidators, from) {
 			return fmt.Errorf("go_api.validator_names renames %q, which no route check names: rename one of %s", from, strings.Join(RouteValidators, ", "))
@@ -83,6 +105,19 @@ func (c GoAPIConfig) check() error {
 		}
 	}
 	return nil
+}
+
+// checkGoAPIChoice refuses a value of key other than empty and the values
+// it takes.
+func checkGoAPIChoice(key, value string, values ...string) error {
+	if value == "" || slices.Contains(values, value) {
+		return nil
+	}
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = fmt.Sprintf("%q", v)
+	}
+	return fmt.Errorf("go_api.%s is %q: use %s", key, value, strings.Join(quoted, " or "))
 }
 
 // checkGoAPIText refuses a text the router writes into a Go string

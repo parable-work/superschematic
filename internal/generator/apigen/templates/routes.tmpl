@@ -1117,7 +1117,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 		{{- end }}
 		if len(rawInput) > 0 {
-			checked, refusal := bodyargs.{{ if .InputAllowsUnknownFields }}ReadInputDroppingUnknown{{ else }}ReadInput{{ end }}(bytes.NewReader(rawInput), input.JSONFieldNames())
+			checked, refusal := bodyargs.{{ if .InputAllowsUnknownFields }}ReadInputDroppingUnknown{{ else }}ReadInput{{ end }}(bytes.NewReader(rawInput), input.JSONFieldNames(){{ readInputOptions . }})
 			if refusal != nil {
 				RespondInputRefusal(w, r, refusal)
 				return
@@ -1155,13 +1155,16 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// decoding and rules, each refused with the 400 every generated
 		// server sends.
 		var input types.{{ .InputType }}
-		rawInput, refusal := bodyargs.ReadInputDroppingUnknown(r.Body, input.JSONFieldNames())
+		rawInput, refusal := bodyargs.ReadInputDroppingUnknown(r.Body, input.JSONFieldNames(){{ readInputOptions . }})
 		{{- else }}
 		// Parse and validate input: a body, JSON, an object with only the
 		// keys the input type declares, then the type's decoding and rules,
 		// each refused with the 400 every generated server sends.
+		{{- with readInputNote . }}
+		// {{ . }}
+		{{- end }}
 		var input types.{{ .InputType }}
-		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames(){{ readInputOptions . }})
 		{{- end }}
 		if refusal != nil {
 			RespondInputRefusal(w, r, refusal)

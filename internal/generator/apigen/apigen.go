@@ -169,6 +169,13 @@ type EndpointInfo struct {
 	// is a @webhook and its type is neither @strictJSON nor
 	// @denyUnknownFields. Every other input refuses such a key (D42).
 	InputAllowsUnknownFields bool
+	// InputClosed reports whether the input's type is @strictJSON or
+	// @denyUnknownFields, a closed contract whose undeclared keys every
+	// router refuses, whatever go_api.undeclared_input_keys says.
+	InputClosed bool
+	// InputStrictJSON reports whether the input's type is @strictJSON, whose
+	// own decoder refuses an undeclared key.
+	InputStrictJSON bool
 
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
@@ -1336,10 +1343,13 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	inputAllowsUnknownFields := false
+	inputClosed, inputStrictJSON := false, false
 	behaviorPreconditions := false
 	if inputType != "" {
 		if typeDef, ok := types.findTypeDef(inputType); ok {
 			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+			inputClosed = typeDef.StrictJSON || typeDef.DenyUnknownFields
+			inputStrictJSON = typeDef.StrictJSON
 			behaviorPreconditions = carriesBehaviorPreconditions(op, typeDef)
 		}
 	}
@@ -1381,6 +1391,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		HasInput:                     hasInput,
 		InputRequired:                inputRequired,
 		InputAllowsUnknownFields:     inputAllowsUnknownFields,
+		InputClosed:                  inputClosed,
+		InputStrictJSON:              inputStrictJSON,
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,

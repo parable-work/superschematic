@@ -199,6 +199,46 @@ func TestValidatorNames(t *testing.T) {
 	})
 }
 
+// unknownKeys is the answer of a body with undeclared keys, which every
+// generated server refuses.
+func unknownKeys(errors string) answer {
+	return answer{Status: 400, Code: "bad_request", Detail: "Request body does not match the declared input", Errors: errors}
+}
+
+// TestUndeclaredInputKeys: under go_api.undeclared_input_keys = "keep" an
+// open input type's undeclared key goes on to its decoder, which ignores
+// it, and a key in another case reads into its field; a closed type's is
+// refused under either value.
+func TestUndeclaredInputKeys(t *testing.T) {
+	runCases(t, []routerCase{
+		{
+			name: "an undeclared key", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1,"extra":true}`,
+			defaults: unknownKeys("extra=unknown"),
+			options:  answer{Status: 200},
+		},
+		{
+			name: "a key in another case", method: http.MethodPost, target: "/api/widgets", body: `{"Name":"ab","count":1}`,
+			defaults: unknownKeys("Name=unknown"),
+			options:  answer{Status: 200},
+		},
+		{
+			name: "an undeclared key of an optional input", method: http.MethodPost, target: "/api/widgets/touch", body: `{"name":"ab","count":1,"extra":true}`,
+			defaults: unknownKeys("extra=unknown"),
+			options:  answer{Status: 200},
+		},
+		{
+			name: "an undeclared key of a closed type", method: http.MethodPost, target: "/api/strict-widgets", body: `{"name":"ab","count":1,"extra":true}`,
+			defaults: unknownKeys("extra=unknown"),
+			options:  unknownKeys("extra=unknown"),
+		},
+		{
+			name: "a declared body", method: http.MethodPost, target: "/api/widgets", body: `{"name":"ab","count":1,"size":"small","tags":["a"]}`,
+			defaults: answer{Status: 200},
+			options:  answer{Status: 200},
+		},
+	})
+}
+
 // TestPathParamError: go_api.path_param_error is the detail of the 400 of a
 // path parameter that does not decode to UTF-8.
 func TestPathParamError(t *testing.T) {
