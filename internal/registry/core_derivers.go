@@ -8,12 +8,13 @@ import (
 
 // deriverDecorator returns @deriver, from @superschematic/api and only in
 // API schemas: a class of the schema that declares a deriver of the API,
-// which fills the Derived fields of engine types of the API's engine
-// database (D74). The class holds no fields and is no type: Apply records
-// the deriver in Schema.Derivers, and the TypeScript reader leaves the
-// class out of Types. Each of its schemas is the name of an engine type of
-// the API's database, a string: an API imports no engine type, which its
-// generators do not render (D58).
+// which fills the Derived fields of types of the API's database, its
+// engine types (D74) or its tables that implement Derived (D146). The
+// class holds no fields and is no type: Apply records the deriver in
+// Schema.Derivers, and the TypeScript reader leaves the class out of
+// Types. Each of its schemas is the name of a type of the API's database,
+// a string: an API imports no engine type, which its generators do not
+// render (D58).
 func deriverDecorator() DecoratorSpec {
 	return DecoratorSpec{
 		Name: "deriver", Packages: []string{pkgAPI}, Target: TargetType,
@@ -56,12 +57,12 @@ func deriverOf(td *ir.TypeDef, args []any) (*ir.Deriver, error) {
 		case "schemas":
 			list, ok := value.([]any)
 			if !ok {
-				return nil, ArgErrorf(0, "@deriver schemas is a list of the engine types whose Derived fields the deriver fills, imported from the API's database")
+				return nil, ArgErrorf(0, "@deriver schemas is a list of the types whose Derived fields the deriver fills, tables or engine types of the API's database")
 			}
 			for _, item := range list {
 				name, ok := item.(string)
 				if !ok {
-					return nil, ArgErrorf(0, "@deriver schemas lists the names of engine types of the API's database that compose Derived, as strings (\"Ticket\"); an API imports no engine type")
+					return nil, ArgErrorf(0, "@deriver schemas lists the names of types of the API's database that compose Derived, tables or engine types, as strings (\"Ticket\"); an API imports no engine type")
 				}
 				deriver.Schemas = append(deriver.Schemas, name)
 			}

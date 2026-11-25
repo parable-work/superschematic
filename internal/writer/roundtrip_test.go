@@ -81,6 +81,9 @@ var corpus = []roundtripFixture{
 	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
 	// @optimistic tables and, in the graph above, @versioned({ exclude }).
 	{name: "fixture-optimistic-db", dir: tsFixtures + "/fixture-optimistic-db", native: FormatTS},
+	// The Mergeable trait (D147): every format writes it, the data forms
+	// as the type's mergeable member.
+	{name: "fixture-merge-db", dir: tsFixtures + "/fixture-merge-db", native: FormatTS},
 	// The user model's traits (D50): every format writes User and
 	// UserRole, and the JSON-native schema's tables share the traits'
 	// names, so the TypeScript leg imports them under an alias.

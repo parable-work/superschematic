@@ -123,6 +123,10 @@ const calendarFixture = "fixture-calendar-db"
 // repository.
 const paymentsFixture = "fixture-payments-db"
 
+// mergeFixture is the DB service whose Label and Customer implement
+// Mergeable (D147), with the tables that reference them.
+const mergeFixture = "fixture-merge-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -141,7 +145,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -292,6 +296,16 @@ func TestWriteORMGolden(t *testing.T) {
 		// Payments(), listPaymentActions taking no key, no repository of a
 		// sub-table or the shared table, no upserts, and no queue.
 		{paymentsFixture, []string{"repository_order.go", "repository_refund.go", "rules.go"}},
+		// Tables that implement Mergeable (D147): merge.go holds the
+		// MergeInto of Label and of Customer, each with the statements of
+		// every relation that references it, and the collisions of each
+		// unique key that holds the relation's column.
+		{mergeFixture, []string{
+			"repository_address.go", "repository_board.go", "repository_customer.go", "repository_customer_profile.go",
+			"repository_document.go", "repository_document_label.go", "repository_label.go", "repository_label_code.go",
+			"repository_label_note.go", "repository_label_pair.go", "repository_label_slot.go", "repository_purchase.go",
+			"repository_subscription.go", "fences.go", "merge.go", "rules.go",
+		}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

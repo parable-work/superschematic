@@ -183,34 +183,74 @@ func removeStaleEngineDocument(path string) error {
 // when the API names it among them; one its config names as its authDb
 // alone is loaded. Nil when the API connects to no database, its database
 // holds no engine type, or the build cannot load it, which the generators
-// that need it report; an API with a deriver is refused then (D74). Its
-// Derivers are the API's (deriversOf).
+// that need it report; an API with a deriver is refused then (D74), unless
+// each of its derivers fills tables (D146, tableDerivers). Its Derivers
+// are the API's that fill engine types (deriversOf).
 func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, error) {
 	info, err := r.engineDatabaseOf(deps)
 	if err == nil && info == nil && len(r.Schema.Derivers) > 0 {
-		return nil, fmt.Errorf("generator: %s declares deriver %s, which fills the Derived fields of engine types of its database, and %s connects to no engine database; set its authDb to the DB service whose types compose Derived (D74)", r.Config.Name, r.Schema.Derivers[0].Name, r.Config.Name)
+		tables, err := r.tableDerivers(deps)
+		if err != nil {
+			return nil, err
+		}
+		if len(tables) == 0 {
+			return nil, fmt.Errorf("generator: %s declares deriver %s, which fills the Derived fields of types of its database, and %s connects to no database whose types compose Derived; set its authDb to the DB service whose types compose Derived (D74, D146)", r.Config.Name, r.Schema.Derivers[0].Name, r.Config.Name)
+		}
 	}
 	return info, err
 }
 
-// engineDatabaseOf is engineDatabase without the refusal of a deriver.
-func (r run) engineDatabaseOf(deps map[string]*ir.Schema) (*apigen.EngineInfo, error) {
+// tableDerivers are the run's API's derivers that fill tables that
+// implement Derived (D146), sorted by name: nil when it declares none,
+// connects to no database, or the build cannot load it, which
+// engineDatabase reports.
+func (r run) tableDerivers(deps map[string]*ir.Schema) ([]apigen.DeriverInfo, error) {
+	if len(r.Schema.Derivers) == 0 {
+		return nil, nil
+	}
+	db, schema := r.databaseSchema(deps)
+	if schema == nil {
+		return nil, nil
+	}
+	tableTypes := codegen.DerivedTableTypes(schema)
+	if len(tableTypes) == 0 {
+		return nil, nil
+	}
+	_, tables, err := deriversOf(r.Schema, db, codegen.EngineTypes(schema), tableTypes, nil)
+	return tables, err
+}
+
+// databaseSchema loads the DB service the run's API connects to, its
+// authDb or its one DB-kind dependency, from deps or, for one its config
+// names as its authDb alone, through the run's loader. The schema is nil
+// when the API connects to none, the build cannot load it, or it is no DB
+// service.
+func (r run) databaseSchema(deps map[string]*ir.Schema) (string, *ir.Schema) {
 	db, _, ok := r.Schema.Database()
 	if !ok {
-		return nil, nil
+		return "", nil
 	}
 	schema := deps[db]
 	if schema == nil {
 		if r.Options.LoadDependency == nil || r.Config.AuthDB != db {
-			return nil, nil
+			return db, nil
 		}
 		loaded, err := r.LoadDependency(db)
 		if err != nil {
-			return nil, nil
+			return db, nil
 		}
 		schema = loaded
 	}
 	if kind, ok := r.Registry.Kind(string(schema.Kind)); !ok || kind.StructRole != ir.RoleDBTable {
+		return db, nil
+	}
+	return db, schema
+}
+
+// engineDatabaseOf is engineDatabase without the refusal of a deriver.
+func (r run) engineDatabaseOf(deps map[string]*ir.Schema) (*apigen.EngineInfo, error) {
+	db, schema := r.databaseSchema(deps)
+	if schema == nil {
 		return nil, nil
 	}
 	types := codegen.EngineTypes(schema)
@@ -256,7 +296,7 @@ func (r run) engineDatabaseOf(deps map[string]*ir.Schema) (*apigen.EngineInfo, e
 	for _, b := range enginedoc.Behaviors(types, r.Registry) {
 		info.Behaviors = append(info.Behaviors, apigen.EngineBehavior{Name: b.Name, Extension: b.Extension, Package: b.Package})
 	}
-	if info.Derivers, err = deriversOf(r.Schema, db, types, info.Policy); err != nil {
+	if info.Derivers, _, err = deriversOf(r.Schema, db, types, codegen.DerivedTableTypes(schema), info.Policy); err != nil {
 		return nil, err
 	}
 	return info, nil

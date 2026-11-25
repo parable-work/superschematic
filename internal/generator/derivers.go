@@ -12,40 +12,55 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The derivers of an API (D74): each `@deriver` fills the Derived fields
-// of engine types of the API's engine database. The API's build reads
-// that database's IR to find each schema's Derived config and the types of
-// its fields, which the generated Derivers interface types its methods
-// with, and refuses what no deriver can run: a schema that composes no
-// Derived, a deriver with no schema, a Go API's deriver, and a rules
-// policy that admits no deriver's subject.
+// The derivers of an API (D74, D146): each `@deriver` fills the Derived
+// fields of types of the API's database, engine types through the engine
+// or tables through their repositories. The API's build reads that
+// database's IR to find each schema's Derived config and the types of its
+// fields, which the generated Derivers interface types its methods with,
+// and refuses what no deriver can run: a schema that composes no Derived,
+// a deriver with no schema, one whose schemas are engine types and tables
+// both, a Go API's deriver, and a rules policy that admits no engine
+// deriver's subject.
 
-// deriversOf reads the derivers of the API api over types, the engine
-// types of db, its engine database, sorted by name. policy is the engine's
-// access policy, which each deriver must pass (checkDeriverPolicy).
-func deriversOf(api *ir.Schema, db string, types []*ir.TypeDef, policy json.RawMessage) ([]apigen.DeriverInfo, error) {
+// deriversOf reads the derivers of the API api over the types of db, its
+// database: engineTypes, its engine types, and tableTypes, its tables that
+// implement Derived. It returns those that fill engine types and those
+// that fill tables (whose Tables is set), each sorted by name. policy is
+// the engine's access policy, which each deriver of engine types must pass
+// (checkDeriverPolicy); a deriver of tables acts through the repositories
+// as a behavior caller, which the core admits by the Derived config's
+// permission alone.
+func deriversOf(api *ir.Schema, db string, engineTypes, tableTypes []*ir.TypeDef, policy json.RawMessage) (engine, tables []apigen.DeriverInfo, err error) {
 	byName := map[string]*ir.TypeDef{}
+	isTable := map[string]bool{}
 	var derived []string
-	for _, td := range types {
+	for _, td := range engineTypes {
 		byName[td.Name] = td
 		if td.ComposesDerived() {
 			derived = append(derived, td.Name)
 		}
 	}
-	var out []apigen.DeriverInfo
+	for _, td := range tableTypes {
+		if td.ComposesDerived() {
+			byName[td.Name] = td
+			isTable[td.Name] = true
+			derived = append(derived, td.Name)
+		}
+	}
+	slices.Sort(derived)
 	for _, d := range api.Derivers {
 		if d == nil {
 			continue
 		}
 		if err := registry.CheckDeriver(d); err != nil {
-			return nil, fmt.Errorf("generator: deriver %s of %s: %w", d.Name, api.Name, err)
+			return nil, nil, fmt.Errorf("generator: deriver %s of %s: %w", d.Name, api.Name, err)
 		}
 		names := d.Schemas
 		if len(names) == 0 {
 			names = derived
 		}
 		if len(names) == 0 {
-			return nil, fmt.Errorf("generator: deriver %s of %s fills the derived fields of %s, and no type of %s composes Derived; compose Derived on a type, or remove the deriver (D74)", d.Name, api.Name, db, db)
+			return nil, nil, fmt.Errorf("generator: deriver %s of %s fills the derived fields of %s, and no type of %s composes Derived; compose Derived on a type, or remove the deriver (D74)", d.Name, api.Name, db, db)
 		}
 		info := apigen.DeriverInfo{
 			Name:        d.Name,
@@ -54,6 +69,7 @@ func deriversOf(api *ir.Schema, db string, types []*ir.TypeDef, policy json.RawM
 			BatchSize:   registry.DeriverBatchSize(d),
 		}
 		permissions := map[string]bool{}
+		var ofEngine, ofTables []string
 		for _, name := range names {
 			td := byName[name]
 			if td == nil || !td.ComposesDerived() {
@@ -61,11 +77,16 @@ func deriversOf(api *ir.Schema, db string, types []*ir.TypeDef, policy json.RawM
 				if len(derived) > 0 {
 					declared = strings.Join(derived, ", ")
 				}
-				return nil, fmt.Errorf("generator: deriver %s of %s fills the derived fields of %s, which is no engine type of %s that composes Derived (its types that do: %s) (D74)", d.Name, api.Name, name, db, declared)
+				return nil, nil, fmt.Errorf("generator: deriver %s of %s fills the derived fields of %s, which is no engine type or table of %s that composes Derived (its types that do: %s) (D74, D146)", d.Name, api.Name, name, db, declared)
+			}
+			if isTable[name] {
+				ofTables = append(ofTables, name)
+			} else {
+				ofEngine = append(ofEngine, name)
 			}
 			schema, err := derivedSchema(td)
 			if err != nil {
-				return nil, fmt.Errorf("generator: deriver %s of %s: %w", d.Name, api.Name, err)
+				return nil, nil, fmt.Errorf("generator: deriver %s of %s: %w", d.Name, api.Name, err)
 			}
 			info.Schemas = append(info.Schemas, schema)
 			permissions[td.Name] = true
@@ -73,17 +94,27 @@ func deriversOf(api *ir.Schema, db string, types []*ir.TypeDef, policy json.RawM
 				permissions[schema.Permission] = true
 			}
 		}
+		if len(ofEngine) > 0 && len(ofTables) > 0 {
+			return nil, nil, fmt.Errorf("generator: deriver %s of %s fills the derived fields of %s, engine types of %s, and of %s, tables of it; a deriver fills engine types through the engine or tables through their repositories, so declare a deriver for each and name its schemas (D146)", d.Name, api.Name, strings.Join(ofEngine, ", "), db, strings.Join(ofTables, ", "))
+		}
 		for permission := range permissions {
 			info.Permissions = append(info.Permissions, permission)
 		}
 		slices.Sort(info.Permissions)
-		if err := checkDeriverPolicy(info, db, policy); err != nil {
-			return nil, err
+		if len(ofTables) > 0 {
+			info.Tables = true
+			tables = append(tables, info)
+			continue
 		}
-		out = append(out, info)
+		if err := checkDeriverPolicy(info, db, policy); err != nil {
+			return nil, nil, err
+		}
+		engine = append(engine, info)
 	}
-	slices.SortFunc(out, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
-	return out, nil
+	byDeriver := func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) }
+	slices.SortFunc(engine, byDeriver)
+	slices.SortFunc(tables, byDeriver)
+	return engine, tables, nil
 }
 
 // derivedSchema reads td's Derived config with its fields' declarations.
@@ -168,4 +199,17 @@ func refuseGoDerivers(api *ir.Schema) error {
 		return nil
 	}
 	return fmt.Errorf("generator: %s declares deriver %s, and it is a Go API; %s (D74)", api.Name, api.Derivers[0].Name, stack.DeriverLanguages)
+}
+
+// refuseRustTableDerivers refuses a Rust API one of whose derivers fills
+// tables: a deriver of tables runs on a TypeScript API so far (D146).
+func refuseRustTableDerivers(api *ir.Schema, tables []apigen.DeriverInfo) error {
+	if len(tables) == 0 {
+		return nil
+	}
+	var names []string
+	for _, schema := range tables[0].Schemas {
+		names = append(names, schema.Name)
+	}
+	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, tables of its database, and it is a Rust API; %s", api.Name, tables[0].Name, strings.Join(names, ", "), stack.TableDeriverLanguages)
 }

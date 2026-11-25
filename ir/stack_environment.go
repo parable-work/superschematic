@@ -393,19 +393,19 @@ type ResolvedRunner struct {
 	Instances int `json:"instances"`
 }
 
-// ResolvedDeriver is a deriver's run in one environment (D74): the member
-// of its API's Derivers that answers its fields, the engine types whose
-// Derived fields it fills, and whether it runs.
+// ResolvedDeriver is a deriver's run in one environment (D74, D146): the
+// member of its API's Derivers that answers its fields, the engine types
+// or the tables whose Derived fields it fills, and whether it runs.
 type ResolvedDeriver struct {
 	// API is the API service that declares the deriver; Name is its
 	// `@deriver` class's name.
 	API  string `json:"api"`
 	Name string `json:"name"`
 
-	// Database is the engine database its API connects to, and Schemas
-	// the engine types of it whose Derived fields it fills, as the
-	// decorator names them; empty is every type that composes Derived,
-	// which the API's build lists.
+	// Database is the database its API connects to, and Schemas the types
+	// of it whose Derived fields it fills, engine types or tables, as the
+	// decorator names them, or every type that composes Derived when it
+	// names none.
 	Database string   `json:"database"`
 	Schemas  []string `json:"schemas,omitempty"`
 

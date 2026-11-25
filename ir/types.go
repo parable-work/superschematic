@@ -197,6 +197,13 @@ type TypeDef struct {
 	// for every other type. See [RoleSeed].
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
+	// Mergeable marks a DB table whose repository folds one row into
+	// another, the core Mergeable trait (D147): mergeInto repoints every
+	// relation of the schema that references the row merged away, deletes
+	// the rows a unique index would refuse, and deletes that row. False for
+	// every other type.
+	Mergeable bool `json:"mergeable,omitempty" yaml:"mergeable,omitempty"`
+
 	// Origin names the declaration the loader expanded this type from:
 	// [OriginVersionGraph] for the graph tables a version graph adds, and
 	// [OriginBehavior] for the sub-tables and queues a table's behaviors

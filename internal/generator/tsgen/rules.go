@@ -52,7 +52,7 @@ import (
 var repositoryMembers = []string{
 	"getOne", "getManyByIds", "findOne", "findMany", "findPage",
 	"createOne", "createMany", "updateOne", "updateMany", "upsertOne", "upsertOneResult", "upsertMany",
-	"deleteOne", "deleteMany", "hardDeleteOne", "nearest", "reencrypt",
+	"deleteOne", "deleteMany", "hardDeleteOne", "mergeInto", "nearest", "reencrypt",
 
 	"constructor", "encrypted", "behaviors", "peers", "orm", "def", "runner", "acting", "keys", "rules", "behaviorCaller", "user",
 	"peer", "selects", "selection", "selectText", "strip", "related", "hydrate", "clauses", "column",

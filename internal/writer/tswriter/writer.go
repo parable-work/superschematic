@@ -134,7 +134,7 @@ var symbolPackages = map[string]string{
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
-	"User": "@superschematic/db", "UserRole": "@superschematic/db",
+	"User": "@superschematic/db", "UserRole": "@superschematic/db", "Mergeable": "@superschematic/db",
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
 	"auth": "@superschematic/api", "publicRoute": "@superschematic/api",

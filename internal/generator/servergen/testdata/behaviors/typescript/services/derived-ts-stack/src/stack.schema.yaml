@@ -1,0 +1,17 @@
+# derived-ts-api in TypeScript on the local target (D146): its default
+# server, and each of its derivers a deployable of its own, which fills the
+# Derived fields of fixture-derived-provenance-db's tables through the
+# database's repositories.
+kind: Stack
+types:
+  Derived:
+    name: Derived
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: derived-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

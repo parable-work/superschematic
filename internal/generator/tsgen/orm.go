@@ -158,6 +158,10 @@ type ORMTable struct {
 
 	SoftDelete   bool
 	HistoryActor bool
+	// Merge is what mergeInto of a table that implements Mergeable runs
+	// (D147), sqlutil's plan with each statement's actor as the runtime
+	// binds it; nil for any other table.
+	Merge *ORMMerge
 	// Fences are the table's @fenced fields (D119), sqlutil's FenceModel,
 	// which the runtime's repositories advance in an update, an updateMany
 	// and an upsert's update; a soft delete and a reseal carry the bump in
@@ -353,6 +357,74 @@ var ormStatements = []string{
 // column adds (D85), which the runtime's TableStatements declares optional.
 var encryptedStatements = []string{"stale", "reseal"}
 
+// ORMMerge is a Mergeable table's merge as orm.ts writes it (D147).
+type ORMMerge struct {
+	Lock         string
+	HistoryActor bool
+	RequiresUser bool
+	Steps        []ORMMergeStep
+}
+
+// ORMMergeStep is one relation that references a Mergeable table.
+type ORMMergeStep struct {
+	Source        string
+	Field         string
+	SelfReference string
+	Collisions    []ORMMergeStatement
+	Repoint       ORMMergeStatement
+}
+
+// ORMMergeStatement is a statement of a merge: its SQL, and how it takes
+// the acting user as $3, "uuid" for a uuid column, "text" for any other,
+// "" when it takes none.
+type ORMMergeStatement struct {
+	SQL   string
+	Actor string
+}
+
+// ormMerge writes the merge of the Mergeable table of type name: sqlutil's
+// plan, each statement that stamps an audit field of its table taking the
+// acting user in the form that field's column holds, which tables, the
+// ORM's tables so far, give.
+func ormMerge(schema *ir.Schema, models []sqlutil.TableModel, tables []ORMTable, name string) (*ORMMerge, error) {
+	plan, err := sqlutil.MergePlanOf(schema, models, name)
+	if err != nil {
+		return nil, err
+	}
+	statement := func(table string, st sqlutil.MergeStatement) ORMMergeStatement {
+		out := ORMMergeStatement{SQL: st.SQL}
+		if st.Actor == "" {
+			return out
+		}
+		out.Actor = "text"
+		for _, t := range tables {
+			if t.Type != table {
+				continue
+			}
+			for _, c := range t.Columns {
+				if c.Field == st.Actor && c.UUID {
+					out.Actor = "uuid"
+				}
+			}
+		}
+		return out
+	}
+	out := &ORMMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser}
+	for _, step := range plan.Steps {
+		s := ORMMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		for _, collision := range step.Collisions {
+			s.Collisions = append(s.Collisions, statement(step.Source, collision))
+		}
+		out.Steps = append(out.Steps, s)
+	}
+	return out, nil
+}
+
+// RepositoryMember is the member of a database's repositories that holds
+// the repository of the table type typeName: the type's name with its
+// first letter in lower case (orm.ticket for Ticket).
+func RepositoryMember(typeName string) string { return lowerFirst(typeName) }
+
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
 var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries"}
@@ -429,7 +501,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			continue
 		}
 		info := types[t.Type]
-		member := lowerFirst(t.Type)
+		member := RepositoryMember(t.Type)
 		if slices.Contains(ormMembers, member) {
 			return nil, fmt.Errorf("tsgen: the repository of table %s would be the ORM's member %s, which the ORM holds itself; rename the table", t.Type, member)
 		}
@@ -528,6 +600,17 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			})
 		}
 		out.Tables = append(out.Tables, table)
+	}
+	// A table that implements Mergeable merges through the statements
+	// sqlutil writes from every table's relations and unique keys (D147).
+	for i := range out.Tables {
+		table := &out.Tables[i]
+		if td := schema.Types[table.Type]; td == nil || !td.Mergeable {
+			continue
+		}
+		if table.Merge, err = ormMerge(schema, tables, out.Tables, table.Type); err != nil {
+			return nil, err
+		}
 	}
 	views, err := ormViews(schema, opts, out, projections, known)
 	if err != nil {
@@ -882,6 +965,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		}
 		if len(t.VectorFields) > 0 {
 			used["VectorRepository"] = true
+		}
+		if t.Merge != nil {
+			used["MergeableRepository"] = true
 		}
 		for _, use := range t.Uses {
 			if len(use.Operations) > 0 {

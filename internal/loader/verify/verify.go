@@ -257,6 +257,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkVersioned(schema, r)
 	checkVersionGraphs(schema, r)
 	checkIdentity(schema, r)
+	checkMergeable(schema, r)
 	checkIdentityRoutes(schema, in, r)
 	checkBehaviorOperations(schema, in, r)
 	checkGraphOperations(schema, in, r)

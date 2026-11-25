@@ -614,9 +614,9 @@ export function worker(_options: WorkerOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
-/** The options of a deriver: the engine types whose Derived fields it fills, and how. */
+/** The options of a deriver: the tables or the engine types whose Derived fields it fills, and how. */
 export type DeriverOptions = {
-  /** The names of the engine types of the API's database whose Derived fields the deriver fills; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
+  /** The names of the types of the API's database whose Derived fields the deriver fills, tables that implement Derived or engine types that compose it, one kind per deriver; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
   readonly schemas?: readonly string[];
   /** How many answers an instance runs at a time; four unless set. An environment's settings change it. */
   readonly concurrency?: number;
@@ -626,10 +626,11 @@ export type DeriverOptions = {
 
 /**
  * Declares a deriver of the API service: a deployable that fills the
- * Derived fields of the engine types of the API's database (D74). It pulls
- * the stale fields, calls the project's generated Derivers for each, which
- * asks a model, and settles the answers. The class's name is the
- * deriver's, and the class holds nothing:
+ * Derived fields of types of the API's database, its tables that implement
+ * Derived or its engine types (D74, D146). It pulls the stale fields, calls
+ * the project's generated Derivers for each, which asks a model, and
+ * settles the answers. The class's name is the deriver's, and the class
+ * holds nothing:
  *
  * ```ts
  * @deriver({ schemas: ["Ticket"], concurrency: 4 })

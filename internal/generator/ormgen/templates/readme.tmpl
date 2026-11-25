@@ -55,6 +55,12 @@ Optimistic tables expose `UpdateOneIfVersion` and `DeleteOneIfVersion` too,
 but keep no history, so they have no `GetVersion`, `ListVersions`, or
 `GetAsOf`.
 {{- end }}
+{{- if .HasMergeable }}
+Tables that implement Mergeable expose `MergeInto`, which folds one row into
+another: it repoints every relation of the schema that references the row
+merged away, deletes the rows a unique index would then refuse, and deletes
+that row.
+{{- end }}
 {{- with .ReadOnlyRepositories }}
 
 The repository of a version graph member's released rows
