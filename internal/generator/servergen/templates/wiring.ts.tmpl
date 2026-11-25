@@ -339,7 +339,12 @@ function main(): void {
 {{- if .Engines }}
     for (const engine of engines) engine.close();
 {{- end }}
+{{- if .Job }}
+    // The wakes the job's enqueues sent go out before it exits (D145, D151).
+    void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
+{{- else }}
     void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));
+{{- end }}
   };
   run(stop.signal, pools{{ if .Engines }}, engines{{ end }}).then(
     () => {
