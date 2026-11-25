@@ -32,7 +32,19 @@ caller: a read, a list, an update and a delete keep the rows one of the
 rule's members holds the caller's subject in, so a row that names another
 is the 404 of one that is not there, and a create sets each member but
 createdBy to the caller. A caller who holds the rule's override permission
-reaches every row.
+reaches every row. A member may be a path through the table's relations
+(D156): unit.contract.parties.party keeps the rows whose unit's contract
+has a party row that names the caller, one condition of the row's WHERE,
+each step a subquery over the next table's rows.
+
+The repositories hold every read and write of the transaction to what its
+caller sees (D156): an @audience table's rows the caller is in the audience
+of, and for a party or an agent run the rows its grants reach. A row the
+caller does not see is the 404 of one that is not there.
+
+A @decrypted member that names a permission (D156) is opened only for a
+caller who holds it, and answered masked to any other; each value it opens
+is recorded in the database's access log, in the transaction.
 
 A create whose body names the state its row starts in (D109), the field of
 a Workflow of the table, creates the row in the Workflow's initial state
@@ -85,6 +97,12 @@ export interface TableOperation {
   readonly view: readonly string[];
   /** The members of the view marked @decrypted, each the opened value of its Encrypted<T> column. */
   readonly decrypted?: readonly string[];
+  /**
+   * The @decrypted members only a holder of a permission sees (D156), by
+   * member: any other caller gets the member masked, and each value opened
+   * is recorded in the access log.
+   */
+  readonly reveal?: Readonly<Record<string, string>>;
   /** The members of a create's and an update's body, each the row's member it sets. */
   readonly body?: readonly string[];
   /** A list's SearchQuery argument (D62), by its query parameter. */
@@ -92,7 +110,8 @@ export interface TableOperation {
   /**
    * The row rule (D108): the row's members that name who may reach it,
    * each a member that holds a subject, a UUID, a to-one relation's key,
-   * text or createdBy. Absent reaches every row the route admits.
+   * text or createdBy, or a path to one through the table's relations
+   * (D156), dotted. Absent reaches every row the route admits.
    */
   readonly by?: readonly string[];
   /** The permission whose holder the row rule does not hold back. */
@@ -138,7 +157,16 @@ interface ColumnShape {
 
 /** A table's repository, as the handlers run it (orm.ts's Repository), with the definition it holds. */
 interface RepositoryShape {
-  readonly def?: { readonly columns?: readonly ColumnShape[] };
+  readonly def?: {
+    readonly name?: string;
+    readonly key?: string;
+    readonly columns?: readonly ColumnShape[];
+    readonly relations?: readonly { readonly field: string; readonly target: string }[];
+    readonly many?: readonly { readonly name: string; readonly target: string }[];
+    readonly access?: string;
+  };
+  /** The repositories of the ORM's tables, by member, which a path through a relation steps to. */
+  readonly peers?: Readonly<Record<string, RepositoryShape>>;
   findOne(filter: Values): Promise<Row | null>;
   findPage(filter: Values, options: Values): Promise<{ readonly rows: readonly Row[]; readonly next: unknown }>;
   createOne(input: Values): Promise<Row>;
@@ -155,8 +183,11 @@ interface UseShape {
 interface OrmShape {
   as(principal: unknown): OrmShape;
   withBehaviorCaller(caller: unknown): OrmShape;
-  transaction<T>(fn: (tx: Readonly<Record<string, RepositoryShape | undefined>>) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (tx: TxShape) => Promise<T>): Promise<T>;
 }
+
+/** A transaction's repositories, and the system actor's view of them. */
+type TxShape = Readonly<Record<string, RepositoryShape | undefined>> & { asSystem?(): TxShape };
 
 /** The columns of a repository's table, or none when it holds no definition. */
 function columnsOf(repository: RepositoryShape): readonly ColumnShape[] {
@@ -258,6 +289,8 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
   if (name === 'NotFoundError') return notFound(`${operation.type} not found`, { cause: error });
   if (name === 'NoUserError') return unauthorized(undefined, { cause: error });
   if (name === 'PageKeyError') return refusedCursor();
+  // A party's or an agent run's write that leaves a row its grants do not reach (D156).
+  if (name === 'AccessRefusedError') return forbidden(`${operation.type}: the row is not one the caller's grants reach`, { cause: error });
   const failed = databaseError(error);
   if (!failed) return error;
   const body = operation.body ?? [];
@@ -299,7 +332,7 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
  * back: a refusal of the behaviors' core as a behavior operation answers
  * it (behaviorOperation), and any other as refusalOf says.
  */
-async function inTransaction<T>(orm: object, operation: TableOperation, ctx: RequestContext, work: (repository: RepositoryShape) => Promise<T>): Promise<T> {
+async function inTransaction<T>(orm: object, operation: TableOperation, ctx: RequestContext, work: (repository: RepositoryShape, tx: TxShape) => Promise<T>): Promise<T> {
   let columns: readonly ColumnShape[] = [];
   const acting = ctx.principal && uuidValue(ctx.principal.subject) !== undefined ? ctx.principal : null;
   try {
@@ -311,7 +344,7 @@ async function inTransaction<T>(orm: object, operation: TableOperation, ctx: Req
           const repository = tx[operation.repository];
           if (!repository) throw new Error(`table operation: the repositories hold no ${operation.repository}, the repository of ${operation.type}`);
           columns = columnsOf(repository);
-          return work(repository);
+          return work(repository, tx);
         })
     );
   } catch (error) {
@@ -335,36 +368,106 @@ const NO_ROW = Symbol('no row');
  * anything is read: a filter drops a member it does not know, and a rule
  * that dropped one would reach every row.
  */
-function reachOf(operation: TableOperation, columns: readonly ColumnShape[], ctx: RequestContext): Values | typeof NO_ROW | undefined {
+function reachOf(operation: TableOperation, repository: RepositoryShape, ctx: RequestContext): Values | typeof NO_ROW | undefined {
   const by = operation.by ?? [];
   if (by.length === 0) return undefined;
-  const members = by.map(member => {
-    const column = columns.find(candidate => candidate.name === member);
-    if (!column?.filter?.includes('eq')) {
-      throw new Error(`table operation: the row rule of ${operation.type} names ${member}, which its repository keeps no equality filter for; rebuild the database's types`);
-    }
-    return column;
-  });
+  const members = by.map(member => pathOf(operation, repository, member));
   const principal = ctx.principal;
   const override = operation.overridePermission;
   if (override !== undefined && principal?.permissions.some(granted => covers(granted, override))) return undefined;
   const subject = principal?.subject;
   if (subject === undefined || subject === '') return NO_ROW;
   const named: Values[] = [];
-  for (const column of members) {
+  for (const { steps, column } of members) {
     if (column.uuid === true && uuidValue(subject) === undefined) continue;
-    named.push({ [column.name]: { eq: subject } });
+    let filter: Values = { [column.name]: { eq: subject } };
+    for (const step of [...steps].reverse()) filter = { [step]: filter };
+    named.push(filter);
   }
   return named.length === 0 ? NO_ROW : { anyOf: named };
 }
 
-/** The row's view: the members the operation's result lists, a @decrypted one opened. */
-function viewOf(operation: TableOperation, row: Row): Values {
-  const view: [string, unknown][] = operation.view.map(member => [
-    member,
-    operation.decrypted?.includes(member) ? revealed(row[member]) : row[member],
-  ]);
+/**
+ * A member of a row rule (D108), or a path to one (D156): the relations it
+ * steps through, each a to-one or a one-to-many relation of the table the
+ * step before reached, and the column at its end, which holds the subject.
+ * A step or a member the repositories do not know is the generator's
+ * error, thrown before anything is read: a filter drops a member it does
+ * not know, and a rule that dropped one would reach every row.
+ */
+function pathOf(operation: TableOperation, repository: RepositoryShape, member: string): { steps: string[]; column: ColumnShape } {
+  const steps = member.split('.');
+  const last = steps.pop()!;
+  let at = repository;
+  for (const step of steps) {
+    const target = at.def?.relations?.find(rel => rel.field === step)?.target ?? at.def?.many?.find(rel => rel.name === step)?.target;
+    const next = target === undefined ? undefined : at.peers?.[target];
+    if (next === undefined) {
+      throw new Error(`table operation: the row rule of ${operation.type} names ${member}, whose step ${step} is no relation its repositories reach; rebuild the database's types`);
+    }
+    at = next;
+  }
+  const column = columnsOf(at).find(candidate => candidate.name === last);
+  if (!column?.filter?.includes('eq')) {
+    throw new Error(`table operation: the row rule of ${operation.type} names ${member}, which its repository keeps no equality filter for; rebuild the database's types`);
+  }
+  return { steps, column };
+}
+
+/**
+ * The row's view: the members the operation's result lists, a @decrypted
+ * one opened, but one whose reveal permission the caller does not hold,
+ * which stays masked (D156). opened collects the members whose value it
+ * opened under a reveal permission, which the access log records.
+ */
+function viewOf(operation: TableOperation, row: Row, ctx?: RequestContext, opened?: string[]): Values {
+  const view: [string, unknown][] = operation.view.map(member => {
+    if (!operation.decrypted?.includes(member)) return [member, row[member]];
+    const permission = operation.reveal?.[member];
+    if (permission === undefined) return [member, revealed(row[member])];
+    if (!ctx?.principal?.permissions.some(granted => covers(granted, permission))) return [member, row[member]];
+    if (row[member] !== null && row[member] !== undefined) opened?.push(member);
+    return [member, revealed(row[member])];
+  });
   return Object.fromEntries(view);
+}
+
+/**
+ * The views of rows, each member opened under a reveal permission recorded
+ * in the database's access log (D156), in the operation's transaction, as
+ * the system actor, so the caller's own audience never hides the record.
+ * A reveal with no access log to record it in is refused: a value is never
+ * opened unrecorded.
+ */
+async function viewsOf(operation: TableOperation, rows: readonly Row[], ctx: RequestContext, tx: TxShape): Promise<Values[]> {
+  const views: Values[] = [];
+  const records: Values[] = [];
+  for (const row of rows) {
+    const opened: string[] = [];
+    views.push(viewOf(operation, row, ctx, opened));
+    for (const field of opened) {
+      const principal = ctx.principal;
+      records.push({
+        at: new Date(),
+        kind: 'reveal',
+        principal: principal?.subject ?? null,
+        principalKind: principal ? (principal.kind ?? 'user') : null,
+        actingFor: principal?.actingFor?.subject ?? null,
+        credential: principal?.credential?.id ?? null,
+        operation: ctx.operation.name,
+        targetType: operation.type,
+        targetId: operation.key === undefined ? null : String(row[operation.key] ?? ''),
+        field,
+      });
+    }
+  }
+  if (records.length > 0) {
+    const system = tx.asSystem?.() ?? tx;
+    const log = Object.values(system).find(repository => typeof repository === 'object' && repository?.def?.access === 'log') as RepositoryShape | undefined;
+    if (!log) throw new Error(`table operation: ${operation.type} reveals ${String(records[0]!.field)}, and the database has no @accessLog table to record it in (D156)`);
+    for (const record of records) await log.createOne(record);
+  }
+  return views;
 }
 
 /** The condition each of the operation's parents is: the row's member holds the path's. */
@@ -381,7 +484,7 @@ function parentsOf(operation: TableOperation, request: TableRequest): Values {
 async function liveRow(repository: RepositoryShape, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<Row> {
   const key = operation.key;
   if (key === undefined) throw new Error(`table operation: a ${operation.kind} of ${operation.type} names no key`);
-  const reach = reachOf(operation, columnsOf(repository), ctx);
+  const reach = reachOf(operation, repository, ctx);
   if (reach === NO_ROW) throw notFound(`${operation.type} not found`);
   const row = await repository.findOne({
     ...parentsOf(operation, request),
@@ -407,7 +510,7 @@ function bodyOf(operation: TableOperation, request: TableRequest): Row {
  * soft-deleted row's and a row's under another parent among them.
  */
 export function tableRead(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => viewOf(operation, await liveRow(repository, operation, ctx, request)));
+  return inTransaction(orm, operation, ctx, async (repository, tx) => (await viewsOf(operation, [await liveRow(repository, operation, ctx, request)], ctx, tx))[0]);
 }
 
 /** The text a contains matches, as the repository's ilike reads it between its two %: with \, % and _ escaped by \, so each matches itself. */
@@ -450,10 +553,10 @@ export function tableList(
   page: PageRequest,
   filter: RequestFilter = {}
 ): Promise<Page<unknown>> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const search = operation.search === undefined ? undefined : request.query[operation.search];
     const parents = parentsOf(operation, request);
-    const reach = reachOf(operation, columnsOf(repository), ctx);
+    const reach = reachOf(operation, repository, ctx);
     // A caller the row rule names in no row lists none.
     if (reach === NO_ROW) return { items: [], next: null };
     // The parents and the row rule hold beside the filter, whatever it says of them.
@@ -474,7 +577,7 @@ export function tableList(
       ...(after !== undefined ? { after } : {}),
     });
     return {
-      items: found.rows.map(row => viewOf(operation, row)),
+      items: await viewsOf(operation, found.rows, ctx, tx),
       next: found.next === null || found.next === undefined ? null : encodeCursor(found.next),
     };
   });
@@ -486,7 +589,7 @@ export function tableList(
  * path names; the view of the row as the write left it.
  */
 export function tableCreate(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const body = bodyOf(operation, request);
     const starts = operation.starts ?? [];
     const input: Values = {};
@@ -498,9 +601,11 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
     }
     for (const parent of operation.parents ?? []) input[parent] = request.path[parent];
     // The row rule's members name the caller in the new row (D108):
-    // createdBy as the repository stamps it, each other one set here.
+    // createdBy as the repository stamps it, each other one set here. A
+    // path names rows of other tables, which a create does not set (D156).
     const columns = columnsOf(repository);
     for (const member of operation.by ?? []) {
+      if (member.includes('.')) continue;
       const column = columns.find(candidate => candidate.name === member);
       if (column?.audit !== undefined) continue;
       const subject = ctx.principal?.subject;
@@ -529,10 +634,10 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
       await use.transition(created[key], { to });
       moved = true;
     }
-    if (!moved) return viewOf(operation, created);
+    if (!moved) return (await viewsOf(operation, [created], ctx, tx))[0];
     const key = columns.find(column => column.key)!.name;
     const row = await repository.findOne({ [key]: { eq: created[key] } });
-    return viewOf(operation, row ?? created);
+    return (await viewsOf(operation, [row ?? created], ctx, tx))[0];
   });
 }
 
@@ -545,7 +650,7 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
  * It answers the view of the row as the write left it.
  */
 export function tableUpdate(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const row = await liveRow(repository, operation, ctx, request);
     const body = bodyOf(operation, request);
     const columns = columnsOf(repository);
@@ -557,8 +662,8 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
       }
       update[member] = body[member];
     }
-    if (Object.keys(update).length === 0) return viewOf(operation, row);
-    return viewOf(operation, await repository.updateOne(row[operation.key!], update));
+    if (Object.keys(update).length === 0) return (await viewsOf(operation, [row], ctx, tx))[0];
+    return (await viewsOf(operation, [await repository.updateOne(row[operation.key!], update)], ctx, tx))[0];
   });
 }
 
@@ -569,9 +674,9 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
  * the view of the row as it was before.
  */
 export function tableDelete(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
-  return inTransaction(orm, operation, ctx, async repository => {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
     const row = await liveRow(repository, operation, ctx, request);
     await repository.deleteOne(row[operation.key!]);
-    return viewOf(operation, row);
+    return (await viewsOf(operation, [row], ctx, tx))[0];
   });
 }

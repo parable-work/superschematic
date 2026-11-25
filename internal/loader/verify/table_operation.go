@@ -365,7 +365,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 	}
 
 	checkResultView(owner, result, r)
-	callerSets := checkRowRule(owner, kind, op, result, key, parentOf, r)
+	callerSets := checkRowRule(owner, kind, op, db, result, key, parentOf, r)
 
 	var input *tableView
 	inputName := ""
@@ -478,7 +478,7 @@ func subjectMember(source *ir.TypeDef, c *sqlutil.ColumnModel) bool {
 // createdBy, which the repository stamps, to the caller: it returns those,
 // which the body may not carry, and refuses the key, which the table
 // generates, and a relation the path sets.
-func checkRowRule(owner, kind string, op *ir.FieldDef, result *tableView, key string, parents map[string]bool, r *Result) map[string]bool {
+func checkRowRule(owner, kind string, op *ir.FieldDef, db *tableDatabase, result *tableView, key string, parents map[string]bool, r *Result) map[string]bool {
 	rule := op.TableOperation
 	if rule == nil || len(rule.By) == 0 {
 		if rule != nil && rule.OverridePermission != "" {
@@ -506,6 +506,16 @@ func checkRowRule(owner, kind string, op *ir.FieldDef, result *tableView, key st
 	sets := map[string]bool{}
 	seen := map[string]bool{}
 	for _, name := range rule.By {
+		if strings.Contains(name, ".") {
+			again := seen[name]
+			seen[name] = true
+			if again {
+				r.errorf("", "%s: by names %s twice", owner, name)
+				continue
+			}
+			checkRowRulePath(owner, kind, db, result, name, r)
+			continue
+		}
 		c := result.column(name)
 		again := seen[name]
 		seen[name] = true
@@ -528,6 +538,70 @@ func checkRowRule(owner, kind string, op *ir.FieldDef, result *tableView, key st
 		}
 	}
 	return sets
+}
+
+// checkRowRulePath holds a row rule's path (D108, D156) to the tables:
+// unit.contract.parties.party steps from the row through its to-one
+// relation unit, that row's to-one relation contract, and that row's
+// one-to-many relation parties, a @hasMany field or another table's
+// relation that points back, to the member party of each party row, which
+// holds a subject as a plain member of a rule does. Every step is a
+// declared relation of the table the step before reached. A create sets
+// the members of its rule to the caller, and a path names rows of other
+// tables, so a create's rule names none.
+func checkRowRulePath(owner, kind string, db *tableDatabase, result *tableView, path string, r *Result) {
+	if kind == ir.TableOperationCreate {
+		r.errorf("", "%s: by names the path %s, and a create's row rule sets each member it names to the caller, which a path through other tables cannot; hold the create to the parent's rule, or write it by hand", owner, path)
+		return
+	}
+	steps := strings.Split(path, ".")
+	last := steps[len(steps)-1]
+	at := result.model
+	source := result.source
+	for _, step := range steps[:len(steps)-1] {
+		next := ""
+		for _, rel := range at.ToOne {
+			if rel.Field == step {
+				next = rel.Target
+			}
+		}
+		for _, rel := range at.ToMany {
+			if next == "" && rel.Name == step {
+				next = rel.Source
+			}
+		}
+		var known []string
+		for _, rel := range at.ToOne {
+			known = append(known, rel.Field)
+		}
+		for _, rel := range at.ToMany {
+			known = append(known, rel.Name)
+		}
+		listed := "it has none"
+		if len(known) > 0 {
+			listed = strings.Join(known, ", ")
+		}
+		if next == "" {
+			r.errorf("", "%s: by names the path %s, whose step %s is no relation of %s; a path steps through the to-one and one-to-many relations each table declares (%s)", owner, path, step, at.Type, listed)
+			return
+		}
+		model := db.tables[next]
+		if model == nil {
+			r.errorf("", "%s: by names the path %s, whose step %s reaches %s, which is no table of %s", owner, path, step, next, db.name)
+			return
+		}
+		at, source = model, db.schema.Types[next]
+	}
+	view := &tableView{source: source, model: at}
+	c := view.column(last)
+	switch {
+	case c == nil:
+		r.errorf("", "%s: by names the path %s, which ends at %s, no member of %s; a path ends at a member that holds a subject", owner, path, last, at.Type)
+	case c.Audit != "" && c.Audit != sqlutil.AuditCreatedBy:
+		r.errorf("", "%s: by names the path %s, which ends at %s, a stamp of a write that says nothing of who the row is for", owner, path, last)
+	case source == nil || !subjectMember(source, c):
+		r.errorf("", "%s: by names the path %s, which ends at %s, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy", owner, path, last)
+	}
 }
 
 // viewMember is the name a view holds a column under: its field, or a

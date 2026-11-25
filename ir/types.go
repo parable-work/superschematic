@@ -247,6 +247,17 @@ type TypeDef struct {
 	// covers. Empty for every other type. See [Fence].
 	Fences []*Fence `json:"fences,omitempty" yaml:"fences,omitempty"`
 
+	// Audience is the @audience declaration of a DB table (D156): who may
+	// see each row, and what an agent run may do with it. Nil for every
+	// other type. See [AudienceDef].
+	Audience *AudienceDef `json:"audience,omitempty" yaml:"audience,omitempty"`
+
+	// AccessGrants marks the DB class that is the table of grants (D156),
+	// and AccessLog the one that is the access log; the loader fills
+	// their fields. Nil for every other type.
+	AccessGrants *AccessGrantsDef `json:"accessGrants,omitempty" yaml:"accessGrants,omitempty"`
+	AccessLog    *AccessLogDef    `json:"accessLog,omitempty" yaml:"accessLog,omitempty"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].
@@ -607,6 +618,13 @@ type FieldDef struct {
 	// of its source's Encrypted<T> field (@decrypted, D85), an opt-in a view
 	// needs to hold such a field at all.
 	Decrypted bool `json:"decrypted,omitempty" yaml:"decrypted,omitempty"`
+
+	// RevealPermission, on a @decrypted field, is the permission a caller
+	// holds to see its value (D156): `@decrypted({ permission })`. A
+	// generated operation answers the field masked to a caller without it,
+	// and records each value it opens in the access log. Empty, every
+	// caller the route admits sees it, as before.
+	RevealPermission string `json:"revealPermission,omitempty" yaml:"revealPermission,omitempty"`
 
 	// SQLName is the column a DB table field is stored in, from
 	// @column("name") (D85): a to-one relation's foreign key column itself.

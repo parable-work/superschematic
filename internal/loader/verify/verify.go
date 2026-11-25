@@ -276,6 +276,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkEnqueueOnChange(schema, in, r)
 	checkStateMachines(schema, in, r)
 	checkFences(schema, in, r)
+	checkAccess(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

@@ -84,6 +84,11 @@ func ViewsOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMode
 			view.SearchColumn = Qualify(table, SearchTextColumn)
 			view.SearchProbe = Qualify(def.Name, view.Key) + " IN (SELECT " + Qualify(table, KeyColumnOf(source)) + " FROM " + QuoteIdentifier(table) + "%s)"
 		}
+		if ofSource && source != nil && source.Audience != nil {
+			table := TableName(source)
+			view.Audience = AudienceOf(source)
+			view.Audience.Probe = Qualify(def.Name, view.Key) + " IN (SELECT " + Qualify(table, KeyColumnOf(source)) + " FROM " + QuoteIdentifier(table) + "%s)"
+		}
 		views = append(views, view)
 	}
 	return views, nil
@@ -144,4 +149,11 @@ func viewKey(schema *ir.Schema, td *ir.TypeDef) (string, bool) {
 		return reads(def.Collapse.By[0]), false
 	}
 	return "", false
+}
+
+// ViewKeyOfSource is ViewKey, and whether the key reads the source's key:
+// a projection whose rows are each one row of its source, which a filter
+// of the source (an audience's, D156) can hold the view to.
+func ViewKeyOfSource(schema *ir.Schema, td *ir.TypeDef) (string, bool) {
+	return viewKey(schema, td)
 }

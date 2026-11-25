@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "AccessGrantsDef": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "AccessLogDef": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
     "App": {
       "additionalProperties": false,
       "properties": {
@@ -96,6 +106,28 @@
         "name",
         "typeRef"
       ],
+      "type": "object"
+    },
+    "AudienceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "default": "",
+          "type": "string"
+        },
+        "default": {
+          "default": "",
+          "type": "string"
+        },
+        "inheritFrom": {
+          "default": "",
+          "type": "string"
+        },
+        "owner": {
+          "default": "",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "BehaviorOperationsConfig": {
@@ -4853,6 +4885,10 @@
           "default": "",
           "type": "string"
         },
+        "revealPermission": {
+          "default": "",
+          "type": "string"
+        },
         "runtime": {
           "default": false,
           "type": "boolean"
@@ -6821,9 +6857,18 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "accessGrants": {
+          "$ref": "#/$defs/AccessGrantsDef"
+        },
+        "accessLog": {
+          "$ref": "#/$defs/AccessLogDef"
+        },
         "allowUnknownFields": {
           "default": false,
           "type": "boolean"
+        },
+        "audience": {
+          "$ref": "#/$defs/AudienceDef"
         },
         "behaviors": {
           "default": [],

@@ -42,6 +42,19 @@ DROP TRIGGER IF EXISTS {{ quote $guard.TriggerName }} ON {{ $guard.QuotedTable }
 DROP FUNCTION IF EXISTS {{ quote $guard.FunctionName }}();
 {{- end }}
 {{- end }}
+{{- if .AudienceTriggers }}
+
+-- Drop the triggers and functions that keep an @audience table's
+-- effective audience
+{{- range $cascade := .AudienceCascades }}
+DROP TRIGGER IF EXISTS {{ quote $cascade.TriggerName }} ON {{ $cascade.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $cascade.FunctionName }}();
+{{- end }}
+{{- range $audience := .AudienceTriggers }}
+DROP TRIGGER IF EXISTS {{ quote $audience.TriggerName }} ON {{ $audience.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $audience.FunctionName }}();
+{{- end }}
+{{- end }}
 {{- if .Fences }}
 
 -- Drop the triggers and functions that hold a @fenced counter

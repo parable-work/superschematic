@@ -1806,3 +1806,117 @@ Left:
 - A wake on SQLite and D1, where no worker claims on Workers.
 - A behavior worker's drain.ts under the pinned workerd, and a Workflow
   under workerd, which runs none: the fixture stands in for one.
+
+## D156. Every caller is one principal of three kinds, a table's rows keep to an audience a trigger resolves, a row rule follows relations, grants are rows a party or an agent run reaches rows through, reveal is a permission, and an access log records sensitive reads (D103, D104, D108, D114, D116 amended)
+
+Roles gave per-operation permissions, and a row rule (D108) matched
+members of the row itself. Nothing said who may see one row and not
+another on every route, nothing followed a relation to the caller, and
+every caller was a user with a session or a key. Sections 7 and 8 of the
+platform plan build parties outside the user table and agent runs on this
+entry's principal and grants.
+
+### The principal
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every route and MCP tool resolves its caller to one principal, of three kinds: `user` (a session or an API key), `party` (a row of an app table that holds a grant) and `agent` (an agent run). The TypeScript runtime's `Principal` gains `kind` (absent reads as `user`), `actingFor` (whom it acts for: the user an agent run serves), `grants` (each grant's target and its role's reaches) and `credential` (the API key's or the grant's id). An MCP tool's call goes through its route's authenticator, so it is one path. | A principal type per kind, which every guard and matcher would then switch on. Parties and agent runs as users with a flag, which would give them sessions, passwords and every user route. |
+| Permissions are checked one way for all three: a party's and an agent run's are its grant's role's, matched as a user's are. | A permission vocabulary per kind. |
+| The caller of an operation travels whole (`currentAccess()`, `AccessCaller`), not as its subject alone, and an operation with no principal runs as the anonymous caller, so a public route sees the rows everyone may while a job, outside any operation, sees every row. | One store of the subject, which cannot tell a public route from a job. |
+| `createdBy` and `updatedBy` record the principal; the access log records it and whom it acted for. | A `createdFor` column on every table, which a table with Provenance (D73) records already. |
+| PR 516's Go auth-provider hook `callerPrincipal` answers the principal's id. The Go principal's kind, `actingFor` and grants are to come from that hook's provider, as a struct the hook returns, when Go builds this entry. | A second Go hook beside 516's. |
+
+### A table's audience
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@audience<T>({ owner?, inheritFrom?, default?, agents? })` from `@superschematic/db` on a DB table. The loader adds five columns: `audience` (`everyone`, `private`, `named`, `inherit`), `audienceNamed` (ids), `agentAccess` (`followRole`, `readOnly`, `none`), and `effectiveAudience` and `effectiveAgents`, which a trigger keeps. | A behavior on the core (D103). The plan names one, and D103's own test puts it elsewhere: a read filter and a stored derived column are a storage shape and a query, a schema feature, as `@searchField` is. The core sees writes; an audience must hold every read, which only the repositories and the SQL see. Its state changes by ordinary writes, held by the update's permission and a row rule (`by: ["owner"]`). |
+| The effective audience is a column, `effective_audience UUID[]`, null for everyone, and a read keeps to `effective_audience IS NULL OR effective_audience && ARRAY[$ids]::uuid[]`: one condition on the row, which a GIN index serves. | A sub-table of principals per row (row, principal), which every read joins and every recompute rewrites row by row, and which a large named audience would favour. A list of the audience is short; a team as one principal (D108's caller through a table) keeps it short. |
+| A trigger resolves the effective columns before each insert and update, whatever writes the row, and a parent's cascade trigger, after an update that changes the parent's resolved columns, updates each child that inherits with no change, so the child's own trigger resolves it again, and its children in turn. Both run in the writer's transaction. | The change queue the plan names, which recomputes after the commit: a parent made private would show its children to everyone until a worker ran. The queue stays the way out for a parent with very many children (left). |
+| A row that inherits and has no parent is its owner's alone. | Everyone, which would show a document to everyone when its private folder is deleted and the relation set null. |
+| An inherited agent access is the least open of the row's and its parent's. | The row's own alone, which would let a document escape its folder's `none`. |
+| The repositories apply it (`orm.ts`, `accessConditions`): every read and write of an `@audience` table in an operation, the generated table operations', a hand-written implementation's through `Deps.orm`, a search, a relation a read includes, a filter through a relation, and a projection keyed by its source's key, whose definition carries a probe that holds the view to the source's rows. A row the caller does not see is the 404 of one that is not there. An upsert in an operation is refused. | Postgres row-level security, which D108 turned down and which needs the caller set on each connection; SQLite and D1 have none. A filter in each generated handler, which a hand-written implementation would skip. |
+| An agent run sees a row its own id or whom it acts for is in the audience of, unless the row's effective agent access is `none`, and writes it only under `followRole`. | An agent run with its own audience alone, which an agent acting for a person could not then serve. |
+| Outside an operation, `orm.asSystem()` and the database's own role read every row. `orm.as(principal)` and `withUser(id)` read as that principal. | A system actor held to an audience, which a job could not then serve. |
+| The predicate is one exported function, `audienceConditions(definition, caller, args, offset, write?)` of `@superschematic/http-runtime/postgres`, which search across tables, the calendar's feed, references and notifications (sections 2 to 5) apply as a repository does. | A predicate per feature. |
+| Postgres alone: the loader refuses `@audience` in a service that lists `sqlite`. | Text arrays as JSON on SQLite, which no index serves and no trigger function writes. |
+
+How an owner sees which rows a private row is referenced from (for
+section 4, which builds references): the reference index holds each
+reference as a row (from, to). An owner's read of a private row's
+backlinks reads every reference to it, as the system, and answers those
+whose source the owner sees, and a count of those they do not, without
+their keys: "two rows you cannot see refer to this". A reader who is not
+the target's owner sees only the backlinks whose sources they see, and no
+count.
+
+### Row rules through relations (D108)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A member of `by` may be a dotted path: `unit.contract.parties.party`. Each step is a to-one relation or a one-to-many relation (a `HasMany` field, or another table's relation that points back) of the table the step before reached; the last is a member that holds a subject. The loader checks every step (`verify.checkRowRulePath`), and a create's rule names none, since a create sets its rule's members to the caller. | A rule on the table, which D108 turned down. A path to a list field of ids, which no filter reads yet. |
+| The handler builds one nested filter, which the repository writes as one condition of the row's `WHERE`, a semijoin per step: `unit_id IN (SELECT id FROM unit WHERE contract_id IN (SELECT ...))`, and for a one-to-many step `id IN (SELECT contract_id FROM contract_party WHERE ...)`. Postgres plans each as `EXISTS`. The repositories' filter gains the one-to-many step for it. | A correlated `EXISTS` text of its own, a second compiler beside the filter's. |
+| The Go and Rust servers leave an operation whose rule names a path to the implementation, with the build's warning (D106's last rule). | Refusing the schema, which would fail a TypeScript API for what only Go and Rust lack. |
+
+### Grants (D116)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A grant is a row of the class marked `@accessGrants`, whose fields the loader fills: the holder's id and kind (`party`, `agent`), the role's name, the target's type and key, `startsAt`, `endsAt`, `endsWhenField` and `endsWhenState` (an end when the target reaches a state), `revokedAt`, `tokenHash` and who made it. | A table the loader adds unasked, as the user model's are, which every database with a User table would carry. Its target as a relation, which would tie a grant to one table. |
+| A role is a row of the UserRole table: its permissions are what the holder may do, and its optional `reaches` field lists the relation paths it reaches from a target, each `Type:path` (`Request:unit.contract`), or `Type:*` for every row of a table. Policy is data. | The paths in the schema, which ground rule 1 turns down. The paths on each grant, which would repeat the role's on every row. |
+| `grantAuthenticator` runs a request with a `grant_` token as the grant's holder, reading the grant, its target's state and its role on every call: a grant that ended or was revoked is the 401 of the very next call. The token is 32 random bytes in base64url after `grant_`, stored as its SHA-256, as D114's keys are. | A token that carries its own expiry, which a revocation could not end. |
+| A party's or an agent run's reads and writes keep to the rows its grants reach, the target and the rows of the tables its role's paths name, through the same paths a row rule follows; a table no path names has none. A create that leaves a row outside its reach is the 403 `forbidden`, and the transaction keeps nothing. | Reach as a row rule of each operation, which a hand-written implementation would skip. |
+| `activeGrants(orm, filter)` reads the active grants. | A generated declared query (left). |
+
+Section 8's run token is a grant: holder an agent run, `actingFor` whom it
+serves, its target the run's rows, its role the agent's, narrowed. Section
+7's party resolves through a channel identity to its active grants
+(`activeGrants({ holder })`) rather than a token.
+
+### Reveal and the access log (D114)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@decrypted({ permission })` on a view's `Encrypted<T>` field makes revealing it a permission of its own (`FieldDef.RevealPermission`): a caller without it gets the field masked, and each value a generated operation opens writes an access-log row in the operation's transaction. A reveal with no access log to write to is refused. Plain `@decrypted` stays as it was. | A reveal operation per field, a route each. |
+| The access log is the class marked `@accessLog`, whose fields the loader fills, written as the system actor: `reveal`, `agentRead` (an agent run's `GET`), `keyCall` (D114's use log) and `grantCall`. The router writes the last three once it has its caller, before the permission check, when its options carry `accessLog` (`accessLogOf(orm)`). | A log of every read, which is the database's audit's to keep. |
+
+Built: the principal's kinds in the TypeScript runtime, and the identity
+service's principal naming its API key; `@audience` and the five columns
+(`ir/access.go`, `internal/registry/core_access.go`,
+`internal/loader/access`, `internal/loader/verify/access.go`), the audience
+triggers in create.sql, drop.sql and migration plans
+(`internal/generator/sqlgen/audience.go`, `internal/sqlmigrate`), the
+repositories' audience and grant reach (`runtime/http/typescript/src/orm.ts`);
+row rules through relations in the loader and the TypeScript handlers;
+`@accessGrants`, `@accessLog`, `grantAuthenticator`, `issueGrant`,
+`revokeGrant`, `activeGrants` and `accessLogOf`
+(`runtime/http/typescript/src/access.ts`); `@decrypted({ permission })`;
+the guide's "Per-record access" section; `examples/access-records`.
+`TestGeneratedAccessEndToEnd` runs the plan's "done when" on Postgres:
+a private row never appears to another user in a list, a read or a
+search; a party with a grant reaches only what its role's paths allow; an
+expired, revoked or ended grant is refused on the next call; a reveal
+writes an access-log row.
+
+Left:
+
+- The Go and Rust servers and repositories: the principal's kinds (Go's
+  through PR 516's `callerPrincipal`), the audience filter, path row
+  rules, grants, reveal and the access log. Python's ORM.
+- An audience on SQLite and D1, and a GIN index on `effective_audience`
+  the build writes.
+- An audience in a declared query (`@query`), which reads every row.
+- A parent with very many children: the cascade updates them in the
+  writer's transaction; the change queue is the way to move it after the
+  commit.
+- Search across tables, the calendar and its feed, references and
+  notifications applying `audienceConditions` (sections 2 to 5), and the
+  backlinks an owner sees, designed above.
+- A generated route and declared query that list the active grants.
+- A generated server that wires `accessLogOf` and `grantAuthenticator`
+  itself; an app passes them in the router's options now.
+- A party's principal across all its active grants, through a channel
+  identity (section 7), and the agent run's narrowed token (section 8).
+- A path to a list field of ids in a row rule, and a team as a principal
+  in an audience.
+- Live deploys: `smoke.sh Cloudflare` and `Gcp` are the maintainer's.
