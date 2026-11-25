@@ -421,7 +421,7 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	}
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
-{{- if not .ReadOnly }}
+{{- if not .Released }}
 
 // {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne and
 // UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
@@ -577,7 +577,7 @@ type {{ .TypeName }}Filter struct {
 	// does an empty AnyOf.
 	AnyOf []{{ .TypeName }}Filter
 }
-{{- if not .ReadOnly }}
+{{- if not .Released }}
 
 // {{ .TypeName }}Update provides fields that can be updated
 type {{ .TypeName }}Update struct {

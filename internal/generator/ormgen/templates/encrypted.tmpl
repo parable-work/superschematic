@@ -124,7 +124,7 @@ func {{ $lower }}KeyText(value any) (string, bool) {
 func {{ $lower }}Cell(field, row string) fieldcrypt.Cell {
 	return fieldcrypt.Cell{Table: {{ printf "%q" .TypeName }}, Field: field, Row: row}
 }
-{{- if not .ReadOnly }}
+{{- if not .Released }}
 
 // seal returns a copy of input with its key, generated when it is unset{{ if not .GeneratesKey }}
 // (a create must set it){{ end }}, and each encrypted field sealed under it.
@@ -227,7 +227,7 @@ func (r *{{ .Name }}) open(row *types.{{ .TypeName }}) error {
 	{{- end }}
 	return nil
 }
-{{- if not .ReadOnly }}
+{{- if not .Released }}
 
 // Reencrypt reseals under the current field key every envelope of
 // {{ .TypeName }} another key of the keyring sealed, batch rows at a time

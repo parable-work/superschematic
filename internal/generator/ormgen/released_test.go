@@ -47,12 +47,12 @@ func generatedFile(t *testing.T, dir, name string) string {
 func TestReleasedRepositoryOnlyReads(t *testing.T) {
 	output := generateFixture(t, versionGraphFixture)
 	for _, repo := range output.Repositories {
-		wantReadOnly, wantOf := repo.TypeName == "PartReleased", ""
-		if wantReadOnly {
+		wantReleased, wantOf := repo.TypeName == "PartReleased", ""
+		if wantReleased {
 			wantOf = "Part"
 		}
-		if repo.ReadOnly != wantReadOnly || repo.ReleasedOf != wantOf {
-			t.Errorf("%s: ReadOnly = %v, ReleasedOf = %q; want %v, %q", repo.TypeName, repo.ReadOnly, repo.ReleasedOf, wantReadOnly, wantOf)
+		if repo.Released != wantReleased || repo.ReleasedOf != wantOf {
+			t.Errorf("%s: Released = %v, ReleasedOf = %q; want %v, %q", repo.TypeName, repo.Released, repo.ReleasedOf, wantReleased, wantOf)
 		}
 	}
 	outDir := t.TempDir()
@@ -144,11 +144,11 @@ func TestReleasedRepositoryOnlyReads(t *testing.T) {
 	}
 }
 
-// TestReadOnlyFollowsTheMarkNotTheName: a repository is read-only when its
+// TestReleasedFollowsTheMarkNotTheName: a repository is read-only when its
 // type is marked as a member's released rows (ir.TypeDef.ReleasedOf), and
 // only then. A table the schema names like one is an ordinary table, and a
 // schema with no such table says nothing of one.
-func TestReadOnlyFollowsTheMarkNotTheName(t *testing.T) {
+func TestReleasedFollowsTheMarkNotTheName(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
 	if err != nil {
 		t.Fatalf("load fixture-db: %v", err)
@@ -179,11 +179,11 @@ func TestReadOnlyFollowsTheMarkNotTheName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if named := repositoryOf(t, output, "TenantReleased"); named.ReadOnly || named.ReleasedOf != "" {
+	if named := repositoryOf(t, output, "TenantReleased"); named.Released || named.ReleasedOf != "" {
 		t.Errorf("TenantReleased, which no member releases into, is read-only: %+v", named)
 	}
-	if marked := repositoryOf(t, output, "Published"); !marked.ReadOnly || marked.ReleasedOf != "Tenant" {
-		t.Errorf("Published: ReadOnly = %v, ReleasedOf = %q; want true, Tenant", marked.ReadOnly, marked.ReleasedOf)
+	if marked := repositoryOf(t, output, "Published"); !marked.Released || marked.ReleasedOf != "Tenant" {
+		t.Errorf("Published: Released = %v, ReleasedOf = %q; want true, Tenant", marked.Released, marked.ReleasedOf)
 	}
 	outDir := t.TempDir()
 	if err := WriteORM(output, outDir); err != nil {
@@ -284,7 +284,7 @@ const releasedShapes = `{ "name": "name", "typeRef": { "name": "string" }, "requ
         { "name": "payloadGrid", "typeRef": { "name": "Generic.JSON", "isArray": true, "isArrayOfArrays": true } },
         { "name": "payloadByName", "typeRef": { "name": "Generic.JSON", "isMap": true }, "required": true, "jsonField": true }`
 
-// TestReadOnlyRepositoriesCompile generates the Go types and the ORM of
+// TestReleasedRepositoriesCompile generates the Go types and the ORM of
 // schemas whose tables the test marks as released rows (D139), and builds
 // and vets each ORM module: a read-only repository imports what its reads
 // use and no more, whatever its columns. releasedShapesSchema's StopReleased
@@ -294,7 +294,7 @@ const releasedShapes = `{ "name": "name", "typeRef": { "name": "string" }, "requ
 // opens its encrypted field and seals nothing; fixture-vectors-db's Passage
 // and TextEmbedding keep Nearest, which runs on database; and
 // fixture-fenced-db's Delivery and Depot have no fences to advance.
-func TestReadOnlyRepositoriesCompile(t *testing.T) {
+func TestReleasedRepositoriesCompile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -397,10 +397,10 @@ func TestReadOnlyRepositoriesCompile(t *testing.T) {
 			}
 
 			for _, repo := range output.Repositories {
-				if repo.ReadOnly != marked[repo.TypeName] {
-					t.Errorf("%s: ReadOnly = %v, want %v", repo.TypeName, repo.ReadOnly, marked[repo.TypeName])
+				if repo.Released != marked[repo.TypeName] {
+					t.Errorf("%s: Released = %v, want %v", repo.TypeName, repo.Released, marked[repo.TypeName])
 				}
-				if !repo.ReadOnly {
+				if !repo.Released {
 					continue
 				}
 				file := generatedFile(t, ormDir, "repository_"+codegen.ToSnakeCase(repo.TypeName)+".go")

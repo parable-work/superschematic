@@ -45,7 +45,7 @@ type ReadOnly{{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 }
 
-{{ if .ReadOnly -}}
+{{ if .Released -}}
 {{ docComment "" (printf "%sRepositoryInterface defines the contract for reading %s, the released rows of %s. The version graph's Release owns the rows (D139), so it has no write." .TypeName .TypeName .ReleasedOf) }}
 {{- else -}}
 // {{ .TypeName }}RepositoryInterface defines the contract for {{ .TypeName }} data access.
@@ -70,7 +70,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindOne(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) (*types.{{ .TypeName }}, error)
 	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
-	{{- if not .ReadOnly }}
+	{{- if not .Released }}
 	CreateOne(ctx context.Context, input *{{ .CreateInput }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*{{ .CreateInput }}) ([]*types.{{ .TypeName }}, error)
 	{{- if not .NoUpsert }}
@@ -323,7 +323,7 @@ func (tx *NoOpTx) Get{{ .TypeName }}ReadOnlyRepository() ReadOnly{{ .TypeName }}
 	return tx.{{ .TypeName }}
 }
 
-{{ if .ReadOnly -}}
+{{ if .Released -}}
 {{ docComment "" (printf "NoOp%s provides deterministic no-op repository behavior: the reads of %s, which has no write (D139)." .Name .Name) }}
 {{- else -}}
 // NoOp{{ .Name }} provides deterministic no-op repository behavior.
@@ -383,7 +383,7 @@ func (r *NoOp{{ .Name }}) FindPage(_ context.Context, _ *{{ .TypeName }}Filter, 
 	return &{{ .TypeName }}Page{Rows: []*types.{{ .TypeName }}{}}, nil
 }
 
-{{- if not .ReadOnly }}
+{{- if not .Released }}
 {{- if .HasBehaviors }}
 
 func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
