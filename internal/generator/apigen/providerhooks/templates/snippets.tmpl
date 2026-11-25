@@ -39,6 +39,23 @@
 {{- end }}
 {{- end }}
 
+{{ define "routesDeclarations" }}
+
+// firstStep, permissionStep and afterDecryptStep are the marker steps the
+// route snippets write.
+func firstStep(string) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+
+func permissionStep(int) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+
+func afterDecryptStep(string) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+{{- end }}
+
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 {{ define "callerImports" }}{{ end }}

@@ -543,7 +543,8 @@ route's `EndpointInfo`: `routeMiddlewaresFirst` runs before every other
 step, `routePermissions` runs after the rate limit, body limit and service
 step, and `routeMiddlewaresAfterDecrypt` runs after the payload decryptor
 and before the timeout. `routesConfigFields` adds the `Config` fields they
-read, in every API, public or not.
+read, in every API, public or not, and `routesDeclarations` adds the
+functions, types and values of `routes.go` they call.
 
 ## Policy on what the core writes
 

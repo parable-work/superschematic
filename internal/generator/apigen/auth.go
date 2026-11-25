@@ -145,6 +145,7 @@ var AuthSnippets = []string{
 	"routesProtectedMiddleware",    // middlewares after cfg.AuthMiddleware on the protected group, and in the end-user step of a route with a service clause (D37)
 	"routeMiddlewaresFirst",        // per-endpoint middlewares that run first on a mounted route, before the webhook signature, rate limit and body limit; data is the EndpointInfo. A route with no other middleware gets a list when it is not empty
 	"routePermissions",             // per-endpoint permission middleware, after the rate and body limits and the service step and before the decryptor and timeout; data is the EndpointInfo
+	"routesDeclarations",           // top-level declarations of routes.go the provider's route snippets call, after the handler factories: helpers, types and per-endpoint values
 	"routeMiddlewaresAfterDecrypt", // per-endpoint middlewares after the payload decryptor and before the timeout, which read the request the handler reads; data is the EndpointInfo. A route with no other middleware gets a list when it is not empty
 	// module.tmpl
 	"moduleRequires", // extra require lines

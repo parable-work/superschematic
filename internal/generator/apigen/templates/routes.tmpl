@@ -1776,6 +1776,7 @@ func createRapiDocHandler() gohttp.HandlerFunc {
 		w.Write([]byte(rapidocHTML))
 	}
 }
+{{- authSnippet "routesDeclarations" . }}
 
 {{- if .HasWebhookHMACEndpoints }}
 
