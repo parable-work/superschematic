@@ -533,6 +533,11 @@ type TypeScriptCall struct {
 type TypeScriptBucketUse struct {
 	Field  string
 	Bucket *TypeScriptBucket
+
+	// ContentAddressed is true for a bucket Deps holds as a content
+	// bucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // TypeScriptBucket is a bucket main.ts opens once, for every API that
@@ -700,7 +705,7 @@ var tsReserved = []string{
 	"connectPostgres", "ping", "Pool", "Database", "Service", "DEFAULT_PORT", "SHUTDOWN_TIMEOUT_MS",
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
-	"server", "stopping", "shutdown", "port", "process", "openBucket",
+	"server", "stopping", "shutdown", "port", "process", "openBucket", "contentBucket",
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
@@ -1062,7 +1067,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			h := memoryStores[m.Service]
@@ -1261,6 +1266,12 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.RateLimitStore != nil }) {
 		out = append(out, "memoryStoreRateLimitStore")
+	}
+	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool {
+		return slices.ContainsFunc(a.Buckets, func(b TypeScriptBucketUse) bool { return b.ContentAddressed })
+	}) {
+		// Deps holds a content bucket over the bucket main.ts opens (D142).
+		out = append(out, "contentBucket")
 	}
 	return out
 }

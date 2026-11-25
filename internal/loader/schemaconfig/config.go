@@ -107,6 +107,17 @@ type SchemaConfig struct {
 	// only.
 	ClientVersions bool `json:"clientVersions,omitempty" yaml:"clientVersions,omitempty"`
 
+	// ContentAddressed has a Bucket service name its objects by their
+	// content (D142): an API that lists it holds a content bucket in its
+	// Deps, which puts a body under the SHA-256 of its bytes if no object
+	// has that name. It is valid on a Bucket config only.
+	ContentAddressed bool `json:"contentAddressed,omitempty" yaml:"contentAddressed,omitempty"`
+
+	// MaxBytes is the largest object a content-addressed bucket puts, in
+	// bytes; 0 is ir.DefaultContentMaxBytes. It is valid only beside
+	// ContentAddressed.
+	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
+
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
@@ -278,8 +289,9 @@ func validateCalls(cfg *SchemaConfig) error {
 
 // validateBuckets checks buckets, an API config's list of Bucket services,
 // each named once (D54), and a Bucket service's own config: its name and
-// kind are all it has, since it names no other service and generates
-// nothing.
+// kind, and whether it names its objects by their content, with the
+// largest it puts (D142), are all it has, since it names no other service
+// and generates nothing.
 func validateBuckets(cfg *SchemaConfig) error {
 	if cfg.Kind == ir.SchemaKindBucket {
 		switch {
@@ -290,6 +302,14 @@ func validateBuckets(cfg *SchemaConfig) error {
 		case len(cfg.Outputs) > 0:
 			return fmt.Errorf("schema config for %s sets outputs; a %s service generates nothing, so its outputs are {}", cfg.Name, ir.SchemaKindBucket)
 		}
+	}
+	switch {
+	case cfg.ContentAddressed && cfg.Kind != ir.SchemaKindBucket:
+		return fmt.Errorf("schema config for %s sets contentAddressed, which only a %s service may set (this service is kind %s)", cfg.Name, ir.SchemaKindBucket, cfg.Kind)
+	case cfg.MaxBytes != 0 && !cfg.ContentAddressed:
+		return fmt.Errorf("schema config for %s sets maxBytes without contentAddressed; maxBytes is the largest object a content-addressed %s puts", cfg.Name, ir.SchemaKindBucket)
+	case cfg.MaxBytes < 0:
+		return fmt.Errorf("schema config for %s sets maxBytes to %d; it is a whole number of bytes above 0", cfg.Name, cfg.MaxBytes)
 	}
 	if len(cfg.Buckets) > 0 && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets buckets, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
@@ -360,6 +380,15 @@ func validateMemoryStores(cfg *SchemaConfig) error {
 		}
 	}
 	return nil
+}
+
+// ContentMaxBytes is the largest object a content-addressed bucket puts:
+// its maxBytes, or ir.DefaultContentMaxBytes when it names none.
+func (c *SchemaConfig) ContentMaxBytes() int64 {
+	if c.MaxBytes > 0 {
+		return c.MaxBytes
+	}
+	return ir.DefaultContentMaxBytes
 }
 
 // UsedMemoryStores are the MemoryStore services the config's API uses:

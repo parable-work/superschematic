@@ -251,15 +251,29 @@ export type {
   ServiceCredentialSource,
   StackEnv,
 } from './stackconfig.js';
-export { DEFAULT_PAGE_SIZE, MAX_SIGNED_URL_SECONDS, ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './bucket.js';
+export {
+  CONTENT_PREFIX,
+  ContentTooLargeError,
+  DEFAULT_CONTENT_MAX_BYTES,
+  DEFAULT_PAGE_SIZE,
+  MAX_SIGNED_URL_SECONDS,
+  ObjectNotFoundError,
+  checkObjectName,
+  checkSignedUrlOptions,
+  contentBucket,
+  contentObjectName,
+} from './bucket.js';
 export type {
   Bucket,
   BucketBody,
   BucketObject,
   BucketRead,
+  ContentBucket,
+  ContentPut,
   ListOptions,
   ListPage,
   PutOptions,
+  PutResult,
   SignedUrlMethod,
   SignedUrlOptions,
 } from './bucket.js';

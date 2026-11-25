@@ -1536,20 +1536,19 @@ generators, the tool manifest, the parity tests and the API routes guide.
 
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 
-A bucket's interface is `put`, `get`, `delete`, `list` and `signedUrl`.
-An application that stores each file once, under its hash, and asks which
-of a set of files are already there, writes the hashing, the existence
-checks and the race between two uploads of one file itself.
+Built: `put` with `ifAbsent` and its `created`, `head`, the Bucket
+config's `contentAddressed` and `maxBytes`, and the content bucket in
+`Deps`, in Go and TypeScript over GCS and in TypeScript over an R2
+binding (`runtime/http/testdata/content_bucket_parity.json`, the buckets
+guide). The commit that built it names D142.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `put` takes `ifAbsent: true`: it writes only when no object has the name, and its result says `created`. On GCS it is `ifGenerationMatch=0`, on R2 its conditional write. | A `head` then a `put`, which two callers interleave |
-| `head(name)` returns the object's record or nothing, without its bytes. | A `get` that is cancelled |
-| A Bucket service's config may say `contentAddressed: true`, with `maxBytes` (32 MiB when absent). `Deps` then holds a content bucket: `put(body, { contentType })` reads the body whole, up to `maxBytes`, names the object `sha256/<hex>` and writes it if absent, answering `{ hash, size, created }`; `has(hash)`, `missing(hashes)`, `get(hash)` and `signedUrl(hash)` read. It has no delete. Its `raw` member is the plain interface, for the caller that needs one. | Hashing a stream into a temporary object and renaming it, which needs a server-side copy that not every provider's binding has; a signed upload the server checks afterwards, during which a wrong object is readable under a hash |
-| Go, TypeScript and Rust, over GCS, and TypeScript over an R2 binding, as the interface is today. | |
-
-Build: the three runtimes' bucket clients, the Bucket kind's config, the
-servers' `Deps`, fake-gcs-server in the tests, and the buckets guide.
+Left: the Rust runtime. Its `Bucket` trait has no `ifAbsent` and no
+`head`, it has no content bucket, and a Rust server's `Deps` holds the
+plain `Arc<dyn Bucket>` for a Bucket service whose config says
+`contentAddressed`. `gcs.rs` can send `ifGenerationMatch=0` on its multipart
+upload as the other two do. The R2 conditional write, `onlyIf` with
+`If-None-Match: *`, is tested against a stand-in of the binding, not
+against R2.
 
 ## D144. A deployable's image takes system packages, and a project may extend the generated image (D30 amended)
 

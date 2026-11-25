@@ -543,6 +543,11 @@ type Call struct {
 type BucketUse struct {
 	Field  string
 	Bucket *Bucket
+
+	// ContentAddressed is true for a bucket Deps holds as a content
+	// bucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // Bucket is a bucket the server opens once, for every API that lists it
@@ -705,7 +710,7 @@ var reserved = []string{
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
 	"identity", "identityConfig", "stdlib", "method", "requested",
 	"jobs", "started",
-	"openBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
+	"openBucket", "contentBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
 	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
 	"x509", "pem", "strings", "sync", "url",
 	"workers", "worker", "queue", "concurrency",
@@ -965,7 +970,7 @@ func Plan(in Input) (*Server, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			h := stores[m.Service]

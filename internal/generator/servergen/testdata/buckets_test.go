@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,7 +118,93 @@ func TestBucketOnTheEmulator(t *testing.T) {
 		t.Error("SignedURL signed a DELETE")
 	}
 
-	for _, name := range []string{"a.txt", "b.txt", "c.txt", "upload.png"} {
+	// D142: a head without the bytes, and a put that writes only when the
+	// name is free, which GCS checks and writes in one step.
+	if !stored.Created {
+		t.Error("a Put that wrote an object says it created none")
+	}
+	if head, found, err := b.Head(ctx, prefix+"a.txt"); err != nil || !found || head.Name != prefix+"a.txt" || head.Size != 14 || head.ContentType != "text/plain" {
+		t.Errorf("Head = %+v, %t, %v", head, found, err)
+	}
+	if _, found, err := b.Head(ctx, prefix+"absent.txt"); err != nil || found {
+		t.Errorf("Head of an absent object = %t, %v", found, err)
+	}
+	fresh, err := b.Put(ctx, prefix+"once.txt", strings.NewReader("first"), bucket.PutOptions{ContentType: "text/plain", IfAbsent: true})
+	if err != nil || !fresh.Created || fresh.Size != 5 {
+		t.Fatalf("a Put of a free name = %+v, %v", fresh, err)
+	}
+	again, err := b.Put(ctx, prefix+"once.txt", strings.NewReader("second, longer"), bucket.PutOptions{IfAbsent: true})
+	if err != nil || again.Created || again.Size != 5 || again.ContentType != "text/plain" || again.Name != prefix+"once.txt" {
+		t.Fatalf("a Put of a taken name = %+v, %v, want the object that was there", again, err)
+	}
+	if r, err := b.Get(ctx, prefix+"once.txt"); err != nil {
+		t.Fatal(err)
+	} else {
+		data, _ := io.ReadAll(r)
+		_ = r.Close()
+		if string(data) != "first" {
+			t.Errorf("the object a second Put left = %q", data)
+		}
+	}
+	var wg sync.WaitGroup
+	var winners atomic.Int64
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			put, err := b.Put(ctx, prefix+"raced.txt", strings.NewReader("x"), bucket.PutOptions{IfAbsent: true})
+			if err != nil {
+				t.Error(err)
+			} else if put.Created {
+				winners.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if winners.Load() != 1 {
+		t.Errorf("%d of 8 puts of one free name created it, want 1", winners.Load())
+	}
+
+	// A content bucket over it, as Deps holds one for a Bucket service
+	// whose config says contentAddressed: the same bytes are one object.
+	content := contentBucket(b, 64)
+	hello, err := content.Put(ctx, strings.NewReader("hello"), bucket.ContentPutOptions{ContentType: "text/plain"})
+	const helloHash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	if err != nil || hello != (bucket.ContentObject{Hash: helloHash, Size: 5, Created: true}) {
+		t.Fatalf("content Put = %+v, %v", hello, err)
+	}
+	if twice, err := content.Put(ctx, strings.NewReader("hello"), bucket.ContentPutOptions{}); err != nil || twice.Created || twice.Hash != helloHash {
+		t.Errorf("a second content Put = %+v, %v", twice, err)
+	}
+	if _, err := content.Put(ctx, strings.NewReader(strings.Repeat("x", 65)), bucket.ContentPutOptions{}); !errors.Is(err, bucket.ErrContentTooLarge) {
+		t.Errorf("a body past maxBytes = %v, want ErrContentTooLarge", err)
+	}
+	absent := strings.Repeat("0", 64)
+	if missing, err := content.Missing(ctx, []string{helloHash, absent}); err != nil || len(missing) != 1 || missing[0] != absent {
+		t.Errorf("Missing = %v, %v", missing, err)
+	}
+	if held, err := content.Has(ctx, helloHash); err != nil || !held {
+		t.Errorf("Has = %t, %v", held, err)
+	}
+	if r, err := content.Get(ctx, helloHash); err != nil {
+		t.Error(err)
+	} else {
+		data, _ := io.ReadAll(r)
+		_ = r.Close()
+		if string(data) != "hello" || r.Object.ContentType != "text/plain" {
+			t.Errorf("content Get = %q (%+v)", data, r.Object)
+		}
+	}
+	if signed, err := content.SignedURL(ctx, helloHash, time.Minute); err != nil {
+		t.Error(err)
+	} else if resp, err := http.Get(signed); err != nil || resp.StatusCode != http.StatusOK {
+		t.Errorf("GET through the content bucket's signed URL: %v %v", resp, err)
+	}
+	if err := content.Raw().Delete(ctx, bucket.ContentPrefix+helloHash); err != nil {
+		t.Error(err)
+	}
+
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "upload.png", "once.txt", "raced.txt"} {
 		if err := b.Delete(ctx, prefix+name); err != nil {
 			t.Fatal(err)
 		}

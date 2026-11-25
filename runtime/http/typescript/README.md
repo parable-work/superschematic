@@ -646,7 +646,16 @@ bucket an API lists in its `buckets` (D54), which its `Deps` holds: `put`
 (from a stream, the bytes or a string), `get` (a stream and the object's
 metadata), `delete`, `list` (a page under a prefix, with the next page's
 token) and `signedUrl` (a V4 URL to `GET` or `PUT` one object, for up to
-seven days). A missing object is an `ObjectNotFoundError`.
+seven days). A missing object is an `ObjectNotFoundError`. `put` with
+`ifAbsent` writes only when no object has the name, in one step with the
+provider, and every `put` answers `created`; `head` is the object's
+metadata without its bytes, or `undefined` (D142). `contentBucket(bucket,
+{ maxBytes })` is the `ContentBucket` a generated `Deps` holds for a
+Bucket service whose config says `contentAddressed`: `put` reads a body
+whole, names it `sha256/<hex>` by its SHA-256 and writes it if absent,
+and `has`, `missing`, `get` and `signedUrl` read by hash, as the Go
+runtime's `bucket.ContentBucket` does
+(`runtime/http/testdata/content_bucket_parity.json`).
 `openBucket(connection, { env })`, from `@superschematic/http-runtime/gcs`,
 opens one over a `BucketConnection` with `@google-cloud/storage`, an
 optional peer dependency that a server installs only when its APIs list a

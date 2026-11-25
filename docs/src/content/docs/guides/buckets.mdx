@@ -43,7 +43,8 @@ An API lists the buckets it uses in `buckets`, beside `authDb` and
 and discovery refuses one in any form. In a data form the list is
 `{ name, kind }` pairs, `buckets: [{ name: shop-media, kind: Bucket }]`.
 A bucket is private: its config takes no `public`, no `authDb`, no
-`dependencies` and no outputs.
+`dependencies` and no outputs. It may say `contentAddressed: true`, with
+`maxBytes` ([below](#name-objects-by-their-content)).
 
 ## What an API gets
 
@@ -61,12 +62,14 @@ template, `{SERVICE}_BUCKET` by default. `Deps` gains the bucket itself,
 named after the service: `ShopMedia bucket.Bucket` in Go, from
 `runtime/http/go/bucket`, `shopMedia: Bucket` in TypeScript, from
 `@superschematic/http-runtime`, and `shop_media: Arc<dyn Bucket>` in Rust,
-from the Rust HTTP runtime's `bucket` module. All three have the same
+from the Rust HTTP runtime's `bucket` module. All three have these
 methods:
 
 | Go | TypeScript | Rust | Does |
 | --- | --- | --- | --- |
 | `Put(ctx, name, body, opts)` | `put(name, body, options)` | `put(name, body, options)` | writes the object from a stream, replacing any, with an optional content type |
+| `Put` with `IfAbsent: true` | `put` with `ifAbsent: true` | not yet | writes only when no object has the name, and says whether it did ([below](#put-only-when-absent)) |
+| `Head(ctx, name)` | `head(name)` | not yet | what the bucket holds of the object, its size, content type and time, without its bytes, or nothing when there is none |
 | `Get(ctx, name)` | `get(name)` | `get(name)` | opens the object as a stream, with its size, content type and time; the caller closes it, or in Rust drops it |
 | `Delete(ctx, name)` | `delete(name)` | `delete(name)` | removes the object |
 | `List(ctx, opts)` | `list(options)` | `list(options)` | a page of the objects whose names begin with a prefix, in name order, and the token of the next page |
@@ -79,6 +82,92 @@ a bucket has no directories. In Rust, a `Body` is bytes, text, or a
 stream of chunks such as an axum request's `into_data_stream()`, and a
 `Reader` is a stream an axum handler answers with as
 `Body::from_stream(reader)`.
+
+## Put only when absent
+
+`put` replaces an object of the same name. With `ifAbsent` it writes only
+when no object has the name, and its result says which happened:
+
+```ts
+const put = await deps.shopMedia.put(name, body, { contentType: "image/png", ifAbsent: true });
+if (!put.created) {
+  // put holds the object that was already there: its size and content type.
+}
+```
+
+```go
+put, err := deps.ShopMedia.Put(ctx, name, body, bucket.PutOptions{ContentType: "image/png", IfAbsent: true})
+if err == nil && !put.Created {
+	// put.Object is the one that was already there.
+}
+```
+
+The provider checks and writes in one step, so of two puts of one name at
+once, one creates the object and the other finds it. A `head` followed by
+a `put` does not do that: two callers interleave. On GCS it is the
+precondition `ifGenerationMatch=0`, and on R2 the binding's conditional
+write, `onlyIf` with `If-None-Match: *`. A put that found an object reads
+it back for its result. If the object is deleted between the two, the put
+fails and says to put it again.
+
+Every `put` answers `created`, in TypeScript beside the object's members
+and in Go as `PutResult{Object, Created}`: `true` for a put without
+`ifAbsent`, which always writes.
+
+## Name objects by their content
+
+A Bucket service whose config says `contentAddressed: true` stores each
+file once, under the hash of its bytes:
+
+```ts
+export default defineConfig({
+  name: "shop-blobs",
+  kind: SchemaKind.Bucket,
+  contentAddressed: true,
+  maxBytes: 8 * 1024 * 1024,
+  outputs: {},
+});
+```
+
+An API that lists it gets a content bucket in its `Deps`, in place of the
+plain one: `ShopBlobs *bucket.ContentBucket` in Go and
+`shopBlobs: ContentBucket` in TypeScript.
+
+| Go | TypeScript | Does |
+| --- | --- | --- |
+| `Put(ctx, body, opts)` | `put(body, { contentType })` | reads the body whole, up to `maxBytes`, names the object `sha256/<hex>` by the SHA-256 of its bytes, and writes it if absent; answers `{ hash, size, created }` |
+| `Has(ctx, hash)` | `has(hash)` | whether the bucket holds those bytes |
+| `Missing(ctx, hashes)` | `missing(hashes)` | the hashes it does not hold, each once, in the order given |
+| `Get(ctx, hash)` | `get(hash)` | opens the bytes as a stream |
+| `SignedURL(ctx, hash, expires)` | `signedUrl(hash, { expiresInSeconds })` | a URL that lets its holder `GET` the bytes |
+| `Raw()` | `raw` | the plain bucket, whose names are `sha256/<hex>` |
+
+```ts
+const { hash, created } = await deps.shopBlobs.put(await request.arrayBuffer().then(bytes => new Uint8Array(bytes)), { contentType: "application/pdf" });
+const missing = await deps.shopBlobs.missing(manifest.hashes);
+```
+
+- A hash is 64 lowercase hex digits. Every method refuses anything else,
+  so no caller's text reaches an object's name.
+- `maxBytes` is 32 MiB when the config names none. `put` holds the body
+  in memory to hash it before it writes, since a name is known only once
+  the last byte is read. A longer body is `bucket.ErrContentTooLarge` in
+  Go and a `ContentTooLargeError` in TypeScript, and nothing is written.
+  Send a larger file to a plain bucket through a signed URL.
+- It has no delete, and it signs no upload: an object is written only by
+  `put`, which hashes it, so the bytes under a hash are always the bytes
+  of that hash. `raw` is the plain interface for the caller that needs
+  one, to list, or to delete an object nothing refers to any more.
+- `missing` asks about sixteen objects at a time.
+- `created` is false when the bucket already held the bytes. Two puts of
+  the same bytes at once store one object, and one of them says it
+  created it.
+- The Go and TypeScript content buckets name and answer alike
+  (`runtime/http/testdata/content_bucket_parity.json`).
+
+A Rust server's `Deps` holds the plain `Arc<dyn Bucket>` for such a
+service: the Rust runtime has no `ifAbsent`, `head` or content bucket
+yet.
 
 ## Hand a browser a signed URL
 

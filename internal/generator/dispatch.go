@@ -898,7 +898,8 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		})
 	}
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	for _, m := range r.Schema.MemoryStores {
 		store := tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)}
@@ -1354,7 +1355,8 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		})
 	}
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	stores, err := r.goMemoryStores()
 	if err != nil {
@@ -1430,6 +1432,25 @@ func (r run) memoryStoreDefinitions(store, lang string) (enabled, known bool, er
 		return false, false, fmt.Errorf("generator: schema config for %s: %w", store, err)
 	}
 	return outputs.TypesEnabled(lang), true, nil
+}
+
+// contentBucket reports whether the Bucket service named bucket names its
+// objects by their content, and the largest it then puts (D142): what its
+// own config says, which the build reads as it reads a memory store's. A
+// config the build cannot read is a plain bucket's: the bucket's own build
+// reports why.
+func (r run) contentBucket(bucket string) (contentAddressed bool, maxBytes int64) {
+	var cfg *schemaconfig.SchemaConfig
+	if r.Options.DependencyConfig != nil {
+		cfg, _ = r.Options.DependencyConfig(bucket)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		cfg, _ = r.Options.LoadDependencyConfig(bucket)
+	}
+	if cfg == nil || !cfg.ContentAddressed {
+		return false, 0
+	}
+	return true, cfg.ContentMaxBytes()
 }
 
 // checkWorkerQueues refuses a worker of api whose queue is no @queue class

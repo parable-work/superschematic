@@ -29,8 +29,15 @@ function fakeR2(): R2BucketBinding & { readonly objects: Map<string, { bytes: Ui
   };
   return {
     objects,
-    async put(key: string, value: R2PutValue, options?: { httpMetadata?: { contentType?: string } }) {
+    async put(key: string, value: R2PutValue, options?: { httpMetadata?: { contentType?: string }; onlyIf?: Headers }) {
       if (value instanceof ReadableStream) throw new TypeError('Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)');
+      // R2's conditional write: If-None-Match: * holds only when no
+      // object has the key, and a failed precondition resolves null.
+      if (options?.onlyIf) {
+        const condition = [...options.onlyIf.entries()];
+        if (condition.length !== 1 || condition[0]![0] !== 'if-none-match' || condition[0]![1] !== '*') throw new TypeError(`unexpected onlyIf ${JSON.stringify(condition)}`);
+        if (objects.has(key)) return null;
+      }
       const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value === null ? new Uint8Array() : new Uint8Array(value instanceof ArrayBuffer ? value : value.buffer);
       objects.set(key, { bytes, ...(options?.httpMetadata?.contentType ? { contentType: options.httpMetadata.contentType } : {}) });
       return meta(key);
@@ -68,7 +75,7 @@ describe('openR2Bucket', () => {
     const bucket = openR2Bucket(r2, connection);
     expect(bucket.name).toBe('shop-stack-shop-media');
     const put = await bucket.put('products/tea.txt', 'tea', { contentType: 'text/plain' });
-    expect(put).toEqual({ name: 'products/tea.txt', size: 3, contentType: 'text/plain', updated: new Date(0) });
+    expect(put).toEqual({ name: 'products/tea.txt', size: 3, contentType: 'text/plain', updated: new Date(0), created: true });
     // A stream is read whole, since R2 takes only a stream whose length it knows.
     await bucket.put('products/cocoa.txt', new Response('cocoa').body!);
     const read = await bucket.get('products/cocoa.txt');
@@ -85,6 +92,28 @@ describe('openR2Bucket', () => {
     await expect(bucket.get('products/tea.txt')).rejects.toBeInstanceOf(ObjectNotFoundError);
     await expect(bucket.delete('products/tea.txt')).rejects.toBeInstanceOf(ObjectNotFoundError);
     await expect(bucket.list({ pageSize: 1001 })).rejects.toThrow('want a whole number from 1 to 1000');
+  });
+
+  test('puts only when absent with R2\'s conditional write, and heads an object without its bytes (D142)', async () => {
+    const r2 = fakeR2();
+    const bucket = openR2Bucket(r2, connection);
+    expect(await bucket.head('sha256/abc')).toBeUndefined();
+    const first = await bucket.put('sha256/abc', 'tea', { contentType: 'text/plain', ifAbsent: true });
+    expect(first).toEqual({ name: 'sha256/abc', size: 3, contentType: 'text/plain', updated: new Date(0), created: true });
+    // The object is there: the put leaves it, and says what the bucket holds.
+    const second = await bucket.put('sha256/abc', 'other bytes', { contentType: 'text/html', ifAbsent: true });
+    expect(second).toEqual({ name: 'sha256/abc', size: 3, contentType: 'text/plain', updated: new Date(0), created: false });
+    expect(new TextDecoder().decode(r2.objects.get('sha256/abc')!.bytes)).toBe('tea');
+    expect(await bucket.head('sha256/abc')).toEqual({ name: 'sha256/abc', size: 3, contentType: 'text/plain', updated: new Date(0) });
+    // Without ifAbsent a put replaces, as before, and says it wrote.
+    expect((await bucket.put('sha256/abc', 'replaced')).created).toBe(true);
+    expect((await bucket.head('sha256/abc'))!.size).toBe(8);
+    // A stream is read whole first, with ifAbsent too.
+    expect((await bucket.put('sha256/def', new Response('cocoa').body!, { ifAbsent: true })).created).toBe(true);
+    // Of many at once, one creates the object.
+    const raced = await Promise.all(Array.from({ length: 8 }, () => bucket.put('sha256/raced', 'x', { ifAbsent: true })));
+    expect(raced.filter(put => put.created).length).toBe(1);
+    await expect(bucket.head('')).rejects.toThrow("an object's name is empty");
   });
 
   test('signs a URL for R2 S3 API with the token as its credential', async () => {

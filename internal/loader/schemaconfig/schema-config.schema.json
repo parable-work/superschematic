@@ -266,6 +266,10 @@
           "description": "Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as \"cli=0.5.0,desktop=2.1.0\", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.",
           "type": "boolean"
         },
+        "contentAddressed": {
+          "description": "Whether this Bucket service names its objects by their content. With true, an API that lists it gets a content bucket in its Deps: put reads a body whole, names the object sha256/<hex> by the SHA-256 of its bytes and writes it if absent, and has, missing, get and signedUrl read by hash. Only a Bucket service sets it.",
+          "type": "boolean"
+        },
         "dependencies": {
           "items": {
             "$ref": "#/definitions/ServiceDependencyRef"
@@ -274,6 +278,10 @@
         },
         "kind": {
           "$ref": "#/definitions/SchemaKindName"
+        },
+        "maxBytes": {
+          "description": "The largest object a content-addressed bucket puts, in bytes: a whole number above 0, 33554432 (32 MiB) when absent. Only a Bucket service whose contentAddressed is true sets it.",
+          "type": "number"
         },
         "memoryStores": {
           "description": "The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.",
@@ -308,7 +316,7 @@
       "type": "object"
     },
     "SchemaKind": {
-      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore service is a Redis or Valkey server the replicas of a stack share, which holds no fact (D75): its schema declares each channel and key it carries (`@superschematic/memory-store`), and APIs list it in their `memoryStores`.",
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`, with `contentAddressed: true` for one that names its objects by their content (D142). A MemoryStore service is a Redis or Valkey server the replicas of a stack share, which holds no fact (D75): its schema declares each channel and key it carries (`@superschematic/memory-store`), and APIs list it in their `memoryStores`.",
       "enum": [
         "DB",
         "API",
