@@ -331,10 +331,13 @@ func generateFile(generator *codegen.FileGenerator, fs embed.FS, templateName, o
 // templateFuncs returns apigen-specific template functions merged on top of
 // the shared base set by codegen.GenerateFile, plus the provider's own and
 // authSnippet, which renders the provider's hook-point snippets. router is
-// the naming file's [go_api] table, which pathParamError reads.
+// the naming file's [go_api] table, which pathParamError and validatorName
+// read.
 func templateFuncs(provider AuthProvider, router naming.GoAPIConfig) (template.FuncMap, error) {
 	funcs := template.FuncMap{
 		"pathParamError":          router.PathParamErrorOf,
+		"validatorName":           router.ValidatorNameOf,
+		"renamesValidators":       func() bool { return len(router.ValidatorNames) > 0 },
 		"base":                    filepath.Base,
 		"toGoName":                codegen.ToPascalCase,
 		"toKebabCase":             codegen.ToKebabCase,

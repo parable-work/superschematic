@@ -2,6 +2,7 @@ package naming
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -23,6 +24,28 @@ type GoAPIConfig struct {
 	// parameter that does not percent-decode to UTF-8. {name} is the
 	// parameter's name. Empty (default), it is DefaultPathParamError.
 	PathParamError string `toml:"path_param_error"`
+
+	// ValidatorNames renames the validators of a route's own checks of its
+	// path and query values: a bound of a number (min, max), of a string's
+	// length (minLength, maxLength), a pattern, and the bounds of a query
+	// list (listMin, listMax). Each key is the core's name and its value
+	// the name the route sends. A validator it does not list keeps the
+	// core's name. The rules of a body, which the input type's Validate
+	// checks, are the types generator's, and keep their names.
+	ValidatorNames map[string]string `toml:"validator_names"`
+}
+
+// RouteValidators are the validators of a route's own checks, which
+// ValidatorNames may rename.
+var RouteValidators = []string{"min", "max", "minLength", "maxLength", "pattern", "listMin", "listMax"}
+
+// ValidatorNameOf is the name the route sends for the core's validator
+// name.
+func (c GoAPIConfig) ValidatorNameOf(name string) string {
+	if renamed, ok := c.ValidatorNames[name]; ok {
+		return renamed
+	}
+	return name
 }
 
 // The placeholder of a [go_api] text and the core's texts.
@@ -45,6 +68,17 @@ func (c GoAPIConfig) PathParamErrorOf(name string) string {
 func (c GoAPIConfig) check() error {
 	for _, kv := range [][2]string{{"validation_error_code", c.ValidationErrorCode}, {"path_param_error", c.PathParamError}} {
 		if err := checkGoAPIText(kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	for from, to := range c.ValidatorNames {
+		if !slices.Contains(RouteValidators, from) {
+			return fmt.Errorf("go_api.validator_names renames %q, which no route check names: rename one of %s", from, strings.Join(RouteValidators, ", "))
+		}
+		if to == "" {
+			return fmt.Errorf("go_api.validator_names renames %q to an empty name", from)
+		}
+		if err := checkGoAPIText("validator_names."+from, to); err != nil {
 			return err
 		}
 	}

@@ -26,6 +26,9 @@ func TestParseReadsTheGoAPITable(t *testing.T) {
 	n, err := Parse([]byte(`[go_api]
 validation_error_code = "VL-1"
 path_param_error = "{name} is not a segment"
+
+[go_api.validator_names]
+minLength = "min_length"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +36,7 @@ path_param_error = "{name} is not a segment"
 	want := GoAPIConfig{
 		ValidationErrorCode: "VL-1",
 		PathParamError:      "{name} is not a segment",
+		ValidatorNames:      map[string]string{"minLength": "min_length"},
 	}
 	if !reflect.DeepEqual(n.GoAPI, want) {
 		t.Errorf("[go_api] = %+v, want %+v", n.GoAPI, want)
@@ -46,11 +50,24 @@ func TestParseRefusesAValueTheGoAPITableDoesNotTake(t *testing.T) {
 		{"[go_api]\nvalidation_error_code = \"a\\nb\"\n", `go_api.validation_error_code "a\nb" holds a line break`},
 		{"[go_api]\nvalidation_error_code = 'a\"b'\n", `go_api.validation_error_code "a\"b" holds a line break, a NUL, a quote or a backslash`},
 		{"[go_api]\npath_param_error = 'a\\b'\n", `go_api.path_param_error "a\\b" holds a line break`},
+		{"[go_api.validator_names]\nenum = \"one_of\"\n", `go_api.validator_names renames "enum", which no route check names: rename one of min, max, minLength, maxLength, pattern, listMin, listMax`},
+		{"[go_api.validator_names]\nmin = \"\"\n", `go_api.validator_names renames "min" to an empty name`},
 	} {
 		_, err := Parse([]byte(tc.file), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%q: err = %v, want it to hold %q", tc.file, err, tc.want)
 		}
+	}
+}
+
+// TestValidatorNameOf renames a listed validator and keeps any other name.
+func TestValidatorNameOf(t *testing.T) {
+	c := GoAPIConfig{ValidatorNames: map[string]string{"listMax": "list_max"}}
+	if got := c.ValidatorNameOf("listMax"); got != "list_max" {
+		t.Errorf("listMax = %q", got)
+	}
+	if got := c.ValidatorNameOf("min"); got != "min" {
+		t.Errorf("min = %q", got)
 	}
 }
 

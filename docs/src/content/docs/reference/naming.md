@@ -1005,6 +1005,24 @@ Default: `{name} must be percent-encoded UTF-8`
 The detail of the 400 the router sends for a path parameter that does not
 percent-decode to UTF-8. `{name}` is the parameter's name.
 
+### `[go_api.validator_names]`
+
+Default: empty
+
+Renames the validators of a route's own checks of its path and query
+values: `min`, `max`, `minLength`, `maxLength`, `pattern`, and the bounds
+of a query list, `listMin` and `listMax`. Each key is the core's name and
+its value the name the route sends. A validator the table does not list
+keeps the core's name. A body's rules are its input type's, and keep
+their names. A key that names another validator, or an empty name, fails
+the load.
+
+```toml
+[go_api.validator_names]
+minLength = "min_length"
+listMax = "list_max"
+```
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

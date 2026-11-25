@@ -625,6 +625,33 @@ func (o *APIOutput) HasBodyArgs() bool {
 	return false
 }
 
+// RenamesQueryListValidators reports whether routes.go renames the
+// validators of the errors bodyargs.QueryList records: a route decodes a
+// list in the query string and the naming file's go_api.validator_names
+// renames a validator.
+func (o *APIOutput) RenamesQueryListValidators() bool {
+	if len(o.Naming.GoAPI.ValidatorNames) == 0 {
+		return false
+	}
+	for _, endpoint := range o.HandlerEndpoints() {
+		if len(endpoint.QueryListArgs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// RouteValidatorNames are the renames of go_api.validator_names in key
+// order, which routes.go writes as routeValidatorNames.
+func (o *APIOutput) RouteValidatorNames() [][2]string {
+	var out [][2]string
+	for from, to := range o.Naming.GoAPI.ValidatorNames {
+		out = append(out, [2]string{from, to})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
+}
+
 // RoutesNeedScalars gates the scalar Go module's import in routes.go, as
 // scalars: a body argument or a query-string list of a JSON-object scalar
 // is built with superscalar's check of the scalar (BodyArg.ChecksJSON).

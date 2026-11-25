@@ -166,17 +166,35 @@ func TestValidationErrorCode(t *testing.T) {
 		{
 			name: "a query value shorter than its rule", method: http.MethodGet, target: "/api/widgets/w1?label=a",
 			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "label=minLength"},
-			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "label=minLength"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "label=min_length"},
 		},
 		{
 			name: "a query list past its bound", method: http.MethodGet, target: "/api/widgets/w1?codes=a,b,c",
 			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "codes=listMax"},
-			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "codes=listMax"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "codes=list_max"},
 		},
 		{
 			name: "a valid query", method: http.MethodGet, target: "/api/widgets/w1?label=ab&codes=a,b",
 			defaults: answer{Status: 200},
 			options:  answer{Status: 200},
+		},
+	})
+}
+
+// TestValidatorNames: go_api.validator_names renames the validators of the
+// route's own checks, a query value's length and a query list's bound, and
+// leaves a validator it does not list alone.
+func TestValidatorNames(t *testing.T) {
+	runCases(t, []routerCase{
+		{
+			name: "a query value longer than its rule", method: http.MethodGet, target: "/api/widgets/w1?label=abcde",
+			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "label=maxLength"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "label=max_length"},
+		},
+		{
+			name: "a query list past its bound", method: http.MethodGet, target: "/api/widgets/w1?codes=a&codes=b,c",
+			defaults: answer{Status: 400, Code: "bad_request", Detail: "Validation failed", Errors: "codes=listMax"},
+			options:  answer{Status: 400, Code: "VALIDATION-1", Detail: "Validation failed", Errors: "codes=list_max"},
 		},
 	})
 }
