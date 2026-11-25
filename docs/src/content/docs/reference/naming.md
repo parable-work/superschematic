@@ -1056,6 +1056,20 @@ relation; `Where` names it `CustomerWhere`. The condition does not
 change. The value holds ASCII letters and digits and starts with an
 upper-case letter; any other value fails the load.
 
+### `go.orm_default_selection`
+
+Default: `all`
+
+The fields the Go ORM reads of a relation that a read selects without a
+nested selection, such as `OrderFields{Store: true}`. `all` reads the
+target's `All()`, whose relations read their own `All()`, as deep as the
+schema goes. `own` writes `<Type>Fields.Own()`, the type's columns with
+each to-one relation as an id-only stub, and reads the target's `Own()`:
+a default read is one level deep and sends one statement per relation.
+An explicit nested selection keeps its depth under either value, and
+under `own` it always reads the target's id, which the read matches the
+rows by. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

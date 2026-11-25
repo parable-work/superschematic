@@ -47,6 +47,14 @@ type GoConfig struct {
 	// ASCII letters and digits and starts with an upper-case letter, so
 	// the member stays an exported Go name.
 	ORMRelationFilterSuffix string `toml:"orm_relation_filter_suffix"`
+
+	// ORMDefaultSelection is "all" (default) or "own" (D164): the fields
+	// the Go ORM reads of a relation selected without a nested selection.
+	// "all" reads the target's All, whose relations read their All in
+	// turn, as deep as the schema goes. "own" writes <Type>Fields.Own, the
+	// type's columns with each to-one relation an id-only stub, and reads
+	// the target's Own, so a default read is one level deep.
+	ORMDefaultSelection string `toml:"orm_default_selection"`
 }
 
 // The values of the [go] keys.
@@ -57,13 +65,16 @@ const (
 	GoOptionalKeep = "keep"
 	GoEnvParse     = "parse"
 	GoEnvStrconv   = "strconv"
+	GoSelectAll    = "all"
+	GoSelectOwn    = "own"
 )
 
 func defaultGoConfig() GoConfig {
 	return GoConfig{
-		LimitConstants:   GoOff,
-		OptionalZero:     GoOptionalOmit,
-		EnvNumberScalars: GoEnvParse,
+		LimitConstants:      GoOff,
+		OptionalZero:        GoOptionalOmit,
+		EnvNumberScalars:    GoEnvParse,
+		ORMDefaultSelection: GoSelectAll,
 	}
 }
 
@@ -72,6 +83,7 @@ func (c *GoConfig) fill(d GoConfig, fill func(dst *string, def string)) {
 	fill(&c.LimitConstants, d.LimitConstants)
 	fill(&c.OptionalZero, d.OptionalZero)
 	fill(&c.EnvNumberScalars, d.EnvNumberScalars)
+	fill(&c.ORMDefaultSelection, d.ORMDefaultSelection)
 }
 
 // check refuses a value the [go] table does not take.
@@ -86,6 +98,9 @@ func (c GoConfig) check() error {
 	}
 	if c.EnvNumberScalars != "" && c.EnvNumberScalars != GoEnvParse && c.EnvNumberScalars != GoEnvStrconv {
 		return fmt.Errorf("go.env_number_scalars is %q: use %q or %q", c.EnvNumberScalars, GoEnvParse, GoEnvStrconv)
+	}
+	if c.ORMDefaultSelection != "" && c.ORMDefaultSelection != GoSelectAll && c.ORMDefaultSelection != GoSelectOwn {
+		return fmt.Errorf("go.orm_default_selection is %q: use %q or %q", c.ORMDefaultSelection, GoSelectAll, GoSelectOwn)
 	}
 	if c.ORMRelationFilterSuffix != "" && !goSuffixRE.MatchString(c.ORMRelationFilterSuffix) {
 		return fmt.Errorf("go.orm_relation_filter_suffix is %q: use ASCII letters and digits, starting with an upper-case letter, or leave it out", c.ORMRelationFilterSuffix)
@@ -102,3 +117,6 @@ func (c GoConfig) KeepsOptionalZero() bool { return c.OptionalZero == GoOptional
 // ParsesEnvNumbersWithStrconv reports whether env_number_scalars is
 // "strconv".
 func (c GoConfig) ParsesEnvNumbersWithStrconv() bool { return c.EnvNumberScalars == GoEnvStrconv }
+
+// ReadsOwnByDefault reports whether orm_default_selection is "own".
+func (c GoConfig) ReadsOwnByDefault() bool { return c.ORMDefaultSelection == GoSelectOwn }

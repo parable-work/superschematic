@@ -952,7 +952,7 @@ ORDER BY {{ $.HistoryRecordedAtCol }} ASC, _version ASC`
 // relations, which lands back here for each of them. enterRelationHydration is
 // what bounds that -- see the guard's contract in utils.go. defaultSelection
 // says whether the caller named a nested selection or fell back to
-// {{ $rel.TargetType }}Fields{}.All(); only the fallback is pruned.
+// {{ $rel.TargetType }}Fields{}.{{ if $.OwnSelection }}Own{{ else }}All{{ end }}(); only the fallback is pruned.
 //
 // A refusal returns no rows rather than an error, because the caller's miss
 // path already writes the id-only stub that a refused expansion should produce.
@@ -985,12 +985,17 @@ func (r *{{ $.Name }}) batch{{ toGoName $rel.FieldName }}ByIDs(ctx context.Conte
 	findOpts := opts
 	if findOpts == nil || findOpts.Fields.IsZero() {
 		findOpts = &{{ $rel.TargetType }}FindOptions{
-			Fields: ({{ $rel.TargetType }}Fields{}).All(),
+			Fields: ({{ $rel.TargetType }}Fields{}).{{ if $.OwnSelection }}Own{{ else }}All{{ end }}(),
 		}
 	} else {
 		optsCopy := *findOpts
 		findOpts = &optsCopy
 	}
+	{{- if $.OwnSelection }}
+	// The rows are matched to their foreign keys by id, so a nested
+	// selection without Id would match none of them.
+	findOpts.Fields.Id = true
+	{{- end }}
 
 	if findOpts.Limit <= 0 || findOpts.Limit < len(ids) {
 		findOpts.Limit = len(ids)
@@ -1179,7 +1184,7 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	if selectedRel{{ toGoName $rel.FieldName }} && tempRel{{ toGoName $rel.FieldName }} != nil {
 		relRequested := opts != nil && (opts.Fields.{{ toGoName $rel.FieldName }} || {{- if $rel.NestedByPointer }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }})
 		if relRequested {
-			childFields := ({{ $rel.TargetType }}Fields{}).All()
+			childFields := ({{ $rel.TargetType }}Fields{}).{{ if $.OwnSelection }}Own{{ else }}All{{ end }}()
 			childFieldsAreDefault := true
 			{{- if $rel.NestedByPointer }}
 			if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
@@ -1683,7 +1688,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	if tempRel{{ toGoName $member.Relationship.FieldName }} != nil {
 		relRequested := opts != nil && (opts.Fields.{{ toGoName $member.Relationship.FieldName }} || {{- if $member.Relationship.NestedByPointer }} (opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero() {{- end }})
 		if relRequested {
-			childFields := ({{ $member.Relationship.TargetType }}Fields{}).All()
+			childFields := ({{ $member.Relationship.TargetType }}Fields{}).{{ if $.OwnSelection }}Own{{ else }}All{{ end }}()
 			childFieldsAreDefault := true
 			{{- if $member.Relationship.NestedByPointer }}
 			if opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero() {
@@ -2022,7 +2027,7 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 		}
 
 		// Batch fetch related entities with typed child field options.
-		childFields := ({{ $rel.TargetType }}Fields{}).All()
+		childFields := ({{ $rel.TargetType }}Fields{}).{{ if $.OwnSelection }}Own{{ else }}All{{ end }}()
 		childFieldsAreDefault := true
 		{{- if $rel.NestedByPointer }}
 		if fields.{{ toGoName $rel.FieldName }}Nested != nil && !fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {

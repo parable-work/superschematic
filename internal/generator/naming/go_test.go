@@ -26,6 +26,7 @@ limit_constants = "on"
 optional_zero = "keep"
 env_number_scalars = "strconv"
 orm_relation_filter_suffix = "Where"
+orm_default_selection = "own"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +36,7 @@ orm_relation_filter_suffix = "Where"
 	want.OptionalZero = GoOptionalKeep
 	want.EnvNumberScalars = GoEnvStrconv
 	want.ORMRelationFilterSuffix = "Where"
+	want.ORMDefaultSelection = GoSelectOwn
 	if n.Go != want {
 		t.Errorf("[go] = %+v, want %+v", n.Go, want)
 	}
@@ -51,6 +53,7 @@ func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
 		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
 		{"[go]\noptional_zero = \"pointers\"\n", `go.optional_zero is "pointers": use "omit" or "keep"`},
 		{"[go]\nenv_number_scalars = \"atoi\"\n", `go.env_number_scalars is "atoi": use "parse" or "strconv"`},
+		{"[go]\norm_default_selection = \"none\"\n", `go.orm_default_selection is "none": use "all" or "own"`},
 		{"[go]\norm_relation_filter_suffix = \"where\"\n", `go.orm_relation_filter_suffix is "where": use ASCII letters and digits`},
 		{"[go]\norm_relation_filter_suffix = \"_Where\"\n", `go.orm_relation_filter_suffix is "_Where"`},
 	} {

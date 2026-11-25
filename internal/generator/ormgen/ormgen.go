@@ -275,6 +275,11 @@ type GeoPointListType struct {
 
 // Repository represents a generated repository for a table.
 type Repository struct {
+	// OwnSelection is go.orm_default_selection = "own" (D164): the type's
+	// Fields has Own, and a relation selected without a nested selection
+	// hydrates with the target's Own, not its All.
+	OwnSelection bool
+
 	Name                   string // e.g. "OrderRepository"
 	TypeName               string // e.g. "Order"
 	TableName              string // e.g. "order"
@@ -1047,6 +1052,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		for j := range repo.PathRelations {
 			repo.PathRelations[j].GoField += opts.Naming.Go.ORMRelationFilterSuffix
 		}
+		repo.OwnSelection = opts.Naming.Go.ReadsOwnByDefault()
 		repositories = append(repositories, repo)
 	}
 
