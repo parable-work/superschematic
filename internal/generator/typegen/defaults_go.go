@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
@@ -43,6 +44,9 @@ func formatGoDefaultLiteral(raw string, kind codegen.DefaultLiteralKind, field F
 		}
 		return trimmed, true
 	case codegen.DefaultLiteralString:
+		if isDurationTextField(field) {
+			return durationDefaultLiteral(raw, field)
+		}
 		return strconv.Quote(raw), true
 	case codegen.DefaultLiteralEnum:
 		return fmt.Sprintf("%s(%q)", field.GoType, raw), true
@@ -53,4 +57,18 @@ func formatGoDefaultLiteral(raw string, kind codegen.DefaultLiteralKind, field F
 		return "", false
 	}
 	return "", false
+}
+
+// durationDefaultLiteral renders the text default of a duration scalar,
+// such as Default<Temporal.Duration, '30s'>. The scalar's Go value is a
+// time.Duration, so a quoted text does not compile: the text is parsed as
+// the scalar's ParseDuration parses a text its rules accept, and written
+// as a typed count of nanoseconds, TemporalDuration(30000000000). A text
+// Go's parser refuses gets no literal.
+func durationDefaultLiteral(raw string, field FieldInfo) (string, bool) {
+	parsed, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%s(%d)", field.GoType, int64(parsed)), true
 }
