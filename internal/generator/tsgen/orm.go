@@ -21,6 +21,13 @@ import (
 // sqlutil.TableStatementsOf). The HTTP runtime's ./postgres entry runs
 // them (ormOf), so the two languages run the same SQL. The file imports
 // the runtime, so the package depends on it.
+//
+// A DB service that lists the sqlite dialect carries each table's
+// statements on SQLite beside them (D116), sqlutil.SQLiteTableStatementsOf,
+// the ones the Rust repositories run, or why SQLite holds no repository of
+// the table, and orm.ts opens the repositories over a SQLite file
+// (createSqliteOrm) and a D1 binding (createD1Orm) through the runtime's
+// ./orm-sqlite entry.
 
 // ORMFile is the file of a types package that holds its repositories.
 const ORMFile = "orm.ts"
@@ -96,6 +103,30 @@ type ORMInfo struct {
 	// HTTP runtime's adapter reads; nil for a database with none.
 	Rules      *behaviorlayout.Layout
 	RulesConst string
+
+	// Postgres is whether the DB service lists the postgres dialect, whose
+	// repositories createOrm opens over a pg Pool. SQLite is whether it
+	// lists the sqlite dialect (D116): each table then carries its
+	// statements on SQLite, SQLiteClauses and SQLiteJSONClauses are
+	// sqlutil.SQLiteClauses and sqlutil.SQLiteJSONClauses by name, and
+	// createSqliteOrm and createD1Orm open the repositories over a file and
+	// a D1 binding.
+	Postgres          bool
+	SQLite            bool
+	SQLiteClauses     []sqlutil.NamedStatement
+	SQLiteJSONClauses []sqlutil.NamedStatement
+}
+
+// SQLiteRefused are the tables with no repository on SQLite, each with
+// why, which orm.ts's comment names (D116).
+func (o *ORMInfo) SQLiteRefused() []ORMTable {
+	var out []ORMTable
+	for _, t := range o.Tables {
+		if t.SQLite != nil && t.SQLite.Unsupported != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // HearsChanges reports whether a table of the layout keeps a change queue
@@ -239,6 +270,50 @@ type ORMTable struct {
 	// and updateOne, deleteOne and each operation take in their options;
 	// none for a table whose uses take none.
 	Preconditions []ORMPrecondition
+
+	// SQLite is the table on SQLite (D116), for a DB service that lists the
+	// sqlite dialect; nil otherwise.
+	SQLite *ORMSQLiteTable
+}
+
+// ORMSQLiteTable is a table on SQLite as orm.ts writes it (D116): its
+// statements and unique keys there, sqlutil's, or, for a table SQLite
+// holds no repository of, Unsupported, why.
+type ORMSQLiteTable struct {
+	Statements  []sqlutil.NamedStatement
+	UniqueKeys  []ORMUniqueKey
+	Unsupported string
+}
+
+// sqliteAudienceRefusal is why a table whose rows keep to an audience
+// (D156) has no repository on SQLite: its reads compare the caller with a
+// UUID[] column, which the SQLite repositories do not hold yet.
+const sqliteAudienceRefusal = "its rows keep to an audience (D156), whose reads compare the caller with a list of UUIDs, which the SQLite repositories do not hold yet"
+
+// ormSQLiteTable is table t on SQLite (D116): sqlutil's statements on
+// SQLite of the names Postgres's carry, and its unique keys read there, or
+// why SQLite holds none (sqlutil.SQLiteTableRefusal, and an audience).
+func ormSQLiteTable(t *sqlutil.TableModel, names []string) *ORMSQLiteTable {
+	reason := sqlutil.SQLiteTableRefusal(t)
+	if reason == "" && t.Audience != nil {
+		reason = sqliteAudienceRefusal
+	}
+	if reason != "" {
+		return &ORMSQLiteTable{Unsupported: reason}
+	}
+	statements := map[string]string{}
+	for _, st := range sqlutil.SQLiteTableStatementsOf(t).AllStatements() {
+		statements[st.Name] = st.SQL
+	}
+	out := &ORMSQLiteTable{}
+	for _, name := range names {
+		out.Statements = append(out.Statements, sqlutil.NamedStatement{Name: name, SQL: statements[name]})
+	}
+	for _, k := range t.UniqueKeys {
+		k = k.SQLite()
+		out.UniqueKeys = append(out.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression})
+	}
+	return out
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -480,6 +555,8 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	clauses := sqlutil.PostgresClauses()
 	out := &ORMInfo{
 		Name:              ORMTypeName(opts.SchemaName),
+		Postgres:          !opts.NoPostgres,
+		SQLite:            opts.SQLite,
 		Clauses:           clauses.AllClauses(),
 		DefaultLimit:      sqlutil.DefaultLimit,
 		ManyLimit:         sqlutil.ManyLimit,
@@ -488,6 +565,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		RequireUpdatedBy:  opts.Actor.RequireUpdatedBy,
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
+	if opts.SQLite {
+		out.SQLiteClauses = sqlutil.SQLiteClauses().AllClauses()
+		out.SQLiteJSONClauses = sqlutil.SQLiteJSONClauses().AllJSONClauses()
+	}
 	if rules != nil {
 		out.Rules, out.RulesConst = rules.layout, lowerFirst(out.Name)+"Rules"
 	}
@@ -540,11 +621,16 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		for _, name := range ormStatements {
 			table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: name, SQL: statements[name]})
 		}
+		names := ormStatements
 		if len(t.EncryptedColumns()) > 0 {
 			table.Encrypted = true
 			for _, name := range encryptedStatements {
 				table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: name, SQL: statements[name]})
 			}
+			names = append(slices.Clone(ormStatements), encryptedStatements...)
+		}
+		if opts.SQLite {
+			table.SQLite = ormSQLiteTable(t, names)
 		}
 		if rules != nil {
 			table.Uses = rules.uses[t.Type]
@@ -938,7 +1024,10 @@ func qualifyTypes(t string, known map[string]bool) string {
 // RuntimeTypes are the types orm.ts imports from the HTTP runtime's
 // ./postgres entry, sorted: those its declarations use, each once.
 func (o *ORMInfo) RuntimeTypes() []string {
-	used := map[string]bool{"Orm": true, "OrmDefinition": true, "OrmOptions": true, "OrmPool": true, "OrmTx": true, "TableDefinition": true}
+	used := map[string]bool{"Orm": true, "OrmDefinition": true, "OrmOptions": true, "OrmTx": true, "TableDefinition": true}
+	if o.Postgres {
+		used["OrmPool"] = true
+	}
 	if len(o.Queries) > 0 {
 		used["QueryDefinition"] = true
 	}
