@@ -21,7 +21,7 @@
 // A part is named as the use it is: a part the table implements by its
 // behavior (holdsState, the operation set's holds operations), a part
 // anchored on a field by the field the bundle names (status,
-// statusEnteredAt, transitionStatus). The bundle's name is in no column,
+// statusEnteredAt, statusTransition). The bundle's name is in no column,
 // table or operation.
 package bundles
 
@@ -161,7 +161,7 @@ func sameParts(where string, recorded, declared []ir.BehaviorRef) error {
 func conflict(td *ir.TypeDef, part ir.BehaviorRef, where string) error {
 	if part.FieldAnchored() {
 		for _, fd := range td.Fields {
-			if fd != nil && fd.Name == part.Field && !(fd.Owned() && fd.Behavior.Use == part.Field) {
+			if fd != nil && fd.Name == part.Field && (!fd.Owned() || fd.Behavior.Use != part.Field) {
 				return fmt.Errorf("%s: part %s anchors %s on field %s, which the type declares; leave the field to the bundle (D103)", where, label(part), part.Name, part.Field)
 			}
 		}

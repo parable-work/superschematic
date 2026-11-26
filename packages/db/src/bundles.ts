@@ -4,7 +4,7 @@
 // `export abstract class Booking implements Reservation<Booking, { ... }>`,
 // and the reader substitutes the table's settings into the parts' configs
 // through the checker: each part becomes a use of the table, named as the
-// use it is (holdsState, status, transitionStatus), so the build, the core
+// use it is (holdsState, status, statusTransition), so the build, the core
 // and every generator meet the parts alone. The data forms name a bundle
 // and its settings, `{ "name": "Reservation", "settings": { ... } }`, and
 // the loader expands them from the registry's declaration

@@ -2,11 +2,39 @@ package registry
 
 import (
 	"encoding/json"
+	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
+
+// TestEveryCoreBundleFileIsRegistered: each declaration under bundles/ is
+// one coreBundles lists, under its file's name, so no file is embedded and
+// left unregistered.
+func TestEveryCoreBundleFileIsRegistered(t *testing.T) {
+	entries, err := fs.ReadDir(coreBundleFiles, "bundles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, entry := range entries {
+		files = append(files, strings.TrimSuffix(entry.Name(), ".bundle.json"))
+	}
+	listed := slices.Clone(coreBundles)
+	slices.Sort(files)
+	slices.Sort(listed)
+	if !slices.Equal(files, listed) {
+		t.Errorf("bundle files = %v, coreBundles = %v", files, listed)
+	}
+	reg := New(naming.Default())
+	for _, file := range coreBundles {
+		if _, ok := reg.Bundle(strings.ToUpper(file[:1]) + file[1:]); !ok {
+			t.Errorf("bundles/%s.bundle.json registers no bundle %s", file, strings.ToUpper(file[:1])+file[1:])
+		}
+	}
+}
 
 // TestCoreBundlesExpand: each of the core's bundles (D103's step 5,
 // D104's Barrier, Mailbox and Assignment) expands, its settings given,

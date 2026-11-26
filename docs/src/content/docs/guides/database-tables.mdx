@@ -4344,11 +4344,13 @@ table that writes `Holds`, `Payments` and `Timers` in its implements
 clause and `status: Workflow<{ ... }>` as a field.
 
 A part is named as the use it is. A part the table implements is named
-for its behavior: `holds_state`, `payments_due`, `booking_holds_items`,
-and the operations under `holds` and `payments`. A part anchored on a
-field is named for the field the bundle gives it: `status`,
-`status_entered_at`, `transitionStatus`. No column, table or operation
-is named for the bundle. A table that implements a bundle does not also
+for its behavior: the columns `holds_state` and `payments_due`, the
+sub-table `booking_holds_items`, and the operations `holdsRetakeHolds`,
+`paymentsOpenPayment` and `timersResetTimer` of a
+`@behaviorOperations(Booking)` set. A part anchored on a field is named
+for the field the bundle gives it: `status`, `status_entered_at` and
+`statusTransition`. No column, table or operation is named for the
+bundle. A table that implements a bundle does not also
 implement one of its parts, or declare a field a part is anchored on:
 the build refuses both, naming the bundle.
 

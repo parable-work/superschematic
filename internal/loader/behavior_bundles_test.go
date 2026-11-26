@@ -232,7 +232,7 @@ func TestBundlesFromTheDataForms(t *testing.T) {
 			t.Fatal(err)
 		}
 		schema, err := LoadService(writeService(t, map[string]string{
-			"schema.config.json":    `{"name": "` + ts.Name + `", "kind": "DB", "outputs": {}}`,
+			"schema.config.json":     `{"name": "` + ts.Name + `", "kind": "DB", "outputs": {}}`,
 			"src/tables.schema.json": string(data),
 		}))
 		if err != nil {
