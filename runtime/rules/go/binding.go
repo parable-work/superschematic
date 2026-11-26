@@ -260,6 +260,14 @@ type Core interface {
 	Check(specs []TypeSpec) ([]*Refusal, error)
 }
 
+// Declarer is a core that runs declarative behaviors (D103's step 5) once
+// it is handed their declaration files: Native's, whose Declare is the
+// package's. The adapter hands a layout's declarations to a core that is
+// one before it checks the layout's specs.
+type Declarer interface {
+	Declare(files ...json.RawMessage) ([]string, error)
+}
+
 // Native is the core the static archive holds, with every behavior ported
 // so far registered. The archive builds it once per process, the first
 // time any operation runs, and every goroutine shares it; each call is a
@@ -270,6 +278,12 @@ func Native() Core {
 }
 
 type nativeCore struct{}
+
+// Declare is the package's Declare: the process's native core runs the
+// files' behaviors from then on.
+func (nativeCore) Declare(files ...json.RawMessage) ([]string, error) {
+	return Declare(files...)
+}
 
 // runInput is rules_run's input document.
 type runInput struct {

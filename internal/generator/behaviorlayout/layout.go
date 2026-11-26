@@ -137,6 +137,12 @@ func convertOfRef(ref ir.TypeRef) Convert {
 // with none has no document.
 type Layout struct {
 	Types map[string]*Table `json:"types"`
+	// Declarations are the declaration files of the declarative behaviors
+	// (D103's step 5) the tables' uses name, by name: behaviors whose
+	// declarations state their rules, which no Rust implements. An adapter
+	// hands them to its core (the bindings' declare) before it checks the
+	// layout's specs. Absent when no use names one.
+	Declarations []json.RawMessage `json:"declarations,omitempty"`
 }
 
 // Table is the layout of one table that composes behaviors: where the core's
@@ -639,6 +645,11 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 	if layout == nil {
 		return nil, nil
 	}
+	declarations, err := declarationsOf(schema, reg)
+	if err != nil {
+		return nil, err
+	}
+	layout.Declarations = declarations
 	// A table a use reads beside its own row's (registry.BehaviorReads:
 	// Recurrence's holidays and relative target, D152) that composes no
 	// behavior is in the layout read-only, so an adapter answers the core's
@@ -658,6 +669,39 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		}
 	}
 	return layout, nil
+}
+
+// declarationsOf is the declaration file of each declarative behavior
+// (D103's step 5) a table of schema composes, once, by name: the
+// registry's declaration, its rules among it, which an adapter's core runs
+// with no Rust of the behavior's own.
+func declarationsOf(schema *ir.Schema, reg *registry.Registry) ([]json.RawMessage, error) {
+	if reg == nil {
+		return nil, nil
+	}
+	named := map[string]bool{}
+	for _, td := range sqlutil.TableTypes(schema) {
+		for _, ref := range td.TableBehaviors() {
+			if b, ok := reg.Behavior(ref.Name); ok && b.Declarative() {
+				named[ref.Name] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(named))
+	for name := range named {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var out []json.RawMessage
+	for _, name := range names {
+		b, _ := reg.Behavior(name)
+		data, err := json.Marshal(b.BehaviorDeclaration)
+		if err != nil {
+			return nil, fmt.Errorf("behaviorlayout: behavior %s's declaration: %w", name, err)
+		}
+		out = append(out, data)
+	}
+	return out, nil
 }
 
 // readTableOf is the read-only layout of a table of schema that composes

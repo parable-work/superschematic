@@ -1242,6 +1242,14 @@ rule hears it. `behaviorlayout.AuditFields` is the Go form. A relation, a
 list or another audit field (`updatedBy`, `deletedBy`, the audit times) is
 not in it.
 
+A layout whose tables compose a declarative behavior (D103's step 5)
+holds each one's declaration file whole, once, by name, in `declarations`
+beside `types`. An adapter hands them to its core before it checks the
+layout's specs: TypeScript's through `RulesCore.declare`, Go's through a
+core that is a `rules.Declarer` (Native's), and a Rust host builds its
+core with `core_declaring(&layout.declarations)`. A layout whose uses name
+none has no `declarations`.
+
 A layout of a table with neither is as it was. A sub-table's `row` is the
 column holding the row's key, which binds as the row table's key binds; its
 `fields` leave the key out. `spec.fields` lists

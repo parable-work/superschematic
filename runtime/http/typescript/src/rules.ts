@@ -449,6 +449,8 @@ export interface RulesCore {
   check?(specs: readonly CoreTypeSpec[]): (CoreRefusal | null)[];
   /** The registered behaviors' declarations, as much of each as the adapter reads: whether an operation writes beside its row (D77's primitive 1), or writes as an operation of the namespace (D77's primitive 3), either of which a read of its use's sub-tables under a fenced lock has no check of. */
   declarations?(): readonly { readonly name: string; readonly operations?: readonly { readonly beside?: boolean; readonly writes?: boolean; readonly scope?: string }[] }[];
+  /** Hands the core the declaration files of declarative behaviors (D103's step 5), which it runs from then on: the adapter hands it a layout's declarations before it checks the layout's specs. */
+  declare?(declarations: readonly object[]): readonly string[];
 }
 
 // ---- The layout document (internal/generator/behaviorlayout) ----
@@ -661,6 +663,8 @@ export interface RulesTable {
 /** A database's layout document: each table that composes behaviors, by its type's name. */
 export interface RulesLayout {
   readonly types: Readonly<Record<string, RulesTable>>;
+  /** The declaration files of the declarative behaviors (D103's step 5) the tables' uses name, each whole, which the adapter hands its core (RulesCore.declare) before it checks the layout's specs; absent for none. */
+  readonly declarations?: readonly object[];
 }
 
 // ---- The store ----
@@ -1500,6 +1504,10 @@ function checked(host: RulesHost): ReadonlyMap<string, CoreRefusal> {
   }
   let refusals = byLayout.get(host.layout);
   if (refusals === undefined) {
+    // The core runs the declarative behaviors the layout's uses name
+    // (D103's step 5) before it checks the specs that name them.
+    const declarations = host.layout.declarations ?? [];
+    if (declarations.length > 0) host.core.declare?.(declarations);
     const names = Object.keys(host.layout.types);
     const found = host.core.check?.(names.map(name => host.layout.types[name]!.spec)) ?? [];
     const map = new Map<string, CoreRefusal>();
@@ -2524,6 +2532,7 @@ export function lazyCore(load: () => RulesCore): RulesCore {
   return {
     run: (spec, command, answers) => loaded().run(spec, command, answers),
     check: specs => loaded().check?.(specs) ?? specs.map(() => null),
+    declare: declarations => loaded().declare?.(declarations) ?? [],
   };
 }
 

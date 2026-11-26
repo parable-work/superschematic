@@ -27,6 +27,12 @@ use superschematic_rules::{Refusal, TypeSpec};
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Layout {
     pub types: BTreeMap<String, Table>,
+    /// The declaration files of the declarative behaviors (D103's step 5)
+    /// the tables' uses name, each whole: a host builds its core with them
+    /// (`superschematic_rules_behaviors::core_declaring`) before it runs a
+    /// command over the layout. Empty for a layout whose uses name none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declarations: Vec<serde_json::Value>,
     // Read by the host loop, which a build with no store leaves out.
     #[serde(skip)]
     #[cfg_attr(
@@ -73,6 +79,7 @@ impl Layout {
                 .into_iter()
                 .map(|table| (table.type_name.clone(), table))
                 .collect(),
+            declarations: Vec::new(),
             checked: Checks::default(),
         }
     }
@@ -516,6 +523,20 @@ mod tests {
             Some(Convert::EpochMillis)
         );
         assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
+        assert!(layout.declarations.is_empty());
+        // A layout whose uses name a declarative behavior (D103's step 5)
+        // holds its declaration file, which a host builds its core with.
+        let mut declaring = document.clone();
+        declaring["declarations"] = json!([{"name": "test.Tally", "rules": {}}]);
+        let declared = Layout::from_json(&declaring.to_string()).expect("it reads");
+        assert_eq!(
+            declared.declarations,
+            [json!({"name": "test.Tally", "rules": {}})]
+        );
+        assert_eq!(
+            serde_json::to_value(&declared).expect("it writes"),
+            declaring
+        );
         assert!(Layout::new([order.clone()]).table("Order").is_some());
         assert_eq!(order.uses[0].member(), "status");
         assert!(order.deadlines.is_none() && order.uses[0].tables.is_empty());
