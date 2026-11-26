@@ -1,5 +1,5 @@
 import { decodeJSONText, formatDuration } from './queue-core.js';
-import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './queue.js';
+import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 import { parseGenericDecimalStrict } from 'superscalar/scalars';
 

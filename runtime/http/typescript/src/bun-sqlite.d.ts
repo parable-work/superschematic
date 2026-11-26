@@ -18,5 +18,7 @@ declare module 'bun:sqlite' {
     /** A function that runs fn in a transaction: BEGIN as it is, or BEGIN IMMEDIATE through immediate. */
     transaction<A extends unknown[], R>(fn: (...args: A) => R): ((...args: A) => R) & { immediate(...args: A): R };
     close(): void;
+    /** Whether a transaction is open on the connection. */
+    readonly inTransaction: boolean;
   }
 }
