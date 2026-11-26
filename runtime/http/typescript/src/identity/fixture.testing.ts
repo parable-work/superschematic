@@ -1,17 +1,22 @@
 // What the identity tests share: the fixture's descriptor and DDL
 // (runtime/http/testdata/identity, fixture-user-model-db), and the
 // databases a store test runs on: SQLite through node:sqlite and through
-// bun:sqlite always, and Postgres when SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL
-// names one, each test in a schema of its own. tsconfig.json leaves it out
-// of the build.
+// bun:sqlite always, and over the SqlDatabase of a file a server's
+// repositories share (D116), and Postgres when
+// SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names one, each test in a schema
+// of its own. tsconfig.json leaves it out of the build.
 import { Database as BunDatabase } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pg from 'pg';
+import { openSqlite } from '../sqlite';
 import {
   bunSqlite,
   nodeSqlite,
   postgresIdentityStore,
+  sqlDatabaseIdentityStore,
   sqliteIdentityStore,
   type SqlIdentityStore,
   type SqliteClient,
@@ -48,7 +53,7 @@ export function descriptorWith(edit: (d: Record<string, any>) => void): string {
 
 /** A database holding the fixture's tables. */
 export interface TestDatabase {
-  readonly name: 'node:sqlite' | 'bun:sqlite' | 'postgres';
+  readonly name: 'node:sqlite' | 'bun:sqlite' | 'SqlDatabase' | 'postgres';
   /** A store over the database, from the fixture's descriptor or another. */
   store(descriptor?: string): SqlIdentityStore;
   /** Runs a statement written with ? placeholders and returns its rows. */
@@ -107,7 +112,26 @@ async function postgresDatabase(ddl: string): Promise<TestDatabase & { pool: pg.
   };
 }
 
-/** node:sqlite, bun:sqlite and, when postgresURLEnv names one, Postgres. */
+/** A SQLite file through openSqlite, the SqlDatabase a server's repositories run on, ddl applied. */
+function sqlDatabase(ddl: string): TestDatabase {
+  const dir = mkdtempSync(join(tmpdir(), 'identity-sqldatabase-'));
+  const file = join(dir, 'users.db');
+  const raw = new BunDatabase(file, { create: true });
+  raw.exec(ddl);
+  raw.close();
+  const db = openSqlite(file);
+  return {
+    name: 'SqlDatabase',
+    store: descriptor => sqlDatabaseIdentityStore(db, descriptor ?? descriptorJSON),
+    query: async (sql, params = []) => (await db.prepare(sql).bind(...params).all()).results,
+    close: async () => {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** node:sqlite, bun:sqlite, a file's SqlDatabase and, when postgresURLEnv names one, Postgres. */
 export const databaseKinds: DatabaseKind[] = [
   {
     name: 'node:sqlite',
@@ -123,6 +147,7 @@ export const databaseKinds: DatabaseKind[] = [
       return sqliteDatabase('bun:sqlite', db as unknown as SqliteModuleDatabase & { close(): void }, bunSqlite(db as unknown as SqliteModuleDatabase), ddl);
     },
   },
+  { name: 'SqlDatabase', open: async (ddl = sqliteDDL) => sqlDatabase(ddl) },
   ...(postgresURL !== '' ? [{ name: 'postgres' as const, open: (ddl = postgresDDL) => postgresDatabase(ddl) }] : []),
 ];
 

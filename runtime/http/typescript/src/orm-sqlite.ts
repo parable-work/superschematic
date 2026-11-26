@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlValue } from './d1.js';
 import { ormOn, type Clauses, type JsonClauses, type Orm, type OrmDefinition, type OrmDialect, type OrmOptions, type OrmPool, type OrmQueryable, type OrmStatement, type TableDefinition, type TableStatements, type TransactionOptions } from './orm.js';
 import { sqliteRulesStore } from './rules.js';
 import { sqliteDecodeRow, sqliteDecodeValue, sqliteEncodeParam } from './sqlitecodec.js';
+import { inTurn, takeTurn } from './sqlite-turns.js';
 
 // What a repository on SQLite throws, and the core's binding a generated
 // orm.ts of a DB service that lists no postgres passes its core through.
@@ -57,34 +58,6 @@ time upsertMany (D89), mergeInto (D147) and declared queries (D86) are not
 built on SQLite and are refused.
 */
 
-/** A turn on a database: one transaction, or one statement outside one, at a time. */
-class Turns {
-  private tail: Promise<void> = Promise.resolve();
-
-  /** Resolves when it is the caller's turn, to the function that ends it. */
-  take(): Promise<() => void> {
-    let end!: () => void;
-    const ended = new Promise<void>(resolve => {
-      end = resolve;
-    });
-    const turn = this.tail.then(() => end);
-    this.tail = this.tail.then(() => ended);
-    return turn;
-  }
-}
-
-/** The turns of each database, shared by every ORM over it. */
-const turnsOf = new WeakMap<SqlDatabase, Turns>();
-
-function turns(db: SqlDatabase): Turns {
-  let out = turnsOf.get(db);
-  if (out === undefined) {
-    out = new Turns();
-    turnsOf.set(db, out);
-  }
-  return out;
-}
-
 /** A statement's rows and how many rows it changed, or for a read how many it read, as pg counts them. */
 async function runOn(db: SqlDatabase, text: string, values: readonly unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
   const { results, meta } = await db
@@ -94,11 +67,11 @@ async function runOn(db: SqlDatabase, text: string, values: readonly unknown[]):
   return { rows: results, rowCount: meta.changes || results.length };
 }
 
-/** What the repositories run a statement on over a SqlDatabase: the database, and the turns a file's statements take, none on D1 and none in a transaction, which holds its turn. */
+/** What the repositories run a statement on over a SqlDatabase: the database, and whether a statement takes a turn on it (./sqlite-turns), as a file's outside a transaction does, and none on D1 or in a transaction, which holds its turn. */
 class SqlQueryable implements OrmQueryable {
   constructor(
     readonly db: SqlDatabase,
-    private readonly turns?: Turns
+    private readonly turns = false
   ) {}
 
   async query(config: { text: string; values: unknown[]; types?: unknown }): Promise<{ rows: unknown[]; rowCount: number | null }> {
@@ -107,13 +80,7 @@ class SqlQueryable implements OrmQueryable {
 
   /** Runs fn in a turn of its own, or at once where the queryable takes none. */
   async inTurn<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.turns === undefined) return fn();
-    const end = await this.turns.take();
-    try {
-      return await fn();
-    } finally {
-      end();
-    }
+    return this.turns ? inTurn(this.db, fn) : fn();
   }
 }
 
@@ -232,16 +199,12 @@ class HeldQueryable extends SqlQueryable {
 
 /** A pool over a SqlDatabase of a file: its statements, and a transaction of its own on the one connection, each in its turn. */
 class FilePool extends SqlQueryable implements OrmPool {
-  private readonly shared: Turns;
-
   constructor(db: SqlDatabase) {
-    const shared = turns(db);
-    super(db, shared);
-    this.shared = shared;
+    super(db, true);
   }
 
   async connect(): Promise<HeldQueryable> {
-    const end = await this.shared.take();
+    const end = await takeTurn(this.db);
     return new HeldQueryable(this.db, () => end());
   }
 }
