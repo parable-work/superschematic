@@ -785,12 +785,19 @@ func (n DerivedFieldNames) template(kind EdgeKind) string {
 // Validate refuses a template that does not name the service once, or
 // whose other characters would not make an environment variable's name:
 // upper-case letters, digits and underscores, not starting with a digit.
+// The database template may leave the service out: an API has one
+// database, so its field is the API's whatever the database is named
+// (DATABASE gives DATABASE_URL).
 func (n DerivedFieldNames) Validate() error {
 	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}, {"bucket", n.Bucket}, {"memory_store", n.MemoryStore}} {
 		if t.template == "" {
 			continue
 		}
-		if strings.Count(t.template, ServicePlaceholder) != 1 {
+		count := strings.Count(t.template, ServicePlaceholder)
+		if t.key == "database" && count > 1 {
+			return fmt.Errorf("derived_fields.%s %q must contain %s once or not at all", t.key, t.template, ServicePlaceholder)
+		}
+		if t.key != "database" && count != 1 {
 			return fmt.Errorf("derived_fields.%s %q must contain %s once", t.key, t.template, ServicePlaceholder)
 		}
 		if !isEnvName(strings.ReplaceAll(t.template, ServicePlaceholder, "S")) {

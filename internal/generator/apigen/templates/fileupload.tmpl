@@ -21,8 +21,17 @@ import (
 	"strings"
 
 	_ "golang.org/x/image/webp" // Register WebP decoder
+{{- if $.Naming.GoAPI.FileUploadType }}
+
+	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
 )
 
+{{- with $.Naming.GoAPI.FileUploadType }}
+// FileUploadData is one uploaded file, the scalar library's {{ . }}
+// (go_api.file_upload_type).
+type FileUploadData = scalars.{{ . }}
+{{- else }}
 // FileUploadData is one uploaded file: its name, its media type as sent,
 // its size and its bytes. The package defines it (D81): the scalar
 // package names no such type, so an upload no longer needs one there.
@@ -61,6 +70,7 @@ func (f *FileUploadData) ResetReader() error {
 	_, err := seeker.Seek(0, io.SeekStart)
 	return err
 }
+{{- end }}
 
 // BodyNotMultipart is the detail of a body that is neither
 // multipart/form-data nor JSON, as every generated server answers it (D81).

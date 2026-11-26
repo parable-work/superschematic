@@ -165,3 +165,20 @@ column_defaults = "on"
 now_defaults = "declared"
 state_guard_terminal = "{column} is terminal at %: it cannot move to %"
 state_guard_refused = "{column} cannot move from % to %"
+
+# How the generated Go API routers answer a request they refuse, and the
+# symbols they write beside the routes. Each key left out keeps the core's
+# router. A project whose clients know the answers of another router sets
+# them.
+[go_api]
+validation_error_code = ""
+path_param_error = "{name} must be percent-encoded UTF-8"
+undeclared_input_keys = "refuse"
+input_trailing_data = "refuse"
+optional_input_empty_body = "refuse"
+strict_input_refusals = "route"
+app_error_context = false
+manual_route_constants = false
+body_arguments = "values"
+query_param_list_empty_item = ""
+file_upload_type = ""

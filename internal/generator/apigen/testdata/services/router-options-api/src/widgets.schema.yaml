@@ -1,0 +1,140 @@
+# Operations whose routes read each kind of request the [go_api] table of
+# the naming file changes: an open input type, a @strictJSON one, an
+# optional input, body arguments, a path parameter, and a query string with
+# a length rule and a list. The Go route tests in apigen load it, with the
+# table's keys set and with their defaults.
+name: router-options-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+enums:
+  # The size of a widget.
+  Size:
+    name: Size
+    values:
+      - name: Small
+        serializedAs: small
+      - name: Large
+        serializedAs: large
+types:
+  # A widget: its name of one to five characters, a count from 1, a size
+  # and at most two tags.
+  WidgetInput:
+    name: WidgetInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 1
+        validateMaxLength: 5
+      - name: count
+        typeRef: { name: number }
+        required: true
+        validateMin: 1
+      - name: size
+        typeRef: { name: Size }
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        validateListMax: 2
+  # The same widget, as a closed contract.
+  StrictWidgetInput:
+    name: StrictWidgetInput
+    role: APIInput
+    strictJSON: true
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 1
+        validateMaxLength: 5
+      - name: count
+        typeRef: { name: number }
+        required: true
+        validateMin: 1
+      - name: size
+        typeRef: { name: Size }
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        validateListMax: 2
+operationSets:
+  - name: WidgetMutations
+    operations:
+      # Save a widget; returns its name.
+      - name: saveWidget
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: widgets
+        arguments:
+          - name: input
+            typeRef: { name: WidgetInput }
+            required: true
+      # Save a widget of the closed contract; returns its name.
+      - name: saveStrictWidget
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: strict-widgets
+        arguments:
+          - name: input
+            typeRef: { name: StrictWidgetInput }
+            required: true
+      # Touch the widgets; the input is optional. Returns the name.
+      - name: touchWidgets
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: widgets/touch
+        arguments:
+          - name: input
+            typeRef: { name: WidgetInput }
+      # Upload a widget's file; the server mounts the route itself, with
+      # its rate limit, body limit and timeout. Returns the name.
+      - name: uploadWidgetFile
+        typeRef: { name: string }
+        required: true
+        httpMethod: PUT
+        restPath: "widgets/{id}/file"
+        manualRouteRegistration: true
+        middleware: { rateLimit: 30, bodyLimit: 8, timeout: 60 }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+      # Claim a widget with a token, at most five times a minute per
+      # client; returns the token.
+      - name: claimWidget
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: widgets/claim
+        middleware: { rateLimit: 5 }
+        arguments:
+          - name: token
+            typeRef: { name: Identity.UUID }
+            required: true
+  - name: WidgetQueries
+    operations:
+      # Find a widget by id, with a label of two to four characters and at
+      # most two codes; returns the id.
+      - name: findWidget
+        typeRef: { name: string }
+        required: true
+        httpMethod: GET
+        restPath: "widgets/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: label
+            typeRef: { name: string }
+            isQuery: true
+            validateMinLength: 2
+            validateMaxLength: 4
+          - name: codes
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateListMax: 2

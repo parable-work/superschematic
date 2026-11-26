@@ -3,6 +3,7 @@ package bodyargs
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 
@@ -28,10 +29,110 @@ const (
 // "validation failed", "does not match the declared type"), and Errors,
 // the field errors of an undeclared key or a broken rule, the problem's
 // top-level errors member.
+//
+// Type is the input type that StrictType named, for the refusal of a key
+// it does not declare. It is empty otherwise.
 type InputRefusal struct {
 	Detail string
 	Reason string
 	Errors validate.ValidationErrors
+	Type   string
+}
+
+// ReadOption changes how ReadInput and ReadInputDroppingUnknown read an input
+// body, and how DecodeRefusal words a decoder's refusal. With no option
+// they make the checks every generated server makes. A router whose
+// clients know another server's answers passes the options that give
+// those answers.
+type ReadOption func(*readOptions)
+
+type readOptions struct {
+	keepUndeclared bool
+	firstValue     bool
+	emptyAsObject  bool
+	nullAsObject   bool
+	strictType     string
+}
+
+// KeepUndeclaredKeys makes ReadInput pass a key the type does not declare
+// on to the type's decoder, as the body holds it, rather than refuse it.
+// The decoder then reads or ignores it as encoding/json does: a key in
+// another case reads into the field it matches.
+func KeepUndeclaredKeys() ReadOption { return func(o *readOptions) { o.keepUndeclared = true } }
+
+// FirstValue reads the first JSON value of the body and leaves the rest of
+// the body unread, as a json.Decoder reads it: trailing data and a second
+// value are not refused, and a read error after the first value is not
+// seen.
+func FirstValue() ReadOption { return func(o *readOptions) { o.firstValue = true } }
+
+// EmptyBodyAsObject reads an empty body, or one of white space alone, as
+// the empty object {}, for an input the operation does not require.
+func EmptyBodyAsObject() ReadOption { return func(o *readOptions) { o.emptyAsObject = true } }
+
+// NullAsEmptyObject reads a body that is the JSON null as the empty object
+// {}, as encoding/json decodes null into a struct: it leaves every field
+// unset, for the field rules to find.
+func NullAsEmptyObject() ReadOption { return func(o *readOptions) { o.nullAsObject = true } }
+
+// StrictType names a closed (@strictJSON) input type, name, whose own
+// decoder owns its refusals. ReadInput records name as the Type of the
+// refusal of a key the type does not declare, and DecodeRefusal leaves the
+// decoder's refusal of a string an enum lacks as the decoder's: the body
+// does not match the declared type, with no "enum" field error.
+func StrictType(name string) ReadOption { return func(o *readOptions) { o.strictType = name } }
+
+func readOptionsOf(opts []ReadOption) readOptions {
+	var o readOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o
+}
+
+// readJSON reads a body that holds one JSON value, with the refusals of
+// ReadInput's first two checks, as the options say.
+func readJSON(r io.Reader, o readOptions) (json.RawMessage, *InputRefusal) {
+	raw, refusal := readJSONValue(r, o)
+	if refusal == nil && o.nullAsObject && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return json.RawMessage("{}"), nil
+	}
+	return raw, refusal
+}
+
+// readJSONValue reads the body's JSON value as readJSON does, the null
+// left as it is.
+func readJSONValue(r io.Reader, o readOptions) (json.RawMessage, *InputRefusal) {
+	if o.firstValue {
+		var raw json.RawMessage
+		if err := json.NewDecoder(r).Decode(&raw); err != nil {
+			if errors.Is(err, io.EOF) {
+				if o.emptyAsObject {
+					return json.RawMessage("{}"), nil
+				}
+				return nil, &InputRefusal{Detail: BodyRequired}
+			}
+			return nil, &InputRefusal{Detail: BodyNotJSON}
+		}
+		return raw, nil
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, &InputRefusal{Detail: BodyNotJSON}
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		if o.emptyAsObject {
+			return json.RawMessage("{}"), nil
+		}
+		return nil, &InputRefusal{Detail: BodyRequired}
+	}
+	var raw json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, &InputRefusal{Detail: BodyNotJSON}
+	}
+	return raw, nil
 }
 
 // Mismatch is the refusal of a body the input type refuses for reason,
@@ -46,29 +147,25 @@ func Mismatch(reason string, errors validate.ValidationErrors) *InputRefusal {
 // object"), and only the top-level keys the type declares, fields
 // (Mismatch, "unknown fields: a, b", with an "unknown" error at each key,
 // in the order the body first holds them). The type's own decoding and
-// Validate follow.
-func ReadInput(r io.Reader, fields []string) (json.RawMessage, *InputRefusal) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, &InputRefusal{Detail: BodyNotJSON}
-	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, &InputRefusal{Detail: BodyRequired}
-	}
-	var raw json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &InputRefusal{Detail: BodyNotJSON}
+// Validate follow. The options change the reading (ReadOption).
+func ReadInput(r io.Reader, fields []string, opts ...ReadOption) (json.RawMessage, *InputRefusal) {
+	o := readOptionsOf(opts)
+	raw, refusal := readJSON(r, o)
+	if refusal != nil {
+		return nil, refusal
 	}
 	unknown, isObject := unknownKeys(raw, fields)
 	if !isObject {
 		return nil, Mismatch("expected an object", nil)
 	}
-	if len(unknown) > 0 {
+	if len(unknown) > 0 && !o.keepUndeclared {
 		errors := validate.NewValidationErrors()
 		for _, key := range unknown {
 			errors.SetFieldErrors(key, []validate.ValidationError{{Validator: "unknown", Message: "unknown field"}})
 		}
-		return nil, Mismatch("unknown fields: "+strings.Join(unknown, ", "), errors)
+		refusal := Mismatch("unknown fields: "+strings.Join(unknown, ", "), errors)
+		refusal.Type = o.strictType
+		return nil, refusal
 	}
 	return raw, nil
 }
@@ -80,18 +177,12 @@ func ReadInput(r io.Reader, fields []string) (json.RawMessage, *InputRefusal) {
 // lists, each where the body holds it. A key is declared only as fields
 // spells it, so a key that differs in case is dropped too, where
 // encoding/json would read it into the field: every server reads the same
-// keys.
-func ReadInputDroppingUnknown(r io.Reader, fields []string) (json.RawMessage, *InputRefusal) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, &InputRefusal{Detail: BodyNotJSON}
-	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, &InputRefusal{Detail: BodyRequired}
-	}
-	var raw json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &InputRefusal{Detail: BodyNotJSON}
+// keys. FirstValue and EmptyBodyAsObject change its reading as they change
+// ReadInput's.
+func ReadInputDroppingUnknown(r io.Reader, fields []string, opts ...ReadOption) (json.RawMessage, *InputRefusal) {
+	raw, refusal := readJSON(r, readOptionsOf(opts))
+	if refusal != nil {
+		return nil, refusal
 	}
 	declared, isObject := declaredMembers(raw, fields)
 	if !isObject {
