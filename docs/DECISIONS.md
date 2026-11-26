@@ -1999,3 +1999,71 @@ Left:
 - The calendar on SQLite and D1.
 - `examples/deploy-smoke` with a Recurrence table, and the live
   `smoke.sh Cloudflare` run, which is the maintainer's.
+
+## D159. Five runtime interfaces a running app calls, each provider a package that declares its interface in its package.json, slots in an API's config that each environment binds, a build that refuses a feature with no provider, and providers that act as their own principals (D156 amended)
+
+The extension seam was build time alone: Go linked into the binary
+(`docs/extension-model.md`). A running app had no interface for what it
+calls outside: a channel to send a notice through, a store of
+credentials, a sandbox and a model for an agent run, a processor for a
+stored file. Sections 3, 4, 7 and 8 of the platform plan call these; this
+entry defines them. `docs/extension-model.md` section 13 and the
+runtime providers guide hold the design as built.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Five interfaces, each a list of operations in `ir.RuntimeContracts` and a TypeScript interface in `@superschematic/http-runtime/providers`: `credentials` (`CredentialProvider`: `list`, `resolve`), `channel` (`ChannelAdapter`: `send`, `health`, optional `status` and `inbound`), `sandbox` (`SandboxProvider`: `start`, `cancel`, `status`, `cost`), `model` (`ModelProvider`: `complete`, its usage in the answer) and `files` (`FileProcessor`: `extractText`, `preview`). `runtime/http/testdata/runtime_contracts.json` holds the Go list, which the TypeScript one is tested against. | An interface per provider kind (email, SMS, chat), which the channel's `kind` and D153's trust levels tell apart as data |
+| TypeScript only for now. The runtime that sections 3, 4 and 8 build first is TypeScript, and a provider package is an npm package. | Go and Rust at once, before a feature calls them |
+| A package declares its interface in its `package.json`, `"superschematic": {"provider": {name, implements, operations, config, role}}`. An API's config lists the packages it may use (`providers`, directories relative to the service), and the loader reads each into `ir.Schema.Providers` and checks it against its contract: an interface the core defines, every required operation and none it does not define, config keys of upper-case words, and a role. In TypeScript the package exports `defineProvider({...})`, which checks the same, and `checkProviderPackage` holds the manifest to the definition and to the provider it makes, in the package's own test. | A Go extension per provider calling a `RegisterRuntimeProvider`, which makes a TypeScript package ship Go to be checked; reading the definition from the TypeScript module at build time, which runs the package's code in the build; a decorator in the package's own schema, which makes a provider a service |
+| A slot is a field of an API's `@envVars` class that `@providers({ SMS: "channel" })` names: a string whose value in each environment names the provider. The provider's settings are the fields named after the slot and its keys (`SMS_URL` for slot `SMS`, key `URL`), a secret one a `Secret<string>`, so `stack secrets set` enters it per environment. The stack binds them as any other field, and each deployable of `environment.json` lists the provider of each slot (`ResolvedDeployable.Providers`). Swapping a provider is a change of env, with the settings the new one reads declared in the config. | A `providers` key of an environment, a second way to bind config; one JSON field per slot holding every setting, which hides a secret inside a plain field; settings named by the provider alone, which two providers of one slot would collide on |
+| The load refuses a slot that is no string field of the config, is a secret, or takes an interface none of the listed packages implements. The resolver refuses a slot bound to a parameter, one that names a provider the API does not list or of another interface, and one whose provider's settings have no field, the wrong secrecy, or no binding (`provider`). `providersFrom` refuses the same at start, with every problem and no value, for a config no build checked. | A parameter as a slot's value, which a build cannot check |
+| Coverage is data: a feature registers itself with `Registry.RegisterRuntimeFeature(RuntimeFeature{Name, Interface, Uses})`, once per interface it needs, and `Uses` reads the API's schema and the DB schemas it connects to. The stack generator records the features each API uses (`stack.Service.Features`), and the resolver refuses an environment that runs a deployable of such an API with no slot of that interface set, naming the feature, the interface and the slots that would fill it (`no-provider`). The core registers none: notifications, attachments and agents register as they are built. `TestRuntimeProvidersExampleRefusals` proves it with a test feature that an API whose database has a `Notice` table uses. | A list of features in the core, which grows with every section; a decorator per feature naming its interface, which a feature that is a behavior or a table kind has no class for |
+| A provider is its own principal, of a fourth kind, `extension` (`ir.PrincipalExtension`, `PrincipalKind` in the runtime), with the subject `extension:<name>` and the permissions its manifest's `role` lists. Each permission names one capability, two dotted segments or more (`messages.relay`), never an area (`messages`), which would cover all of it. `providersFrom` runs each call into a provider within that principal, so what it writes through an ORM opened with no user records it; `extensionAuthenticator` authenticates a provider that calls the app with its own key, a messaging bridge that connects outward, as it. | An existing kind: a provider is not a user (no session, no sign-in), not a party (no row, no grant) and not an agent run (no run, no sandbox), and the access log tells them apart by kind |
+| A credential provider returns no value to its caller. `list` answers `CredentialListing` (reference, title, sites); `resolve` answers an `Injection`, which holds the value sealed: no member returns it, its JSON and string forms show the reference and target alone, its private field makes the class nominal so no object literal passes for one, and a provider makes one only from a `SecretValue`. `applyInjection` alone opens it, handing it to the runner's `fill` or `setHeader`. `useCredential` resolves, refuses an injection for another reference or target, applies it, and answers `CredentialUse` (reference, provider, target, time), which the run record keeps. | A value with a mask, which the caller could still unwrap; resolution in core with the value passed to the runner, which puts it in core's memory and logs |
+
+Built: the contracts, the manifest and its check, the slots, the
+providers on the IR and on resolved deployables, and the extension
+principal (`ir/runtime_providers.go`, `ir/access.go`); `@providers` and
+`RegisterRuntimeFeature` (`internal/registry/core_providers.go`, aliased
+in `registry`); the config's `providers` (schemaconfig, the TypeScript
+config reader, `@superschematic/schema-config`); the loader's reading and
+checks (`internal/loader/providers.go`); the stack's slots, provider
+checks and coverage (`internal/stack/providers.go`,
+`internal/generator/stackgen`); the TypeScript runtime's `./providers`
+entry, which the Workers check bundles. `examples/runtime-providers`
+ships six packages: two SMS channel adapters of two shapes, a vault
+broker scoped to named vaults, a local-process sandbox, a model stub and
+a file processor, and a stack whose two environments send through the two
+adapters. The tests: `TestRuntimeContractsMatchTheTypeScriptRuntime`,
+`TestARuntimeProviderIsCheckedAgainstItsContract` (ir), the decorator and
+feature registration (registry), the manifest and slot checks (loader),
+the resolver's (`TestAnEnvironmentNamesTheProviderOfEachSlot`,
+`TestAFeatureNeedsAProviderOfItsInterface`,
+`TestAProviderSlotIsCheckedAgainstTheProvider`), the example's stack
+built by the installed binary (`TestRuntimeProvidersExampleStack`,
+`TestRuntimeProvidersExampleRefusals`), the runtime's providers test, and
+the example's own on Node.js and Bun.
+
+Left:
+
+- Go and Rust: the five interfaces, `providersFrom` and the injection in
+  each runtime, and the principal kind in Go's auth hooks (D156's
+  `callerPrincipal`).
+- The generated server: a TypeScript API that lists providers gets its
+  slots from the IR and builds `Providers` into its `Deps`, importing the
+  listed packages; today the project's wiring calls `providersFrom`.
+- A provider package named by its npm name, resolved from the service's
+  `node_modules`, beside a directory.
+- Provider packages in build-all's dependency graph (D136) and in its
+  build cache key, so a change to one's manifest rebuilds the APIs that
+  list it and the stacks that deploy them.
+- The features: notifications (D153) register `channel`, attachments
+  (D154) `files`, agents (D158) `sandbox` and `model`, and credentials
+  for agent runs `credentials`, each with its `Uses`.
+- Health: D153 skips an adapter whose `health` fails and alerts on the
+  others; nothing calls `health` on a schedule yet.
+- A secret setting of a slot an environment leaves unset is still a
+  secret of that environment, which `stack secrets set` asks for.
+- A real container platform's sandbox provider, one model API's provider,
+  and a PDF and video file processor, which the plan names as examples and
+  the plan's question on the sandbox platform leaves open.

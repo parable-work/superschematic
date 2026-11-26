@@ -163,6 +163,14 @@ type TypeDef struct {
 	// EnvVars indicates this type provides environment variable configuration.
 	EnvVars bool `json:"envVars,omitempty" yaml:"envVars,omitempty"`
 
+	// ProviderSlots are the @providers declaration of an API's @envVars
+	// class (D159): each config field whose value, per environment, names
+	// the runtime provider that serves it, by field, with the runtime
+	// interface the provider implements (RuntimeChannel, ...). The
+	// provider reads its own settings from the fields named after the slot
+	// (ProviderConfigField). Nil for every other type.
+	ProviderSlots map[string]string `json:"providerSlots,omitempty" yaml:"providerSlots,omitempty"`
+
 	// DenyUnknownFields (@denyUnknownFields) makes the generated Rust serde
 	// deserializer reject a payload key the type does not declare instead of
 	// dropping it. Opt-in per type: a strict decoder suits a closed wire

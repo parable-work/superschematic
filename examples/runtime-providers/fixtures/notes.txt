@@ -1,0 +1,5 @@
+Weekly notes
+
+The team moved the review to Thursday.
+Open items: the storage quota, the on-call rota, and the release checklist.
+Next review: two weeks from now.

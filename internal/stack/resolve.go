@@ -284,6 +284,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.orderRollout()
 	r.bindConfig()
 	r.checkFieldKeys()
+	r.resolveProviders()
 	if r.failed() {
 		return nil
 	}

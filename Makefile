@@ -218,6 +218,7 @@ ts:
 	cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
+	examples/runtime-providers/scripts/check.sh
 
 # The version-graph core's Python binding: cargo test runs the binding's own
 # unit tests, uv builds the PyO3 extension with maturin into the package's
