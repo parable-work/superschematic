@@ -5,17 +5,23 @@ import (
 	"net/http"
 
 	"example.com/schemas/sdk/go/fixture-timers-api/namespaces"
+	types "example.com/schemas/types/go/fixture-timers-api"
 )
 
 // APIError represents a non-successful API response.
 type APIError struct {
-	Message         string
-	StatusCode      int
-	Body            []byte
-	Code            string
-	Details         map[string]any
-	RequestID       string
-	ResponseHeaders http.Header
+	Message    string
+	StatusCode int
+	Body       []byte
+	Code       string
+	Details    map[string]any
+	// ValidationErrors holds the field errors of the answer: the `errors`
+	// member of the problem body, by field name. A generated router writes
+	// it on a 400 when the request fails its validator. It is nil when the
+	// body has no field errors.
+	ValidationErrors types.ValidationErrors
+	RequestID        string
+	ResponseHeaders  http.Header
 }
 
 func (e *APIError) Error() string {
