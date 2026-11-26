@@ -121,6 +121,9 @@ var transcriptFiles = []transcriptFile{
 	// other row, and the hand-written cases.
 	{"../../engine/testdata/rules/core-refunds.transcript.json", 52},
 	{"../../engine/testdata/rules/core-payments.transcript.json", 73},
+	// Blueprint (D149): a create whose change set creates each child of
+	// the template in the child's table, blocked after its steps.
+	{"../../engine/testdata/rules/core-blueprint.transcript.json", 151},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

@@ -131,6 +131,25 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	// D103's step 4, its later waves, in the order they were ported.
 	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
 	"Stock", "Holds", "Calendar", "Payments",
+	// Blueprint (D149), the one behavior ported with no state of its own:
+	// a create stamps the template's rows in another table.
+	"Blueprint",
+}
+
+// tableCreatesRows are the behaviors a table's create of a row runs that
+// create rows of another table in the create's change set, each with why:
+// Blueprint's children (D149). Such a create is no upsert's insert, so a
+// table that implements one has no upserts in any ORM. Per-behavior code,
+// as tableLeavesOut is, until step 5 derives it from the behavior's class
+// (D103).
+var tableCreatesRows = map[string]string{
+	"Blueprint": "a create of the row stamps a row of the child table per step of its template, in the create's change set (D149)",
+}
+
+// TableCreatesRows reports whether a table's use of the behavior name
+// creates rows of another table when a row is created (tableCreatesRows).
+func TableCreatesRows(name string) bool {
+	return tableCreatesRows[name] != ""
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a

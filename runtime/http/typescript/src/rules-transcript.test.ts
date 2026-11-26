@@ -156,6 +156,9 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // row, and the hand-written cases.
   { file: 'core-refunds', floor: 52 },
   { file: 'core-payments', floor: 73 },
+  // Blueprint (D149): a create whose change set creates each child of the
+  // template in the child's table, blocked after its steps.
+  { file: 'core-blueprint', floor: 151 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

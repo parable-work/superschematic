@@ -145,6 +145,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// shared table with no repository, no upserts, and the tables in
 		// the layout.
 		{service: "fixture-payments-db", behaviors: true},
+		// Tables of Blueprint (D149): Batch's create through the core, which
+		// stamps its jobs, with no upserts; Job's Dependencies' operations
+		// under dependencies, its blockers in a sub-table with no repository;
+		// Blueprint, with no operation, under none; no queue.
+		{service: "fixture-blueprint-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},

@@ -645,6 +645,49 @@ a DB table`).
   permission.
 - Nothing resets exhaustion.
 
+## On a table and on development mode
+
+Lease, Presence, Budget, Retries and Blueprint also run on the behaviors'
+core, so a DB table implements them (`implements Lease<Job, { ... }>`)
+and [development mode](/superschematic/guides/development-mode/) serves
+them. Queue and Assignment do not. `examples/engine-jobs` runs on both:
+`test/jobs.dev.test.ts` serves `schemas/dev` with
+`@superschematic/rules-handler` on a clock the test moves.
+
+**A claim is a read and a lease.** Queue folds into the app's own claim:
+a read of the rows that may be claimed, in the order you want, and
+Lease's `acquire` on the one you pick. A claimer that loses the race meets
+`held_by_another` and goes on to the next row. The holder then moves the
+row with the lease's token, and reserves its budget:
+
+<Snippet example="engine-jobs" file="src/dev.ts" symbol="claim" />
+
+- **Blocked work waits at its gate.** A read shows `Dependencies`'
+  `blocked`, so the claim passes over a blocked row. Give `Dependencies`
+  the state a claim moves to in `gatedStates` (`["running"]`), so a move
+  that skips the read waits for the blockers too.
+- **Retries keeps no result.** A table's Retries takes no `resultField`.
+  The example keeps a result in the successful attempt's `detail`, since
+  its workers write a job only through the work's operations. An app
+  whose holders may update the row writes it there, with the token.
+- **Search is a filter.** Development mode serves no `Search`. A list's
+  `filter[title][contains]=...` matches a field's text anywhere, case
+  aside, with no weights and no ranking.
+
+**Blueprint on a table.** A table implements `Blueprint<Batch, { schema,
+parentLink, keyField, steps, copyFields?, copyLinks? }>`. `parentLink` is
+the child table's to-one relation to this one, and `copyLinks` names this
+table's relations, each copied to the child's relation of the same name.
+A create stamps a child per step in its change set, each through the child
+table's own create, so a failing child refuses the parent's create. A
+child's key is a UUID the core draws. Blueprint keeps no state: a read
+computes `children`, the child rows that point at the row, in the
+template's order. So it joins and leaves a table with rows. It takes inline
+steps alone: `from` reads a pinned revision, and a relation pins none. The
+build holds the config to the child table: the relation, `keyField`,
+`Constants` over the stamped fields, `Dependencies` for an `after`, the
+fields a step's data sets, and a `when`'s `includes` over a list.
+
 ## Where to go next
 
 - The package

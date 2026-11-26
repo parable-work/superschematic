@@ -102,10 +102,10 @@ the field itself (`status`), and its other fields follow the field's name
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
 Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
-Revisions, Comments, Derived and Provenance. Blueprint is not ported yet, so
-`examples/engine-jobs` still runs on the engine. `examples/engine-notes`
-runs on both: its `test/notes.dev.test.ts` serves the notes schema with
-`superschematic-dev`.
+Revisions, Comments, Derived, Provenance and Blueprint. `examples/engine-notes`
+and `examples/engine-jobs` run on both: `test/notes.dev.test.ts` serves the
+notes schema with `superschematic-dev`, and `test/jobs.dev.test.ts` serves
+the jobs' `schemas/dev` with `@superschematic/rules-handler`.
 
 A get and a list also show the fields a behavior computes at a read,
 which no row holds. They are named as the use's other fields are:
@@ -143,6 +143,13 @@ they stand. `describe` lists them under `computed`.
   type's fields: an enum's values and a primitive's type.
 - Provenance's `inReview` is an owned field of each row, which a list
   filters on as `Provenance.inReview`.
+- Blueprint's create stamps a row of the child type per step of its
+  template, in the create's unit, each through the child's own create
+  with its relation to the row and its blockers. A refusal of any child
+  refuses the create. A child's key is a UUID the core draws. The
+  child type's own fields are not held at that create, as a create
+  request's are. `blueprintChildren` is computed at a read: the child rows
+  that point at the row. It takes inline steps alone.
 
 ## Requests
 

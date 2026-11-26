@@ -787,6 +787,17 @@ Most are load errors; knowing them saves a build round-trip:
   write of the `<table>_dependencies_blockers` sub-table is never refused
   but runs none of its checks: add and remove edges through the
   operations.
+- When a row's create should make a fixed set of child rows (a batch's
+  steps, a release's checks), implement Blueprint on the table rather than
+  creating them in app code (D149): `implements Blueprint<Batch, { schema:
+  "Job"; parentLink: "batch"; keyField: "step"; steps: { fetch: {}; index:
+  { after: ["fetch"] } }; copyFields: ["topic"] }>`. The child table has a
+  `batch: Relation<Batch>`, a string `step`, Constants over `step` and the
+  copied fields, and Dependencies when a step has `after`. The create
+  stamps every child in its own write, blocked after its steps; a `when`
+  (`{ field, equals }` or `{ field, includes }`) leaves a step out. Steps
+  are inline (`from` is an engine type's alone). `children` is computed at
+  a read and no column holds it; the table has no upserts.
 - When a row needs a number a person reads (an invoice's INV-2026-0042,
   a ticket's T-17), type a field as a Numbering rather than a counter
   column of your own or a database sequence: `number: Numbering<{ format:

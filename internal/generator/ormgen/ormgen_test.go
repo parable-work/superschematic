@@ -123,6 +123,13 @@ const calendarFixture = "fixture-calendar-db"
 // repository.
 const paymentsFixture = "fixture-payments-db"
 
+// blueprintFixture is the DB fixture whose Batch implements Blueprint
+// beside its status Workflow, and whose Job implements Constants and
+// Dependencies beside its own (D149): Job's operations under
+// Dependencies(), Batch's create through the core, which stamps its jobs,
+// and no upserts on Batch, whose create writes more than its row.
+const blueprintFixture = "fixture-blueprint-db"
+
 // mergeFixture is the DB service whose Label and Customer implement
 // Mergeable (D147), with the tables that reference them.
 const mergeFixture = "fixture-merge-db"
@@ -145,7 +152,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -296,6 +303,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// Payments(), listPaymentActions taking no key, no repository of a
 		// sub-table or the shared table, no upserts, and no queue.
 		{paymentsFixture, []string{"repository_order.go", "repository_refund.go", "rules.go"}},
+		// Tables of Blueprint (D149): Job's Dependencies' operations under
+		// Dependencies(), Batch's create through the core, which stamps its
+		// jobs, no upserts of Batch, and no queue.
+		{blueprintFixture, []string{"repository_batch.go", "repository_job.go", "rules.go"}},
 		// Tables that implement Mergeable (D147): merge.go holds the
 		// MergeInto of Label and of Customer, each with the statements of
 		// every relation that references it, and the collisions of each

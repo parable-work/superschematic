@@ -1073,7 +1073,12 @@ reaches through applyDerived, an update attributed to Derived
 `core-holds-timers` to 14, the hand-written `core-commerce` to 66,
 `core-calendar` to 47, `core-bookings` to 83, `core-refunds` to 52 and
 `core-payments` to 73, each take of a claim a call of its supply's
-operation on the supply's row under the supply row's lock. Every transcript's `behaviors` lists the
+operation on the supply's row under the supply row's lock; and, of
+Blueprint (D149), `core-blueprint` (the engine's `workqueue-blueprint.json`)
+to 151 steps, 101 checks and 50 commands, each create of a row whose
+template stamps children a change set that creates every child in the
+child's table (`Cx::create_row`), keyed by a UUID drawn from the command's
+request id, its blockers Dependencies' create parameters. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

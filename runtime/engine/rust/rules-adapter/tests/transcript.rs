@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 34] = [
+const TRANSCRIPTS: [(&str, usize); 35] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -126,6 +126,7 @@ const TRANSCRIPTS: [(&str, usize); 34] = [
     ("core-calendar", CALENDAR_FLOOR),
     ("core-refunds", REFUNDS_FLOOR),
     ("core-payments", PAYMENTS_FLOOR),
+    ("core-blueprint", BLUEPRINT_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -347,6 +348,12 @@ const REFUNDS_FLOOR: usize = 52;
 /// rows of its shared table, and listPaymentActions a command without a row
 /// over a read across the table.
 const PAYMENTS_FLOOR: usize = 73;
+
+/// core-blueprint's floor (D149): 151 steps of the engine's
+/// workqueue-blueprint.json, 50 commands and 101 checks: a create whose
+/// change set creates each child of the template in the child's table,
+/// its relation to the parent and its blockers in Dependencies' sub-table.
+const BLUEPRINT_FLOOR: usize = 151;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

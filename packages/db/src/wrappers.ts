@@ -735,6 +735,52 @@ export interface DependenciesOn<T> {
  */
 export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;
 
+/** When a step of BlueprintOn<T> is stamped (D149): the table's own field equals a value, or is a list that includes one, compared as JSON. */
+export type BlueprintWhenOn<T> =
+  | { readonly field: Extract<keyof T, string>; readonly equals: unknown }
+  | { readonly field: Extract<keyof T, string>; readonly includes: unknown };
+
+/** One step of BlueprintOn<T>'s template (D149): the steps whose children block its child, when it is stamped, and the child's own fields beside its key and the copied ones. */
+export interface BlueprintStepOn<T> {
+  /** The keys of the steps of the template whose children block this step's child. */
+  readonly after?: readonly string[];
+  /** Stamps the step only when it holds; always when absent. A step left out passes the steps it comes after on to the steps that come after it. */
+  readonly when?: BlueprintWhenOn<T>;
+  /** Fields of the child, beside its key and the copied fields. */
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+/** Blueprint's config on a table (D149): the child table, its to-one relation to this one, the field each child holds its step's key in, the template's steps by key, and what each child copies. */
+export interface BlueprintOn<T> {
+  /** The child table. It composes Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
+  readonly schema: string;
+  /** The child table's to-one relation to this table, through which each child points at its parent. */
+  readonly parentLink: string;
+  /** A string field of the child table that each child holds its step's key in. */
+  readonly keyField: string;
+  /** The steps, by key: letters, digits, dots, underscores, colons and hyphens, at most 500 of them. */
+  readonly steps: Readonly<Record<string, BlueprintStepOn<T>>>;
+  /** Fields of this table copied to every child, a field of the child table of the same name. */
+  readonly copyFields?: readonly Extract<keyof T, string>[];
+  /** To-one relations of this table copied to every child, a relation of the child table of the same name to the same table. */
+  readonly copyLinks?: readonly Extract<keyof T, string>[];
+}
+
+/**
+ * Children created with their parent (D149): `export abstract class Batch
+ * implements Blueprint<Batch, { schema: "Job"; parentLink: "batch";
+ * keyField: "step"; steps: { fetch: {}; index: { after: ["fetch"] } } }>`.
+ * The type stays a table. A create of a row stamps a row of the child
+ * table per step whose when holds, in the create's change set, each through
+ * the child table's own create, with its key, the copied fields and
+ * relations, the step's data, its relation to the row, and its blockers in
+ * the child table's Dependencies, so the steps run in the template's order.
+ * Blueprint keeps no column: a read of the row computes its children, the
+ * child rows that point at it. Like Timers, it resolves to the empty
+ * object type; the first type argument is the table itself.
+ */
+export type Blueprint<T, C extends BlueprintOn<T>> = NonNullable<unknown>;
+
 /** One derived field of DerivedOn<T> (D73): the table's own fields it is derived from, never itself or another derived field; what the model is asked; the label of its model; and the states of the table's Workflow it is derived in. */
 export interface DerivedFieldOn<T> {
   readonly from: readonly Extract<keyof T, string>[];
