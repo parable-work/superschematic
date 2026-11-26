@@ -280,6 +280,12 @@ type TypeDef struct {
 	// @attachments table (D154). Nil for every other type. See [RowTable].
 	RowTable *RowTable `json:"rowTable,omitempty" yaml:"rowTable,omitempty" jsonschema:"-"`
 
+	// CalendarSources are the @calendarSource declarations of a DB table
+	// (D152): the dates of its rows, or the occurrences of its Recurrence,
+	// that the calendar read and feed merge across tables. See
+	// [CalendarSourceDef].
+	CalendarSources []CalendarSourceDef `json:"calendarSources,omitempty" yaml:"calendarSources,omitempty"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].
