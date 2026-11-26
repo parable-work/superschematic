@@ -91,8 +91,12 @@ pub mod stackconfig;
 #[cfg(feature = "otel")]
 pub mod telemetry;
 mod token_source;
+// The wake a queue client sends after an enqueue (D145), with the
+// `postgres` feature.
 #[cfg(any(feature = "identity", feature = "postgres", feature = "sqlite"))]
 mod uuid62;
+#[cfg(feature = "postgres")]
+pub mod wake;
 // A webhook verifier over a JWT carrying the body's SHA-256 (D81).
 mod webhook;
 // A worker's claim loop (D53, D65), with the `postgres` or `sqlite`
