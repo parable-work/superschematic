@@ -3172,11 +3172,13 @@ buildRouter(implementations, {
 
 `RecipeGraph` is the facade the database's types package exports from
 `./versiongraph`, and `pgPool` is `@superschematic/versiongraph/postgres`'s.
-The database lists Postgres first: the facade runs on Postgres alone. A
-generated image does not build the version-graph core's WebAssembly
-module yet, so a stack's build writes this server no Dockerfile and says
-so; run it from the checkout or build its image from a Dockerfile of your
-own.
+The database lists Postgres first: the facade runs on Postgres alone. No
+published package ships the version-graph core's WebAssembly module yet,
+so the server's generated image builds it: a stage builds the module for
+`wasm32-unknown-unknown` from the core's crate beside the package the
+naming file's `[paths] versiongraph_typescript` names, and the build
+stage emits the package's `dist/` with the module in it. Without that
+key a stack's build writes this server no Dockerfile and says so.
 
 The Go and the Rust servers do not serve the set yet. Each operation
 stays a method of your implementation's interface, with the same route and
