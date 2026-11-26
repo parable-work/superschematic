@@ -140,3 +140,5 @@ export { attachments, references } from "./rowrefs";
 export { channelIdentities, event, notifier } from "./notifications";
 export type { EventOptions, NotifierPart, Urgency } from "./notifications";
 export type { AttachmentsOptions, ReferencesOptions } from "./rowrefs";
+export { searchable } from "./search";
+export type { SearchableOptions } from "./search";

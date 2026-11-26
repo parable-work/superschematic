@@ -209,6 +209,11 @@ type ORMTable struct {
 	// notifier raises and routes; nil for a table with none.
 	TableEvents []ORMEvent
 
+	// Searchable is a @searchable table's SearchableDefinition (D155), as
+	// JSON, which the runtime's search and indexing read; empty for a
+	// table that is not @searchable.
+	Searchable string
+
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
@@ -513,7 +518,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	// generated, so no relation reaches it either.
 	owned := map[string]bool{}
 	for _, t := range tables {
-		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil) {
+		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex) {
 			owned[t.Type] = true
 		}
 	}
@@ -549,6 +554,9 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			table.Calendar = calendar
 			table.Notifier = notifierPartOf(td)
 			table.TableEvents = eventsOf(td)
+			if table.Searchable, err = searchableOf(schema, td, tables); err != nil {
+				return nil, err
+			}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn

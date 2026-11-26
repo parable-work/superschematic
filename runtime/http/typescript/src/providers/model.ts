@@ -57,7 +57,21 @@ export interface ModelCompletion {
   readonly usage: ModelUsage;
 }
 
+/** Texts to embed (D155): each becomes one vector, under model or the provider's default. */
+export interface ModelEmbedRequest {
+  readonly model?: string;
+  readonly texts: readonly string[];
+}
+
+/** The vectors of an embed request, one per text in order, and what it used. */
+export interface ModelEmbedding {
+  readonly vectors: readonly (readonly number[])[];
+  readonly usage?: ModelUsage;
+}
+
 /** A model provider. */
 export interface ModelProvider {
   complete(turn: ModelTurn): Promise<ModelCompletion>;
+  /** Embeds texts, for search's re-ranking (D155); a provider that embeds nothing leaves it out, and search runs on full text alone. */
+  embed?(request: ModelEmbedRequest): Promise<ModelEmbedding>;
 }

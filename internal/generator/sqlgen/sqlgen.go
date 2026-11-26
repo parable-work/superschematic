@@ -287,6 +287,11 @@ type DDLOutput struct {
 	// file's object, by attachments table (rowrefs.go, D154).
 	ReferencesClears    []ReferencesClear
 	AttachmentsReleases []AttachmentsRelease
+	// SearchTriggers keep the search index rows of each @searchable
+	// table, and SearchChildTriggers enqueue a row whose conversation or
+	// files changed (searchable.go, D155).
+	SearchTriggers      []SearchTrigger
+	SearchChildTriggers []SearchChildTrigger
 	Projections         []ProjectionView
 	Timestamp           string
 
@@ -584,6 +589,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	searchTriggers, searchChildTriggers, err := buildSearchables(schema, tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
 	if err != nil {
 		return nil, err
@@ -654,6 +663,8 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 
 		ReferencesClears:    referencesClears,
 		AttachmentsReleases: attachmentsReleases,
+		SearchTriggers:      searchTriggers,
+		SearchChildTriggers: searchChildTriggers,
 		RoleSeeds:           roleSeeds,
 		Projections:         projections,
 		Timestamp:           opts.Clock.RFC3339(),

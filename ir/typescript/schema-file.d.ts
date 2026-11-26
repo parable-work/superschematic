@@ -792,6 +792,15 @@ export interface ScalarFile {
   typeMappings?: { [key: string]: string };
 }
 
+export interface SearchableDef {
+  attachments?: boolean;
+  body?: string[];
+  comments?: boolean;
+  queue: string;
+  scope?: string;
+  title: string;
+}
+
 export interface ServerDecl {
   serves: ServiceRef[];
 }
@@ -905,6 +914,7 @@ export interface TypeDef {
   rawSql?: RawSQLDef[];
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
   rowReferences?: RowReferencesDef;
+  searchable?: SearchableDef;
   seedRoles?: RoleSeed[];
   server?: ServerDecl;
   source?: SourceRef;

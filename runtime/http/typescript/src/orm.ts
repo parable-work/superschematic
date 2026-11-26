@@ -5,6 +5,7 @@ import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, wi
 import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './queue.js';
+import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -435,6 +436,8 @@ export interface TableDefinition {
   readonly access?: 'grants' | 'log' | 'roles';
   /** The table's @calendarSource declarations (D152), which the calendar read and feed merge; absent for a table with none. */
   readonly calendar?: readonly CalendarSourceDefinition[];
+  /** A @searchable table's index (D155), which the search across tables ranks and indexSearch builds; absent for a table that is not @searchable. */
+  readonly searchable?: SearchableDefinition;
   /** What the table is to the notifier (D153): one of its parts, or the table of channel identities; absent for any other table. */
   readonly notifier?: 'inbox' | 'deliveries' | 'routes' | 'preferences' | 'subscriptions' | 'channelTrust' | 'replies' | 'channelIdentities';
   /** The table's @event declarations (D153), which the notifier raises and routes; absent for a table with none. */

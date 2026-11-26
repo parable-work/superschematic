@@ -27,6 +27,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/loader/search"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
@@ -696,6 +697,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// notifier's classes and the channel identities join the schema before
 	// the pass, so it reads them as its own.
 	if added := notifications.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Search across tables (D155): the database's search index and the
+	// fields of the queues @searchable names join the schema before the
+	// pass, so it reads them as its own.
+	if added := search.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

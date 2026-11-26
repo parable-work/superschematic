@@ -29,6 +29,20 @@ export const stubModel = defineProvider({
         const outputTokens = Math.min(words(content), turn.maxTokens ?? Number.POSITIVE_INFINITY);
         return { content, toolCalls: [], stop: outputTokens < words(content) ? 'maxTokens' : 'end', usage: { inputTokens, outputTokens } };
       },
+      // Search's embeddings (D155): each text's vector is three FNV-1a
+      // hashes of its words, so the same text always embeds alike.
+      async embed(request) {
+        const vectors = request.texts.map(text =>
+          [0x811c9dc5, 0x01000193, 0x9e3779b9].map(seed => {
+            let hash = seed;
+            for (const word of text.toLowerCase().split(/\s+/u).filter(Boolean).sort()) {
+              for (let i = 0; i < word.length; i++) hash = Math.imul(hash ^ word.charCodeAt(i), 0x01000193) >>> 0;
+            }
+            return (hash / 0xffffffff) * 2 - 1;
+          })
+        );
+        return { vectors, usage: { inputTokens: request.texts.reduce((sum, text) => sum + words(text), 0), outputTokens: 0 } };
+      },
     };
   },
 });

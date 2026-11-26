@@ -36,7 +36,7 @@ func RuntimeOf(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		return nil, err
 	}
 	for _, td := range sqlutil.TableTypes(schema) {
-		if td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil {
+		if td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil || td.SearchIndex {
 			continue
 		}
 		var model *sqlutil.TableModel

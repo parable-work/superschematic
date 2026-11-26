@@ -114,7 +114,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 	for i := range tables {
 		source := &tables[i]
 		td := schema.Types[source.Type]
-		if td == nil || td.BehaviorTable != nil || td.RowTable != nil {
+		if td == nil || td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex {
 			continue
 		}
 		for c := range source.Columns {
@@ -363,7 +363,7 @@ func mergeHiddenSteps(schema *ir.Schema, tables []TableModel, target *TableModel
 	for i := range tables {
 		owner := &tables[i]
 		td := schema.Types[owner.Type]
-		if td == nil || td.BehaviorTable != nil || td.RowTable != nil {
+		if td == nil || td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex {
 			continue
 		}
 		for _, f := range td.Fields {
