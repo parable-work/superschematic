@@ -1,4 +1,4 @@
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::errors::SDKError;
-use crate::runtime::{MultipartBody, RequestInterceptor, RequestOptions};
+use crate::runtime::{BinaryStream, MultipartBody, RequestInterceptor, RequestOptions};
 
 pub type TokenProviderFuture = Pin<Box<dyn Future<Output = Result<Option<String>, SDKError>> + Send>>;
 pub type TokenProvider = Arc<dyn Fn() -> TokenProviderFuture + Send + Sync>;
@@ -317,6 +317,58 @@ impl HttpClient {
             .send_json_with_refresh(method, path, query, body, request_options, Some(idempotency_key))
             .await?;
         self.decode_response(response)
+    }
+
+    /// Sends a request whose success body is a stream of `content_type`, an
+    /// `@httpBinaryStream` operation's (D167), and returns the body unread.
+    /// It asks for the media type or a problem in `Accept`. A refusal is the
+    /// `SDKError::Api` that `request_json` returns, after the same retries; a
+    /// success of another media type is `SDKError::Contract`. The client's
+    /// timeout, or `RequestOptions::timeout_ms`, bounds the whole exchange,
+    /// the body included.
+    pub async fn request_stream(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        content_type: &str,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<BinaryStream, SDKError> {
+        let accept = format!("{content_type}, application/problem+json");
+        let mut retries = Retries::default();
+        loop {
+            let mut request = self
+                .build_request(method, path, query, request_options, retries.fresh_service_token)
+                .await?;
+            if let Some(payload) = body.clone() {
+                request = request.json(&payload);
+            }
+            let response = self.send(request.header(ACCEPT, accept.as_str())).await?;
+            if response.status().is_success() {
+                let received = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                let media_type = received.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+                if media_type != content_type {
+                    let received = if received.is_empty() { "no content type" } else { received.as_str() };
+                    return Err(SDKError::contract(format!(
+                        "SDK contract error: expected {content_type} in streamed success response, got {received}"
+                    )));
+                }
+                return Ok(BinaryStream {
+                    content_type: content_type.to_string(),
+                    response,
+                });
+            }
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Err(SDKError::api(response.status.as_u16(), &response.headers, &response.body));
+            }
+        }
     }
 
     pub async fn request_multipart<T>(

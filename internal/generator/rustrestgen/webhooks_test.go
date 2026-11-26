@@ -30,7 +30,7 @@ func TestWriteRustAPIGoldenWebhooks(t *testing.T) {
 	router := generated["src/router.rs"]
 	for _, want := range []string{
 		"let route = RouteControls::under(transport)\n        .rate_limiter(limits.of(&crate::operations::WEBHOOK_RECEIVE_STRIPE_EVENT))\n        .apply(post(handle_webhook_receive_stripe_event));\n    router = router.route(\n        \"/api/webhooks/stripe\",\n        webhook_verified(\n            route,\n            Arc::clone(&state.implementations.webhook_verifiers[\"stripe\"]),",
-		"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&state.implementations.authenticator), &[\"webhooks.receive\"])\n        .apply(post(handle_webhook_receive_github_event));\n    router = router.route(\n        \"/api/webhooks/github\",\n        webhook_verified(\n            route,\n            Arc::clone(&state.implementations.webhook_verifiers[\"github\"]),",
+		"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&state.implementations.authenticator), &[\"webhooks.receive\"])\n        .operation(\"receiveGithubEvent\")\n        .apply(post(handle_webhook_receive_github_event));\n    router = router.route(\n        \"/api/webhooks/github\",\n        webhook_verified(\n            route,\n            Arc::clone(&state.implementations.webhook_verifiers[\"github\"]),",
 		`router = router.route("/api/events/{id}", get(handle_event_get_event));`,
 	} {
 		if !strings.Contains(router, want) {

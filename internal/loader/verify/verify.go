@@ -125,6 +125,14 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// RustOutput names the output of the service's config that builds Rust
+	// (D181): "outputs.types.rust" for a DB service's Rust types,
+	// "outputs.api.language: rust" for an API's Rust server; empty when it
+	// builds none, or when the loader has no config to read. The features
+	// of D152 to D159 the Rust outputs do not serve yet are refused for it
+	// (checkRustFeatures).
+	RustOutput string
+
 	// Naming supplies the npm scope that marks an import as a schema
 	// service reference. The loader fills it from loader.WithNaming; empty
 	// fields fall back to naming.Default().
@@ -270,6 +278,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkMiddleware(schema, r)
 	checkPages(schema, r)
 	checkFileTransfers(schema, r)
+	checkHTTPBinaryStreams(schema, r)
 	checkMCPToolsLeftOut(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
@@ -285,6 +294,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkNotifications(schema, in, r)
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
+	checkRustFeatures(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

@@ -262,7 +262,7 @@ func TestMCPEndpointOfAGuardedAPI(t *testing.T) {
 		"        requires_auth: true,\n",
 		"        authenticator: Some(authenticator),\n",
 		"        service_authenticator: Some(Arc::clone(&state.implementations.service_authenticator)),\n",
-		"    let route = RouteControls::under(transport)\n        .body_limit_megabytes(2)\n        .identify_service(Arc::clone(&state.implementations.service_authenticator))\n        .authorize(Arc::clone(&authenticator), &[\"orders.write\"])\n        .timeout_seconds(30)\n        .apply(patch(check_order_update_order));\n",
+		"    let route = RouteControls::under(transport)\n        .body_limit_megabytes(2)\n        .identify_service(Arc::clone(&state.implementations.service_authenticator))\n        .authorize(Arc::clone(&authenticator), &[\"orders.write\"])\n        .operation(\"updateOrder\")\n        .timeout_seconds(30)\n        .apply(patch(check_order_update_order));\n",
 		"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[\"storefront\"])\n        .apply(post(check_order_open_return));\n",
 		"    if manual_routes {\n        let route = RouteControls::under(transport)\n            .identify_service(Arc::clone(&state.implementations.service_authenticator))\n            .apply(get(check_request));\n        router = router.route(\"/api/orders\", route);\n    }\n",
 		"async fn check_request(uri: Uri) -> Response {",
@@ -392,7 +392,7 @@ func TestMCPEndpointCratesBuild(t *testing.T) {
 			// The user model's routes are the identity runtime's: a route's
 			// check runs its controls, and a public route's none.
 			"    router = router.route(\"/api/auth/login\", post(check_request));\n",
-			"        .authorize(Arc::clone(&authenticator), &[])\n        .apply(get(check_request));\n    router = router.route(\"/api/auth/me\", route);\n",
+			"        .authorize(Arc::clone(&authenticator), &[])\n        .operation(\"me\")\n        .apply(get(check_request));\n    router = router.route(\"/api/auth/me\", route);\n",
 		}},
 		{"fixture-webhooks-api", "getEvent", nil, []string{
 			"        webhook_verified(\n            post(check_webhook_receive_stripe_event),\n            Arc::clone(&state.implementations.webhook_verifiers[\"stripe\"]),\n        ),",

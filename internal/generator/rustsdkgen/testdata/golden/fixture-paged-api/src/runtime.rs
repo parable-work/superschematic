@@ -316,6 +316,18 @@ pub fn check_query_list_item(name: &str, index: usize, text: &str) -> Result<(),
     Ok(())
 }
 
+/// The success body of an `@httpBinaryStream` operation (D167), unread. Read
+/// it with `stream.response.chunk().await` until it returns `None`, or with
+/// `stream.response.bytes().await`; `stream.response.headers()` holds the
+/// response's headers. Dropping it before its end ends the request.
+/// `content_type` is the media type the operation declares, which the client
+/// checked.
+#[derive(Debug)]
+pub struct BinaryStream {
+    pub content_type: String,
+    pub response: reqwest::Response,
+}
+
 #[derive(Debug, Clone)]
 pub struct UploadFile {
     pub filename: String,

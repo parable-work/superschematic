@@ -23,6 +23,7 @@ import type {
   ForwardedUser,
   RequestOptions,
   DownloadedFile,
+  BinaryStreamResponse,
   Page,
 } from './types';
 
@@ -355,11 +356,13 @@ export class HttpClient {
    *
    * Both sources abort the transport: a caller AbortSignal and the SDK timeout.
    * timeout <= 0 disables the timeout arm only; caller signals still apply.
+   * stopTimeout ends the timeout arm and keeps the caller's signal linked, for
+   * a streamed body that outlives the request call.
    */
   private mergeSignals(
     callerSignal: AbortSignal | undefined,
     timeoutMs: number
-  ): { signal: AbortSignal | undefined; cleanup: () => void } {
+  ): { signal: AbortSignal | undefined; cleanup: () => void; stopTimeout: () => void } {
     let timeoutController: AbortController | undefined;
     let handle: ReturnType<typeof setTimeout> | undefined;
 
@@ -372,7 +375,7 @@ export class HttpClient {
       }
     }
 
-    const cleanup = () => {
+    const stopTimeout = () => {
       if (handle !== undefined) {
         clearTimeout(handle);
       }
@@ -381,20 +384,20 @@ export class HttpClient {
     const timeoutSignal = timeoutController?.signal;
 
     if (!callerSignal && !timeoutSignal) {
-      return { signal: undefined, cleanup };
+      return { signal: undefined, cleanup: stopTimeout, stopTimeout };
     }
 
     if (callerSignal && !timeoutSignal) {
-      return { signal: callerSignal, cleanup };
+      return { signal: callerSignal, cleanup: stopTimeout, stopTimeout };
     }
 
     if (!callerSignal && timeoutSignal) {
-      return { signal: timeoutSignal, cleanup };
+      return { signal: timeoutSignal, cleanup: stopTimeout, stopTimeout };
     }
 
     const parts = [callerSignal!, timeoutSignal!];
     if (typeof AbortSignal !== 'undefined' && typeof (AbortSignal as any).any === 'function') {
-      return { signal: (AbortSignal as any).any(parts), cleanup };
+      return { signal: (AbortSignal as any).any(parts), cleanup: stopTimeout, stopTimeout };
     }
 
     const merged = new AbortController();
@@ -411,11 +414,12 @@ export class HttpClient {
     return {
       signal: merged.signal,
       cleanup: () => {
-        cleanup();
+        stopTimeout();
         for (const part of listening) {
           part.removeEventListener('abort', onAbort);
         }
       },
+      stopTimeout,
     };
   }
 
@@ -489,11 +493,13 @@ export class HttpClient {
     attempt: RequestAttempt = FIRST_ATTEMPT,
     startMs: number = performance.now()
   ): Promise<T> {
+    const streamContentType = options.responseType === 'stream' ? options.streamContentType : undefined;
     let requestConfig: RequestConfig = {
       url: path,
       method: method.toUpperCase(),
       headers: {
-        Accept: 'application/json',
+        // A stream asks for its media type, or the problem a refusal is (D167).
+        Accept: streamContentType !== undefined ? `${streamContentType}, application/problem+json` : 'application/json',
         ...(options.headers || {}),
         ...(this.clientVersion !== undefined ? { 'X-Client-Version': this.clientVersion } : {}),
       },
@@ -532,7 +538,8 @@ export class HttpClient {
     }
 
     const timeoutMs = this.config.timeout === undefined ? 30000 : this.config.timeout;
-    const { signal, cleanup } = this.mergeSignals(requestConfig.signal, timeoutMs);
+    const { signal, cleanup, stopTimeout } = this.mergeSignals(requestConfig.signal, timeoutMs);
+    let streamed = false;
 
     let response: Response | undefined;
     try {
@@ -572,6 +579,27 @@ export class HttpClient {
       });
 
       const responseHeaders = this.headersToRecord(response.headers);
+      if (streamContentType !== undefined && response.ok) {
+        // An @httpBinaryStream result (D167): the body, unread, not the envelope.
+        const contentType = response.headers.get('content-type') ?? '';
+        const mediaType = contentType.split(';')[0].trim().toLowerCase();
+        if (mediaType !== streamContentType || !response.body) {
+          await response.body?.cancel();
+          throw new Error(
+            `SDK contract error: expected ${streamContentType} in streamed success response, got ${contentType || 'no content type'}`
+          );
+        }
+        this.logger.debug('Response:', response.status, requestConfig.url);
+        this.reportCompletion(requestConfig, startMs, response.status, false);
+        streamed = true;
+        const stream: BinaryStreamResponse = {
+          contentType: streamContentType,
+          body: response.body,
+          status: response.status,
+          headers: responseHeaders,
+        };
+        return stream as T;
+      }
       if (options.responseType === 'file' && response.ok) {
         // A FileDownload result (D81): the body is the file, not the envelope.
         const blob = await response.blob();
@@ -612,6 +640,7 @@ export class HttpClient {
                 signal: requestConfig.signal,
                 forward: options.forward,
                 responseType: options.responseType,
+                streamContentType: options.streamContentType,
               },
               { ...attempt, serviceRetried: true, freshServiceToken: true },
               startMs
@@ -720,7 +749,13 @@ export class HttpClient {
       const message = error instanceof Error ? error.message : String(error);
       throw new NetworkError('Network error: ' + message);
     } finally {
-      cleanup();
+      // A returned stream's body still reads under the caller's signal; only
+      // the timeout, which bounds the wait for the response headers, ends here.
+      if (streamed) {
+        stopTimeout();
+      } else {
+        cleanup();
+      }
     }
   }
 

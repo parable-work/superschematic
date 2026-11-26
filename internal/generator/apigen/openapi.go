@@ -522,6 +522,9 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		if endpoint.FileDownload != nil {
 			success = fileDownloadResponse(endpoint.FileDownload)
 		}
+		if endpoint.BinaryStream != nil {
+			success = binaryStreamResponse(endpoint.BinaryStream)
+		}
 		operation["responses"] = map[string]interface{}{
 			"200": success,
 			"400": problemResponse("The request is not valid. `detail` says why."),

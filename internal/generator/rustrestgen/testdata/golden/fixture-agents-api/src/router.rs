@@ -77,94 +77,117 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetCheckReserve")
         .apply(post(handle_account_budget_check_reserve));
     router = router.route("/api/account/{id}/budget/check-reserve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetObserve")
         .apply(post(handle_account_budget_observe));
     router = router.route("/api/account/{id}/budget/observe", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetRecordUsage")
         .apply(post(handle_account_budget_record_usage));
     router = router.route("/api/account/{id}/budget/record-usage", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetRecordUsageFor")
         .apply(post(handle_account_budget_record_usage_for));
     router = router.route("/api/account/{id}/budget/record-usage-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetReserve")
         .apply(post(handle_account_budget_reserve));
     router = router.route("/api/account/{id}/budget/reserve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetReserveFor")
         .apply(post(handle_account_budget_reserve_for));
     router = router.route("/api/account/{id}/budget/reserve-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSetLimit")
         .apply(post(handle_account_budget_set_limit));
     router = router.route("/api/account/{id}/budget/set-limit", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSettle")
         .apply(post(handle_account_budget_settle));
     router = router.route("/api/account/{id}/budget/settle", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSettleFor")
         .apply(post(handle_account_budget_settle_for));
     router = router.route("/api/account/{id}/budget/settle-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_account_status_transition));
     router = router.route("/api/account/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseExpireHolder")
         .apply(post(handle_job_lease_expire_holder));
     router = router.route("/api/job/lease/expire-holder", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseAcknowledge")
         .apply(post(handle_job_lease_acknowledge));
     router = router.route("/api/job/{id}/lease/acknowledge", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseAcquire")
         .apply(post(handle_job_lease_acquire));
     router = router.route("/api/job/{id}/lease/acquire", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseDirect")
         .apply(post(handle_job_lease_direct));
     router = router.route("/api/job/{id}/lease/direct", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseExpire")
         .apply(post(handle_job_lease_expire));
     router = router.route("/api/job/{id}/lease/expire", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseHeartbeat")
         .apply(post(handle_job_lease_heartbeat));
     router = router.route("/api/job/{id}/lease/heartbeat", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseRelease")
         .apply(post(handle_job_lease_release));
     router = router.route("/api/job/{id}/lease/release", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("leaseResetExpiries")
         .apply(post(handle_job_lease_reset_expiries));
     router = router.route("/api/job/{id}/lease/reset-expiries", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("retriesRecordAttempt")
         .apply(post(handle_job_retries_record_attempt));
     router = router.route("/api/job/{id}/retries/record-attempt", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_job_status_transition));
     router = router.route("/api/job/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("presenceBeat")
         .apply(post(handle_session_presence_beat));
     router = router.route("/api/session/{id}/presence/beat", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("presenceMiss")
         .apply(post(handle_session_presence_miss));
     router = router.route("/api/session/{id}/presence/miss", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_session_status_transition));
     router = router.route("/api/session/{id}/status/transition", route);
     router

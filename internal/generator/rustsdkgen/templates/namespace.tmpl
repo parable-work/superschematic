@@ -406,12 +406,12 @@ pub struct {{.FilesStructName}} {
         let body = Some(serde_json::to_value(encrypted)?);
 
         self.client
-            .request_json("{{.HTTPMethod}}", path, &query_params, body, request_options)
+            {{if .BinaryStreamContentType}}.request_stream("{{.HTTPMethod}}", path, &query_params, body, "{{.BinaryStreamContentType}}", request_options){{else}}.request_json("{{.HTTPMethod}}", path, &query_params, body, request_options){{end}}
             .await
 {{- else if .HasInput}}
         let body = Some(input_value);
         self.client
-            .request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, body, options{{if .Idempotent}}, &idempotency_key{{end}})
+            {{if .BinaryStreamContentType}}.request_stream("{{.HTTPMethod}}", path, &query_params, body, "{{.BinaryStreamContentType}}", options){{else}}.request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, body, options{{if .Idempotent}}, &idempotency_key{{end}}){{end}}
             .await
 {{- else if and .HasScalarArgs (eq .HTTPMethod "GET")}}
         // GET endpoint: scalar args go as query parameters, not request body.
@@ -442,16 +442,16 @@ pub struct {{.FilesStructName}} {
 {{- end}}
 {{- end}}
         self.client
-            .request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, None, options{{if .Idempotent}}, &idempotency_key{{end}})
+            {{if .BinaryStreamContentType}}.request_stream("{{.HTTPMethod}}", path, &query_params, None, "{{.BinaryStreamContentType}}", options){{else}}.request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, None, options{{if .Idempotent}}, &idempotency_key{{end}}){{end}}
             .await
 {{- else if .HasScalarArgs}}
         let body = Some(serde_json::to_value(input)?);
         self.client
-            .request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, body, options{{if .Idempotent}}, &idempotency_key{{end}})
+            {{if .BinaryStreamContentType}}.request_stream("{{.HTTPMethod}}", path, &query_params, body, "{{.BinaryStreamContentType}}", options){{else}}.request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, body, options{{if .Idempotent}}, &idempotency_key{{end}}){{end}}
             .await
 {{- else}}
         self.client
-            .request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, None, options{{if .Idempotent}}, &idempotency_key{{end}})
+            {{if .BinaryStreamContentType}}.request_stream("{{.HTTPMethod}}", path, &query_params, None, "{{.BinaryStreamContentType}}", options){{else}}.request_json{{if .Idempotent}}_idempotent{{end}}("{{.HTTPMethod}}", path, &query_params, None, options{{if .Idempotent}}, &idempotency_key{{end}}){{end}}
             .await
 {{- end}}
 {{- end}}

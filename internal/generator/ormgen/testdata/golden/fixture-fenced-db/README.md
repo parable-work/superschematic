@@ -37,12 +37,20 @@ Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
 `FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,
 and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
 `GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
-a table with soft deletes and hard-deletes one without. Tables with soft
-deletes additionally expose `HardDeleteOne`.
+a table with soft deletes and hard-deletes one without. They also expose
+`GetVersions`, which reads many `VersionKey` versions in one query, and
+`GetVersionsWithFields`, which reads only the fields a `*Fields` selects.
+Each keeps the order of its keys and returns nil for a missing version or a
+delete. Tables with soft deletes additionally expose `HardDeleteOne`.
 
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
+
+A transaction's `*Tx` runs work after its commit: `AfterCommit(fn)` adds a
+function, `AfterCommitHook(key, newHook)` adds one hook for each key, and
+`CommitDuration()` says how long the commit took. A rollback runs none of
+them, and a rollback to a savepoint keeps them.
 
 A table with a `@fenced` field keeps a counter that every write of a column
 the fence covers sets to the stored value plus one, which a trigger holds

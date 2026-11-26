@@ -5,6 +5,10 @@
 /// spec and an input parse share with them.
 pub use superschematic_schema_runtime as schema;
 
+// Per-record access (D156): the access log of calls and reveals, and with
+// the postgres feature the grants a party or an agent run reaches rows
+// through.
+pub mod access;
 mod auth;
 mod body;
 // The provider-neutral interface of a bucket an API lists (D54).
@@ -118,7 +122,10 @@ pub mod worker;
 /// error a generated crate passes on without naming its type.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-pub use auth::{admit, bearer_token, covers, has_any_permission, Authenticator, Principal};
+pub use auth::{
+    admit, bearer_token, covers, has_any_permission, ActingFor, Authenticator, Credential,
+    CredentialKind, GrantReach, Principal, PrincipalKind,
+};
 pub use body::{json_body, query_values};
 pub use context::RequestContext;
 pub use controls::RouteControls;

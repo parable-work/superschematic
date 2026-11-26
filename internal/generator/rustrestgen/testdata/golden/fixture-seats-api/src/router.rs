@@ -61,26 +61,32 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("seatsLeaveSeat")
         .apply(post(handle_problem_seats_leave_seat));
     router = router.route("/api/problem/{id}/seats/leave-seat", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("seatsListSeats")
         .apply(post(handle_problem_seats_list_seats));
     router = router.route("/api/problem/{id}/seats/list-seats", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("seatsTakeSeat")
         .apply(post(handle_problem_seats_take_seat));
     router = router.route("/api/problem/{id}/seats/take-seat", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_problem_status_transition));
     router = router.route("/api/problem/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("observedObserve")
         .apply(post(handle_sandbox_observed_observe));
     router = router.route("/api/sandbox/{id}/observed/observe", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_sandbox_status_transition));
     router = router.route("/api/sandbox/{id}/status/transition", route);
     router

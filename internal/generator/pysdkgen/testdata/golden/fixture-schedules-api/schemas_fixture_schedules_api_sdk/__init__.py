@@ -5,6 +5,7 @@
 __version__ = "1.0.0"
 
 from .client import (
+    BinaryStream,
     ClientConfig,
     ClientIdentity,
     DownloadedFile,
@@ -35,6 +36,7 @@ __all__ = [
     "EncryptedRequestOptions",
     "FilePart",
     "DownloadedFile",
+    "BinaryStream",
     "SDKError",
     "APIError",
     "AuthenticationError",

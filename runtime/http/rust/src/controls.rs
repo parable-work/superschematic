@@ -77,6 +77,9 @@ pub struct RouteControls {
     principal_limit: Option<PrincipalLimit>,
     idempotent: Option<Idempotent>,
     timeout: Option<Duration>,
+    /// The operation the route serves, which its authenticator is told of
+    /// each call of (D156, `Authenticator::called`).
+    operation: Option<Arc<str>>,
     /// The route is served with no transport under it (D116): its rate
     /// limit, body limit and timeout are its host's.
     hostless: bool,
@@ -167,6 +170,16 @@ impl RouteControls {
             authenticator,
             permissions: permissions.iter().map(ToString::to_string).collect(),
         });
+        self
+    }
+
+    /// The operation the route serves, by its name: the route's
+    /// authenticator is told of each call once its caller is established,
+    /// before its permissions are checked (D156,
+    /// [`Authenticator::called`]), which records it in the access log.
+    #[must_use]
+    pub fn operation(mut self, name: &str) -> Self {
+        self.operation = Some(Arc::from(name));
         self
     }
 
@@ -319,6 +332,7 @@ impl RouteControls {
             let gate = Gate {
                 service: self.service,
                 authorization: self.authorization,
+                operation: self.operation,
             };
             route = route.route_layer(from_fn(move |request: Request, next: Next| {
                 gate.clone().run(request, next)
@@ -402,6 +416,7 @@ pub(crate) fn too_large() -> Response {
 struct Gate {
     service: Option<ServiceStep>,
     authorization: Option<Authorization>,
+    operation: Option<Arc<str>>,
 }
 
 impl Gate {
@@ -424,7 +439,10 @@ impl Gate {
             }
         }
         if let (Some(authorization), false) = (&self.authorization, admitted) {
-            match authorization.principal(&parts).await {
+            match authorization
+                .principal(&parts, self.operation.as_deref())
+                .await
+            {
                 Ok(principal) => {
                     parts.extensions.insert(principal);
                 }
@@ -451,8 +469,19 @@ impl ServiceRule {
 
 impl Authorization {
     /// The end user, holding one of the route's permissions.
-    async fn principal(&self, parts: &Parts) -> Result<Principal, ApiError> {
+    /// The authenticator is told of the call of `operation` once the
+    /// caller is established, before the permission check (D156).
+    async fn principal(
+        &self,
+        parts: &Parts,
+        operation: Option<&str>,
+    ) -> Result<Principal, ApiError> {
         let principal = self.authenticator.authenticate(parts).await?;
+        if let Some(operation) = operation {
+            self.authenticator
+                .called(principal.as_ref(), operation, &parts.method)
+                .await?;
+        }
         crate::auth::admit(self.authenticator.as_ref(), principal, &self.permissions)
     }
 }

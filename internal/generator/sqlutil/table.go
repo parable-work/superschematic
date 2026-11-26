@@ -730,16 +730,43 @@ func importedSchema(pkg string) string {
 // TablesOf models every table of schema (TableTypes), in that order, its
 // imported enums and unions read from dependencies.
 func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableModel, error) {
+	tables, refused := tablesOf(schema, dependencies, true)
+	// It stops at the first table it cannot model, so refused holds one.
+	for _, err := range refused {
+		return nil, err
+	}
+	return tables, nil
+}
+
+// TablesModelled models each table of schema that can be modelled, as
+// TablesOf does, and gives, by its type, why each other one cannot. A
+// reference or relation to a table that cannot be modelled is left out of
+// the models that hold one. It is for a reader of one table's columns in a
+// schema another table of which is refused (an index that names no column
+// of its own), which the build reports for that table alone: TablesOf
+// models no table of such a schema.
+func TablesModelled(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableModel, map[string]error) {
+	return tablesOf(schema, dependencies, false)
+}
+
+// tablesOf models schema's tables, and gives why each it cannot model
+// cannot, stopping at the first when first is true.
+func tablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema, first bool) ([]TableModel, map[string]error) {
 	schema = codegen.WithoutEngineTypes(schema)
 	scalars := ScalarClasses(schema)
 	sqlTypes := ScalarSQLTypes(schema)
 	enums := EnumNames(schema, dependencies)
 	unions := UnionNames(schema, dependencies)
 	var tables []TableModel
+	refused := map[string]error{}
 	for _, td := range TableTypes(schema) {
 		table, err := tableOf(td, schema, sqlTypes, scalars, enums, unions)
 		if err != nil {
-			return nil, fmt.Errorf("table %s: %w", td.Name, err)
+			refused[td.Name] = fmt.Errorf("table %s: %w", td.Name, err)
+			if first {
+				return nil, refused
+			}
+			continue
 		}
 		tables = append(tables, table)
 	}
@@ -761,7 +788,7 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 			tables[i].Access = AccessRoles
 		}
 	}
-	return tables, nil
+	return tables, refused
 }
 
 // attachLiveRoots gives each table of a graph member's released rows

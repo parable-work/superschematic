@@ -86,70 +86,87 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("getRecipe")
         .apply(get(handle_recipe_get_recipe));
     router = router.route("/api/recipes/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("materialize")
         .apply(get(handle_recipe_materialize));
     router = router.route("/api/recipes/{id}/commits/{commit}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("diff")
         .apply(get(handle_recipe_diff));
     router = router.route("/api/recipes/{id}/diff", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("entityHistory")
         .apply(get(handle_recipe_entity_history));
     router = router.route("/api/recipes/{id}/entities/{kind}/{key}/history", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("branch")
         .apply(post(handle_recipe_branch));
     router = router.route("/api/recipes/{id}/refs", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("arrange")
         .apply(post(handle_recipe_arrange));
     router = router.route("/api/recipes/{id}/refs/{ref}/arrange", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("commit")
         .apply(post(handle_recipe_commit));
     router = router.route("/api/recipes/{id}/refs/{ref}/commit", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("discard")
         .apply(post(handle_recipe_discard));
     router = router.route("/api/recipes/{id}/refs/{ref}/discard", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("save")
         .apply(put(handle_recipe_save));
     router = router.route("/api/recipes/{id}/refs/{ref}/edits", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("history")
         .apply(get(handle_recipe_history));
     router = router.route("/api/recipes/{id}/refs/{ref}/history", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("merge")
         .apply(post(handle_recipe_merge));
     router = router.route("/api/recipes/{id}/refs/{ref}/merge", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("rebase")
         .apply(post(handle_recipe_rebase));
     router = router.route("/api/recipes/{id}/refs/{ref}/rebase", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("revert")
         .apply(post(handle_recipe_revert));
     router = router.route("/api/recipes/{id}/refs/{ref}/revert", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("seal")
         .apply(post(handle_recipe_seal));
     router = router.route("/api/recipes/{id}/refs/{ref}/seal", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("compose")
         .apply(get(handle_recipe_compose));
     router = router.route("/api/recipes/{id}/refs/{ref}/tree", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.release"])
+        .operation("release")
         .apply(post(handle_recipe_release));
     router = router.route("/api/recipes/{id}/release", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["recipes.write"])
+        .operation("released")
         .apply(get(handle_recipe_released));
     router = router.route("/api/recipes/{id}/released", route);
     router
