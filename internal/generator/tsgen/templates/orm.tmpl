@@ -298,6 +298,13 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Audience}}
   audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}} },
 {{- end}}
+{{- if .Calendar}}
+  calendar: [
+{{- range .Calendar}}
+    { name: {{jsonString .Name}}, kind: {{jsonString .Kind}}, title: {{jsonString .Title}}{{if .Color}}, color: {{jsonString .Color}}{{end}}{{if .Field}}, field: {{jsonString .Field}}{{end}}{{if .End}}, end: {{jsonString .End}}{{end}}{{if .Owner}}, owner: {{jsonString .Owner}}{{end}}{{with .Occurrences}}, occurrences: { table: {{jsonString .Table}}, row: {{jsonString .Row}}, key: {{jsonString .Key}}, due: {{jsonString .Due}}, dueAt: {{jsonString .DueAt}}, state: {{jsonString .State}} }{{end}} },
+{{- end}}
+  ],
+{{- end}}
 {{- if .Access}}
   access: {{jsonString .Access}},
 {{- end}}

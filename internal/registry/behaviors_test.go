@@ -72,7 +72,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -774,7 +774,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Pool, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Pool, Presence, Provenance, Queue, Reactions, Reconcile, Recurrence, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},
@@ -931,9 +931,9 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	if numbering.Value != "label" || !numbering.Fields[1].Optional || numbering.Fields[1].Name != "label" {
 		t.Errorf("Numbering = value %q, fields %+v", numbering.Value, numbering.Fields)
 	}
-	// Timers and Reactions hear their table's writes (D103), and so does
-	// Schedules (D104), and no other core behavior does; Schedules and Pool
-	// alone emit events of their own.
+	// Timers and Reactions hear their table's writes (D103), and so do
+	// Schedules (D104) and Recurrence (D152), and no other core behavior
+	// does; Schedules and Pool alone emit events of their own.
 	var hearing, emitting []string
 	for _, name := range core.BehaviorNames() {
 		b, _ := core.Behavior(name)
@@ -944,8 +944,8 @@ func TestRegisterBehaviorTables(t *testing.T) {
 			emitting = append(emitting, name)
 		}
 	}
-	if strings.Join(hearing, ",") != "Reactions,Schedules,Timers" {
-		t.Errorf("the behaviors that hear changes = %v, want Reactions, Schedules and Timers", hearing)
+	if strings.Join(hearing, ",") != "Reactions,Recurrence,Schedules,Timers" {
+		t.Errorf("the behaviors that hear changes = %v, want Reactions, Recurrence, Schedules and Timers", hearing)
 	}
 	if strings.Join(emitting, ",") != "Pool,Schedules" {
 		t.Errorf("the behaviors that emit events = %v, want Pool and Schedules", emitting)

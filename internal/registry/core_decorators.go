@@ -184,6 +184,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// a bucket (core_rowrefs.go, D154).
 	specs = append(specs, rowFeatureDecorators()...)
 
+	// The dates of a table's rows, or its Recurrence's occurrences, that
+	// the calendar merges (core_calendar.go, D152).
+	specs = append(specs, calendarDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

@@ -2067,3 +2067,82 @@ Left:
   `@attachments` back, as it does not write `@audience` either.
 - A live direct upload to R2 and to Cloud Storage: `smoke.sh Cloudflare`
   and `Gcp` are the maintainer's.
+
+## D152. Recurrence turns a rule into dated occurrences on a row, the core dates them for every language, and a calendar read and feed merge the dates of many tables as each caller reads them (D103, D104, D156 amended)
+
+`Temporal.RecurrenceRule` validated an RFC 5545 rule and nothing expanded
+it. Schedules ran code no more than thirty days apart and kept no record of
+what was due or what was done, and nothing put a table's dates on a
+calendar.
+
+### Recurrence
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `implements Recurrence<T, { anchors, timeZone?, horizonDays?, historyDays?, adjust?, weekendDays?, holidays?, relative?, opensBefore?, remindBefore?, overdueAfter?, permission?, managePermission? }>` on a DB table, a behavior the core alone implements, as Schedules is. A row's anchor is its own: `calendar` (an RRULE from a wall start in a zone), `afterDone` (an interval after the last completion) or `relative` (an offset from a date a to-one relation reaches, and its anniversaries). | A field type, which would allow several on a row: a thing done on several rules is several rows. Schedules with longer intervals, which keeps no occurrences. |
+| The row's rule is an owned field, `recurrence`, beside `nextDueAt` and `lastDoneAt`; the occurrences are the sub-table `occurrences`, keyed by the nominal wall date-time before any adjustment (`2026-10-31T09:00`), holding `due`, `dueAt`, `opensAt`, `remindAt`, `overdueAt`, `state`, `revision`, `shifted`, `moved`, `changedAt`, `remindedAt`, `completedAt`, `completedByTable`, `completedByKey`, `completedByPrincipal` and `note`. | A key of the adjusted date, which a holiday added would change. |
+| An occurrence is `upcoming`, then `open` at its `opensAt`, then `done` (`complete`) or `missed` at its `overdueAt`; `skip` finishes one that is not done, and a missed one is still completed late. With no `opensBefore` it opens when the one before it falls due. | An occurrence open from when it is planned, which a rule change could then never replan. |
+| Each row arms four deadlines on the table's deadline queue, by name: `open` (the earliest upcoming `opensAt`), `remind` (the earliest `remindAt` not reminded), `overdue` (the earliest open `overdueAt`) and `plan` (when nothing is upcoming, the time the horizon reaches the next). Every fire runs one plan, which catches up every occurrence due by its time. On Workers they drain as any deadline does (D151). | A deadline per occurrence and name, which a daily rule would make a thousand messages of per row. |
+| The plan keeps the occurrences the rule dates from the later of when it was set and the latest one that opened, up to `horizonDays` ahead: it inserts a new one, dates an upcoming one again, and deletes an upcoming one the rule no longer dates. Open and finished ones are never touched, so `setRecurrence` changes only the future. An afterDone rule keeps one ahead, dated from the later of its last completion and its latest missed or skipped due, so a missed one never blocks the next. | Regenerating every occurrence on a change, which would move one a person is working on. |
+| A due date on a weekend day or a holiday moves `before` or `after` it, or stays (`none`). Holidays are rows of a table the app fills, `holidays: { table, calendarField, dateField, field }`; which calendar applies is the row's field. Core ships no holidays. The behaviors' layout carries the holiday table and the relative anchor's target read-only (`registry.BehaviorReads`), whose rows every adapter reads at version 0. | Built-in holiday calendars, which ground rule 1 turns down. |
+| `complete({ key?, completedBy?, note? })` records `completedBy` as `{ table, key }`, the key as text, the shape references take (section 4), and the principal that completed it. | A relation to one table. |
+| `complete` and `listOccurrences` need `permission`; `setRecurrence`, `skip` and `moveOne` need `managePermission`, `permission` when absent. | One permission for all. |
+| Occurrences belong to a table with no Workflow: Recurrence keeps its own states. A table's Workflow may read them as it reads any field. | Requiring Workflow, which a duty with no status of its own does not have. |
+| A finished occurrence stays `historyDays` after its due, 1100 unless set (three years, up to a hundred), then a plan prunes it. The row that completed it keeps the evidence. | Keeping every occurrence, which a daily rule grows without bound. |
+
+### Expansion
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core expands every rule (`superschematic_rules_behaviors::recurrence::expand`), and a fourth operation of its C ABI, `rules_expand`, answers it: TypeScript's `RulesCore.expand`, Go's `rules.Expand`. One golden file (`runtime/engine/testdata/rules/recurrence/expand.golden.json`) runs each anchor two years out across a change of the clocks and a holiday that moves a date, and Rust, TypeScript and Go each hold their core to it. | An expander per language, which would drift. |
+| The RRULE is expanded over wall time by the core's own reader (`recurrence::rrule`: `YEARLY` to `HOURLY`, `INTERVAL`, `COUNT`, `UNTIL`, every `BY` part, `BYSETPOS`, `WKST`), and the maintained `rrule` crate is its oracle in a test: 52 rules from six starts, sixty occurrences each, date for date. Each wall time is then an instant in the zone through the IANA database jiff bundles: a time a change skips takes the offset before it, and one it repeats its first pass, as RFC 5545 reads a local time. An `UNTIL` in UTC is made the zone's wall time first. | The `rrule` crate in the build: its chrono turns on `wasmbind` for `wasm32-unknown-unknown`, which gives the module JavaScript imports (it must import nothing) and adds 2.3 MB to its 4.7. `MINUTELY` and `SECONDLY`, which Schedules' cron lines serve. |
+| Lead times are ISO 8601 spans read in the zone's calendar (`P14D`, `-P60D`, `P1M`), so a day is a calendar day across a change. | Milliseconds, which a change of the clocks shifts by an hour. |
+
+### The calendar
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@calendarSource<T>({ name?, field?, end?, occurrences?, title, kind, color?, owner? })` on a DB table, repeated per source: a row dated by a date or date-time field, or each occurrence of its Recurrence. The generated repository's definition carries it (`TableDefinition.calendar`). | A list of sources in the API, which the table's schema would not say. |
+| `readCalendar(orm, principal, { from, to, sources?, scope? })` reads each source through its table's repository as the caller (`orm.as(principal)`), so a row's audience and the caller's grants hold (D156), and shows an occurrence only when its row is read. A source may need a permission (`CalendarOptions.permissions`). `scope: "mine"` keeps to the rows whose `owner` field holds the caller. | A query across tables with an audience predicate of its own, which would miss grants. |
+| `calendarRoutes` serves it at `GET /api/calendar`, and `calendarMcpTool` with `callCalendarTool` as an MCP tool. | |
+| A feed's URL holds a token, since a calendar client sends no header. The token is a grant of the `@accessGrants` table: its holder the user it reads as (`holderKind: user`), its role a UserRole whose permissions bound the feed, its target `CalendarFeed;detail=...;sources=...`. `grantAuthenticator` refuses it on every other route, so a leaked URL reads the feed alone. Its detail is `full` or `busy` ("Busy" and a reference number, a short hash of the entry). | A token store of its own, which would repeat the grants' hashing, revocation and ends. |
+| A feed expires a year after its issue unless the issue says (at most ten years). Rotation revokes it and issues another of the same scope, role and expiry; a revoked or expired feed is refused at the next fetch. Only its holder rotates or revokes it, and the token is shown once. | A feed with no end. |
+
+Built: the expansion, its reader and its oracle and golden tests in Rust,
+TypeScript and Go; `Recurrence` on the core (`recurrence/behavior.rs`), its
+declaration, registry entry, loader check (`verify/behaviors_recurrence.go`)
+and `@superschematic/db` types; the read-only tables of the behaviors'
+layout in the TypeScript, Go and Rust adapters; `@calendarSource`, its IR
+(`ir/calendar.go`), check (`verify/calendar.go`) and the generated
+definition (`tsgen/calendar.go`); `readCalendar`, the feed, its routes and
+its MCP tool (`runtime/http/typescript/src/calendar.ts`); the feed's
+refusal in `grantAuthenticator`. The tests: the core's
+(`tests/recurrence.rs`); `TestGeneratedRecurrenceEndToEnd`, which serves
+the generated API and runs its worker on Postgres (a rule change leaves the
+open occurrence untouched, the remind deadline fires on the worker, a raw
+write of the calendar field is heard, the calendar merges two sources);
+`TestGeneratedAccessEndToEnd`'s feed case (a feed shows only what its
+principal reads, busy or in full, and a rotated or revoked one is refused);
+and the runtime's workerd fixture `recurrence`, which runs the remind
+deadline under the pinned workerd. The guide's "A row's recurrence, and the
+calendar"; `examples/recurring-duties`.
+
+Left:
+
+- Raising events (section 3): an occurrence's open, remind, overdue and
+  missed are deadline fires and state changes today, recorded on the
+  occurrence; each becomes an `@event` once events exist.
+- `completedBy` converging with references (section 4) once they merge.
+- Replanning a relative recurrence when its target's date changes: today
+  the row plans again on its own write, at a fire, or at `setRecurrence`.
+- The generated router mounting `calendarRoutes` and the calendar MCP
+  tool; an app wires them, as it wires `grantAuthenticator` (D156).
+- The Go and Rust servers: Recurrence's operations through their adapters
+  end to end, and the calendar read and feed.
+- A hand-written scenario of Recurrence that every adapter replays.
+- The SDK types narrowed by the config (`behaviortypes`: the anchors).
+- A calendar source's permission in the schema, beside the route's option;
+  weekend days per holiday calendar; a recurrence set at create.
+- The calendar on SQLite and D1.
+- `examples/deploy-smoke` with a Recurrence table, and the live
+  `smoke.sh Cloudflare` run, which is the maintainer's.

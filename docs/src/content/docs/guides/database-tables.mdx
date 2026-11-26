@@ -3205,6 +3205,119 @@ due, and an event message deleted with SQL is never handed on. Prefer the
 operations: `pauseSchedule` and `resumeSchedule`, a `setSchedule` that
 replaces it, `cancelSchedule`.
 
+### A row's recurrence, and the calendar
+
+A table implements `Recurrence` as it implements Schedules, with the table
+itself as its first type argument (D152): a rule on each row that turns
+into dated occurrences, each opened, reminded, done, missed or skipped.
+Schedules runs code at times; Recurrence keeps a record of what is due and
+what was done. The behaviors' core alone implements it, and dates every
+language's occurrences alike.
+
+```ts
+// recurrence-db
+@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+export abstract class Filing
+  implements
+    Recurrence<Filing, {
+      anchors: ["calendar", "afterDone", "relative"];
+      timeZone: "Europe/London";
+      horizonDays: 400;
+      adjust: "after";
+      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar" };
+      relative: { via: "contract"; type: "Contract"; field: "endsOn" };
+      opensBefore: "P14D";
+      remindBefore: "P3D";
+      overdueAfter: "P1D";
+      permission: "filings.work";
+      managePermission: "filings.manage";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  holidayCalendar: Nullable<string>;
+  contract: Nullable<Relation<Contract>>;
+}
+```
+
+Above, a filing is due on a calendar rule, a while after it was last
+done, or a while before its contract ends. Each occurrence opens two weeks
+before it is due, reminds three days before, and is missed a day after. A
+due date that falls on a weekend or on a holiday of the filing's calendar
+moves to the next business day.
+
+| Member | What it does |
+| --- | --- |
+| `anchors` | the anchors a row's recurrence may take: `calendar`, an RFC 5545 `RRULE` from a wall start; `afterDone`, an interval after the last completion; `relative`, an offset from the date `relative` names, and its anniversaries |
+| `timeZone` | the IANA zone a recurrence is read in when `setRecurrence` names none; UTC when absent |
+| `horizonDays` | how many days ahead the occurrences are kept; 400 when absent |
+| `historyDays` | how many days a finished occurrence stays after its due; 1100 when absent |
+| `adjust` | how a due date on a weekend day or a holiday moves: `before`, `after` or `none`; none when absent |
+| `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
+| `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
+| `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
+| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds |
+| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `permission` | the permission `complete` and `listOccurrences` need |
+| `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
+
+The build adds the owned fields `recurrence` (the row's rule as set),
+`nextDueAt` and `lastDoneAt`; the sub-table `filing_recurrence_occurrences`
+(`FilingRecurrenceOccurrences`), one row per occurrence, keyed by its
+nominal wall date-time before any adjustment (`2026-10-31T09:00`), with
+`due`, `due_at`, `opens_at`, `remind_at`, `overdue_at`, `state`,
+`revision`, `shifted`, `moved`, `changed_at`, `reminded_at`,
+`completed_at`, `completed_by_table`, `completed_by_key`,
+`completed_by_principal` and `note`; the deadline queue
+`filing_deadline_queue`, where the deadlines `open`, `remind`, `overdue`
+and `plan` wait; and the change queue `filing_change_queue`, through which
+a write of the calendar field or the relation plans again. Its operations
+are `recurrence.setRecurrence({ anchor, rule?, start?, every?, offset?,
+timeZone?, adjust? })`, which answers `{ recurrence, planned, kept,
+nextDueAt? }`; `complete({ key?, completedBy?, note? })`, `skip({ key,
+note? })` and `moveOne({ key, due })`, each answering the occurrence; and
+the read-only `listOccurrences({ from?, to?, states? })`.
+
+- **States.** An occurrence is `upcoming` until it opens, then `open`
+  until it is `done` or, at its overdue time, `missed`. `skip` finishes one
+  that is not done. A missed one can still be completed late, and it never
+  blocks the next.
+- **Rule changes.** `setRecurrence` replans only the occurrences that
+  have not opened. Open and finished ones stay as they are; `kept` names
+  the open ones.
+- **What completed it.** `completedBy` is `{ table, key }`, any row as a
+  reference names one; the principal that completed it is recorded too.
+  An `afterDone` recurrence dates its next occurrence from the completion.
+- **Holidays.** Your app fills the holiday table. Core ships no holidays:
+  which days close is data, and which calendar applies is a field of the
+  row.
+- **Dates in every language.** The core expands each rule. TypeScript
+  (`RulesCore.expand`), Go (`rules.Expand`) and Rust
+  (`recurrence::expand`) read one golden file of expansions, so they return
+  the same dates across a change of the clocks.
+
+`@calendarSource` puts a table on the calendar: each row dated by a date
+or date-time `field` (to an `end`), or each occurrence of its Recurrence
+(`occurrences: true`), titled by a field, with a `kind` and a `color` key.
+`readCalendar(orm, principal, { from, to, sources?, scope? })` from
+`@superschematic/http-runtime/postgres` merges every source in a window.
+It reads each table through its repository as the caller, so a row's
+audience and the caller's grants hold, and shows an occurrence only when
+its row is shown. `calendarRoutes` serves the read at `GET /api/calendar`,
+and `calendarMcpTool` with `callCalendarTool` serve it as an MCP tool.
+
+A calendar client sends no `Authorization` header, so its feed's URL holds
+a token: `POST /api/calendar/feeds { role, detail, sources? }` issues one
+for the caller, and `GET /api/calendar/feed/<token>.ics` serves it as
+iCalendar. The token is a grant of the database's `@accessGrants` table
+that reads its feed alone: it reads as its holder, bounded by its role's
+permissions, and every other route refuses it. Its `detail` is `full`
+(each title) or `busy` ("Busy" and a reference number), so a leaked URL
+shows only what its owner chose. A feed lasts a year unless its issue says
+otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
+another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 ### A pool of members
 
 A table implements `Pool` as it implements Schedules (D104): each row is a

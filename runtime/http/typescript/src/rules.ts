@@ -1294,7 +1294,10 @@ export async function readRow(host: RulesHost, type: string, key: string): Promi
  */
 function rowList(table: RulesTable): string {
   const selected = [...ownRead(table), ...table.uses.flatMap(use => use.fields)];
-  return [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${quote(table.version)} AS v`].join(', ');
+  // A table the layout holds read-only, which composes no behavior and a
+  // use reads (D152), has no version column; its rows read at 0.
+  const version = table.version === '' ? '0' : quote(table.version);
+  return [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${version} AS v`].join(', ');
 }
 
 /** The columns a row read holds among a row's own fields: the own columns, then the audit columns (D104). */
