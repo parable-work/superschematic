@@ -928,6 +928,8 @@ export interface TypeRef {
 }
 
 export interface UnionDef {
+  arms?: { [key: string]: string };
+  by?: string;
   comment?: string;
   description?: string;
   name: string;
@@ -935,6 +937,8 @@ export interface UnionDef {
 }
 
 export interface UnionFile {
+  arms?: { [key: string]: string };
+  by?: string;
   comment?: string;
   description?: string;
   kind: 'Union';

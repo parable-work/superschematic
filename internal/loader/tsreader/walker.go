@@ -1628,12 +1628,18 @@ func (w *walker) walkEnum(node *astNode) {
 }
 
 // walkTypeAlias converts an exported object-shaped type alias into an
-// EmbeddedStruct TypeDef. Other alias forms are not schema declarations.
+// EmbeddedStruct TypeDef, and an alias of Variant<By, Arms> into a variant
+// union (walkVariantAlias, D149). Other alias forms are not schema
+// declarations.
 func (w *walker) walkTypeAlias(node *astNode) {
 	alias := node.AsTypeAliasDeclaration()
 	name := node.Name().Text()
+	if w.variantAlias(alias.Type) {
+		w.walkVariantAlias(node)
+		return
+	}
 	if alias.Type.Kind != kindTypeLiteral {
-		w.addErr(errorAtNode(node, "type aliases must be object shapes; use an enum or class for other forms"))
+		w.addErr(errorAtNode(node, "type aliases must be object shapes or a Variant<By, Arms>; use an enum or class for other forms"))
 		return
 	}
 	file := getSourceFileOfNode(node)

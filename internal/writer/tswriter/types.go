@@ -846,3 +846,24 @@ func rawSQLArgs(raw ir.RawSQLDef) string {
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
+
+// emitVariant renders a variant union (D149) as the alias the reader reads
+// it from: `export type StepResult = Variant<"kind", { verify:
+// VerifyResult; review: ReviewResult }>`, its arms in the union's types'
+// order, so the members read back in the same order.
+func (e *emitter) emitVariant(def *ir.UnionDef) {
+	if def.Description != "" {
+		e.failf("union %s: descriptions have no TypeScript authoring form", def.Name)
+	}
+	var arms []string
+	for _, arm := range def.ArmList() {
+		key := arm.Value
+		if !identifierRe.MatchString(key) {
+			key = quote(key)
+		}
+		arms = append(arms, key+": "+e.ident(arm.Type, "union member"))
+	}
+	e.body.WriteString("\n")
+	e.comment("", def.Comment)
+	fmt.Fprintf(&e.body, "export type %s = %s<%s, { %s }>;\n", e.ident(def.Name, "union"), e.use("Variant"), quote(def.By), strings.Join(arms, "; "))
+}

@@ -60,3 +60,18 @@ export type Runtime<T> = T & Wrapped<T> & { readonly __runtime: true };
  * rule, and is no list element or Record value.
  */
 export type RequiredNull = null;
+/**
+ * A discriminated-union field type (D149), declared as an exported alias:
+ * `export type StepResult = Variant<"kind", { verify: VerifyResult; review: ReviewResult }>`.
+ * A field of type `StepResult` holds the member its sibling field `kind`
+ * names by value: a `VerifyResult` while `kind` is `"verify"`, a
+ * `ReviewResult` while it is `"review"`, and nothing while `kind` holds
+ * any other value or none. `By` names a string or enum field of every type
+ * that holds such a field, and each key of `Arms` is a value of it. Every
+ * generated validator checks the field by its sibling (the rule
+ * `variant`), a Postgres or SQLite CHECK holds its column to the arms, and
+ * each ORM and SDK types it as the union of the arms. A variant union is
+ * one field's type: no list, map, argument or result is of it.
+ */
+export type Variant<By extends string, Arms extends { readonly [value: string]: object }> = Arms[keyof Arms] &
+  Wrapped<Arms[keyof Arms]> & { readonly __variantBy: By };

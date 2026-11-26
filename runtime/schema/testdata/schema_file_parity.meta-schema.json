@@ -7302,6 +7302,17 @@
     "UnionDef": {
       "additionalProperties": false,
       "properties": {
+        "arms": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "by": {
+          "default": "",
+          "type": "string"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -7329,6 +7340,17 @@
     "UnionFile": {
       "additionalProperties": false,
       "properties": {
+        "arms": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "by": {
+          "default": "",
+          "type": "string"
+        },
         "comment": {
           "default": "",
           "type": "string"

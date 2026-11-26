@@ -34,6 +34,7 @@ export type {
   Secret,
   Validate,
   ValidateConfig,
+  Variant,
   Wrapped,
 } from "./wrappers";
 export { display } from "./display";
