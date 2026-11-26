@@ -401,8 +401,19 @@ export interface TableDefinition {
   /** The columns, in the order every statement lists them. */
   readonly columns: readonly TableColumn[];
   readonly statements: TableStatements;
-  /** A table with deletedAt, which a delete stamps. */
+  /**
+   * A table with deletedAt, which a delete stamps. On a readOnly table of
+   * a graph member's released rows (D139), one whose graph's root has
+   * deletedAt: its statements' live condition leaves out the rows of a
+   * soft-deleted root, as a soft-deleted row's, and no write stamps them.
+   */
   readonly softDelete?: boolean;
+  /**
+   * The table of a graph member's released rows (D139), which the graph's
+   * release owns and rewrites: the ORM's repository of it has the reads
+   * alone (READ_METHODS), and no create, update, upsert or delete.
+   */
+  readonly readOnly?: boolean;
   /** A @versioned table whose hard deletes set the history actor. */
   readonly historyActor?: boolean;
   /** The table's @fenced fields, in the order declared (D119); absent for a table with none. */
@@ -3217,16 +3228,30 @@ function distinct(values: readonly unknown[]): unknown[] {
   return out;
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Record<string, TableRepository> {
-  const out: Record<string, TableRepository> = {};
+/** The methods of a readOnly table's repository (D139): a table's reads, and no write. */
+export const READ_METHODS = ['getOne', 'getManyByIds', 'findOne', 'findMany', 'findPage', 'nearest'] as const;
+
+/** The repository of a readOnly table (D139): the reads of repository alone, each bound to it. */
+function readsOf(repository: TableRepository): Readonly<Record<(typeof READ_METHODS)[number], unknown>> {
+  const reads: Partial<Record<(typeof READ_METHODS)[number], unknown>> = {};
+  for (const method of READ_METHODS) reads[method] = repository[method].bind(repository);
+  return Object.freeze(reads as Record<(typeof READ_METHODS)[number], unknown>);
+}
+
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Record<string, unknown> {
+  const tables: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller, viewer);
-    out[member].bindUses();
+    tables[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller, viewer);
+    tables[member].bindUses();
   }
   // An include and a filter through a relation read the target through
   // its repository on the same runner, acting as the same user (D90).
-  for (const repository of Object.values(out)) repository.peers = out;
+  for (const repository of Object.values(tables)) repository.peers = tables;
+  // A readOnly table's repository is its reads alone (D139): the graph's
+  // release owns its rows, so the object carries no write to call.
+  const out: Record<string, unknown> = {};
+  for (const [member, repository] of Object.entries(tables)) out[member] = repository.def.readOnly ? readsOf(repository) : repository;
   return out;
 }
 
