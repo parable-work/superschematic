@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D166 is the highest so far.
+  the highest number any branch has used. D168 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
