@@ -59,7 +59,7 @@ func TestRegisterRuntimeFeature(t *testing.T) {
 	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "notices", Interface: ir.RuntimeChannel, Uses: usesNotices}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "agents", Interface: ir.RuntimeSandbox, Uses: func(RuntimeFeatureInput) bool { return true }}); err != nil {
+	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "previews", Interface: ir.RuntimeFiles, Uses: func(RuntimeFeatureInput) bool { return true }}); err != nil {
 		t.Fatal(err)
 	}
 	for name, f := range map[string]RuntimeFeature{
@@ -76,11 +76,60 @@ func TestRegisterRuntimeFeature(t *testing.T) {
 	api := &ir.Schema{Name: "notes-api"}
 	db := &ir.Schema{Name: "notes-db", Types: map[string]*ir.TypeDef{"Notice": {Name: "Notice"}}}
 	got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"notes-db": db}})
-	if len(got) != 2 || got[0] != (ir.RuntimeFeatureUse{Feature: "agents", Interface: ir.RuntimeSandbox}) || got[1] != (ir.RuntimeFeatureUse{Feature: "notices", Interface: ir.RuntimeChannel}) {
+	if len(got) != 2 || got[0] != (ir.RuntimeFeatureUse{Feature: "notices", Interface: ir.RuntimeChannel}) || got[1] != (ir.RuntimeFeatureUse{Feature: "previews", Interface: ir.RuntimeFiles}) {
 		t.Fatalf("RuntimeFeaturesUsed = %v", got)
 	}
-	if got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api}); len(got) != 1 || got[0].Feature != "agents" {
+	if got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api}); len(got) != 1 || got[0].Feature != "previews" {
 		t.Fatalf("with no database: %v", got)
+	}
+}
+
+// TestAgentsNeedASandboxAndAModel (D158): the core registers agents twice,
+// once per interface, which an API uses when one of its databases declares
+// an @agents class.
+func TestAgentsNeedASandboxAndAModel(t *testing.T) {
+	r := New(naming.Naming{})
+	api := &ir.Schema{Name: "work-api"}
+	db := &ir.Schema{Name: "work-db", Types: map[string]*ir.TypeDef{"AgentRun": {Name: "AgentRun", Agents: &ir.AgentsDef{Part: ir.AgentRuns}}}}
+	got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"work-db": db}})
+	if len(got) != 2 || got[0] != (ir.RuntimeFeatureUse{Feature: "agents", Interface: ir.RuntimeModel}) || got[1] != (ir.RuntimeFeatureUse{Feature: "agents", Interface: ir.RuntimeSandbox}) {
+		t.Fatalf("RuntimeFeaturesUsed = %v", got)
+	}
+	plain := &ir.Schema{Name: "work-db", Types: map[string]*ir.TypeDef{"Task": {Name: "Task"}}}
+	if got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"work-db": plain}}); len(got) != 0 {
+		t.Errorf("a database with no agents uses %v", got)
+	}
+}
+
+// TestAutonomyDecorator (D158): @autonomy reads a class and a mode, and
+// refuses an operation that moves money with any mode but ask.
+func TestAutonomyDecorator(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []any
+		want *ir.OperationAutonomy
+		err  string
+	}{
+		"a class":                    {args: []any{map[string]any{"class": "read"}}, want: &ir.OperationAutonomy{Class: "read"}},
+		"money that asks":            {args: []any{map[string]any{"class": "moneyMovement", "mode": "ask"}}, want: &ir.OperationAutonomy{Class: "moneyMovement", Mode: "ask"}},
+		"money with no mode":         {args: []any{map[string]any{"class": "moneyMovement"}}, want: &ir.OperationAutonomy{Class: "moneyMovement"}},
+		"money that runs on its own": {args: []any{map[string]any{"class": "moneyMovement", "mode": "auto"}}, err: "an agent may only ask to move money"},
+		"money that tells":           {args: []any{map[string]any{"class": "moneyMovement", "mode": "tell"}}, err: "an agent may only ask to move money"},
+		"no such class":              {args: []any{map[string]any{"class": "spend"}}, err: `class "spend" is none of`},
+		"no class":                   {args: []any{map[string]any{"mode": "ask"}}, err: "needs a class"},
+		"an unknown option":          {args: []any{map[string]any{"class": "read", "why": "x"}}, err: `no option "why"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := autonomyOf("payInvoice", tc.args)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("autonomyOf = %v, %v; want an error saying %q", got, err, tc.err)
+				}
+				return
+			}
+			if err != nil || *got != *tc.want {
+				t.Fatalf("autonomyOf = %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
 	}
 }
 

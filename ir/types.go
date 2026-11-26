@@ -290,6 +290,11 @@ type TypeDef struct {
 	Notifier          *NotifierDef          `json:"notifier,omitempty" yaml:"notifier,omitempty"`
 	ChannelIdentities *ChannelIdentitiesDef `json:"channelIdentities,omitempty" yaml:"channelIdentities,omitempty"`
 
+	// Agents marks a DB class that is one of the agent orchestration's
+	// tables (D158); the loader adds the fields of its part the class does
+	// not declare. Nil for every other type. See [AgentsDef].
+	Agents *AgentsDef `json:"agents,omitempty" yaml:"agents,omitempty"`
+
 	// CalendarSources are the @calendarSource declarations of a DB table
 	// (D152): the dates of its rows, or the occurrences of its Recurrence,
 	// that the calendar read and feed merge across tables. See
@@ -457,6 +462,12 @@ type FieldDef struct {
 	// MCP is an operation's MCP classification, declared with @mcp. Nil on
 	// data fields and on operations without @mcp.
 	MCP *OperationMCP `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+
+	// Autonomy is the operation's @autonomy (D158): the class of operation
+	// it is to an agent's autonomy policy, and the autonomy an agent has
+	// over it when no policy row names it. Nil for an operation that
+	// declares none, which an agent's policy reads as an internal write.
+	Autonomy *OperationAutonomy `json:"autonomy,omitempty" yaml:"autonomy,omitempty"`
 
 	// Icon names the glyph a UI shows for the field or operation, declared
 	// with @icon (`x-icon` in the legacy form). On an operation it is the

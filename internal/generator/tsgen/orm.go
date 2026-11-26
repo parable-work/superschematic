@@ -210,6 +210,11 @@ type ORMTable struct {
 	// empty for any other table.
 	Notifier string
 
+	// Agents is the part of the agent orchestration the table is (D158):
+	// definitions, runs, policies, approvals or controls; empty for any
+	// other table.
+	Agents string
+
 	// Events are the table's @event declarations (D153), which the
 	// notifier raises and routes; nil for a table with none.
 	TableEvents []ORMEvent
@@ -556,6 +561,9 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				return nil, err
 			}
 			table.Notifier = notifierPartOf(td)
+			if td.Agents != nil {
+				table.Agents = td.Agents.Part
+			}
 			table.TableEvents = eventsOf(td)
 		}
 		if t.Search {
