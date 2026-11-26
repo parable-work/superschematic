@@ -1193,7 +1193,12 @@ The Rust facade differs from the Go one where the languages do:
 
 The facade turns a typed edit into a canonical row from each field's serde
 JSON, and a canonical row back into a typed value, so a field comes back in
-its canonical form, as through the Go facade.
+its canonical form, as through the Go facade. `save_values` saves edits
+held as JSON: each kind's under its kind (`"step"`), each upsert an object
+of the kind's fields by their serde names. A caller that holds the rows as
+JSON, such as the Rust server's graph routes, saves with it, since a typed
+value needs members, such as the audit fields, that such a row does not
+carry.
 
 ## Use the core from Python
 
@@ -1411,7 +1416,7 @@ SQLite ones among them, on the default Python and on 3.9.
 - A graph's operations are served as routes, with no handler to write, by
   `@graphOperations(Root)` in an API schema
   ([API routes](/superschematic/guides/api-routes/#a-version-graphs-operations));
-  the TypeScript server serves them.
+  the TypeScript, Go and Rust servers serve them, on Postgres.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
   unless a service calls it or `RunSweeper`, or the engine's runner does
