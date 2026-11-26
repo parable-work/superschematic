@@ -953,4 +953,48 @@ mod tests {
         .unwrap_or_default();
         assert_eq!(ordered(&steps), ["design", "build", "review"]);
     }
+
+    #[test]
+    fn a_step_left_out_passes_what_it_comes_after_on() {
+        let steps = parse_steps(&json!({
+            "fetch": {},
+            "audit": { "after": ["fetch"], "when": { "field": "flags", "includes": "audit" } },
+            "report": { "after": ["audit"] }
+        }))
+        .unwrap_or_default();
+        let config = BlueprintConfig {
+            schema: "Job".into(),
+            parent_link: "batch".into(),
+            key_field: "step".into(),
+            order: ordered(&steps),
+            steps,
+            copy_fields: Vec::new(),
+            copy_links: Vec::new(),
+        };
+        let keys = |own: Value| -> Vec<(String, Vec<String>)> {
+            plan(&config, own.as_object().unwrap_or(&Map::new()))
+                .into_iter()
+                .map(|step| (step.key, step.after))
+                .collect()
+        };
+        let owned = |key: &str, after: &[&str]| -> (String, Vec<String>) {
+            (
+                key.to_owned(),
+                after.iter().map(|k| (*k).to_owned()).collect(),
+            )
+        };
+        assert_eq!(
+            keys(json!({ "flags": ["audit"] })),
+            [
+                owned("fetch", &[]),
+                owned("audit", &["fetch"]),
+                owned("report", &["audit"])
+            ]
+        );
+        // No flags: audit is left out, and report comes after fetch.
+        assert_eq!(
+            keys(json!({})),
+            [owned("fetch", &[]), owned("report", &["fetch"])]
+        );
+    }
 }
