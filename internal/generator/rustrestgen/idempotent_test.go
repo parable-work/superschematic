@@ -140,7 +140,8 @@ func TestIdempotentRoutesPlan(t *testing.T) {
 // fixture-idempotent-api beside its Rust SDK (idempotentRouterTest), with
 // its keys in a SQLite file made from the generated DDL of
 // fixture-idempotent-db, through the runtime's SQLite store over
-// IDEMPOTENCY_TABLE: each @idempotent route runs its implementation once
+// IDEMPOTENCY_TABLE, which Implementations::new builds over Deps.db:
+// each @idempotent route runs its implementation once
 // per key and answers a repeat what the first request was, the SDK sends
 // one key a call, its own or the one its options name, and a refusal of a
 // key is the problem the Go and TypeScript routers answer (D140).
@@ -153,7 +154,7 @@ func TestIdempotentRoutesEndToEnd(t *testing.T) {
 	}
 	crate := strings.ReplaceAll(naming.Default().RustSDKCrate(idempotentAPI), "-", "_")
 	cargoTestAPICrateWith(t, idempotentAPI, schema, "idempotent", strings.ReplaceAll(idempotentRouterTest, "SDK_CRATE", crate),
-		cargoOptions{idempotencyTable: table, devDependencies: runtime},
+		cargoOptions{idempotencyTable: table, devDependencies: runtime, deps: &DepsInfo{Database: idempotentDB, SQLite: true}},
 		writeDDL, withSDKOf(schema, idempotentAPI, apiSource{idempotencyTable: table}))
 }
 
@@ -163,8 +164,8 @@ const idempotentRouterTest = `use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use API_CRATE::{
-    build_router, types, Implementations, OrdersCancelOrderArgs, OrdersImplementation, OrdersPlaceOrderArgs,
-    IDEMPOTENCY_TABLE,
+    build_router, types, Handlers, Implementations, OrdersCancelOrderArgs, OrdersImplementation,
+    OrdersPlaceOrderArgs, IDEMPOTENCY_TABLE,
 };
 use RUNTIME_CRATE::idempotency::{SqliteStore, Store};
 use RUNTIME_CRATE::orm::sqlite::{rusqlite, Database};
@@ -307,8 +308,10 @@ async fn serve(router: Router) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_sdk_sends_one_key_a_call() {
     let orders = Arc::new(Orders::default());
-    let (db, store) = store();
-    let base_url = serve(router(Arc::clone(&orders), store)).await;
+    let (db, _) = store();
+    // Implementations::new builds the store over Deps.db, the SQLite file.
+    let implementations = Implementations::new(Handlers { orders: Arc::clone(&orders) as _ }, Arc::clone(&db));
+    let base_url = serve(build_router(implementations)).await;
     let sdk = FixtureIdempotentApiSdk::new(ClientConfig::with_base_url(base_url, None, None)).unwrap();
     let input = || PlaceOrderInput { sku: "tea".to_string(), quantity: 2.0 };
 
