@@ -14,7 +14,8 @@ types, repositories over `pg` ([TypeScript](#typescript)). The Go ORM and
 the TypeScript repositories run the same statements, which the compiler
 writes once. A service whose
 `outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
-(`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
+(`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)),
+and the Go ORM's repositories on SQLite ([Go on SQLite](#go-on-sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
 covers the basics of the users and products tables.
 
@@ -1720,6 +1721,63 @@ The scope's type refuses a write. Postgres refuses one in a
 `ReadOnlyTransaction`, and on a replica. A raw statement through
 `ReadOnly()` on a database with no replica runs on the primary outside a
 transaction, so Postgres does not refuse a write in it.
+
+## Go on SQLite
+
+A DB service whose `outputs.sql.dialects` lists `sqlite` also gets its
+repositories on SQLite in the Go ORM (D116): `sqlite.go`, and a
+`sqlite_<table>.go` per table. They run the SQLite statements the Rust
+repositories run, and hold a value as the SQLite DDL stores it: a UUID as
+its hyphenated text, a timestamp in RFC 3339 in UTC to the millisecond, a
+boolean as 1 or 0, a list and a JSON value as JSON text, and a decimal as
+its text.
+
+`OpenSQLite(ctx, db)` opens them over a `*sql.DB` you opened with a
+driver. The ORM imports none. `SQLiteDSN(path)` is the data source name
+of a file as `modernc.org/sqlite` reads it: write-ahead logging, a busy
+timeout, foreign keys on, and transactions that begin `IMMEDIATE`, so a
+transaction that reads before it writes takes the write lock as it
+begins.
+
+```go
+raw, err := sql.Open("sqlite", orm.SQLiteDSN("shop_db.sqlite"))
+if err != nil {
+	return err
+}
+db, err := orm.OpenSQLite(ctx, raw)
+```
+
+A `*SQLiteDatabase` is a `DatabaseInterface`, and each table's repository
+its `ReviewRepositoryInterface`, so code written against the interfaces
+runs on either dialect. A generated Go API's `Deps.DB` is the ORM of its
+database's first dialect: over a pool, or over the SQLite file. The
+repositories read, write, filter, page and upsert as the Postgres ones do,
+call for call, and a SQLite constraint refuses a write as Postgres's
+`*pgconn.PgError` does: `23505` for a unique key, with its columns in the
+detail, `23503` for a foreign key, `23502` for a null, and `23514` for a
+check. What is Postgres's stays Postgres's:
+
+- `Query`, `QueryRow` and `Exec` answer pgx's rows and command tag, so on
+  SQLite they answer `ErrPostgresOnly`. `QueryContext` and `ExecContext`
+  on the database and on a transaction run raw SQL on SQLite, and
+  `SQL()` is the `*sql.DB` or the `*sql.Tx`.
+- A SQLite file has no read replica: `HasReadReplica()` is false, and
+  `ReadReplica()` and `ReadOnly()` are the database itself.
+- SQLite's transactions are serializable. `TransactionWith` checks its
+  isolation level and begins an ordinary transaction.
+- The declared queries answer `ErrPostgresOnly`.
+
+A table SQLite does not hold has a repository that refuses every call with
+`ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
+`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, a
+version graph's released rows, and a table that composes behaviors. The
+SQLite DDL refuses a vector and a `@versioned` table for the whole
+service. A timestamp is held to the millisecond, so two rows written in one
+millisecond tie in an order by it, and their keys break the tie.
+
+An enqueue on SQLite takes the transaction itself
+(`EnqueueReviewWrittenSQLite(ctx, tx.(*orm.SQLiteTx), msg)`), so the
+message commits with the rows.
 
 ## TypeScript
 

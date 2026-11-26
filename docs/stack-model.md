@@ -3511,9 +3511,9 @@ export abstract class FulfilOrders {}
   sqlite-first database claims on the environment's SQLite file
   (`local.worker-sqlite`), beside the server that enqueues, each process
   with a connection of its own that waits five seconds for the other's
-  write lock. A Go worker there is refused with its server, since its
-  `Deps` reach Postgres alone (D64); its client is proven by the
-  parity test. A Rust worker on a SQLite file is a function its host
+  write lock. A Go worker there is refused, since it claims on Postgres
+  alone, while its server and its jobs open the file (D64, D116); its
+  client is proven by the parity test. A Rust worker on a SQLite file is a function its host
   calls (D116): `worker::SqliteWorker::drain`, with a connection, the time
   and a limit, claims and runs what is due, a message at a time, and
   answers how many it ran and when the next falls due. It needs no async
@@ -6419,8 +6419,13 @@ Resolution refuses (`unrealizable`), on each sql edge:
 - a Rust one whose database resolves to another dialect than its DB
   service's first, as a TypeScript one's: its `Deps.db` is a pool for
   `postgres` and the HTTP runtime's SQLite file for `sqlite` (D116);
-- a Go one whose database resolves to `sqlite`, since the Go ORM reaches
-  Postgres alone.
+- a Go server or job whose database resolves to another dialect than its
+  DB service's first, as a TypeScript one's: its `Deps.DB` is the Go
+  ORM's `Database` over a pool for `postgres` and its `SQLiteDatabase`
+  over the file for `sqlite`, both a `DatabaseInterface`, which the
+  entrypoint opens with the HTTP runtime's `sqlitefile` (D116);
+- a Go worker whose database resolves to `sqlite`, since it claims its
+  queue on Postgres alone.
 
 A Rust server on a SQLite file serves its table operations from the Rust
 repositories on SQLite, a table that composes behaviors among them: its
