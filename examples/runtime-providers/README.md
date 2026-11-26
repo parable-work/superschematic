@@ -11,11 +11,12 @@ either: an environment's config picks each one.
 |---|---|
 | `providers/sms-relay-a` | A channel adapter for an SMS relay that takes JSON with a Bearer token and posts back signed delivery statuses and replies |
 | `providers/sms-relay-b` | A second SMS channel adapter, for a relay of another shape: form posts under an account with basic authentication, send-only |
+| `providers/mail-relay` | A channel adapter for a mail relay that takes JSON with a Bearer token, send-only; `examples/notifications` sends email and password reset codes through it (D153) |
 | `providers/vault-broker` | A credential provider over a password manager's service API: items named by secret reference, `vault://<vault>/<item>/<field>`, scoped to the vaults its config names |
 | `providers/local-sandbox` | A sandbox provider that runs each run's instance as a local process: a stub, not an isolation boundary |
 | `providers/stub-model` | A model provider whose answers follow from the turn |
 | `providers/text-preview` | A file processor with no dependency: the text of plain text and Markdown with an SVG preview, and a thumbnail of a greyscale PGM image |
-| `schemas/services/notes-db` | DB: notes, and the notices sent about them |
+| `schemas/services/notes-db` | DB: notes, which raise `note.changed`, and the notifier's tables (D153), so every environment that runs notes-api needs a channel adapter |
 | `schemas/services/notes-api` | API over notes-db. Its config lists the six packages under `providers`, and `NotesApiConfig` names five slots with `@providers`: `SMS`, `VAULT`, `RUNNER`, `MODEL` and `PREVIEWS`, each with the settings fields after it |
 | `schemas/services/notes-stack` | The stack: `Dev`, on this machine, sends SMS through sms-relay-a and names every slot; `Cloudflare` sends through sms-relay-b and names no sandbox or model |
 | `src/app.ts` | The server's wiring: `notesProviders`, which reads the providers a loaded config names with `providersFrom`, and `sendNotice` and `receiveReplies`, which send through and read from whichever adapter `SMS` names |
@@ -33,8 +34,9 @@ either: an environment's config picks each one.
   contract, and writes each environment's providers into its
   `environment.json`. It refuses an environment whose slot names a
   provider the API does not list, one of another interface, or one whose
-  settings are unbound; and, once a feature that needs a channel adapter
-  registers, one that leaves `SMS` unset.
+  settings are unbound; and one that leaves `SMS` unset, since notes-db
+  raises events, which the core's notifications feature sends through a
+  channel adapter (D153).
 - **A credential reaches only the runner.** The broker lists titles and
   sites, and resolves an item into an `Injection` that only the runner
   opens. The run record keeps the reference and the time.

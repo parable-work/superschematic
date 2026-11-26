@@ -4203,6 +4203,11 @@
       ],
       "type": "object"
     },
+    "ChannelIdentitiesDef": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
     "DNSPlacement": {
       "additionalProperties": false,
       "properties": {
@@ -4786,6 +4791,37 @@
           "type": "object"
         }
       },
+      "type": "object"
+    },
+    "EventDef": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "payload": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "urgency": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
       "type": "object"
     },
     "Fence": {
@@ -5553,6 +5589,18 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "NotifierDef": {
+      "additionalProperties": false,
+      "properties": {
+        "part": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part"
+      ],
       "type": "object"
     },
     "OperationDocs": {
@@ -7025,6 +7073,9 @@
           },
           "type": "array"
         },
+        "channelIdentities": {
+          "$ref": "#/$defs/ChannelIdentitiesDef"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -7056,6 +7107,13 @@
         },
         "environment": {
           "$ref": "#/$defs/EnvironmentDecl"
+        },
+        "events": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EventDef"
+          },
+          "type": "array"
         },
         "extends": {
           "default": "",
@@ -7115,6 +7173,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "notifier": {
+          "$ref": "#/$defs/NotifierDef"
         },
         "optimistic": {
           "default": false,

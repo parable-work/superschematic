@@ -204,6 +204,16 @@ type ORMTable struct {
 	// table that is not @searchable.
 	Searchable string
 
+	// Notifier is the part of the notifier the table is (D153): inbox,
+	// deliveries, routes, preferences, subscriptions, channelTrust or
+	// replies, or channelIdentities for the table of channel identities;
+	// empty for any other table.
+	Notifier string
+
+	// Events are the table's @event declarations (D153), which the
+	// notifier raises and routes; nil for a table with none.
+	TableEvents []ORMEvent
+
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
@@ -545,6 +555,8 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			if table.Searchable, err = searchableOf(schema, td, tables); err != nil {
 				return nil, err
 			}
+			table.Notifier = notifierPartOf(td)
+			table.TableEvents = eventsOf(td)
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -1303,4 +1315,41 @@ func (o *ORMInfo) NearestSettingDefinitions() []string {
 		out[i] = def + " }"
 	}
 	return out
+}
+
+// ORMEvent is one @event of a table as the generated repository's
+// definition carries it (D153): its kind, the members its payload carries,
+// the member a notice is titled by, and its default urgency.
+type ORMEvent struct {
+	Kind    string
+	Payload []string
+	Title   string
+	Urgency string
+}
+
+// eventsOf is td's events, each with its default urgency.
+func eventsOf(td *ir.TypeDef) []ORMEvent {
+	var out []ORMEvent
+	for _, event := range td.Events {
+		if event == nil {
+			continue
+		}
+		urgency := event.Urgency
+		if urgency == "" {
+			urgency = ir.UrgencyNormal
+		}
+		out = append(out, ORMEvent{Kind: event.Kind, Payload: event.Payload, Title: event.Title, Urgency: urgency})
+	}
+	return out
+}
+
+// notifierPartOf is what td is to the notifier (D153), or "".
+func notifierPartOf(td *ir.TypeDef) string {
+	switch {
+	case td.ChannelIdentities != nil:
+		return "channelIdentities"
+	case td.Notifier != nil:
+		return td.Notifier.Part
+	}
+	return ""
 }

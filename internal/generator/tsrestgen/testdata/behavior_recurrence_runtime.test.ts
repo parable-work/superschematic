@@ -7,8 +7,10 @@ serves the API over the generated repositories of fixture-recurrence-db
 (createOrm), in a schema of the test's own, with an authenticator that reads
 `Authorization: Bearer <subject>[:<permission>,...]`; and the behavior
 worker FilingDeadlines runs in process, its queues as the API's package
-generates them (filingDeadlinesQueues: Filing's deadlines and changes) under
-the runtime's runWorker.
+generates them (filingDeadlinesQueues: Filing's deadlines, changes and
+events) under the runtime's runWorker, with a Workers of the test's own that
+records each event Recurrence emits as it opens, reminds and misses an
+occurrence (D153), which a notifier raises.
 
 A Filing implements Recurrence in Europe/London: each occurrence opens two
 weeks before it is due, reminds three days before, and is missed a day
@@ -127,7 +129,17 @@ async function makeDue(id: string, name: string): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const worker = () => filingDeadlinesQueues(pool, orm, logger as never) as WorkerQueue[];
+/** What Recurrence emitted, as the project's Workers methods heard it (D153): the kind and the occurrence's key. */
+const heard: { kind: string; key: string; row: string }[] = [];
+const hear = (kind: string) => async (event: { key: string; payload: { key: string } }) => {
+  heard.push({ kind, key: event.payload.key, row: event.key });
+};
+const workers = {
+  filingDeadlinesRecurrenceOpened: hear('opened'),
+  filingDeadlinesRecurrenceReminded: hear('reminded'),
+  filingDeadlinesRecurrenceMissed: hear('missed'),
+};
+const worker = () => filingDeadlinesQueues(pool, orm, workers, logger as never) as WorkerQueue[];
 
 async function workUntil(done: () => Promise<boolean>): Promise<void> {
   const stop = new AbortController();
@@ -186,7 +198,7 @@ test('a rule change leaves the open occurrence untouched and replans the ones th
   expect(gaps.every(gap => Math.abs(gap - 7 * DAY) <= 3_600_000)).toBe(true);
 });
 
-test('the remind deadline fires on the worker and records the reminder', async () => {
+test('the remind deadline fires on the worker, records the reminder and emits the opening and the reminder', async () => {
   const id = await newFiling();
   expect((await call('manager', id, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=YEARLY', start: londonDay(30) })).status).toBe(200);
   const first = (await occurrences(id))[0]!;
@@ -197,6 +209,13 @@ test('the remind deadline fires on the worker and records the reminder', async (
   expect(Number(fired.reminded_at)).toBeGreaterThanOrEqual(Number(first.remind_at));
   // Three days before its due, its two-week window has opened too.
   expect(fired.state).toBe('open');
+  // The fire emitted both moves, which the worker handed to the project's
+  // Workers methods (D153).
+  await workUntil(async () => heard.some(e => e.row === id && e.kind === 'reminded'));
+  expect(heard.filter(e => e.row === id).map(e => [e.kind, e.key]).sort()).toEqual([
+    ['opened', fired.key],
+    ['reminded', fired.key],
+  ]);
 });
 
 test('complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it', async () => {

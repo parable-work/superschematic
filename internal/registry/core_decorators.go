@@ -192,6 +192,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// a write that changes them enqueues on (core_search.go, D155).
 	specs = append(specs, searchDecorator())
 
+	// The events a table's rows raise, the notifier's tables and the table
+	// of channel identities (core_notifications.go, D153).
+	specs = append(specs, notificationDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

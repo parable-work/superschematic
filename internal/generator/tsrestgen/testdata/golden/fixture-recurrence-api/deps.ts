@@ -4,10 +4,15 @@
 // of the implementation's create and authenticate (D51; docs/stack-model.md,
 // sections 8.5 and 8.6). The server's entrypoint fills Deps from the
 // connections and clients the server shares between the APIs it serves.
+//
+// It also declares Workers, a method per event its behavior workers'
+// tables emit (D104), and the type of the implementation's createWorkers
+// (D53; section 8.8).
 
 import type { Pool } from 'pg';
 import type { Authenticator, Logger } from '@superschematic/http-runtime';
-import type { FixtureRecurrenceDbOrm } from '@schemas/fixture-recurrence-db-types/orm';
+import type { FixtureRecurrenceDbOrm, FixtureRecurrenceDbTx } from '@schemas/fixture-recurrence-db-types/orm';
+import type { FilingRecurrenceMissedEvent, FilingRecurrenceOpenedEvent, FilingRecurrenceRemindedEvent } from '@schemas/fixture-recurrence-api-types/types';
 import type { Implementations } from './interfaces';
 
 /** What the implementation of fixture-recurrence-api is built from. */
@@ -41,3 +46,28 @@ export type Constructor = (deps: Deps) => Implementations | Promise<Implementati
  * the API's Deps, as the Go entrypoint calls AuthMiddleware(deps).
  */
 export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authenticator>;
+
+/**
+ * The handlers of the events the tables of fixture-recurrence-api's behavior workers
+ * emit (D104), a method per event of each use, named for the worker, the
+ * use and the kind. A behavior worker's entrypoint claims each event of its
+ * table's event queue, one row's in the order written, and calls the
+ * method with the database's repositories in the transaction that spends
+ * the claim, as the worker's caller, and with a signal that aborts when
+ * the worker stops and its grace is over.
+ */
+export interface Workers {
+  /** Handles an event opened of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
+  filingDeadlinesRecurrenceOpened(event: FilingRecurrenceOpenedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
+  /** Handles an event reminded of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
+  filingDeadlinesRecurrenceReminded(event: FilingRecurrenceRemindedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
+  /** Handles an event missed of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
+  filingDeadlinesRecurrenceMissed(event: FilingRecurrenceMissedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
+}
+
+/**
+ * The type of the implementation's createWorkers, which a worker's
+ * entrypoint calls with the API's Deps. The scaffolded implementation
+ * exports createWorkers: WorkersConstructor.
+ */
+export type WorkersConstructor = (deps: Deps) => Workers | Promise<Workers>;

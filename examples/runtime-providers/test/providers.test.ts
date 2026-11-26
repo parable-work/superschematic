@@ -23,6 +23,7 @@ import { createLogger } from '@superschematic/http-runtime';
 import { currentAccess } from '@superschematic/http-runtime/hono';
 import {
   checkProviderPackage,
+  providersFrom,
   SecretValue,
   useCredential,
   type CredentialUse,
@@ -31,6 +32,7 @@ import {
 
 import { notesProviders, receiveReplies, sendNotice } from '../src/app.ts';
 import { localSandbox, settled } from '../providers/local-sandbox/src/index.ts';
+import { mailRelay } from '../providers/mail-relay/src/index.ts';
 import { smsRelayA } from '../providers/sms-relay-a/src/index.ts';
 import { smsRelayB } from '../providers/sms-relay-b/src/index.ts';
 import { stubModel } from '../providers/stub-model/src/index.ts';
@@ -124,6 +126,15 @@ test('each provider package declares in its package.json what its definition and
     const instance = await providers.get(slot, definition.implements);
     checkProviderPackage(pkg, definition, instance);
   }
+  // The mail relay, which examples/notifications sends email through (D153).
+  const mailPkg = JSON.parse(readFileSync(here('../providers/mail-relay/package.json'), 'utf8')) as unknown;
+  const mail = providersFrom({
+    slots: { MAIL: 'channel' },
+    config: { MAIL: 'mail-relay', MAIL_URL: 'http://mail.test', MAIL_TOKEN: new SecretValue('t'), MAIL_FROM: 'notices@example.test' },
+    definitions: [mailRelay()],
+    log: capturedLog().log,
+  });
+  checkProviderPackage(mailPkg, mailRelay(), await mail.channel('MAIL'));
 });
 
 test('one notice goes out through either SMS relay, and only the config differs', async () => {
