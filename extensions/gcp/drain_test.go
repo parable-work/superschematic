@@ -1,6 +1,7 @@
 package gcp_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -242,7 +243,6 @@ func TestDrainWorkerSettings(t *testing.T) {
 	s = shop()
 	workerSettings(s, "Staging").Values = map[string]any{"tick": "5m"}
 	refused("a tick on a pool's worker", s, stacktest.AcmeShop(), `worker shop-orders-fulfil-orders sets tick, how often a worker in drain mode is run; it runs as a worker pool`)
-	refused("a Rust worker", drainShop(), rustOrdersShop(), "worker shop-orders-fulfil-orders runs in drain mode and is written in Rust, whose worker entrypoint does not exit when its queue is empty yet")
 	services := stacktest.AcmeShop()
 	for i := range services {
 		if services[i].Name == "shop-orders" {
@@ -263,4 +263,91 @@ func TestDrainWorkerSettings(t *testing.T) {
 	if _, err := stack.Resolve(reg, stack.Input{Stack: drainShop(), Services: services, Environment: "Staging"}); err != nil {
 		t.Errorf("a TypeScript worker in drain mode: %v", err)
 	}
+
+	// So does a Rust one (D145): its job is the Go one's, but for the image
+	// its entrypoint's Dockerfile builds.
+	goJob := node(t, resolve(t, reg, drainShop(), stacktest.AcmeShop(), "Staging"), fulfilOrders+".job")
+	rustEnv := resolve(t, reg, drainShop(), rustOrdersShop(), "Staging")
+	rustJob := node(t, rustEnv, fulfilOrders+".job")
+	if rustJob.Type != gcp.TypeJob {
+		t.Fatalf("a Rust worker in drain mode is %s, not a Cloud Run job", rustJob.Type)
+	}
+	envOf := func(job *ir.Resource) []any {
+		template := job.Properties["template"].(map[string]any)["template"].(map[string]any)
+		return template["containers"].([]any)[0].(map[string]any)["envs"].([]any)
+	}
+	if got, want := fmt.Sprint(envOf(rustJob)), fmt.Sprint(envOf(goJob)); got != want {
+		t.Errorf("the Rust drain worker's variables are\n%s\nwant the Go one's\n%s", got, want)
+	}
+	if node(t, rustEnv, fulfilOrders+".tick").Type != gcp.TypeSchedulerJob {
+		t.Errorf("the Rust drain worker has no tick")
+	}
+}
+
+// behaviorDrainShop is the shop whose shop-db keeps Order's deadline,
+// change and event queues (D103, D104), which shop-orders' behavior worker
+// OrderTimers runs in drain mode in Staging (D145).
+func behaviorDrainShop() (*ir.Stack, []stack.Service) {
+	s := shop()
+	s.Name = "DrainShop"
+	e := s.Environment("Staging")
+	e.Settings = append(e.Settings, &ir.DeployableSettings{Of: stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers"), Mode: ir.WorkerModeDrain})
+	services := stacktest.AcmeShop()
+	for i := range services {
+		switch services[i].Name {
+		case "shop-db":
+			services[i].Queues = append(services[i].Queues, "OrderChange", "OrderDeadline", "OrderEvent")
+			services[i].BehaviorQueues = map[string]ir.BehaviorQueue{
+				"OrderDeadline": {Row: "Order", Kind: ir.BehaviorQueueDeadlines},
+				"OrderChange":   {Row: "Order", Kind: ir.BehaviorQueueChanges},
+				"OrderEvent":    {Row: "Order", Kind: ir.BehaviorQueueEvents},
+			}
+		case "shop-orders":
+			services[i].Workers = append(services[i].Workers, ir.Worker{
+				Name: "OrderTimers", Queue: "OrderDeadline", Queues: []string{"OrderDeadline", "OrderChange", "OrderEvent"},
+				BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Order"}, Origin: ir.OriginBehavior,
+			})
+		}
+	}
+	return s, services
+}
+
+// TestABehaviorWorkerDrainsAsAJob (D145): a behavior worker in drain mode
+// is a Cloud Run job with a tick, as a `@worker` is, and each deployable
+// that may write to its database holds its run method in QUEUE_WAKES under
+// each of its queues, which the behaviors' core wakes it for.
+func TestABehaviorWorkerDrainsAsAJob(t *testing.T) {
+	const timers = "shop-orders-order-timers"
+	s, services := behaviorDrainShop()
+	env := resolve(t, assemble(t), s, services, "Staging")
+	job := node(t, env, timers+".job")
+	if job.Type != gcp.TypeJob {
+		t.Fatalf("the behavior worker in drain mode is %s, not a Cloud Run job", job.Type)
+	}
+	envs := job.Properties["template"].(map[string]any)["template"].(map[string]any)["containers"].([]any)[0].(map[string]any)["envs"].([]any)
+	wantJSON(t, "the behavior worker's last variables", envs[len(envs)-3:],
+		`[{"name":"WORKER_MODE","value":"drain"},{"name":"WORKER_IDLE_SECONDS","value":"30"},{"name":"WORKER_SLOTS","value":"1"}]`)
+	if node(t, env, timers+".tick").Type != gcp.TypeSchedulerJob {
+		t.Errorf("the behavior worker has no tick")
+	}
+	var wakes string
+	service := node(t, env, "shop-api.service").Properties["template"].(map[string]any)
+	for _, v := range service["containers"].([]any)[0].(map[string]any)["envs"].([]any) {
+		if v.(map[string]any)["name"] == ir.QueueWakesVariable {
+			wakes = v.(map[string]any)["value"].(string)
+		}
+	}
+	var byQueue map[string][]struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(wakes), &byQueue); err != nil {
+		t.Fatalf("shop-api's QUEUE_WAKES %q: %v", wakes, err)
+	}
+	const run = "https://run.googleapis.com/v2/projects/acme-staging/locations/us-east1/jobs/" + timers + ":run"
+	for _, queue := range []string{"OrderDeadline", "OrderChange", "OrderEvent"} {
+		if got := byQueue[queue]; len(got) != 1 || got[0].URL != run {
+			t.Errorf("shop-api's wakes of %s are %+v, want the behavior worker's job", queue, got)
+		}
+	}
+	node(t, env, timers+".woken-by.shop-api")
 }

@@ -3579,9 +3579,10 @@ export abstract class FulfilOrders {}
   within its horizon, five minutes, so a queue that is empty runs
   nothing. `instances` is then how many of it may run at once,
   and `maxInstances` beside it is refused, as is `idle` on a pool's
-  worker, and drain mode on a behavior worker, whose queues triggers and
-  the clock fill. The core names no provider. It gives a platform three
-  things to build on:
+  worker. A behavior worker drains too: its claim loops take one slot
+  for them all, of its first queue, and stop together, and its wakes are
+  given under each of its queues. The core names no provider. It gives a
+  platform three things to build on:
   - the worker's mode in its run, and three variables its entrypoint
     reads (`ir.WorkerModeVariable`, `ir.WorkerIdleSecondsVariable`,
     `ir.WorkerSlotsVariable`): `WORKER_MODE=drain`, the idle time in
@@ -3601,7 +3602,18 @@ export abstract class FulfilOrders {}
     `ir.QueueWake`: a URL to `POST` an empty JSON object to, and where
     the bearer token comes from, a URL to `GET` with headers that answers
     `{ access_token, expires_in }`. A worker another target runs, or a
-    platform with no wake, leaves the variable out;
+    platform with no wake, leaves the variable out. The queue clients
+    send a wake after an enqueue's statement: the Go ORM's (`OnEnqueue`),
+    the TypeScript runtime's (`queue-wake.ts`) and the Rust runtime's
+    (`wake`). A behavior worker's queues are filled by the behaviors'
+    core and by its table's change trigger, so each language's rules
+    adapter wakes them once a command's unit has applied: the event
+    queue of each event, the deadline queue of each deadline armed due
+    within five minutes (`rules.WakeHorizon`, Rust's `WAKE_HORIZON_MS`),
+    and the change queue of each row written, through the host's wake
+    (Go's `rules.Host.Wake`, Rust's `Host::with_wake`), which the
+    generated code gives the queue client's; the repositories' writes
+    past the core wake the change queue too;
   - the slots. `sqlutil.PostgresQueueStatements` writes one more
     statement, `slot`, `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.<table>'), $1::int)`,
     which the Go ORM's `<Queue>Queue.Slot(ctx, slots)` and the TypeScript
@@ -3661,7 +3673,9 @@ export abstract class FulfilOrders {}
     exits 0;
   - in drain mode (`worker.DrainFromEnv`, `worker.Options.Drain`) takes a
     slot of its queue before its first claim, through the queue's `Slot`,
-    and returns at once when none is free; then runs the same loop, which
+    and returns at once when none is free (a behavior worker's
+    `worker.RunAll` takes one for all its queues, of the first that has a
+    `Slot`, and its loops share one idle clock); then runs the same loop, which
     ends, with `drained: no message was ready or held`, once a claim
     found nothing, no method runs and none has run or returned for the
     idle time, and the queue's `NextDue` reads no message due within the
@@ -3746,8 +3760,8 @@ export abstract class FulfilOrders {}
   always allocated, so `cpu` takes one or more. Bootstrap needs no new API
   or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
   `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
-  reads them. A worker in drain mode (D145), in Go or TypeScript, is no
-  worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
+  reads them. A worker in drain mode (D145), in any language and a
+  behavior worker among them, is no worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
   as the pool would be, of one task with no retries and a day to run,
   with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`, the
   last its `instances`. Its tick is a Cloud Scheduler job, `<worker>.tick`,
@@ -3770,8 +3784,7 @@ export abstract class FulfilOrders {}
   does not wait for the worker. A waker that rolls out first sends wakes
   the job refuses until the worker's wave, which the tick covers. A drain
   worker the environment turns off keeps its job and has no tick and no
-  grant. A Rust worker in drain mode is refused, since its entrypoint
-  does not exit when idle yet. `deployer`'s `roles/run.admin` and
+  grant. `deployer`'s `roles/run.admin` and
   `roles/cloudscheduler.admin` manage all of it, as they manage a
   scheduled job's.
 - **Dead messages.** A dead message stays in the table, with its last
