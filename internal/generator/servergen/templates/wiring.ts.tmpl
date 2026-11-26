@@ -351,9 +351,9 @@ function main(): void {
 {{- if .Engines }}
     for (const engine of engines) engine.close();
 {{- end }}
-{{- if and .Job .PostgresDatabases }}
-    // The wakes the job's enqueues sent go out before it exits (D145, D151):
-    // only a queue on Postgres sends one.
+{{- if and (or .Job (and .Worker .Worker.Behavior)) .PostgresDatabases }}
+    // The wakes its enqueues and its commands sent go out before it exits
+    // (D145, D151): only a queue on Postgres sends one.
     void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
 {{- else }}
     void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));

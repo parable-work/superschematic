@@ -1696,7 +1696,15 @@ func (s *RustServer) AnyCORS() bool {
 // Closes reports whether main.rs closes anything once it stops serving or
 // running: an engine, or a memory store (D75).
 func (s *RustServer) Closes() bool {
-	return len(s.Engines) > 0 || len(s.MemoryStores) > 0
+	return len(s.Engines) > 0 || len(s.MemoryStores) > 0 || s.SettlesWakes()
+}
+
+// SettlesWakes reports whether the entrypoint awaits the wakes its
+// enqueues sent before it ends (D145), so a wake sent just before the end
+// still goes out: a job's or a worker's with a pool, whose queue client
+// sends them.
+func (s *RustServer) SettlesWakes() bool {
+	return (s.Job != nil || (s.Worker != nil && !s.Worker.OnSQLite())) && len(s.Databases) > 0
 }
 
 // Dispatches reports whether the server serves more than one API, whose
@@ -1794,6 +1802,9 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
 	root := []string{"Shutdown"}
+	if s.SettlesWakes() {
+		root = append(root, "wake")
+	}
 	switch {
 	case s.Worker == nil:
 	case !s.Worker.OnSQLite():
