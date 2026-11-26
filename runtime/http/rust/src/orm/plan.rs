@@ -9,12 +9,13 @@ use std::fmt::Display;
 use serde_json::Value;
 
 use super::{
-    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate,
-    Definition, Dialect, Error, Fence, FieldCell, FieldKeys, FindOptions, Marks, OrderBy,
-    PageOptions, Session, Table, UniqueKey, Values, WriteOptions,
+    audience_conditions, invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation,
+    CoreTableOperation, CoreUpdate, Definition, Dialect, Error, Fence, FieldCell, FieldKeys,
+    FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey, Values, WriteOptions,
 };
 use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
+use serde_json::Map;
 
 /// Fills a format string's `%s` and `%d`, in order, with `args`, and `%%`
 /// with `%`, as Go's `fmt.Sprintf` fills the statements `sqlutil` writes.
@@ -205,13 +206,237 @@ impl<'a> Plan<'a> {
         self.bind(key, self.table.key_column(), "key")
     }
 
+    /// Whether the reads of `table` keep to a caller now (D156): an
+    /// `@audience` table's, or any table's for a caller with grants, when
+    /// the repositories were opened for a caller.
+    pub(crate) fn kept(&self, table: &Table) -> bool {
+        self.session
+            .access
+            .as_ref()
+            .is_some_and(|sees| table.audience.is_some() || sees.grants.is_some())
+    }
+
     /// The filter's conditions, each value appended to `args`, as the Go
-    /// ORM's `conditions` writes them.
+    /// ORM's `conditions` writes them, then the conditions that keep the
+    /// rows to what the repositories' caller sees (D156,
+    /// [`Plan::access_conditions`]).
     fn conditions(
         &self,
         table: &Table,
         filter: Option<&Values>,
         args: &mut Vec<Bound>,
+    ) -> Result<Vec<String>, Error> {
+        self.conditions_for(table, filter, args, false)
+    }
+
+    /// The filter's conditions, then the caller's access, of a read, or
+    /// with `write` of a write.
+    fn conditions_for(
+        &self,
+        table: &Table,
+        filter: Option<&Values>,
+        args: &mut Vec<Bound>,
+        write: bool,
+    ) -> Result<Vec<String>, Error> {
+        let mut conditions = self.filter_conditions(table, filter, args, true)?;
+        conditions.extend(self.access_conditions(table, args, write)?);
+        Ok(conditions)
+    }
+
+    /// The conditions that keep a read, or with `write` a write, of `table`
+    /// to what the caller sees (D156), as the TypeScript repositories'
+    /// `accessConditions` writes them: an `@audience` table's audience
+    /// ([`audience_conditions`]), and for a party or an agent run, the rows
+    /// one of its grants reaches, its target and the rows its role's paths
+    /// lead to it from. None for repositories opened for no caller, and on a
+    /// table no audience holds for a caller with no grants. A table no grant
+    /// reaches has no row for a caller with grants.
+    fn access_conditions(
+        &self,
+        table: &Table,
+        args: &mut Vec<Bound>,
+        write: bool,
+    ) -> Result<Vec<String>, Error> {
+        let Some(sees) = &self.session.access else {
+            return Ok(Vec::new());
+        };
+        let c = &self.definition.clauses;
+        let mut out = Vec::new();
+        if let Some(audience) = &table.audience {
+            out.extend(audience_conditions(
+                self.definition,
+                audience,
+                sees,
+                args,
+                write,
+            )?);
+        }
+        let Some(grants) = &sees.grants else {
+            return Ok(out);
+        };
+        let start = args.len();
+        let mut branches = Vec::new();
+        for grant in grants {
+            if grant.target_type == table.name {
+                let key = table.key_column();
+                let target = Value::String(grant.target_id.clone());
+                check(&target, key).map_err(|err| {
+                    invalid(format!("{}.{}: grant target: {err}", table.name, key.name))
+                })?;
+                args.push(Bound {
+                    value: target,
+                    marks: Marks::of(key),
+                });
+                branches.push(fill(&c.eq, &[&key.qualified, &args.len()])?);
+            }
+            for path in grant.reaches.get(&table.name).into_iter().flatten() {
+                // Every row of the table, whatever the other branches
+                // bound.
+                if path == "*" {
+                    args.truncate(start);
+                    return Ok(out);
+                }
+                let Some(filter) =
+                    self.reach_filter(table, path, &grant.target_type, &grant.target_id)?
+                else {
+                    continue;
+                };
+                let inner = self.filter_conditions(table, Some(&filter), args, false)?;
+                if !inner.is_empty() {
+                    branches.push(fill(&c.group, &[&inner.join(&c.and)])?);
+                }
+            }
+        }
+        // No grant reaches a row of the table: none is there.
+        out.push(if branches.is_empty() {
+            "FALSE".to_owned()
+        } else {
+            fill(&c.group, &[&branches.join(&c.or)])?
+        });
+        Ok(out)
+    }
+
+    /// The filter of a role's path from `table` to a grant's target (D156):
+    /// `unit.contract` is `{"unit": {"contract": {<key>: {"eq": target}}}}`,
+    /// each step a to-one or a one-to-many relation of the table it is on.
+    /// None for a path that names no relation, or that ends at another
+    /// table than the target's: it reaches no row.
+    fn reach_filter(
+        &self,
+        table: &Table,
+        path: &str,
+        target_type: &str,
+        target_id: &str,
+    ) -> Result<Option<Values>, Error> {
+        let steps: Vec<&str> = path.split('.').collect();
+        let mut at = table;
+        for step in &steps {
+            let Some(next) = at.relation_target(step) else {
+                return Ok(None);
+            };
+            let Ok(next) = self.definition.table(next) else {
+                return Ok(None);
+            };
+            at = next;
+        }
+        if at.name != target_type {
+            return Ok(None);
+        }
+        let mut eq = Map::new();
+        eq.insert("eq".to_owned(), Value::String(target_id.to_owned()));
+        let mut filter = Values::new();
+        filter.insert(at.key.clone(), Value::Object(eq));
+        for step in steps.iter().rev() {
+            let mut outer = Values::new();
+            outer.insert((*step).to_owned(), Value::Object(filter));
+            filter = outer;
+        }
+        Ok(Some(filter))
+    }
+
+    /// The read of the live row whose key is `key` if the caller sees it,
+    /// or with `write` may write it (D156): what a write of a row checks
+    /// first, so a row the caller may not write is not there.
+    pub(crate) fn reach(&self, key: &Value, write: bool) -> Result<Statement, Error> {
+        let table = self.table;
+        let column = table.key_column();
+        let mut args = vec![self.key(key)?];
+        let mut conditions = vec![fill(
+            &self.definition.clauses.eq,
+            &[&column.qualified, &args.len()],
+        )?];
+        conditions.extend(self.access_conditions(table, &mut args, write)?);
+        let where_ = self.live_where(self.where_of(&conditions), false);
+        let s = &table.statements;
+        let sql = fill(&s.find_one, &[&s.columns, &where_, &""])?;
+        Ok(Statement { sql, args })
+    }
+
+    /// The conditions of a filter through the table's relations. Through a
+    /// to-one relation (D90): the foreign key in the keys of the target's
+    /// live rows its filter finds. Through a one-to-many relation (D156):
+    /// the key in the keys its rows' foreign key holds, of the rows the
+    /// filter finds, so a path to a row's members reaches through a list of
+    /// them. Each holds the other table's rows to what the caller sees,
+    /// unless `access` is false.
+    fn relation_conditions(
+        &self,
+        table: &Table,
+        filter: &Values,
+        args: &mut Vec<Bound>,
+        access: bool,
+    ) -> Result<Vec<String>, Error> {
+        let mut conditions = Vec::new();
+        let inner_of = |target: &Table, through: &Values, args: &mut Vec<Bound>| {
+            let mut inner = if access {
+                self.conditions(target, Some(through), args)?
+            } else {
+                self.filter_conditions(target, Some(through), args, false)?
+            };
+            if target.soft_delete {
+                inner.push(target.statements.live_condition.clone());
+            }
+            Ok::<_, Error>(self.where_of(&inner))
+        };
+        for relation in &table.relations {
+            let Some(Value::Object(through)) = filter.get(&relation.field) else {
+                continue;
+            };
+            let target = self.definition.table(&relation.target)?;
+            let where_ = inner_of(target, through, args)?;
+            conditions.push(fill(&relation.probe, &[&where_])?);
+        }
+        for many in &table.many {
+            let Some(Value::Object(through)) = filter.get(&many.name) else {
+                continue;
+            };
+            let source = self.definition.table(&many.target)?;
+            let foreign = source.column(&many.column).ok_or_else(|| {
+                Error::Definition(format!(
+                    "{}'s relation {} reads {}, which {} has no column of",
+                    table.name, many.name, many.column, source.name
+                ))
+            })?;
+            let where_ = inner_of(source, through, args)?;
+            conditions.push(format!(
+                "{} IN (SELECT {} FROM {}{where_})",
+                table.key_column().qualified,
+                foreign.qualified,
+                source.table,
+            ));
+        }
+        Ok(conditions)
+    }
+
+    /// The filter's conditions alone. A filter through a relation holds
+    /// the target's rows to what the caller sees too, unless `access` is
+    /// false, as a grant's path is: its steps are the role's to name.
+    fn filter_conditions(
+        &self,
+        table: &Table,
+        filter: Option<&Values>,
+        args: &mut Vec<Bound>,
+        access: bool,
     ) -> Result<Vec<String>, Error> {
         let Some(filter) = filter else {
             return Ok(Vec::new());
@@ -351,19 +576,7 @@ impl<'a> Plan<'a> {
                 }
             }
         }
-        // A filter through a to-one relation (D90): the foreign key in the
-        // keys of the target's live rows its filter finds.
-        for relation in &table.relations {
-            let Some(Value::Object(through)) = filter.get(&relation.field) else {
-                continue;
-            };
-            let target = self.definition.table(&relation.target)?;
-            let mut inner = self.conditions(target, Some(through), args)?;
-            if target.soft_delete {
-                inner.push(target.statements.live_condition.clone());
-            }
-            conditions.push(fill(&relation.probe, &[&self.where_of(&inner)])?);
-        }
+        conditions.extend(self.relation_conditions(table, filter, args, access)?);
         for reference in &table.referenced_by {
             let Some(Value::Object(probe)) = filter.get(&reference.filter) else {
                 continue;
@@ -392,7 +605,7 @@ impl<'a> Plan<'a> {
         // allOf's filters' conditions are the filter's own, ANDed (D99).
         if let Some(Value::Array(all)) = filter.get("allOf") {
             for each in all {
-                conditions.extend(self.conditions(table, each.as_object(), args)?);
+                conditions.extend(self.filter_conditions(table, each.as_object(), args, access)?);
             }
         }
         // anyOf ORs filters of the table (D90), each one's conditions
@@ -405,7 +618,7 @@ impl<'a> Plan<'a> {
                 let mut branches = Vec::new();
                 let mut every = false;
                 for branch in any {
-                    let inner = self.conditions(table, branch.as_object(), args)?;
+                    let inner = self.filter_conditions(table, branch.as_object(), args, access)?;
                     if inner.is_empty() {
                         every = true;
                         continue;
@@ -435,6 +648,7 @@ impl<'a> Plan<'a> {
                     .column(member)
                     .is_some_and(|column| !column.filter.is_empty())
                 || table.relations.iter().any(|r| &r.field == member)
+                || table.many.iter().any(|m| &m.name == member)
                 || table.referenced_by.iter().any(|r| &r.filter == member);
             if !known {
                 return Err(invalid(format!("{} has no filter by {member}", table.name)));
@@ -1306,7 +1520,7 @@ impl<'a> Plan<'a> {
             )));
         }
         self.advance(&mut sets);
-        let conditions = self.conditions(self.table, filter, &mut args)?;
+        let conditions = self.conditions_for(self.table, filter, &mut args, true)?;
         let where_ = self.live_where(self.where_of(&conditions), false);
         let sql = fill(
             &self.table.statements.update_many,
@@ -1639,7 +1853,7 @@ impl<'a> Plan<'a> {
     /// behaviors updates through the core, a row at a time (D103, D116).
     pub(crate) fn rows_of(&self, filter: Option<&Values>) -> Result<Statement, Error> {
         let mut args = Vec::new();
-        let conditions = self.conditions(self.table, filter, &mut args)?;
+        let conditions = self.conditions_for(self.table, filter, &mut args, true)?;
         let where_ = self.live_where(self.where_of(&conditions), false);
         let s = &self.table.statements;
         let order = self.order_by(&[OrderBy::asc(self.table.key.clone())])?;

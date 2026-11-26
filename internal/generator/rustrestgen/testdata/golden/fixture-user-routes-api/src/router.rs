@@ -71,23 +71,28 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("greet")
         .apply(get(handle_greeting_greet));
     router = router.route("/api/greeting", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("capabilities")
         .apply(identity_handler(&identity_service, identity::OP_CAPABILITIES));
     router = router.route("/api/auth/capabilities", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("listApiKeys")
         .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));
     router = router.route("/api/auth/keys", route);
     let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("createApiKey")
         .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));
     router = router.route("/api/auth/keys", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("revokeApiKey")
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));
     router = router.route("/api/auth/keys/{id}", route);
     let route = RouteControls::under(transport)
@@ -96,15 +101,18 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/auth/login", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("logout")
         .apply(identity_handler(&identity_service, identity::OP_LOGOUT));
     router = router.route("/api/auth/logout", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("me")
         .apply(identity_handler(&identity_service, identity::OP_ME));
     router = router.route("/api/auth/me", route);
     let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_CHANGE_PASSWORD))
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("changePassword")
         .apply(identity_handler(&identity_service, identity::OP_CHANGE_PASSWORD));
     router = router.route("/api/auth/password", route);
     let route = RouteControls::under(transport)
@@ -113,62 +121,77 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/auth/register", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("listRoles")
         .apply(identity_handler(&identity_service, identity::OP_LIST_ROLES));
     router = router.route("/api/auth/admin/roles", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("createRole")
         .apply(identity_handler(&identity_service, identity::OP_CREATE_ROLE));
     router = router.route("/api/auth/admin/roles", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("deleteRole")
         .apply(identity_handler(&identity_service, identity::OP_DELETE_ROLE));
     router = router.route("/api/auth/admin/roles/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("updateRole")
         .apply(identity_handler(&identity_service, identity::OP_UPDATE_ROLE));
     router = router.route("/api/auth/admin/roles/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("listUsers")
         .apply(identity_handler(&identity_service, identity::OP_LIST_USERS));
     router = router.route("/api/auth/admin/users", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("createUser")
         .apply(identity_handler(&identity_service, identity::OP_CREATE_USER));
     router = router.route("/api/auth/admin/users", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("getUser")
         .apply(identity_handler(&identity_service, identity::OP_GET_USER));
     router = router.route("/api/auth/admin/users/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("approveUser")
         .apply(identity_handler(&identity_service, identity::OP_APPROVE_USER));
     router = router.route("/api/auth/admin/users/{id}/approve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("disableUser")
         .apply(identity_handler(&identity_service, identity::OP_DISABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/disable", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("enableUser")
         .apply(identity_handler(&identity_service, identity::OP_ENABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/enable", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("listUserApiKeys")
         .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));
     router = router.route("/api/auth/admin/users/{id}/keys", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("revokeUserApiKey")
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));
     router = router.route("/api/auth/admin/users/{id}/keys/{keyId}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("setUserPassword")
         .apply(identity_handler(&identity_service, identity::OP_SET_USER_PASSWORD));
     router = router.route("/api/auth/admin/users/{id}/password", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("revokeRole")
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_ROLE));
     router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
+        .operation("grantRole")
         .apply(identity_handler(&identity_service, identity::OP_GRANT_ROLE));
     router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
     router
