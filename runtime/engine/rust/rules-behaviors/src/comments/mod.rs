@@ -44,12 +44,18 @@
 //! (`markRead`, `follow`, [`follows`]), and a message that comes to stand
 //! records a delivery for each subject that should hear of it.
 //!
+//! A message may carry `attachment` blocks too (D154): a file the
+//! deployment keeps, named by a URI whose scheme, media type and size the
+//! config's `attachments` allow, as the engine's batch 5 has it. The core
+//! never fetches the URI and checks no `sha256`: a table's Attachments
+//! keeps the file, and the runtime that posts the block names the row's
+//! file by it (`attachment:<id>`).
+//!
 //! What the engine's Comments has that a table's leaves out, each a part
 //! the core cannot run yet or a later step's: the inbox, claiming and
 //! settling deliveries (the config's `deliverPermission`, `maxAttempts`,
 //! `retryBackoffMs` and `deliveryRetentionMs`) and `searchMessages`, which
-//! run across a namespace; attachment blocks and the config's
-//! `attachments`; `moveAnchor` and `anchorPermission`; a message's `via`,
+//! run across a namespace; `moveAnchor` and `anchorPermission`; a message's `via`,
 //! the calling service, which the core's caller does not carry; and the
 //! operation events the engine logged, a table's events reaching the app
 //! through its event queue (D104). The core declares none of those
@@ -163,15 +169,34 @@ pub const NAMESPACE_WIDE: &str = "claiming and settling deliveries (claimDeliver
 pub const ANCHORS: &str = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)";
 
 /// The config members a table's Comments refuses, each with why it waits.
-const WAITING_MEMBERS: [(&str, &str); 3] = [
-    ("anchorPermission", ANCHORS),
-    ("attachments", ATTACHMENTS),
-    ("blocks", ATTACHMENTS),
-];
+const WAITING_MEMBERS: [(&str, &str); 1] = [("anchorPermission", ANCHORS)];
 
-/// Why an attachment block waits.
-pub const ATTACHMENTS: &str =
-    "an attachment block waits for attachments on the core (D77's step 5, D103's step 4)";
+/// The URI schemes an attachment block's uri may use when the config's
+/// attachments name none.
+const DEFAULT_SCHEMES: [&str; 1] = ["https"];
+
+/// What an attachment block may describe (the config's `attachments`):
+/// the URI schemes its uri may use, the media types it may have, and the
+/// largest file, in bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentsConfig {
+    /// The schemes; `["https"]` when the config names none.
+    pub schemes: Vec<String>,
+    /// The media types, each type/subtype or type/*; any when `None`.
+    pub media_types: Option<Vec<String>>,
+    /// The largest file; no limit when `None`.
+    pub max_bytes: Option<i64>,
+}
+
+impl Default for AttachmentsConfig {
+    fn default() -> Self {
+        AttachmentsConfig {
+            schemes: DEFAULT_SCHEMES.iter().map(|s| (*s).to_owned()).collect(),
+            media_types: None,
+            max_bytes: None,
+        }
+    }
+}
 
 /// Comments' config. Every member is optional; `{}` and no config are the
 /// same.
@@ -196,6 +221,8 @@ pub struct CommentsConfig {
     pub compose_timeout_ms: i64,
     /// The most composing messages a subject has at once on a row.
     pub max_drafts: i64,
+    /// What an attachment block may describe.
+    pub attachments: AttachmentsConfig,
 }
 
 impl Default for CommentsConfig {
@@ -209,6 +236,7 @@ impl Default for CommentsConfig {
             resolve_permission: None,
             compose_timeout_ms: DEFAULT_COMPOSE_TIMEOUT_MS,
             max_drafts: DEFAULT_MAX_DRAFTS,
+            attachments: AttachmentsConfig::default(),
         }
     }
 }
@@ -222,23 +250,28 @@ impl CommentsConfig {
             return Err(ConfigError::Schema(issues.into_issues()));
         }
         for (member, why) in WAITING_MEMBERS {
-            let Some(value) = raw.get(member) else {
-                continue;
-            };
-            // A blocks list waits only when it names attachment.
-            if member == "blocks"
-                && !value
-                    .as_array()
-                    .is_some_and(|kinds| kinds.iter().any(|kind| kind == "attachment"))
-            {
-                continue;
+            if raw.get(member).is_some() {
+                return Err(format!("{member}: {why}").into());
             }
-            return Err(if member == "blocks" {
-                format!("blocks lists attachment: {why}").into()
-            } else {
-                format!("{member}: {why}").into()
-            });
         }
+        let strings = |value: Option<&Value>| -> Option<Vec<String>> {
+            value.and_then(Value::as_array).map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+        };
+        let attachments = raw.get("attachments");
+        let attachments = AttachmentsConfig {
+            schemes: strings(attachments.and_then(|a| a.get("schemes")))
+                .unwrap_or_else(|| AttachmentsConfig::default().schemes),
+            media_types: strings(attachments.and_then(|a| a.get("mediaTypes"))),
+            max_bytes: attachments
+                .and_then(|a| a.get("maxBytes"))
+                .and_then(checks::whole),
+        };
         let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_owned);
         Ok(CommentsConfig {
             max_body_length: raw
@@ -264,6 +297,7 @@ impl CommentsConfig {
                 .get("maxDrafts")
                 .and_then(checks::whole)
                 .unwrap_or(DEFAULT_MAX_DRAFTS),
+            attachments,
         })
     }
 }

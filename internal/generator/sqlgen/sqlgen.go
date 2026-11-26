@@ -282,8 +282,18 @@ type DDLOutput struct {
 	// changes, by table (audience.go, D156).
 	AudienceTriggers []AudienceTrigger
 	AudienceCascades []AudienceCascade
-	Projections      []ProjectionView
-	Timestamp        string
+	// ReferencesClears clear the references to a deleted row, by target
+	// table, and AttachmentsReleases enqueue the release of a deleted
+	// file's object, by attachments table (rowrefs.go, D154).
+	ReferencesClears    []ReferencesClear
+	AttachmentsReleases []AttachmentsRelease
+	// SearchTriggers keep the search index rows of each @searchable
+	// table, and SearchChildTriggers enqueue a row whose conversation or
+	// files changed (searchable.go, D155).
+	SearchTriggers      []SearchTrigger
+	SearchChildTriggers []SearchChildTrigger
+	Projections         []ProjectionView
+	Timestamp           string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -575,6 +585,14 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	referencesClears, attachmentsReleases, err := buildRowFeatures(schema, tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
+	searchTriggers, searchChildTriggers, err := buildSearchables(schema, tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
 	if err != nil {
 		return nil, err
@@ -642,10 +660,15 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		Fences:           fences,
 		AudienceTriggers: audienceTriggers,
 		AudienceCascades: audienceCascades,
-		RoleSeeds:        roleSeeds,
-		Projections:      projections,
-		Timestamp:        opts.Clock.RFC3339(),
-		RawSQL:           rawSQL,
+
+		ReferencesClears:    referencesClears,
+		AttachmentsReleases: attachmentsReleases,
+		SearchTriggers:      searchTriggers,
+		SearchChildTriggers: searchChildTriggers,
+		RoleSeeds:           roleSeeds,
+		Projections:         projections,
+		Timestamp:           opts.Clock.RFC3339(),
+		RawSQL:              rawSQL,
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}

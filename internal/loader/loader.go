@@ -19,14 +19,19 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/access"
+	"github.com/parable-work/superschematic/internal/loader/agents"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/conversations"
 	"github.com/parable-work/superschematic/internal/loader/graphops"
 	"github.com/parable-work/superschematic/internal/loader/idempotency"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
+	"github.com/parable-work/superschematic/internal/loader/notifications"
+	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/loader/search"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
@@ -275,6 +280,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				verified, err = o.runVerify(schema, vin)
 				return err
 			})
+			if err == nil {
+				err = loadProviders(servicePath, verified, cfg)
+			}
 			return verified, cfg, err
 		}
 	} else {
@@ -384,6 +392,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		verified, err = o.runVerify(schema, vin)
 		return err
 	})
+	if err == nil {
+		err = loadProviders(servicePath, verified, cfg)
+	}
 	return verified, cfg, err
 }
 
@@ -624,6 +635,8 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// A @source view of another service's @audience table reads its
 	// audience columns as the table's own (D156).
 	access.ExpandExternal(vin.ExternalTypes)
+	notifications.ExpandExternal(vin.ExternalTypes)
+	agents.ExpandExternal(vin.ExternalTypes)
 	// The table that keeps idempotency keys gets its key and columns
 	// before the pass, which checks it as any other table (D140).
 	keyScalars, err := idempotency.Expand(schema)
@@ -704,6 +717,47 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// tables' fields join the schema before the pass, so it reads them as
 	// the table's own.
 	if added := access.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Outside parties and inbound messages (D157): the fields of the
+	// conversations' classes and the run requests queue join the schema
+	// before the references and attachments expansion, so a messages class
+	// may hold references and files.
+	if added := conversations.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// References and attachments (D154): the sub-tables of a @references
+	// or an @attachments table, and the fields of the queues they name,
+	// join the schema before the pass, so it reads them as its own.
+	if added := rowrefs.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Events, notifications and channels (D153): the fields of the
+	// notifier's classes and the channel identities join the schema before
+	// the pass, so it reads them as its own.
+	if added := notifications.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Agent orchestration (D158): the fields of each @agents class's part
+	// that the class does not declare join it before the pass, so it reads
+	// them as its own.
+	if added := agents.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Search across tables (D155): the database's search index and the
+	// fields of the queues @searchable names join the schema before the
+	// pass, so it reads them as its own.
+	if added := search.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

@@ -20,7 +20,7 @@
 //! call from any number of threads at once, all of which run one core.
 //!
 //! The operations ([`crate`] says each one's documents): `rules_run`,
-//! `rules_declarations` and `rules_check`.
+//! `rules_declarations`, `rules_check` and `rules_expand`.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -146,6 +146,20 @@ pub unsafe extern "C" fn rules_check(
     call(Op::Check, in_ptr, in_len, out_ptr, out_len)
 }
 
+/// `expand`: a recurrence (D152) to its dated occurrences.
+///
+/// # Safety
+/// As [`rules_run`].
+#[no_mangle]
+pub unsafe extern "C" fn rules_expand(
+    in_ptr: *const u8,
+    in_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    call(Op::Expand, in_ptr, in_len, out_ptr, out_len)
+}
+
 /// Releases an output document.
 ///
 /// # Safety
@@ -208,6 +222,15 @@ mod tests {
         );
         assert_eq!(code, RULES_OK, "{text}");
         assert!(text.contains(r#""kind":"row""#), "{text}");
+        let (code, text) = invoke(
+            rules_expand,
+            br#"{"anchor": "relative", "date": "2026-10-31", "offset": "-P1D"}"#,
+        );
+        assert_eq!(code, RULES_OK, "{text}");
+        assert!(text.contains(r#""due":"2026-10-30T00:00""#), "{text}");
+        let (code, text) = invoke(rules_expand, br#"{"anchor": "weekly"}"#);
+        assert_eq!(code, RULES_ERROR, "{text}");
+        assert!(text.contains("invalid_input"), "{text}");
     }
 
     #[test]

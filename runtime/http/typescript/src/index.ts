@@ -311,6 +311,9 @@ export {
   contentBucket,
   contentObjectName,
 } from './bucket.js';
+// A stream's SHA-256 as it is read, which an attachment's upload is
+// checked against (D154): workerd's native digest on Workers.
+export { Sha256, sha256Stream } from './sha256.js';
 export type {
   Bucket,
   BucketBody,

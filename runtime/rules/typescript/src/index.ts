@@ -22,7 +22,7 @@
 // database, and takes a RulesCore from here, which the generated orm.ts
 // passes it.
 
-import type { Answers, BehaviorDeclaration, Caller, Command, Refusal, Step, TypeSpec } from './contract.js';
+import type { Answers, BehaviorDeclaration, Caller, Command, Expansion, ExpandInput, Refusal, Step, TypeSpec } from './contract.js';
 
 export type * from './contract.js';
 
@@ -92,6 +92,14 @@ export interface RulesCore {
    * its layout's specs when it first opens the core.
    */
   check(specs: readonly TypeSpec[], options?: CheckOptions): (Refusal | null)[];
+  /**
+   * Dates a recurrence (D152): its anchor, adjustment and lead times in, its
+   * occurrences in due order out, as the core computes them for every
+   * language. A recurrence it refuses (a rule that is no RFC 5545 RRULE, a
+   * zone the bundled database lacks) throws a RulesError of code
+   * invalid_input whose message, after `expand: `, says why.
+   */
+  expand(input: ExpandInput): Expansion;
 }
 
 /**
@@ -138,12 +146,13 @@ interface Exports {
   rules_run: Export;
   rules_declarations: Export;
   rules_check: Export;
+  rules_expand: Export;
 }
 
-const EXPORTS = ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check'] as const;
+const EXPORTS = ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand'] as const;
 
 /** An operation of the C ABI (runtime/engine/rust/rules-wasm/src/ffi.rs). */
-type Operation = 'run' | 'declarations' | 'check';
+type Operation = 'run' | 'declarations' | 'check' | 'expand';
 
 // The return codes of the C ABI.
 const RULES_OK = 0;
@@ -243,6 +252,10 @@ class Core implements RulesCore {
     return this.#typed('check', input) as (Refusal | null)[];
   }
 
+  expand(input: ExpandInput): Expansion {
+    return this.#typed('expand', input) as Expansion;
+  }
+
   #typed(operation: Operation, input: unknown): unknown {
     return this.#parse(this.#run(operation, this.#stringify(input)));
   }
@@ -276,7 +289,7 @@ class Core implements RulesCore {
 
   #copy(operation: Operation, bytes: Uint8Array): { code: number; output: string } {
     const core = this.#exports;
-    const call = operation === 'run' ? core.rules_run : operation === 'check' ? core.rules_check : core.rules_declarations;
+    const call = operation === 'run' ? core.rules_run : operation === 'check' ? core.rules_check : operation === 'expand' ? core.rules_expand : core.rules_declarations;
     const inPtr = core.rules_alloc(bytes.length);
     // Two 32-bit slots the core writes the output pointer and length into.
     const slots = core.rules_alloc(8);

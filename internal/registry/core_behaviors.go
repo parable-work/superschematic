@@ -79,6 +79,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"reconcile", RulesPackage},
 	{"schedules", RulesPackage},
 	{"pool", RulesPackage},
+	{"recurrence", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -114,7 +115,8 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // after D104's, then Numbering and Revisions, its next, then Comments, the
 // wave after, then Derived and Provenance (D73), the wave after that, then
 // Stock and Holds (D70), the commerce wave's first, which meet through the
-// contract Supply, then Calendar, its timed supply. Of these, a table
+// contract Supply, then Calendar, its timed supply, then Recurrence
+// (D152), which the core alone implements, as Schedules is. Of these, a table
 // implements one that names no value field (implements Timers<T, C>, and
 // Constants, StateRules and Approvals since D104's step 2, Lease,
 // Presence, Budget and Retries since its second batch, Seats since its
@@ -131,6 +133,8 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	// D103's step 4, its later waves, in the order they were ported.
 	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
 	"Stock", "Holds", "Calendar", "Payments",
+	// D152: dated occurrences of a recurrence, the core's alone.
+	"Recurrence",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a
@@ -163,11 +167,10 @@ var tableLeavesOut = map[string]map[string]string{
 // table's generated API does not serve; and the core's own words for what
 // it runs no command for yet.
 const (
-	commentsStreamed    = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
-	commentsReadState   = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
-	commentsDeliveries  = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-	commentsAnchors     = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
-	commentsAttachments = "an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+	commentsStreamed   = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
+	commentsReadState  = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
+	commentsDeliveries = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+	commentsAnchors    = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
 )
 
 // tableArmsNoDeadlines are the behaviors whose declarations arm deadlines
@@ -207,7 +210,6 @@ var tableRefusesMembers = map[string][]RefusedMember{
 		{"retryBackoffMs", commentsDeliveries},
 		{"deliveryRetentionMs", commentsDeliveries},
 		{"anchorPermission", commentsAnchors},
-		{"attachments", commentsAttachments},
 	},
 }
 
@@ -217,10 +219,6 @@ var tableRefusesMembers = map[string][]RefusedMember{
 func TableRefusesMembers(name string) []RefusedMember {
 	return tableRefusesMembers[name]
 }
-
-// CommentsAttachments is why a table's Comments refuses an attachment
-// block, and a config's blocks that lists one (D103's step 4).
-const CommentsAttachments = commentsAttachments
 
 // TableLeavesOut is why a table's use of the behavior name leaves its
 // operation out, or "" for one the behaviors' core runs: the layout lists
@@ -234,6 +232,39 @@ func TableLeavesOut(name, operation string) string {
 // (RulesBehaviors).
 func RunsOnTheCore(name string) bool {
 	return slices.Contains(RulesBehaviors, name)
+}
+
+// BehaviorReads are the tables a use of the behavior name with config
+// reads beside its own row's, which a table that composes no behavior may
+// be (D152): Recurrence's holiday table (holidays.table) and its relative
+// anchor's target (relative.type), in that order, each once; none for any
+// other behavior or a config that does not read. The behaviors' layout
+// carries each, read-only, so an adapter answers the core's reads of it.
+// Per-behavior code, as BehaviorListens is, until step 5 derives it from
+// the behavior's class (D103).
+func BehaviorReads(name string, config json.RawMessage) []string {
+	if name != "Recurrence" || len(config) == 0 {
+		return nil
+	}
+	var parsed struct {
+		Holidays *struct {
+			Table string `json:"table"`
+		} `json:"holidays"`
+		Relative *struct {
+			Type string `json:"type"`
+		} `json:"relative"`
+	}
+	if json.Unmarshal(config, &parsed) != nil {
+		return nil
+	}
+	var out []string
+	if parsed.Holidays != nil && parsed.Holidays.Table != "" {
+		out = append(out, parsed.Holidays.Table)
+	}
+	if parsed.Relative != nil && parsed.Relative.Type != "" && !slices.Contains(out, parsed.Relative.Type) {
+		out = append(out, parsed.Relative.Type)
+	}
+	return out
 }
 
 // BehaviorListen is a table whose writes a use of another table hears

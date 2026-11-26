@@ -251,6 +251,16 @@ Its entry points:
   (`WithoutUpserts`), since an upsert applies no change set.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
+- `@superschematic/http-runtime/providers`, the runtime extension points
+  (D159): the five interfaces a provider package implements
+  (`CredentialProvider`, `ChannelAdapter`, `SandboxProvider`,
+  `ModelProvider`, `FileProcessor`), `defineProvider` and
+  `checkProviderPackage`, which hold a package to its interface's
+  contract, `providersFrom`, which reads the providers an environment's
+  config names and runs each as its own principal (kind `extension`), and
+  `Injection` and `useCredential`, through which a credential reaches only
+  the runner. It imports node:async_hooks alone, as a Worker has it.
+  `examples/runtime-providers` holds six provider packages.
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
   emulator that serves its API, over a derived bucket connection (below).
   It is the only entry that imports `@google-cloud/storage`.

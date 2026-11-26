@@ -57,6 +57,9 @@ type Registry struct {
 	// rateLimitKeys are the principal @rateLimit keys extensions name
 	// (D131), in registration order.
 	rateLimitKeys []RateLimitKey
+	// runtimeFeatures are the features that need a runtime provider
+	// (D159), in registration order.
+	runtimeFeatures []RuntimeFeature
 	// toolInvocation is the policy RegisterToolInvocationPolicy installed;
 	// nil means ToolInvocationPolicy returns the core's.
 	toolInvocation *ToolInvocationPolicy
@@ -139,6 +142,17 @@ func New(n naming.Naming) *Registry {
 	// docs/extension-model.md section 8.
 	if err := r.RegisterAuthProvider(sessionauth.Provider{}); err != nil {
 		panic("registry: core auth provider: " + err.Error())
+	}
+	// The core's runtime features (D159): notifications need a channel
+	// adapter (D153).
+	if err := r.RegisterRuntimeFeature(notificationsFeature()); err != nil {
+		panic("registry: core runtime features: " + err.Error())
+	}
+	// Agent runs need a sandbox provider and a model provider (D158).
+	for _, feature := range agentFeatures() {
+		if err := r.RegisterRuntimeFeature(feature); err != nil {
+			panic("registry: core runtime features: " + err.Error())
+		}
 	}
 	return r
 }

@@ -143,9 +143,6 @@ export abstract class FractionalRetries {
   orderId: Identity.UUID;
 }
 
-@queue()
-export abstract class NoFields {}
-
 @queue({ backoff: "1m", maxBackoff: "30s" })
 export abstract class CapUnderTheBackoff {
   orderId: Identity.UUID;
@@ -175,7 +172,6 @@ export abstract class RetentionNoDuration {
 				`@queue NegativeRetries: retries is -1; it is zero or more`,
 				`@queue NotWholeSeconds: backoff: "1500ms" is not a whole number of seconds`,
 				`@queue retries is 1.5; it is a whole number`,
-				`@queue class NoFields has no fields`,
 				`@queue CapUnderTheBackoff: maxBackoff is "30s", shorter than the backoff of 60s; it caps the backoff a failure doubles, so it is the backoff or more`,
 				`@queue CapUnderTheDefaultBackoff: maxBackoff is "10s", shorter than the backoff of 30s`,
 				`@queue NegativeRetention: retain: "-1h" is negative; it is zero or more, and zero keeps no done message`,

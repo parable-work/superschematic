@@ -3,8 +3,8 @@
 // reached through the JSON C ABI of superschematic-rules-wasm's native
 // build, and the one host loop every Go caller runs it through.
 //
-// The binding (RunJSON, DeclarationsJSON, CheckJSON, and Native's Core over
-// them) sends one JSON document through the C ABI and reads one back. The
+// The binding (RunJSON, DeclarationsJSON, CheckJSON, ExpandJSON and Expand,
+// and Native's Core over them) sends one JSON document through the C ABI and reads one back. The
 // contract's types mirror the core's JSON as @superschematic/rules's
 // contract.ts does, every value of the core's own (a config, a parameter,
 // an own or owned value) held as json.RawMessage, so a number keeps its
@@ -70,12 +70,88 @@ func CheckJSON(input []byte) ([]byte, error) {
 	return call(opCheck, input)
 }
 
+// ExpandJSON is rules_expand: a recurrence (D152) to its dated
+// occurrences, {"occurrences": [...], "more"}; a recurrence the core
+// refuses is an *Error of code invalid_input whose message, after
+// "expand: ", says why.
+func ExpandJSON(input []byte) ([]byte, error) {
+	return call(opExpand, input)
+}
+
+// Expand dates a recurrence (D152) as the core does for every language:
+// ExpandInput's anchor, adjustment and lead times in, its occurrences in
+// due order out.
+func Expand(input ExpandInput) (Expansion, error) {
+	in, err := json.Marshal(input)
+	if err != nil {
+		return Expansion{}, fmt.Errorf("rules: encode the recurrence: %w", err)
+	}
+	out, err := ExpandJSON(in)
+	if err != nil {
+		return Expansion{}, err
+	}
+	var expansion Expansion
+	if err := json.Unmarshal(out, &expansion); err != nil {
+		return Expansion{}, fmt.Errorf("rules: decode the core's expansion: %w", err)
+	}
+	return expansion, nil
+}
+
+// ExpandInput is a recurrence the core dates (D152), as
+// @superschematic/rules's ExpandInput: its anchor (calendar, afterDone,
+// relative), the zone its wall times are read in, the adjustment of a due
+// date that falls on a weekend day or a holiday, the lead times (ISO 8601
+// spans) and the window [From, To) of due instants in epoch milliseconds.
+// Date is a wall date or date-time text, or epoch milliseconds.
+type ExpandInput struct {
+	Anchor       string          `json:"anchor"`
+	TimeZone     string          `json:"timeZone,omitempty"`
+	Rule         string          `json:"rule,omitempty"`
+	Start        string          `json:"start,omitempty"`
+	Every        string          `json:"every,omitempty"`
+	LastDone     *int64          `json:"lastDone,omitempty"`
+	Date         json.RawMessage `json:"date,omitempty"`
+	Offset       string          `json:"offset,omitempty"`
+	Adjust       string          `json:"adjust,omitempty"`
+	WeekendDays  []string        `json:"weekendDays,omitempty"`
+	Holidays     []string        `json:"holidays,omitempty"`
+	OpensBefore  string          `json:"opensBefore,omitempty"`
+	RemindBefore string          `json:"remindBefore,omitempty"`
+	OverdueAfter string          `json:"overdueAfter,omitempty"`
+	From         *int64          `json:"from,omitempty"`
+	To           *int64          `json:"to,omitempty"`
+	Limit        int             `json:"limit,omitempty"`
+}
+
+// ExpandedOccurrence is one dated occurrence (D152): Key is its nominal
+// wall date-time before the adjustment, Due the wall date-time it falls due
+// at after it, Shifted why it moved (weekend, holiday), and Projected an
+// afterDone occurrence past the first.
+type ExpandedOccurrence struct {
+	Key       string `json:"key"`
+	Due       string `json:"due"`
+	DueAt     int64  `json:"dueAt"`
+	OpensAt   *int64 `json:"opensAt,omitempty"`
+	RemindAt  *int64 `json:"remindAt,omitempty"`
+	OverdueAt int64  `json:"overdueAt"`
+	Shifted   string `json:"shifted,omitempty"`
+	Projected bool   `json:"projected,omitempty"`
+}
+
+// Expansion is what the core's expand answers: the occurrences in due
+// order, and whether more lie in the window past the limit.
+type Expansion struct {
+	Occurrences []ExpandedOccurrence `json:"occurrences"`
+	More        bool                 `json:"more"`
+}
+
 type op int
 
 const (
 	opRun op = iota
 	opDeclarations
 	opCheck
+	opExpand
 )
 
 // call runs one operation of the core on a JSON input and returns its
@@ -99,6 +175,8 @@ func call(o op, in []byte) ([]byte, error) {
 		code = C.rules_declarations(inPtr, inLen, &outPtr, &outLen)
 	case opCheck:
 		code = C.rules_check(inPtr, inLen, &outPtr, &outLen)
+	case opExpand:
+		code = C.rules_expand(inPtr, inLen, &outPtr, &outLen)
 	default:
 		return nil, fmt.Errorf("rules: unknown operation %d", o)
 	}

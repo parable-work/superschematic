@@ -176,6 +176,34 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// access log (core_access.go, D156).
 	specs = append(specs, accessDecorators()...)
 
+	// An API's provider slots, each a config field that names a runtime
+	// provider per environment (core_providers.go, D159).
+	specs = append(specs, providersDecorator())
+
+	// A table's references to rows of any table, and the files it holds in
+	// a bucket (core_rowrefs.go, D154).
+	specs = append(specs, rowFeatureDecorators()...)
+
+	// The dates of a table's rows, or its Recurrence's occurrences, that
+	// the calendar merges (core_calendar.go, D152).
+	specs = append(specs, calendarDecorators()...)
+
+	// The fields of a table the database's search index holds, and the queue
+	// a write that changes them enqueues on (core_search.go, D155).
+	specs = append(specs, searchDecorator())
+
+	// The events a table's rows raise, the notifier's tables and the table
+	// of channel identities (core_notifications.go, D153).
+	specs = append(specs, notificationDecorators()...)
+
+	// The agent orchestration's tables and an operation's autonomy class
+	// (core_agents.go, D158).
+	specs = append(specs, agentDecorators()...)
+
+	// The tables whose rows are parties, the conversations' tables and the
+	// queue of run requests (core_parties.go, D157).
+	specs = append(specs, partyDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
