@@ -329,6 +329,26 @@ func ({{ $typeName }}Fields) All() {{ $typeName }}Fields {
 	}
 }
 
+{{- if .OwnSelection }}
+
+// Own returns the {{ $typeName }} columns, with each to-one relation as an
+// id-only stub. It is the default nested selection (D164): a relation
+// selected without a nested selection hydrates with the target's Own, so a
+// default read never goes deeper than one level.
+func ({{ $typeName }}Fields) Own() {{ $typeName }}Fields {
+	return {{ $typeName }}Fields{
+		{{- range .Fields }}
+		{{ toGoName .Name }}: true,
+		{{- end }}
+		{{- range .Relationships }}
+		{{- if not .IsArray }}
+		{{ toGoName .FieldName }}Nested: {{ if .NestedByPointer }}&{{ end }}{{ .TargetType }}Fields{Id: true},
+		{{- end }}
+		{{- end }}
+	}
+}
+{{- end }}
+
 // Minimal returns commonly needed fields (id and name-like fields)
 func ({{ $typeName }}Fields) Minimal() {{ $typeName }}Fields {
 	return {{ $typeName }}Fields{

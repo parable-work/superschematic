@@ -39,6 +39,16 @@ import (
 {{- range .ImportedTypes}}
 {{formatComment .Name .Doc}}
 type {{.Name}} = {{.ImportAlias}}.{{.Name}}
+{{- if .LimitConsts}}
+{{- $alias := .ImportAlias}}
+
+// Limits of {{.Name}} fields, aliased from the module that owns the type.
+const (
+{{- range .LimitConsts}}
+	{{.}} = {{$alias}}.{{.}}
+{{- end}}
+)
+{{- end}}
 
 {{- end}}
 {{- range .ImportedUnions}}
@@ -1139,7 +1149,16 @@ type {{.Name}} struct {
 	durations *durationDecode
 {{- end}}
 }
-
+{{if .HasLimitConsts}}
+// Limits of {{.Name}} fields: each Validate<> limit merged with the
+// field's scalar, as Validate checks it. A length counts Unicode code
+// points, not bytes.
+const (
+	{{range .Fields}}{{range .LimitConsts}}
+	{{.Name}} = {{.Literal}}
+	{{- end}}{{end}}
+)
+{{end}}
 {{if .OpenAPISchemaJSON}}
 // {{.Name}}OpenAPISchema returns a fresh copy of the standalone OpenAPI
 // schema of {{.Name}}; referenced types are under "definitions".

@@ -302,6 +302,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 	}
 
 	fieldInfo.Validations = buildValidations(fieldInfo.ScalarInfo, field, fieldInfo.Required)
+	fieldInfo.Limits = EffectiveLimits(fieldInfo.ScalarInfo, field)
 	fieldInfo.Digits = DigitRulesOf(field)
 
 	// A required-null field has no value type: each language holds it in

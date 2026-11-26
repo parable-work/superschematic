@@ -983,6 +983,120 @@ Default: `{column} cannot move from % to %`
 The message the Postgres guard raises for a move the machine does not
 list, with the placeholders of `sql.state_guard_terminal`.
 
+## `[go]`
+
+Shapes of the generated Go types and ORM. The defaults are the core's
+output. A project whose hand-written Go code another compiler's output
+shaped sets these keys, so that code compiles and behaves the same.
+
+### `go.limit_constants`
+
+Default: `off`
+
+`on` writes, after each Go type, an untyped constant for each limit a
+field declares with `Validate<T, {...}>`: `<Type><Field>MinLength`,
+`MaxLength`, `Min`, `Max`, `ListMin` and `ListMax`, such as
+`OrderNotesMaxLength = 2000`. The value is the bound `Validate` checks:
+the field's limit merged with its scalar's, the larger minimum and the
+smaller maximum. A length counts Unicode code points. A module that
+aliases a dependency's type aliases its constants beside it. Two
+constants with one name, or a constant with the name of a type, enum or
+union, fail the build. `off` writes none. Any other value fails the load.
+
+### `go.optional_zero`
+
+Default: `omit`
+
+How a generated Go type holds a single optional field of a boolean, a
+number, a string or an integer scalar, such as `Generic.Int64`. `omit` is
+the core's rule
+([Required, nullable and optional](/superschematic/guides/modeling-types/#required-nullable-and-optional)):
+a `number` or a `string` is its value, left out when empty, and so is an
+integer scalar or a `boolean` with a default.
+
+`keep` keeps every value a payload states. A field whose value type would
+drop an explicit `0`, `""` or `false`, or read an explicit `null` as its
+default, is a pointer instead:
+
+| Optional field | `keep` |
+| --- | --- |
+| a scalar, with or without a default | `*T` |
+| `boolean` or `number` without a default | `*bool`, `*float64` |
+| `boolean`, `number` or `string` whose default is not `false`, `0` or `""` | `*bool`, `*float64`, `*string`, outside an `@envVars` class |
+| `number` or `string` whose default is `0` or `""`, `string` without a default | the value, left out when empty |
+
+An absent key decodes to a pointer to the default, and an explicit `null`
+to `nil`: the default does not apply. In an `@envVars` class a field with
+a default stays its value, since an unset variable is absent and never
+null; one whose default is not its zero value is always written. The ORM
+reads and writes each column into the type's shape, the env loader
+assigns it, and the Go server's `@tableOperation` handlers copy it
+between the API's types and the rows. Any other value fails the load.
+
+### `go.env_number_scalars`
+
+Default: `parse`
+
+How the Go env loader reads the variable of a number scalar, such as
+`Generic.Int64`, `Generic.Float64` or a port. `parse` hands the text to
+the types package's `Parse<Scalar>`, which the scalar library's parser
+backs. `strconv` trims the text and reads it with Go's `strconv`: an
+integer scalar with `ParseInt`, a float scalar with `ParseFloat`, which
+also refuses a value that is not finite. `Validate` then checks the
+scalar's rules, under either value. A text the loader cannot read fails
+the load with `environment variable <NAME>: not a valid integer`, `not a
+valid number` or `not a finite number`. Use `strconv` with a scalar
+library whose types package has no `Parse` function for a number scalar.
+Any other value fails the load.
+
+### `go.orm_relation_filter_suffix`
+
+Default: empty
+
+Ends the name of the member of a Go ORM filter that keeps the rows whose
+to-one relation points at a row another filter finds, such as
+`OrderFilter.Customer *CustomerFilter`. Empty names the member after the
+relation; `Where` names it `CustomerWhere`. The condition does not
+change. The value holds ASCII letters and digits and starts with an
+upper-case letter; any other value fails the load.
+
+### `go.orm_default_selection`
+
+Default: `all`
+
+The fields the Go ORM reads of a relation that a read selects without a
+nested selection, such as `OrderFields{Store: true}`. `all` reads the
+target's `All()`, whose relations read their own `All()`, as deep as the
+schema goes. `own` writes `<Type>Fields.Own()`, the type's columns with
+each to-one relation as an id-only stub, and reads the target's `Own()`:
+a default read is one level deep and sends one statement per relation.
+An explicit nested selection keeps its depth under either value, and
+under `own` it always reads the target's id, which the read matches the
+rows by. Any other value fails the load.
+
+### `go.enum_text_methods`
+
+Default: `off`
+
+`on` gives a Go enum whose members' comments carry a `title:` or an
+`action:` line the methods `Title()` and `Action()`. Each returns the
+text after its key on the member's first such line, trimmed, or `""` for
+a member without one, so code reads a member's words from the generated
+enum and keeps no copy of them:
+
+```ts
+export enum UploadProblem {
+  // title: The upload was refused
+  // action: Pick a smaller file and try again.
+  TOO_LARGE = "UP-001",
+}
+```
+
+The key matches in any case. The member's comment keeps the lines. An
+enum with no such line gets neither method. The member's `@title` tag
+(D48) is a separate label, which the methods do not read. `off` writes
+neither method. Any other value fails the load.
+
 ## `[go_api]`
 
 How the generated Go API routers answer a request they refuse, and the

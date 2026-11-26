@@ -134,6 +134,10 @@ type FieldInfo struct {
 	// KeepsZeroValue drops omitempty from an optional bool whose default is
 	// true: an omitted false would decode back as true.
 	KeepsZeroValue bool
+
+	// LimitConsts are the constants of the limits the field declares with
+	// Validate<>, written with go.limit_constants = "on" (D160).
+	LimitConsts []LimitConst
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][].
@@ -245,6 +249,9 @@ type ImportedTypeInfo struct {
 	Doc         string
 	ImportAlias string
 	IsInput     bool
+	// LimitConsts name the dependency's limit constants of the type, which
+	// the module aliases beside it (go.limit_constants = "on", D160).
+	LimitConsts []string
 }
 
 // ImportedUnionInfo holds alias metadata for unions owned by a dependency module.
@@ -272,6 +279,10 @@ type EnumInfo struct {
 	Name   string
 	Doc    string
 	Values []codegen.EnumValueInfo
+	// TextMethods writes Title() and Action(), the `title:` and `action:`
+	// lines of each member's comment: go.enum_text_methods = "on" and a
+	// member with such a line (D165).
+	TextMethods bool
 }
 
 // ModuleOutput contains all generated code for a types module.
@@ -448,7 +459,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		if scalar.ParseAsInt64 {
 			output.HasInt64ScalarParsers = true
 		}
-		if scalar.ParseAsJSON {
+		// A JSON scalar without a Parse function (no ParseTarget) calls no
+		// json function, so it needs no encoding/json import.
+		if scalar.ParseAsJSON && scalar.ParseTarget != "" {
 			output.HasJSONScalarParsers = true
 		}
 	}
@@ -470,7 +483,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		allDependencyModulePaths(opts.ModulePath, slices.Concat(output.ModuleDependencies, output.IndirectModuleDependencies), opts.DependencyModules),
 	)
 
-	output.Enums = convertEnums(codegen.ExtractEnums(schema))
+	output.Enums = convertEnums(codegen.ExtractEnums(schema), opts.Naming.Go.WritesEnumTextMethods())
 
 	output.Unions = convertUnions(codegen.ExtractUnions(schema))
 	for _, def := range codegen.ExtractCompositeDefaults(schema) {
@@ -489,8 +502,16 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	importAliases := importAliasReplacements(output.Imports)
 	unionNames := knownUnionNames(output.Unions, output.ImportedUnions)
-	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames)
-	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames)...)
+	shapes := codegen.GoOptionalShapes{KeepZero: opts.Naming.Go.KeepsOptionalZero()}
+	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames, shapes)
+	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames, shapes)...)
+	if opts.Naming.Go.WritesLimitConstants() {
+		setLimitConsts(output.Types[:len(objectTypes)], objectTypes)
+		setLimitConsts(output.Types[len(objectTypes):], inputTypes)
+		if err := checkLimitConstNames(output); err != nil {
+			return nil, err
+		}
+	}
 	// A strict General type is a closed payload contract; give it its
 	// standalone OpenAPI schema so a Go program can hand the contract to a
 	// consumer that validates or documents it.
@@ -772,13 +793,14 @@ func scalarLibParseTarget(scalar ScalarInfo) string {
 	return ""
 }
 
-func convertEnums(enums []codegen.EnumInfo) []EnumInfo {
+func convertEnums(enums []codegen.EnumInfo, textMethods bool) []EnumInfo {
 	converted := make([]EnumInfo, len(enums))
 	for i, e := range enums {
 		converted[i] = EnumInfo{
-			Name:   e.Name,
-			Doc:    e.Doc(),
-			Values: e.Values,
+			Name:        e.Name,
+			Doc:         e.Doc(),
+			Values:      e.Values,
+			TextMethods: textMethods && codegen.EnumValuesHaveText(e.Values),
 		}
 	}
 	return converted
@@ -826,11 +848,11 @@ func knownUnionNames(local []UnionInfo, imported []ImportedUnionInfo) map[string
 	return names
 }
 
-func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []TypeInfo {
+func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool, shapes codegen.GoOptionalShapes) []TypeInfo {
 	scalarMap := buildScalarMap(scalars)
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, ct := range codegenTypes {
-		fields := convertFields(ct.Fields, scalarMap, isInput, enumLookup, importAliases, unionNames)
+		fields := convertFields(ct.Fields, scalarMap, isInput, ct.EnvVars, enumLookup, importAliases, unionNames, shapes)
 		hasDefaults := false
 		for _, f := range fields {
 			if f.HasDefault && f.DefaultLiteral != "" {
@@ -903,7 +925,7 @@ func buildEnumLookup(localEnums []EnumInfo, importedEnums []ImportedEnumInfo) co
 }
 
 // convertFields converts codegen.FieldInfo to typegen.FieldInfo.
-func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []FieldInfo {
+func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput, envVars bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool, shapes codegen.GoOptionalShapes) []FieldInfo {
 	fields := make([]FieldInfo, len(codegenFields))
 	for i, cf := range codegenFields {
 		isUnion := cf.IsUnion || unionNames[cf.Type]
@@ -916,9 +938,9 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		// T[] and T[][] are value types, so [][]*T cannot arise.
 		goType := normalizeImportedGoType(cf.TargetType, importAliases)
 		// An optional integer-like scalar keeps its pointer unless it declares
-		// a default; see codegen.GoOptionalIntegerScalarIsPointer.
-		if !isInput && cf.IsScalar && !cf.Required && !cf.DistinctNull && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike &&
-			!codegen.GoOptionalIntegerScalarIsPointer(cf.Required, cf.IsArray, cf.IsMap, cf.Default) {
+		// a default; see codegen.GoOptionalShapes.IntegerScalarIsPointer.
+		if !isInput && cf.IsScalar && !cf.Required && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike &&
+			!shapes.IntegerScalarIsPointer(cf.Required, cf.IsArray, cf.IsMap, cf.Default, cf.DistinctNull) {
 			goType = strings.TrimPrefix(goType, "*")
 		}
 		// A Go union is an interface and already nilable. A pointer to it is
@@ -936,8 +958,10 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		// and a reader that treats absence as unset (Python None, a layered
 		// merge) still sees it. With a default of true the field stays bool
 		// and always serializes; see KeepsZeroValue.
-		if !isInput && codegen.GoOptionalBoolIsPointer(cf.Type, cf.Required, cf.IsArray, cf.IsMap, cf.Default) {
-			goType = "*bool"
+		// With go.optional_zero = "keep" an optional number or string is a
+		// pointer by the same reasoning; see codegen.GoOptionalShapes.
+		if !isInput && shapes.PrimitiveIsPointer(cf.Type, cf.Required, cf.IsArray, cf.IsMap, cf.Default, envVars) {
+			goType = "*" + goType
 		}
 		if usesWrapper {
 			innerType := goType
@@ -974,8 +998,12 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 
 		if cf.Default != nil {
 			kind := codegen.ClassifyDefault(cf, enumLookup)
+			format := formatGoDefaultLiteral
+			if shapes.KeepZero && strings.HasPrefix(goType, "*") {
+				format = formatGoPointerDefaultLiteral
+			}
 			if kind != codegen.DefaultLiteralUnknown {
-				if literal, ok := formatGoDefaultLiteral(*cf.Default, kind, field); ok && literal != "" {
+				if literal, ok := format(*cf.Default, kind, field); ok && literal != "" {
 					field.HasDefault = true
 					field.DefaultLiteral = literal
 				}
@@ -986,6 +1014,9 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			field.Validations = withoutScalarRules(field.Validations)
 		}
 		field.KeepsZeroValue = !isInput && goType == "bool" && !cf.Required && field.DefaultLiteral == "true"
+		if shapes.KeepZero {
+			field.KeepsZeroValue = !isInput && !cf.Required && field.HasDefault && defaultHidesZero(goType, field.DefaultLiteral)
+		}
 
 		fields[i] = field
 	}

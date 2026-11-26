@@ -19,6 +19,9 @@ import (
 	"sync"
 	"sync/atomic"
 {{- end }}
+{{- if .ParsesFloatScalars }}
+	"math"
+{{- end }}
 {{- end }}
 
 	"github.com/joho/godotenv"
@@ -109,7 +112,7 @@ func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 	if val, err := {{ loaderExpr . }}; err != nil {
 		errs = append(errs, err)
 	} else {
-		scalar, parseErr := types.Parse{{ .GoType }}(val)
+		scalar, parseErr := {{ scalarParse . "val" }}
 		if parseErr != nil {
 			errs = append(errs, fmt.Errorf("environment variable %s: %w", "{{ .Key }}", parseErr))
 		} else if valid, validationErrs := scalar.ValidateRequired(); !valid {
@@ -126,7 +129,7 @@ func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 	{
 		val := {{ loaderExpr . }}
 		if val != "" {
-			scalar, parseErr := types.Parse{{ .GoType }}(val)
+			scalar, parseErr := {{ scalarParse . "val" }}
 			if parseErr != nil {
 				errs = append(errs, fmt.Errorf("environment variable %s: %w", "{{ .Key }}", parseErr))
 			} else if valid, validationErrs := scalar.Validate(); !valid {
@@ -139,7 +142,7 @@ func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 {{- end }}
 			}
 		}{{- if .HasDefault }} else {
-			scalar, _ := types.Parse{{ .GoType }}("{{ .DefaultValue }}")
+			scalar, _ := {{ scalarParse . (printf "%q" .DefaultValue) }}
 {{- if assignsPointer . }}
 			cfg.{{ .GoName }} = &scalar
 {{- else }}
@@ -200,7 +203,7 @@ func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 	}
 {{- else if .OptionalBool }}
 	if lookup("{{ .Key }}") != "" {
-		cfg.{{ .GoName }} = new({{ loaderExpr . }})
+		cfg.{{ .GoName }} = new({{ primitiveAssign . (loaderExpr .) }})
 	}
 {{- else }}
 	cfg.{{ .GoName }} = {{ primitiveAssign . (loaderExpr .) }}
@@ -440,6 +443,37 @@ func combineErrors(errs []error) error {
 
 {{- if or .HasScalars .HasNamed }}
 
+{{- if .ParsesFloatScalars }}
+// parseFloatScalar parses the text of a floating-point scalar, such as
+// Generic.Float64, with strconv: the loader's own parse under
+// go.env_number_scalars = "strconv" (D162). Validate then checks the
+// scalar's rules.
+func parseFloatScalar[T ~float64](val string) (T, error) {
+	f, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+	if err != nil {
+		return 0, fmt.Errorf("not a valid number: %w", err)
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, errors.New("not a finite number")
+	}
+	return T(f), nil
+}
+
+{{ end }}
+{{- if .ParsesIntScalars }}
+// parseIntScalar parses the text of an integer scalar, such as
+// Generic.Int64 or Network.Port, with strconv: the loader's own parse
+// under go.env_number_scalars = "strconv" (D162). Validate then checks the
+// scalar's rules.
+func parseIntScalar[T ~int64](val string) (T, error) {
+	i, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("not a valid integer: %w", err)
+	}
+	return T(i), nil
+}
+
+{{ end }}
 // formatValidationError formats a validation error with helpful context.
 func formatValidationError(envVar string, value string, validationErrs []types.ValidationError) error {
 	var messages []string

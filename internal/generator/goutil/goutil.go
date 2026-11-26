@@ -15,6 +15,14 @@ func ToPackageName(value string) string {
 	return strings.ToLower(value)
 }
 
+// LimitConstName is the Go name of the constant of one field limit:
+// LimitConstName("Order", "Notes", codegen.LimitMaxLength) is
+// OrderNotesMaxLength.
+func LimitConstName(typeName, fieldGoName string, kind codegen.LimitKind) string {
+	parts := append([]string{typeName, fieldGoName}, kind.Words()...)
+	return GoPublicIdentifier(strings.Join(parts, "_"))
+}
+
 // ToPascalCase converts input to PascalCase using shared codegen conventions.
 func ToPascalCase(value string) string {
 	return codegen.ToPascalCase(strings.ReplaceAll(strings.ReplaceAll(value, "-", "_"), " ", "_"))

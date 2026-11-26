@@ -275,6 +275,11 @@ type GeoPointListType struct {
 
 // Repository represents a generated repository for a table.
 type Repository struct {
+	// OwnSelection is go.orm_default_selection = "own" (D164): the type's
+	// Fields has Own, and a relation selected without a nested selection
+	// hydrates with the target's Own, not its All.
+	OwnSelection bool
+
 	Name                   string // e.g. "OrderRepository"
 	TypeName               string // e.g. "Order"
 	TableName              string // e.g. "order"
@@ -449,7 +454,8 @@ type Repository struct {
 }
 
 // PathRelation is a to-one relation a filter reaches through (D90):
-// sqlutil's, with its member of the filter, GoField.
+// sqlutil's, with its member of the filter, GoField: the relation's field
+// in PascalCase, then go.orm_relation_filter_suffix (D163).
 type PathRelation struct {
 	sqlutil.ToOne
 	GoField string
@@ -517,7 +523,7 @@ type Field struct {
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
 	IsNullableEnum     bool   // optional enum: typegen emits *Enum
 	IsNullableScalar   bool   // optional scalar typegen emits as *Scalar (an integer-like one only without a default, or DistinctNull)
-	IsNullableBool     bool   // optional boolean without a default: typegen emits *bool
+	IsNullableBool     bool   // optional boolean, number or string typegen emits as a pointer (codegen.GoOptionalShapes): *bool for a boolean without a default
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
@@ -1032,6 +1038,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 
 	scalarMap := buildScalarLookup(schema)
+	shapes := codegen.GoOptionalShapes{KeepZero: opts.Naming.Go.KeepsOptionalZero()}
 	unionNames := sqlutil.UnionNames(schema, opts.Dependencies)
 	enumNames := sqlutil.EnumNames(schema, opts.Dependencies)
 	uuidGoType, err := resolveUUIDGoType(schema, tableTypes, scalarMap)
@@ -1052,7 +1059,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			// operations write it, through the core (D103).
 			continue
 		}
-		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType)
+		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType, shapes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract table from type %s: %w", typeDef.Name, err)
 		}
@@ -1064,6 +1071,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 				return nil, err
 			}
 		}
+		// go.orm_relation_filter_suffix names the member of each to-one
+		// relation the filter reaches through (D163).
+		for j := range repo.PathRelations {
+			repo.PathRelations[j].GoField += opts.Naming.Go.ORMRelationFilterSuffix
+		}
+		repo.OwnSelection = opts.Naming.Go.ReadsOwnByDefault()
 		repositories = append(repositories, repo)
 	}
 
@@ -1078,7 +1091,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
+	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite, shapes)
 	if err != nil {
 		return nil, err
 	}
@@ -1088,7 +1101,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err := attachChanges(repositories, queues); err != nil {
 		return nil, err
 	}
-	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)
+	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies, shapes)
 	if err != nil {
 		return nil, err
 	}
@@ -1099,7 +1112,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		queueRepositories[i] = Repository{Fields: q.Fields}
 	}
 	// So does a projection's column, which it reads (D90).
-	projections, err := projectionRepositories(schema, opts.Dependencies, scalarMap, unionNames)
+	projections, err := projectionRepositories(schema, opts.Dependencies, scalarMap, unionNames, shapes)
 	if err != nil {
 		return nil, err
 	}
@@ -1449,7 +1462,7 @@ func isRelationalTarget(typeName string, schema *ir.Schema) bool {
 }
 
 // extractRepository extracts repository information from an IR TypeDef.
-func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, uuidGoType string) (Repository, error) {
+func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, uuidGoType string, shapes codegen.GoOptionalShapes) (Repository, error) {
 	tableName := sqlutil.TableName(typeDef)
 	repo := Repository{
 		Name:            typeDef.Name + "Repository",
@@ -1511,7 +1524,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 				)
 			}
 
-			rel := extractRelationship(fieldDef, typeDef.Name, schema, scalars, unionNames)
+			rel := extractRelationship(fieldDef, typeDef.Name, schema, scalars, unionNames, shapes)
 			repo.Relationships = append(repo.Relationships, rel)
 			// Only to-one relationships are local FK columns; hasMany
 			// relationships are hydrated separately and do not participate
@@ -1526,7 +1539,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			continue
 		}
 
-		field := extractField(fieldDef, schema, scalars, unionNames)
+		field := extractField(fieldDef, schema, scalars, unionNames, shapes)
 		if enumNames[field.IRType] && !field.IsEnum {
 			field.IsEnum = true
 		}
@@ -1663,7 +1676,7 @@ func reanchorOrderedMembers(repo *Repository) {
 }
 
 // extractField extracts column information from an IR FieldDef.
-func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool) Field {
+func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, shapes codegen.GoOptionalShapes) Field {
 	irType := fieldDef.TypeRef.Name
 	isArray := fieldDef.TypeRef.IsArray
 	isRequired := fieldDef.Required
@@ -1691,13 +1704,15 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	// optional non-union map holds *T values), so neither is a *T even when
 	// the field itself is nullable. An optional integer-like scalar with a
 	// declared default is a value type, as typegen declares it, unless its
-	// null is distinct (ir.FieldDef.DistinctNull); other optional scalars and
-	// enums use pointers.
+	// null is distinct (ir.FieldDef.DistinctNull) or go.optional_zero is
+	// "keep"; other optional scalars and enums use pointers. A boolean,
+	// number or string is a pointer where typegen makes it one
+	// (codegen.GoOptionalShapes).
 	isMap := fieldDef.TypeRef.IsMap
 	isNullableEnum := !isRequired && !isArray && !isMap && isEnum
 	isNullableScalar := !isRequired && !isArray && !isMap && isScalar &&
-		(!traits.IsIntegerLike || fieldDef.DistinctNull || codegen.GoOptionalIntegerScalarIsPointer(isRequired, isArray, isMap, fieldDef.Default))
-	isNullableBool := codegen.GoOptionalBoolIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default)
+		(!traits.IsIntegerLike || shapes.IntegerScalarIsPointer(isRequired, isArray, isMap, fieldDef.Default, fieldDef.DistinctNull))
+	isNullableBool := shapes.PrimitiveIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default, false)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
 
 	field := Field{
@@ -1770,7 +1785,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 }
 
 // extractRelationship extracts relationship information from an IR FieldDef.
-func extractRelationship(fieldDef *ir.FieldDef, parentTypeName string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool) Relationship {
+func extractRelationship(fieldDef *ir.FieldDef, parentTypeName string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, shapes codegen.GoOptionalShapes) Relationship {
 	targetType := fieldDef.TypeRef.Name
 	dbColumnName := sqlutil.ForeignKeyColumn(fieldDef)
 	targetTableName := sqlutil.TableNameOf(schema, targetType)
@@ -1789,13 +1804,13 @@ func extractRelationship(fieldDef *ir.FieldDef, parentTypeName string, schema *i
 		QuotedTargetTable:          sqlutil.QuoteIdentifier(targetTableName),
 		IsRequired:                 fieldDef.Required,
 		IsArray:                    fieldDef.TypeRef.IsArray,
-		TargetPrimaryKeyIsPointer:  targetPrimaryKeyIsPointer(targetType, schema, scalars, unionNames),
+		TargetPrimaryKeyIsPointer:  targetPrimaryKeyIsPointer(targetType, schema, scalars, unionNames, shapes),
 		HasManyParentRelationField: hasManyParentRelationField,
 		HasManyParentFilterField:   hasManyParentFilterField,
 	}
 }
 
-func targetPrimaryKeyIsPointer(targetType string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool) bool {
+func targetPrimaryKeyIsPointer(targetType string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, shapes codegen.GoOptionalShapes) bool {
 	typeDef := schema.Types[targetType]
 	if typeDef == nil {
 		return false
@@ -1804,7 +1819,7 @@ func targetPrimaryKeyIsPointer(targetType string, schema *ir.Schema, scalars map
 		if fieldDef == nil || !fieldDef.Key {
 			continue
 		}
-		field := extractField(fieldDef, schema, scalars, unionNames)
+		field := extractField(fieldDef, schema, scalars, unionNames, shapes)
 		return field.DerefValue || field.IsAutoGenerated
 	}
 	return false
@@ -2111,7 +2126,7 @@ func computeImportNeeds(repo *Repository) {
 		}
 		// A JSON column (a map among them) scans through []byte, never
 		// sql.NullString.
-		if !field.IsJSONField && !field.IsRequired && !field.IsPrimaryKey && !field.IsAuditField && !field.IsArray && field.GoType == "string" {
+		if !field.IsJSONField && !field.IsRequired && !field.IsPrimaryKey && !field.IsAuditField && !field.IsArray && field.GoType == "string" && !field.IsNullableBool {
 			repo.NeedsSQLNull = true
 		}
 

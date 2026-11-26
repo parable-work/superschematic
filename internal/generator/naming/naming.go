@@ -234,6 +234,9 @@ type Naming struct {
 	// beyond its type, and the text of the errors its triggers raise.
 	SQL SQLConfig `toml:"sql"`
 
+	// Go is the [go] table: shapes of the generated Go types and ORM that
+	// a project whose Go code another compiler's output shaped can set.
+	Go GoConfig `toml:"go"`
 	// GoAPI is the [go_api] table: how the generated Go API routers answer
 	// a request they refuse, and the symbols they write beside the routes.
 	GoAPI GoAPIConfig `toml:"go_api"`
@@ -967,6 +970,7 @@ func Default() Naming {
 			StateGuardTerminal: DefaultGuardTerminal,
 			StateGuardRefused:  DefaultGuardRefused,
 		},
+		Go: defaultGoConfig(),
 		AuthoringPackages: []string{
 			"@superschematic/api",
 			"@superschematic/db",
@@ -1037,6 +1041,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SQL.NowDefaults, d.SQL.NowDefaults)
 	fill(&n.SQL.StateGuardTerminal, d.SQL.StateGuardTerminal)
 	fill(&n.SQL.StateGuardRefused, d.SQL.StateGuardRefused)
+	n.Go.fill(d.Go, fill)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -1412,6 +1417,9 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.SQL.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Go.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.GoAPI.check(); err != nil {

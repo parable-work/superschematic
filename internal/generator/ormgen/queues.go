@@ -81,7 +81,7 @@ type SQLiteQueueField struct {
 // native array, and a list of locations or durations, a POINT[] or an
 // INTERVAL[] column, which the TypeScript and Rust clients leave out too. A
 // single location or duration it holds (D53, amended).
-func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, sqlite bool) ([]Queue, error) {
+func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, sqlite bool, shapes codegen.GoOptionalShapes) ([]Queue, error) {
 	sqlTypes := sqlutil.ScalarSQLTypes(schema)
 	var queues []Queue
 	for _, td := range schema.Queues() {
@@ -105,7 +105,7 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 			if f == nil {
 				continue
 			}
-			field := extractField(f, schema, scalars, unionNames)
+			field := extractField(f, schema, scalars, unionNames, shapes)
 			if enumNames[field.IRType] && field.IsRequired && !field.IsArray && f.Default != nil {
 				field.EnumDefault = *f.Default
 			}
@@ -215,7 +215,7 @@ func (f Field) QueueScanTemp() string {
 		return "time.Duration"
 	case !f.IsArray && f.IsDateLike:
 		return "pgtype.Date"
-	case !f.IsRequired && !f.IsArray && f.GoType == "string":
+	case !f.IsRequired && !f.IsArray && f.GoType == "string" && !f.IsNullableBool:
 		return "sql.NullString"
 	case !f.IsRequired && !f.IsArray:
 		return "*" + f.GoType

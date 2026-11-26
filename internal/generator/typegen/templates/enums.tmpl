@@ -107,6 +107,32 @@ func (e *{{.Name}}) UnmarshalJSON(data []byte) error {
 	return err
 }
 
+{{if .TextMethods -}}
+// Title returns the `title:` line of the member's schema comment: the
+// heading a person reads first. It returns "" when the member has none.
+func (e {{.Name}}) Title() string {
+	switch e {
+	{{- range .Values}}{{if .Title}}
+	case {{$enumName}}_{{.Name}}:
+		return {{printf "%q" .Title}}
+	{{- end}}{{end}}
+	}
+	return ""
+}
+
+// Action returns the `action:` line of the member's schema comment: what
+// the person can do next. It returns "" when the member has none.
+func (e {{.Name}}) Action() string {
+	switch e {
+	{{- range .Values}}{{if .Action}}
+	case {{$enumName}}_{{.Name}}:
+		return {{printf "%q" .Action}}
+	{{- end}}{{end}}
+	}
+	return ""
+}
+
+{{end -}}
 // Values returns every {{.Name}} member in schema declaration order.
 // Each call returns a new slice.
 func ({{.Name}}) Values() []{{.Name}} {

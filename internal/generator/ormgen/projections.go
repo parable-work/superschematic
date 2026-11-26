@@ -123,7 +123,7 @@ func (o *ORMOutput) ProjectionsUse(what string) bool {
 		for _, f := range p.Fields {
 			switch what {
 			case "sql":
-				if !f.IsRequired && !f.IsArray && f.GoType == "string" && !f.IsJSONField && !f.IsDateLike && !f.IsInterval && !f.IsGeoPoint && !f.IsVector {
+				if !f.IsRequired && !f.IsArray && f.GoType == "string" && !f.IsNullableBool && !f.IsJSONField && !f.IsDateLike && !f.IsInterval && !f.IsGeoPoint && !f.IsVector {
 					return true
 				}
 			case "pgtype":
@@ -148,7 +148,7 @@ func (o *ORMOutput) ProjectionsUse(what string) bool {
 // a key, sorted by name, each column classified as a table's column of its
 // type (extractField), then held to the view sqlutil models: the same
 // columns, filters and sorts.
-func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schema, scalars map[string]scalarLookup, unions map[string]bool) ([]ProjectionRepository, error) {
+func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schema, scalars map[string]scalarLookup, unions map[string]bool, shapes codegen.GoOptionalShapes) ([]ProjectionRepository, error) {
 	views, err := sqlutil.ViewsOf(schema, dependencies)
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schem
 			return nil, err
 		}
 		for _, fd := range td.Fields {
-			field := extractField(fd, schema, scalars, unions)
+			field := extractField(fd, schema, scalars, unions, shapes)
 			// A view's column is no table's audit field or key, whatever
 			// its name: it reads, filters and sorts as its type does.
 			field.IsAuditField, field.IsAuditTimestamp, field.IsPrimaryKey = false, false, false

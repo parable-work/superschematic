@@ -177,7 +177,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			}
 
 			if typeDef, ok := depSchema.Types[symbol]; ok {
-				if addImportedTypeAliases(&result.types, seenTypes, localSymbols, depSchema, typeDef, alias) {
+				if addImportedTypeAliases(&result.types, seenTypes, localSymbols, depSchema, typeDef, alias, opts.Naming.Go.WritesLimitConstants()) {
 					usedModule = true
 				}
 				continue
@@ -230,7 +230,7 @@ func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
 // API view that shares a name with a nested DB relation (e.g. shop-api.Order
 // vs shop-db.Order). Traits are skipped -- they are flattened into tables and
 // are not emitted as Go types in the dependency module.
-func addImportedTypeAliases(result *[]ImportedTypeInfo, seen map[string]struct{}, localSymbols map[string]struct{}, depSchema *ir.Schema, typeDef *ir.TypeDef, alias string) bool {
+func addImportedTypeAliases(result *[]ImportedTypeInfo, seen map[string]struct{}, localSymbols map[string]struct{}, depSchema *ir.Schema, typeDef *ir.TypeDef, alias string, limitConsts bool) bool {
 	if typeDef == nil {
 		return false
 	}
@@ -244,19 +244,23 @@ func addImportedTypeAliases(result *[]ImportedTypeInfo, seen map[string]struct{}
 		return false
 	}
 	seen[typeDef.Name] = struct{}{}
-	*result = append(*result, ImportedTypeInfo{
+	imported := ImportedTypeInfo{
 		Name:        typeDef.Name,
 		Doc:         codegen.DocText(typeDef.Description, typeDef.Comment),
 		ImportAlias: alias,
 		IsInput:     typeDef.Role == ir.RoleAPIInput,
-	})
+	}
+	if limitConsts {
+		imported.LimitConsts = importedLimitConsts(typeDef)
+	}
+	*result = append(*result, imported)
 	emitted := true
 	for _, field := range typeDef.Fields {
 		nested, ok := depSchema.Types[field.TypeRef.Name]
 		if !ok {
 			continue
 		}
-		if addImportedTypeAliases(result, seen, localSymbols, depSchema, nested, alias) {
+		if addImportedTypeAliases(result, seen, localSymbols, depSchema, nested, alias, limitConsts) {
 			emitted = true
 		}
 	}

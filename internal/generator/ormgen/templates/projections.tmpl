@@ -515,7 +515,7 @@ func (r *{{ .Name }}) read(ctx context.Context, query string, args []interface{}
 		var temp{{ toGoName $f.Name }} *time.Duration
 {{- else if and (not $f.IsArray) $f.IsDateLike }}
 		var temp{{ toGoName $f.Name }} pgtype.Date
-{{- else if and (not $f.IsRequired) (not $f.IsArray) (eq $f.GoType "string") }}
+{{- else if and (not $f.IsRequired) (not $f.IsArray) (eq $f.GoType "string") (not $f.IsNullableBool) }}
 		var temp{{ toGoName $f.Name }} sql.NullString
 {{- else if and (not $f.IsRequired) (not $f.IsArray) }}
 		var temp{{ toGoName $f.Name }} *{{ $f.GoType }}
@@ -596,7 +596,7 @@ func (r *{{ .Name }}) read(ctx context.Context, query string, args []interface{}
 			result.{{ toGoName $f.Name }} = {{ $f.GoType }}(temp{{ toGoName $f.Name }}.Time.Format("2006-01-02"))
 			{{- end }}
 		}
-{{- else if and (not $f.IsRequired) (not $f.IsArray) (eq $f.GoType "string") }}
+{{- else if and (not $f.IsRequired) (not $f.IsArray) (eq $f.GoType "string") (not $f.IsNullableBool) }}
 		if temp{{ toGoName $f.Name }}.Valid {
 			result.{{ toGoName $f.Name }} = temp{{ toGoName $f.Name }}.String
 		}
