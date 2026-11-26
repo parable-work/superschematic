@@ -720,7 +720,9 @@ func (t *ORMTable) add(c sqlutil.ColumnModel, column ormColumn, member ORMMember
 	// A table the repositories only read has no create and no update
 	// (D139).
 	owned := c.Def.Owned()
-	insertable := !c.Internal && c.Audit == "" && !owned && !t.ReadOnly
+	// A value a create gives (D147: Aliased's name) is the create's, which
+	// the core hands the behavior; no update sets it.
+	insertable := !c.Internal && c.Audit == "" && (!owned || c.Def.GivenAtCreate()) && !t.ReadOnly
 	if insertable {
 		create := member
 		create.Optional = !c.Required || column.Auto || c.Key || len(column.Default) > 0

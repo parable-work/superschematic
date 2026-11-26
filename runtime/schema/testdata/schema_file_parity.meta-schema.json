@@ -149,6 +149,32 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Aliased"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "normalize": {
+                    "description": "How two names are read as one: lower, the default, compares them in lower case with the white space at their ends dropped and each run of it within one space; slug compares only their letters and digits, in lower case, each run of anything else one hyphen.",
+                    "enum": [
+                      "lower",
+                      "slug"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Approvals"
               }
             }
@@ -3955,6 +3981,7 @@
         },
         "name": {
           "enum": [
+            "Aliased",
             "Approvals",
             "Assignment",
             "Blueprint",

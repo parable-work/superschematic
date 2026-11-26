@@ -4696,7 +4696,7 @@ type {{ .TypeName }}Create struct {
 	{{- range .OrderedMembers }}
 	{{- if .IsRelationship }}
 	{{ toGoName .Relationship.FieldName }} {{ .Relationship.MemberGoType }}
-	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (or (not .Field.IsOwned) .Field.IsGivenAtCreate) }}
 	{{ toGoName .Field.Name }} {{ .Field.MemberGoType }}
 	{{- end }}
 	{{- end }}
@@ -4712,7 +4712,7 @@ func (input *{{ .TypeName }}Create) row() *types.{{ .TypeName }} {
 	{{- range .OrderedMembers }}
 	{{- if .IsRelationship }}
 	row.{{ toGoName .Relationship.FieldName }} = input.{{ toGoName .Relationship.FieldName }}
-	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (or (not .Field.IsOwned) .Field.IsGivenAtCreate) }}
 	row.{{ toGoName .Field.Name }} = input.{{ toGoName .Field.Name }}
 	{{- end }}
 	{{- end }}
@@ -4970,7 +4970,8 @@ func (r *{{ .Name }}) createColumns(row *types.{{ .TypeName }}) (map[string]any,
 func (r *{{ .Name }}) corePatch(update *{{ .TypeName }}Update) map[string]any {
 	patch := map[string]any{}
 	{{- range .CoreOwn }}
-	{{- if .Relationship }}
+	{{- if .Given }}
+	{{- else if .Relationship }}
 	{{- $member := printf "%sID" (toGoName .Relationship.FieldName) }}
 	{{- if not .Relationship.IsRequired }}
 	if update.{{ $member }}SetNull {

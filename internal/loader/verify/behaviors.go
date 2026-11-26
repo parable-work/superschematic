@@ -358,6 +358,11 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"
 			switch ref.Name {
+			case aliasedBehavior:
+				// A create gives a field's value, which a type anchor has
+				// none of (D147).
+				r.errorf(td.Owner, "type %s implements %s, which a field carries, its name the field's value a create gives: write name: %s<string> (D147)", td.Name, ref.Name, ref.Name)
+				continue
 			case timersBehavior:
 				checkTimersConfig(schema, td, ref, r)
 			case reactionsBehavior:

@@ -161,6 +161,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// MergeableRepository, and each one's definition in orm.ts holds
 		// its merge, the statements of every relation that references it.
 		{service: "fixture-merge-db", behaviors: true},
+		// Aliased (D147): the name a create gives in each create input,
+		// rename, addAlias, removeAlias and resolve under each field, and
+		// Company's merge, whose steps move its aliases and names.
+		{service: "fixture-aliased-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

@@ -258,6 +258,9 @@ func expandType(td *ir.TypeDef, reg *registry.Registry) ([]string, error) {
 					Behavior: use.Name,
 					Field:    declared.Name,
 					Value:    value,
+					// A create gives it (D147), so the create input holds
+					// it.
+					FromCreate: value && declared.FromCreate,
 				},
 			}
 			if column := behaviorlayout.OwnedColumn(use, declared.Name, value); column != codegen.ToSnakeCase(name) {
@@ -573,7 +576,9 @@ func subTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTable) 
 // row (its marker's RowField is empty) and a row's delete leaves its rows;
 // keyed by the declared key alone, its primary key; and @optimistic's
 // _version, which each write through the core is held to, so two writers
-// that read one row write it one after the other (Numbering's counts).
+// that read one row write it one after the other (Numbering's counts). A
+// declared field that holds a row's key (rowKey, D147: Aliased's holder)
+// takes td's key's type, required, with an index of its own.
 func sharedTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTable) *ir.TypeDef {
 	shared := &ir.TypeDef{
 		Name:    behaviorlayout.SubTableTypeName(td.Name, use, table.Name),
@@ -591,11 +596,19 @@ func sharedTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTabl
 		Optimistic: true,
 	}
 	for _, declared := range table.Fields {
+		typeName := declared.Type
+		if key := keyField(td); declared.RowKey && key != nil {
+			// A field that holds a row's key takes the key's type (D147:
+			// Aliased's holder), so a merge repoints it as it repoints a
+			// foreign key, and an index finds a row's.
+			typeName = key.TypeRef.Name
+			shared.Indexes = append(shared.Indexes, ir.IndexDef{Keys: []string{declared.Name}, Origin: ir.OriginBehavior})
+		}
 		shared.Fields = append(shared.Fields, &ir.FieldDef{
 			Name:        declared.Name,
 			Description: declared.Description,
-			TypeRef:     ir.TypeRef{Name: declared.Type},
-			Required:    declared.Name == table.Key,
+			TypeRef:     ir.TypeRef{Name: typeName},
+			Required:    declared.Name == table.Key || declared.RowKey,
 			Key:         declared.Name == table.Key,
 		})
 	}

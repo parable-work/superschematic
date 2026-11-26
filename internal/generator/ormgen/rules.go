@@ -201,6 +201,9 @@ type CoreOwnColumn struct {
 	// Relationship that relation's.
 	Column       *Field
 	Relationship *Relationship
+	// Given is a value a create gives (D147: Aliased's name), which a
+	// create's own fields name and no update's patch does.
+	Given bool
 }
 
 // CoreValue is the core's value of the column's field held at expr, a Go
@@ -650,6 +653,13 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			return fmt.Errorf("ormgen: table %s: the behaviors' layout converts %s as %q, and the repository holds it as a date-time %t", repo.TypeName, column.Field, column.Convert, own.Column.IsDateTimeScalar)
 		}
 		repo.CoreOwn = append(repo.CoreOwn, own)
+	}
+	// A value a create gives (D147: Aliased's name) is the create's own
+	// member of the anchor's name, which the core hands the use.
+	for i := range repo.Fields {
+		if repo.Fields[i].IsGivenAtCreate {
+			repo.CoreOwn = append(repo.CoreOwn, CoreOwnColumn{Field: repo.Fields[i].Name, Column: &repo.Fields[i], Given: true})
+		}
 	}
 
 	for _, use := range table.Uses {

@@ -84,11 +84,27 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 	}
 	var config json.RawMessage
 	at := prop.Type
-	if args := prop.Type.AsTypeReferenceNode().TypeArguments; args != nil && len(args.Nodes) > 0 {
-		if len(args.Nodes) > 1 {
+	var args []*astNode
+	if list := prop.Type.AsTypeReferenceNode().TypeArguments; list != nil {
+		args = list.Nodes
+	}
+	if valueFromCreate(behavior) {
+		// A value a create gives is typed by the field (D147: Aliased<T,
+		// C>): its first type argument is the value's type, string, and its
+		// config the second, which it may leave out.
+		if len(args) == 0 || len(args) > 2 {
+			return fieldUse{}, true, errorAtNode(prop.Type, "%s: %s<T, C> takes the value's type, string, and then its config, which it may leave out (D147)", where, id.name)
+		}
+		if t := w.checker.GetTypeFromTypeNode(args[0]); t == nil || t.Flags()&typeFlagsString == 0 {
+			return fieldUse{}, true, errorAtNode(args[0], "%s: %s<T, C> holds a name, so T is string (D147)", where, id.name)
+		}
+		args = args[1:]
+	}
+	if len(args) > 0 {
+		if len(args) > 1 {
 			return fieldUse{}, true, errorAtNode(prop.Type, "%s: %s<C> takes one type argument, its config", where, id.name)
 		}
-		at = args.Nodes[0]
+		at = args[0]
 		reader := configReader{w: w, where: fmt.Sprintf("%s: behavior %s config", where, behavior.Name), root: at}
 		value, serr := reader.value(w.checker.GetTypeFromTypeNode(at), at, "", 0)
 		if serr != nil {
@@ -113,6 +129,17 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 		return fieldUse{}, true, errorAtNode(at, "%s: %s", where, err)
 	}
 	return fieldUse{ref: refs[0], node: member}, true, nil
+}
+
+// valueFromCreate reports whether behavior's declaration says a create
+// gives its value field (registry.BehaviorField.FromCreate, D147).
+func valueFromCreate(behavior registry.Behavior) bool {
+	for _, declared := range behavior.Fields {
+		if declared.Name == behavior.Value {
+			return declared.FromCreate
+		}
+	}
+	return false
 }
 
 // valueOptional reports whether behavior's declaration says its value
