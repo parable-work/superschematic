@@ -173,6 +173,9 @@ type cargoOptions struct {
 	features        []string
 	devDependencies string
 	mcp             bool
+	// idempotencyTable names the table that keeps the keys of the
+	// crate's @idempotent operations (D140).
+	idempotencyTable *ir.IdempotencyTable
 }
 
 // cargoTestAPICrateWith is cargoTestAPICrate with options.
@@ -202,7 +205,7 @@ func cargoTestAPICrateWith(t *testing.T, service string, schema *ir.Schema, test
 	if err := rustgen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("rustgen.WriteTypes: %v", err)
 	}
-	output, err := generateFrom(schema, apiSource{authDB: authDBOf(t, schema)}, Options{
+	output, err := generateFrom(schema, apiSource{authDB: authDBOf(t, schema), idempotencyTable: options.idempotencyTable}, Options{
 		SchemaName: service,
 		TypesCrate: naming.Default().RustTypesCrate(service),
 		TypesDir:   typesDir,

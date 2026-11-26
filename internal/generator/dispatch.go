@@ -1704,7 +1704,8 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	for _, m := range r.Schema.MemoryStores {

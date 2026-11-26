@@ -155,7 +155,7 @@ async fn run() -> Result<(), Failure> {
         {{ .Field }}: {{ .Client.Var }}.clone(),
 {{- end }}
 {{- range $api.Buckets }}
-        {{ .Field }}: Arc::clone(&{{ .Bucket.Var }}),
+{{ .Init "        " true }}
 {{- end }}
         span: logging::api_span({{ rustString $api.Service }}),
     };

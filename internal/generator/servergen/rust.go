@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -520,6 +521,11 @@ type RustAPI struct {
 	Tables    bool
 	FieldKeys bool
 
+	// Idempotency is true when the API has @idempotent operations (D140):
+	// Implementations::new then takes Database's pool too, over which it
+	// builds the store of their keys.
+	Idempotency bool
+
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
 	Engine *RustEngine
@@ -566,6 +572,30 @@ type RustCall struct {
 type RustBucketUse struct {
 	Field  string
 	Bucket *RustBucket
+
+	// ContentAddressed is true for a bucket Deps holds as the runtime's
+	// bucket::ContentBucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
+}
+
+// Init is the Deps field's initializer, indented by indent, as rustfmt
+// lays it out: the bucket main.rs opened, an Arc clone of it when shared,
+// or, for a content bucket (D142), the ContentBucket over it.
+func (b RustBucketUse) Init(indent string, shared bool) string {
+	value := b.Bucket.Var
+	if shared {
+		value = "Arc::clone(&" + value + ")"
+	}
+	if !b.ContentAddressed {
+		return indent + b.Field + ": " + value + ","
+	}
+	args := []string{value, strconv.FormatInt(b.MaxBytes, 10)}
+	list := strings.Join(args, ", ")
+	if line := indent + b.Field + ": ContentBucket::new(" + list + "),"; len(list) <= rustCallWidth && len(line) <= rustWidth {
+		return line
+	}
+	return indent + b.Field + ": ContentBucket::new(\n" + indent + "    " + strings.Join(args, ",\n"+indent+"    ") + ",\n" + indent + "),"
 }
 
 // RustBucket is a bucket main.rs opens once, for every API that lists it,
@@ -1008,6 +1038,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Tables = true
 			api.FieldKeys = o.TableFieldKeys()
 		}
+		if o.HasIdempotent() && !background {
+			if api.Database == nil {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, whose @idempotent operations keep their keys in its database (D140), and opens no pool on it", in.Stack, in.Server, o.SchemaName)
+			}
+			api.Idempotency = true
+		}
 		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
@@ -1066,7 +1102,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			if bare {
@@ -1843,13 +1879,20 @@ func (s *RustServer) appUses(runtime string) []string {
 }
 
 // bucketUses are the use declarations of main.rs from the HTTP runtime for
-// its buckets (D54): the Bucket each API's Deps holds and the gcs module
-// that opens it, none without a bucket.
+// its buckets (D54): the Bucket each API's Deps holds, the ContentBucket
+// over one that names its objects by their content (D142), and the gcs
+// module that opens it, none without a bucket.
 func (s *RustServer) bucketUses(runtime string) []string {
 	if len(s.Buckets) == 0 {
 		return nil
 	}
-	return []string{"use " + runtime + "::bucket::Bucket;", "use " + runtime + "::gcs;"}
+	items := []string{"Bucket"}
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool {
+		return slices.ContainsFunc(a.Buckets, func(b RustBucketUse) bool { return b.ContentAddressed })
+	}) {
+		items = append(items, "ContentBucket")
+	}
+	return []string{rustutil.UseLine(runtime+"::bucket", items), "use " + runtime + "::gcs;"}
 }
 
 // memoryStoreUses are the use declarations of main.rs from the HTTP
@@ -1926,7 +1969,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 		}
 		args = append(args, authenticator)
 	}
-	if a.Behaviors || a.Tables {
+	if a.Behaviors || a.Tables || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {

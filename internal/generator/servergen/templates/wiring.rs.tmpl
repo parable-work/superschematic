@@ -163,7 +163,7 @@ fn open_bucket(
         {{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range $api.Buckets }}
-        {{ .Field }}: {{ .Bucket.Var }},
+{{ .Init "        " false }}
 {{- end }}
 {{- range $api.MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),

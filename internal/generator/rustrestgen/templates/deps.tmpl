@@ -95,9 +95,18 @@ pub struct Deps {
     pub {{ .Field }}: {{ .CrateIdent }}::{{ .Client }},
 {{- end }}
 {{- range .Buckets }}
+{{- if .ContentAddressed }}
+    /// {{ .Service }}, a bucket the API lists that names each object by its
+    /// content (D142): `put` writes a body of at most {{ .MaxBytes }} bytes under
+    /// the SHA-256 of its bytes if no object has that name, and `has`,
+    /// `missing`, `get` and `signed_url` read by hash. `raw` is the plain
+    /// bucket.
+    pub {{ .Field }}: ContentBucket,
+{{- else }}
     /// {{ .Service }}, a bucket the API lists: private object storage it puts,
-    /// gets, deletes and lists objects in, and signs URLs for (D54).
+    /// gets, heads, deletes and lists objects in, and signs URLs for (D54).
     pub {{ .Field }}: Arc<dyn Bucket>,
+{{- end }}
 {{- end }}
 {{- range .MemoryStores }}
     /// {{ .Service }}, a memory store the API lists (D75): channels and keys
@@ -145,7 +154,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -171,6 +180,11 @@ impl Implementations {
     /// `db` is {{ .TableDatabase }}, from whose repositories the table operations
     /// are served (D106): what `Deps.db` holds.
 {{- end }}
+{{- if .HasIdempotent }}
+    ///
+    /// The keys of the @idempotent operations are kept in `db`, {{ .Deps.Database }}, in
+    /// the table `IDEMPOTENCY_TABLE` names (D140): what `Deps.db` holds.
+{{- end }}
 {{- if .TableFieldKeys }}
     ///
     /// `field_keys` are the keys of the `Encrypted<T>` fields of {{ .TableDatabase }}
@@ -190,6 +204,12 @@ impl Implementations {
 {{- end }}
 {{- if .HasServiceCallers }}
             service_authenticator,
+{{- end }}
+{{- if .HasIdempotent }}
+            idempotency_store: Arc::new({{ .IdempotencyStoreType }}::new(
+                db{{ if or .HasBehaviorOperations .HasTableOperations }}.clone(){{ end }},
+                &crate::IDEMPOTENCY_TABLE,
+            )),
 {{- end }}
 {{- if .HasBehaviorOperations }}
             behaviors: crate::behaviors::Behaviors::new(db{{ if .HasTableOperations }}.clone(){{ end }}),

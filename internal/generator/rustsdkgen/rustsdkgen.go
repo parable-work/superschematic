@@ -165,6 +165,10 @@ type EndpointInfo struct {
 	HasFileUpload          bool
 	FileUploadFields       []FileUploadField
 	FilesStructName        string
+	// Idempotent marks an @idempotent operation (D140): its method sends an
+	// Idempotency-Key, the one its options name or a UUID it makes, on
+	// every send of the call.
+	Idempotent bool
 	// Filter is the operation's FilterBy (D106), nil for an operation
 	// without one. Its method takes the filter typed, FilterStructName
 	// (ListPartsFilter) with a member per field in FilterFields, as the
@@ -901,6 +905,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		HasFileUpload:          ep.HasFileUpload,
 		FileUploadFields:       fileUploadFields,
 		FilesStructName:        methodPrefix + "Files",
+		Idempotent:             ep.Idempotent != nil,
 		Filter:                 ep.Filter,
 		FilterFields:           filterFields,
 		SupportsListAll:        supportsListAll,
