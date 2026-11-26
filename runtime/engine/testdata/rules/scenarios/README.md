@@ -92,6 +92,14 @@ writes them, and `test/corpus.test.ts` does not list them.
   retry by clientId, the edit window; and the config members a table's
   Comments waits for, refused at define. The engine's recordings
   (`core-comments.json`) hold the rest of batch 1.
+- `core-aliased.json` (D147): Aliased's names on a table, anchored on a
+  field whose value a create gives (`fromCreate`): a name another row
+  holds, as its name or an alias, in its normalized form (`lower`, or
+  `slug`), refused in a create, a rename and an addAlias with that row's
+  key; rename keeping the old name as an alias; addAlias and removeAlias,
+  a removed alias taken by another row; `resolve`, a call of the table as
+  a whole; a delete that frees the row's names; and the define refusals.
+  No engine implements Aliased.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -116,7 +124,8 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs` and
 `runtime/engine/rust/rules-testkit/tests/comments_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with

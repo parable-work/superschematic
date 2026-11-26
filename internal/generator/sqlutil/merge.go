@@ -2,6 +2,7 @@ package sqlutil
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -36,7 +37,10 @@ type MergePlan struct {
 	// whose column the build adds to the target; and one per @manyToMany
 	// that names the table or that the table declares, whose rows are a
 	// join table's. A behavior's sub-table is left out: its rows are the
-	// behavior's state of `from`, and go with it.
+	// behavior's state of `from`, and go with it, but for an Aliased use's
+	// (D147): its aliases move to `into`, `from`'s name among them, and its
+	// rows of the names table name `into` as their holder, so no name of
+	// either row is freed or taken by the merge.
 	Steps []MergeStep
 
 	// RequiresUser reports that the merge stamps a row deleted, the row
@@ -74,6 +78,12 @@ type MergeStep struct {
 	// per unique key that holds the relation's column, in the key's order.
 	Collisions []MergeStatement
 
+	// Before are statements the step runs before its collisions and its
+	// repoint, which the counts leave out: an Aliased use's insert of
+	// `from`'s name as an alias of `into` (D147), which reads `from`'s rows
+	// of the names table and its aliases before the steps move them.
+	Before []MergeStatement
+
 	// Repoint moves every row that references `from` to `into`, deleted
 	// rows among them, stamping updatedAt and updatedBy where the source
 	// keeps them. A row a collision stamped deleted is repointed by that
@@ -93,6 +103,13 @@ type MergeStatement struct {
 // MergePlanOf writes the merge of the Mergeable table of type name among
 // tables, the tables of schema (TablesOf).
 func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePlan, error) {
+	return mergePlanOf(schema, tables, name, false)
+}
+
+// mergePlanOf writes the merge, its statements Postgres's, but for the row
+// an expression's collision reads, which on SQLite is a SELECT of named
+// values, since SQLite names no VALUES list's columns.
+func mergePlanOf(schema *ir.Schema, tables []TableModel, name string, sqlite bool) (*MergePlan, error) {
 	var target *TableModel
 	for i := range tables {
 		if tables[i].Type == name {
@@ -128,7 +145,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 				// reference to the row merged away.
 				return nil, fmt.Errorf("sqlutil: %s.%s references %s, which implements Mergeable, and %s is a version graph's table, whose rows a commit versions: a merge writes rows in place, so a commit made before it would still reference the row merged away; keep the reference in a table outside the graph, or leave Mergeable off %s (D147)", source.Type, column.Field, name, source.Type, name)
 			}
-			step, err := mergeStep(td, source, column, name)
+			step, err := mergeStep(td, source, column, name, sqlite)
 			if err != nil {
 				return nil, err
 			}
@@ -148,6 +165,11 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 		}
 	}
 	plan.Steps = append(plan.Steps, mergeHiddenSteps(schema, tables, target)...)
+	aliased, err := mergeAliasedSteps(schema, tables, target)
+	if err != nil {
+		return nil, err
+	}
+	plan.Steps = append(plan.Steps, aliased...)
 	sort.SliceStable(plan.Steps, func(a, b int) bool {
 		if plan.Steps[a].Source != plan.Steps[b].Source {
 			return plan.Steps[a].Source < plan.Steps[b].Source
@@ -159,7 +181,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 
 // mergeStep writes the step of the relation column of source, whose type is
 // td, that references the merged table of type name.
-func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name string) (MergeStep, error) {
+func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name string, sqlite bool) (MergeStep, error) {
 	t := source.Quoted
 	pk := Qualify(source.Name, source.Key)
 	ref := column.Qualified
@@ -233,7 +255,15 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 					values[i] = "CAST($2 AS " + keyColumn.SQLType() + ")"
 				}
 			}
-			moved = append(moved, "(SELECT ("+idx.Expression+") FROM (VALUES ("+strings.Join(values, ", ")+")) AS "+t+" ("+strings.Join(names, ", ")+")) AS k1")
+			row := "(VALUES (" + strings.Join(values, ", ") + ")) AS " + t + " (" + strings.Join(names, ", ") + ")"
+			if sqlite {
+				named := make([]string, len(values))
+				for i := range values {
+					named[i] = values[i] + " AS " + names[i]
+				}
+				row = "(SELECT " + strings.Join(named, ", ") + ") AS " + t
+			}
+			moved = append(moved, "(SELECT ("+idx.Expression+") FROM "+row+") AS k1")
 			held = append(held, "("+idx.Expression+") AS k1")
 			match = append(match, "moved.k1"+equal+"held.k1")
 		} else {
@@ -345,6 +375,161 @@ func repointOf(source *TableModel, quoted, qualified string) MergeStatement {
 	}
 	out.SQL = "UPDATE " + source.Quoted + " SET " + sets + source.fenced(written...) + " WHERE " + qualified + " = $1"
 	return out
+}
+
+// SQLiteMergePlanOf writes the merge of the Mergeable table of type name in
+// SQLite's dialect (D147's merges on SQLite): MergePlanOf's statements,
+// each placeholder ?N where Postgres writes $N; the lock a read that takes
+// none, since SQLite's one writer holds the database from a write
+// transaction's first statement; the clock strftime's, as the queues' times
+// hold it; a value compared with nulls alike by IS; and a key read into an
+// expression's row as it is bound, since SQLite's columns are typed by
+// affinity and a cast to Postgres's type would change it. A merge whose
+// steps delete a @versioned table's rows, whose tombstones record their
+// actor on Postgres alone, is refused.
+func SQLiteMergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePlan, error) {
+	plan, err := mergePlanOf(schema, tables, name, true)
+	if err != nil {
+		return nil, err
+	}
+	if plan.HistoryActor {
+		return nil, fmt.Errorf("sqlutil: a merge of %s deletes rows of a @versioned table, whose tombstones record their actor on Postgres alone; it has no merge on SQLite (D147)", name)
+	}
+	out := *plan
+	out.Lock = sqliteMergeSQL(strings.TrimSuffix(plan.Lock, " FOR UPDATE"))
+	out.Steps = make([]MergeStep, len(plan.Steps))
+	for i, step := range plan.Steps {
+		s := step
+		s.SelfReference = sqliteMergeSQL(step.SelfReference)
+		s.Before = sqliteMergeStatements(step.Before)
+		s.Collisions = sqliteMergeStatements(step.Collisions)
+		s.Repoint.SQL = sqliteMergeSQL(step.Repoint.SQL)
+		out.Steps[i] = s
+	}
+	return &out, nil
+}
+
+// sqliteMergeStatements are statements in SQLite's dialect.
+func sqliteMergeStatements(in []MergeStatement) []MergeStatement {
+	if in == nil {
+		return nil
+	}
+	out := make([]MergeStatement, len(in))
+	for i, statement := range in {
+		out[i] = MergeStatement{SQL: sqliteMergeSQL(statement.SQL), Actor: statement.Actor}
+	}
+	return out
+}
+
+var (
+	mergePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
+	mergeCast        = regexp.MustCompile(`CAST\(\?([0-9]+) AS [^)]+\)`)
+)
+
+// sqliteMergeSQL is one of a merge's statements in SQLite's dialect.
+func sqliteMergeSQL(text string) string {
+	if text == "" {
+		return ""
+	}
+	text = mergePlaceholder.ReplaceAllString(text, "?$1")
+	text = mergeCast.ReplaceAllString(text, "?$1")
+	text = strings.ReplaceAll(text, " IS NOT DISTINCT FROM ", " IS ")
+	return strings.ReplaceAll(text, "now()", sqliteNow)
+}
+
+// The behavior and the tables of an Aliased use whose rows a merge moves
+// (D147), as its declaration names them.
+const (
+	aliasedBehavior = "Aliased"
+	aliasedAliases  = "aliases"
+	aliasedNames    = "names"
+)
+
+// mergeAliasedSteps are the steps of each Aliased use of target (D147): its
+// aliases sub-table's, whose Before inserts `from`'s name as an alias of
+// `into`, read from `from`'s rows of the names table that are no alias of
+// `from`'s, and whose repoint moves `from`'s aliases to `into`; and its
+// names table's, whose repoint names `into` the holder of `from`'s names,
+// moving each row's version on, as the core's writes of it do. A name is
+// one row's, so `from`'s names and `into`'s are apart, and no collision is
+// possible. The aliases' step sorts before the names' (<Row><Member>Aliases
+// before <Row><Member>Names), so the insert reads both as they were.
+func mergeAliasedSteps(schema *ir.Schema, tables []TableModel, target *TableModel) ([]MergeStep, error) {
+	byType := map[string]*TableModel{}
+	for i := range tables {
+		byType[tables[i].Type] = &tables[i]
+	}
+	td := schema.Types[target.Type]
+	if td == nil {
+		return nil, nil
+	}
+	var steps []MergeStep
+	for _, use := range td.FieldBehaviors() {
+		if use.Name != aliasedBehavior {
+			continue
+		}
+		var aliases, names *TableModel
+		var aliasesType *ir.TypeDef
+		for _, name := range sortedStringKeys(schema.Types) {
+			sub := schema.Types[name]
+			if sub == nil || sub.BehaviorTable == nil || sub.BehaviorTable.Row != target.Type || sub.BehaviorTable.Use != use.UseID() || sub.BehaviorTable.Behavior != aliasedBehavior {
+				continue
+			}
+			switch sub.BehaviorTable.Table {
+			case aliasedAliases:
+				aliases, aliasesType = byType[name], sub
+			case aliasedNames:
+				names = byType[name]
+			}
+		}
+		var value *ir.FieldDef
+		for _, fd := range td.Fields {
+			if fd != nil && fd.Name == use.Field {
+				value = fd
+			}
+		}
+		if aliases == nil || names == nil || aliasesType == nil || value == nil {
+			return nil, fmt.Errorf("sqlutil: %s.%s is an Aliased use, and the schema holds no table of its aliases or its names, or no column of the name (D147)", target.Type, use.Field)
+		}
+		row := aliases.columnOfField(aliasesType.BehaviorTable.RowField)
+		normalized := aliases.columnOfField(aliasesType.BehaviorTable.Key)
+		alias := aliases.columnOfField("alias")
+		key := names.columnOfField("normalized")
+		holder := names.columnOfField("holder")
+		name := target.columnOfField(value.Name)
+		if row == nil || normalized == nil || alias == nil || key == nil || holder == nil || name == nil {
+			return nil, fmt.Errorf("sqlutil: %s.%s is an Aliased use whose tables lack a column its merge moves (D147)", target.Type, use.Field)
+		}
+		insert := "INSERT INTO " + aliases.Quoted + " (" + row.Quoted + ", " + normalized.Quoted + ", " + alias.Quoted + ")" +
+			" SELECT $2, held." + key.Quoted + ", merged." + name.Quoted +
+			" FROM " + names.Quoted + " AS held, " + target.Quoted + " AS merged" +
+			" WHERE merged." + QuoteIdentifier(target.Key) + " = $1 AND held." + holder.Quoted + " = $1" +
+			" AND NOT EXISTS (SELECT 1 FROM " + aliases.Quoted + " AS kept WHERE kept." + row.Quoted + " = $1 AND kept." + normalized.Quoted + " = held." + key.Quoted + ")"
+		steps = append(steps,
+			MergeStep{
+				Source:  aliases.Type,
+				Field:   row.Field,
+				Before:  []MergeStatement{{SQL: insert}},
+				Repoint: MergeStatement{SQL: "UPDATE " + aliases.Quoted + " SET " + row.Quoted + " = $2 WHERE " + row.Quoted + " = $1"},
+			},
+			MergeStep{
+				Source:  names.Type,
+				Field:   holder.Field,
+				Repoint: MergeStatement{SQL: "UPDATE " + names.Quoted + " SET " + holder.Quoted + " = $2, " + QuoteIdentifier(VersionColumn) + " = " + QuoteIdentifier(VersionColumn) + " + 1 WHERE " + holder.Quoted + " = $1"},
+			},
+		)
+	}
+	return steps, nil
+}
+
+// sortedStringKeys are a map's keys in order.
+func sortedStringKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // mergeHiddenSteps are the steps of the foreign keys that reference target

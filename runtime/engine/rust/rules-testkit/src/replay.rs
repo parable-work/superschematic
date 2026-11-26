@@ -2181,8 +2181,28 @@ impl<'r> Run<'r> {
         let Expected::Error(_) = cx.expected else {
             return None;
         };
-        let fields = self.engines[cx.at].fields.get(type_name)?;
-        let problems = shape::own_field_problems(type_name, fields, data, create);
+        let engine = &self.engines[cx.at];
+        let fields = engine.fields.get(type_name)?;
+        // A create's member of a field anchor whose behavior takes its value
+        // from a create is that use's value, no own field (D147).
+        let mut data = data.clone();
+        if create {
+            if let Some(spec) = engine.host.store().live(type_name) {
+                for entry in &spec.uses {
+                    let given = entry.field().filter(|_| {
+                        engine
+                            .host
+                            .core()
+                            .declaration(&entry.behavior)
+                            .is_some_and(|declared| declared.value_from_create)
+                    });
+                    if let Some(field) = given {
+                        data.remove(field);
+                    }
+                }
+            }
+        }
+        let problems = shape::own_field_problems(type_name, fields, &data, create);
         (!problems.is_empty()).then(|| {
             Done::Skipped(format!(
                 "own-field validation is the store's, and it refuses this write: {}",

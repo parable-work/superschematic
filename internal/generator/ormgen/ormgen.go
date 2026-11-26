@@ -556,6 +556,10 @@ type Field struct {
 	// and its filter hold it, and <Type>Create and <Type>Update leave it
 	// out, since only the behavior's operations change it.
 	IsOwned bool
+	// IsGivenAtCreate is an owned field a create gives (D147,
+	// ir.FieldDef.GivenAtCreate: Aliased's name): <Type>Create holds it,
+	// which the core hands the behavior, and <Type>Update does not.
+	IsGivenAtCreate bool
 
 	// Sortable is true when FindPage can order the table's rows by the
 	// field's column (D60, amended), as sqlutil's column says
@@ -1800,6 +1804,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,
 		IsEncrypted:               fieldDef.EncryptedAtRest,
 		IsOwned:                   fieldDef.Owned(),
+		IsGivenAtCreate:           fieldDef.GivenAtCreate(),
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
 		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}

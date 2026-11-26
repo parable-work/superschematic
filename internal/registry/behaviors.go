@@ -246,6 +246,19 @@ type BehaviorField struct {
 	// An engine's declaration parser takes the key and shifts it out, as it
 	// does a field's type, since step 4.
 	Optional bool `json:"optional,omitempty"`
+	// FromCreate is true for a value field a create gives (D147): on a
+	// field anchor the create's member of the anchor's name is the value
+	// the core hands the behavior, so a table's create input holds the
+	// field, and its update input does not, since only the behavior's
+	// operations change it (Aliased's name). Only the value field is.
+	FromCreate bool `json:"fromCreate,omitempty"`
+	// RowKey is true for a field of a shared table that holds the key of a
+	// row of the table that composes the behavior (Aliased's holder,
+	// D147): its declared type is string, which the core reads, and on a
+	// table the build types its column by the table's key, so a merge's
+	// statements repoint it as they repoint a foreign key. Only a shared
+	// table's field other than its key is.
+	RowKey bool `json:"rowKey,omitempty"`
 }
 
 // BehaviorFieldPath is a behavior field's qualified name: the behavior's
@@ -674,6 +687,12 @@ func checkBehaviorFields(decl BehaviorDeclaration) error {
 		if field.Optional && field.Name != decl.Value {
 			return fmt.Errorf("registry: behavior %s field %s is optional, and only its value field may be: every other field a table takes is optional already", decl.Name, field.Name)
 		}
+		if field.FromCreate && field.Name != decl.Value {
+			return fmt.Errorf("registry: behavior %s field %s is fromCreate, and only its value field may be: a create gives a field anchor's value alone", decl.Name, field.Name)
+		}
+		if field.RowKey {
+			return fmt.Errorf("registry: behavior %s field %s is rowKey, and only a shared table's field may be: a row's own fields hold no other row's key", decl.Name, field.Name)
+		}
 	}
 	if decl.Value != "" && !seen[decl.Value] {
 		return fmt.Errorf("registry: behavior %s value %q is not one of its fields", decl.Name, decl.Value)
@@ -712,6 +731,10 @@ func checkBehaviorTables(decl BehaviorDeclaration) error {
 				return fmt.Errorf("registry: behavior %s table %s field %s has no type: a sub-table's field is a column", decl.Name, table.Name, field.Name)
 			case field.Volatile || field.PerReader:
 				return fmt.Errorf("registry: behavior %s table %s field %s is volatile: a sub-table's field is stored", decl.Name, table.Name, field.Name)
+			case field.Optional || field.FromCreate:
+				return fmt.Errorf("registry: behavior %s table %s field %s is optional or fromCreate, which only a value field is", decl.Name, table.Name, field.Name)
+			case field.RowKey && (!table.Shared() || field.Name == table.Key || field.Type != "string"):
+				return fmt.Errorf("registry: behavior %s table %s field %s is rowKey, which only a shared table's field other than its key is, typed string", decl.Name, table.Name, field.Name)
 			}
 			fields[field.Name] = field
 		}

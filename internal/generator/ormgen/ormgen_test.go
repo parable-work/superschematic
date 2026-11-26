@@ -134,6 +134,12 @@ const blueprintFixture = "fixture-blueprint-db"
 // Mergeable (D147), with the tables that reference them.
 const mergeFixture = "fixture-merge-db"
 
+// aliasedFixture is the DB fixture whose Company and Tag carry Aliased on
+// a field (D147): the name a create gives, rename, addAlias and
+// removeAlias under Name() and Label(), resolve of the table, its aliases
+// and names with no repository, and Company's MergeInto moving the aliases.
+const aliasedFixture = "fixture-aliased-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -152,7 +158,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture || svc == aliasedFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -320,6 +326,12 @@ func TestWriteORMGolden(t *testing.T) {
 		// A variant field (D149): Step's result is read from its JSON
 		// column as the member its kind names.
 		{"fixture-variant-field-db", []string{"repository_step.go"}},
+		// Tables of Aliased (D147): the name in each create input, its
+		// operations under Name() and Label(), resolve taking no key, no
+		// repository of a sub-table or a shared table, no upserts, no
+		// queue, and Company's MergeInto, whose steps move the aliases and
+		// the names.
+		{aliasedFixture, []string{"repository_company.go", "repository_contact.go", "repository_tag.go", "merge.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

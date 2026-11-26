@@ -159,6 +159,9 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // Blueprint (D149): a create whose change set creates each child of the
   // template in the child's table, blocked after its steps.
   { file: 'core-blueprint', floor: 151 },
+  // Aliased (D147): names unique across rows in a shared table, a removed
+  // alias's and a deleted row's rows deleted.
+  { file: 'core-aliased', floor: 46 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

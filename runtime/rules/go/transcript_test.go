@@ -124,6 +124,9 @@ var transcriptFiles = []transcriptFile{
 	// Blueprint (D149): a create whose change set creates each child of
 	// the template in the child's table, blocked after its steps.
 	{"../../engine/testdata/rules/core-blueprint.transcript.json", 151},
+	// Aliased (D147): names unique across rows in a shared table, a
+	// removed alias's and a deleted row's rows deleted.
+	{"../../engine/testdata/rules/core-aliased.transcript.json", 46},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

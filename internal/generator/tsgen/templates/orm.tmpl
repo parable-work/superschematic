@@ -291,6 +291,13 @@ export const {{.Const}}: TableDefinition = {
 {{- if .SelfReference}}
         selfReference: {{jsonString .SelfReference}},
 {{- end}}
+{{- if .Before}}
+        before: [
+{{- range .Before}}
+          { sql: {{jsonString .SQL}}{{if .Actor}}, actor: {{jsonString .Actor}}{{end}} },
+{{- end}}
+        ],
+{{- end}}
 {{- if .Collisions}}
         collisions: [
 {{- range .Collisions}}

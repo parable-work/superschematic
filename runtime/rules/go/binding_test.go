@@ -106,7 +106,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		names = append(names, declaration.Name)
 		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Blueprint"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Blueprint", "Aliased"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
 	}
 	// Comments' writes are beside the row (D103's step 4).
@@ -138,7 +138,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 			}
 		}
 	}
-	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema", "Derived.staleDerivations": "schema", "Derived.settleDerivations": "schema", "Derived.failedDerivations": "schema", "Calendar.findAvailability": "schema", "Payments.listPaymentActions": "schema"}; !maps.Equal(scopes, want) {
+	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema", "Derived.staleDerivations": "schema", "Derived.settleDerivations": "schema", "Derived.failedDerivations": "schema", "Calendar.findAvailability": "schema", "Payments.listPaymentActions": "schema", "Aliased.resolve": "schema"}; !maps.Equal(scopes, want) {
 		t.Fatalf("the operations of a table as a whole = %v, want %v", scopes, want)
 	}
 	if got := byName["Budget"].Contracts; len(got) != 1 || got[0].Name != "Capacity" || got[0].Role != "implements" {

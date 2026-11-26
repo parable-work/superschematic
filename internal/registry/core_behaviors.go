@@ -79,6 +79,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"reconcile", RulesPackage},
 	{"schedules", RulesPackage},
 	{"pool", RulesPackage},
+	{"aliased", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -134,6 +135,8 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	// Blueprint (D149), the one behavior ported with no state of its own:
 	// a create stamps the template's rows in another table.
 	"Blueprint",
+	// D147's Aliased, the core's alone.
+	"Aliased",
 }
 
 // tableCreatesRows are the behaviors a table's create of a row runs that

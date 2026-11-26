@@ -527,6 +527,29 @@ export interface NumberingConfig {
  */
 export type Numbering<C extends NumberingConfig> = string | null;
 
+/** Aliased's config on a field (D147). */
+export interface AliasedConfig {
+  /** How two names read as one: lower, the default, ignores their case and their runs of white space; slug keeps only their letters and digits, in lower case. */
+  readonly normalize?: "lower" | "slug";
+}
+
+/**
+ * A name on each row with the names it was also known by, unique across
+ * the table (D147): `name: Aliased<string, { normalize: "slug" }>`. No two
+ * rows hold one name, as a name or an alias, in its normalized form. The
+ * type stays a table: the field's column holds the name, which a create
+ * gives and only its operations change (name.rename, which keeps the old
+ * name as an alias, name.addAlias, name.removeAlias, and name.resolve on
+ * the table). Its aliases are a sub-table of the row (company_name_aliases)
+ * and every name a row holds a row of a table of the use's own, kept for
+ * the table as a whole and keyed by the normalized form (company_name_names),
+ * which the database holds unique. A name another row holds is refused
+ * with that row's key, the veto name_taken. A delete frees the row's
+ * names, and a merge (Mergeable) moves the row merged away's aliases to
+ * the row that stays, its name among them. T is the name's type, string.
+ */
+export type Aliased<T extends string, C extends AliasedConfig = {}> = T;
+
 /** Revisions' config on a table (D16, D103's step 4): with review, a caller proposes a change of the own fields and a caller who holds the permission approves or rejects it. */
 export interface RevisionsOn {
   /** Turns on the review step: propose, approve, reject and listProposals. */

@@ -45,6 +45,15 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     }
     if let Some(value) = file.get("value").and_then(Value::as_str) {
         declaration = declaration.value(value);
+        // A value field a create gives is the use's value at a create
+        // (D147's first primitive: Aliased's name).
+        let given = listed(&file, "fields").any(|field| {
+            field.get("name").and_then(Value::as_str) == Some(value)
+                && field.get("fromCreate") == Some(&Value::Bool(true))
+        });
+        if given {
+            declaration = declaration.value_from_create();
+        }
     }
     for table in listed(&file, "tables") {
         if let Some(name) = table.get("name").and_then(Value::as_str) {

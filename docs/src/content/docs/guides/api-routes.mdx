@@ -1298,6 +1298,18 @@ The HTTP method and the shape say what the handler does:
 | `POST`, one body argument, no key | create | creates a row from the body's members | the view of the row as the write left it |
 | `PATCH`, the key, one body argument | update | sets the members the body sets | the view of the row as the write left it |
 | `DELETE`, the key | delete | deletes the row | the view of the row as it was before |
+| `POST`, the key and `{into}`, no body, of a table that implements `Mergeable` | merge | folds the row into the row of `{into}` with the repository's `mergeInto` (D147) | the view of the row that stays |
+
+A merge (`@rest(HttpMethod.POST, "labels/{id}/merge/{into}")`, `mergeLabel(id:
+Identity.UUID, into: Identity.UUID): LabelView`) reads both live rows, 404
+for either that holds none, and runs [the
+merge](/superschematic/guides/database-tables/#merging-rows) in the route's
+transaction. A merge of a row into itself, or into a row that references
+it through a relation of the table to itself, is 409. It takes no row rule
+and no parent in its path, since it reaches both rows by their keys. The
+TypeScript server serves it; the Go and Rust servers write no handler of
+it yet, so the operation stays in the implementation's interface, to write
+over `MergeInto` and `merge_into`.
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message

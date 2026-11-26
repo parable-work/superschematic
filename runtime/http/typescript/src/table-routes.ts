@@ -71,7 +71,7 @@ whichever copy of the runtime or the driver threw it.
 */
 
 /** What a table operation does, which its HTTP method and shape decide (ir.TableOperationKinds). */
-export type TableOperationKind = 'read' | 'list' | 'create' | 'update' | 'delete';
+export type TableOperationKind = 'read' | 'list' | 'create' | 'update' | 'delete' | 'merge';
 
 /**
  * A table operation as the generated router carries it (D106): what the
@@ -172,6 +172,8 @@ interface RepositoryShape {
   createOne(input: Values): Promise<Row>;
   updateOne(id: unknown, update: Values): Promise<Row>;
   deleteOne(id: unknown): Promise<void>;
+  /** A Mergeable table's (D147). */
+  mergeInto?(input: { readonly from: unknown; readonly into: unknown }): Promise<unknown>;
 }
 
 /** A Workflow's operations on a repository, under the field's member (orm.ts's UseOperations): what a create that names a starting state runs. */
@@ -289,6 +291,8 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
   if (name === 'NotFoundError') return notFound(`${operation.type} not found`, { cause: error });
   if (name === 'NoUserError') return unauthorized(undefined, { cause: error });
   if (name === 'PageKeyError') return refusedCursor();
+  // A merge of a row into itself, or into a row under it (D147).
+  if (name === 'MergeError') return conflict(error instanceof Error ? error.message : `${operation.type} cannot be merged so`, { cause: error });
   // A party's or an agent run's write that leaves a row its grants do not reach (D156).
   if (name === 'AccessRefusedError') return forbidden(`${operation.type}: the row is not one the caller's grants reach`, { cause: error });
   const failed = databaseError(error);
@@ -664,6 +668,28 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
     }
     if (Object.keys(update).length === 0) return (await viewsOf(operation, [row], ctx, tx))[0];
     return (await viewsOf(operation, [await repository.updateOne(row[operation.key!], update)], ctx, tx))[0];
+  });
+}
+
+/**
+ * A merge (D147): the live row under the path's key folded into the live
+ * row of {into}, 404 for either that holds none, through the repository's
+ * mergeInto, which repoints every relation that references the one, an
+ * Aliased field's aliases and names among them, and deletes it, in the
+ * route's transaction; a merge of a row into itself, or into a row that
+ * references it through a relation of the table to itself, is 409. It
+ * answers the view of the row that stays as the merge left it.
+ */
+export function tableMerge(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
+  return inTransaction(orm, operation, ctx, async (repository, tx) => {
+    const key = operation.key!;
+    if (!repository.mergeInto) throw new Error(`table operation: ${operation.type}'s repository has no mergeInto: the table does not implement Mergeable`);
+    const from = await liveRow(repository, operation, ctx, request);
+    const into = await liveRow(repository, operation, ctx, { ...request, path: { ...request.path, [key]: request.path.into } });
+    await repository.mergeInto({ from: from[key], into: into[key] });
+    const stays = await repository.findOne({ [key]: { eq: into[key] } });
+    if (stays === null) throw notFound(`${operation.type} not found`);
+    return (await viewsOf(operation, [stays], ctx, tx))[0];
   });
 }
 

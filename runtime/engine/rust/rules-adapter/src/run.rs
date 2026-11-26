@@ -2473,6 +2473,19 @@ fn shared_row_of(
                 values,
             ))
         }
+        // A delete held to its version (D147): one a writer moved or deleted
+        // first deletes nothing, and the unit runs the command again.
+        SharedRowChange::Delete { expected_version } => Ok(Statement::write(
+            format!(
+                "DELETE FROM {} WHERE {} = {} AND {} = {}",
+                quote(&shared.table),
+                quote(&shared.key.column.column),
+                placeholder(dialect, 1),
+                quote(&shared.version),
+                placeholder(dialect, 2)
+            ),
+            vec![bound_key, Bind::Int(*expected_version)],
+        )),
         other => Err(internal(format!(
             "the adapter takes no shared-table row change of this kind: {}",
             serde_json::to_string(other).unwrap_or_default()

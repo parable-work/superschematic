@@ -84,6 +84,8 @@ export type {
   ManyToMany,
   Numbering,
   NumberingConfig,
+  Aliased,
+  AliasedConfig,
   OnDeleteAction,
   Payments,
   PaymentsOn,

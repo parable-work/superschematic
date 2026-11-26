@@ -192,6 +192,68 @@ type ormTable struct {
 	Relations    []ormRelation           `json:"relations,omitempty"`
 	Unsupported  string                  `json:"unsupported,omitempty"`
 	Behaviors    *ormBehaviors           `json:"behaviors,omitempty"`
+	Merge        *ormMerge               `json:"merge,omitempty"`
+}
+
+// ormMerge is what merge_into of a table that implements Mergeable runs
+// (D147), the runtime's orm::Merge: sqlutil's plan in the definition's
+// dialect, each statement that takes the acting user saying how its column
+// holds one.
+type ormMerge struct {
+	Lock         string         `json:"lock"`
+	HistoryActor bool           `json:"historyActor,omitempty"`
+	RequiresUser bool           `json:"requiresUser,omitempty"`
+	Steps        []ormMergeStep `json:"steps"`
+}
+
+type ormMergeStep struct {
+	Source        string              `json:"source"`
+	Field         string              `json:"field"`
+	SelfReference string              `json:"selfReference,omitempty"`
+	Before        []ormMergeStatement `json:"before,omitempty"`
+	Collisions    []ormMergeStatement `json:"collisions,omitempty"`
+	Repoint       ormMergeStatement   `json:"repoint"`
+}
+
+// ormMergeStatement is a merge's statement, its actor "uuid" for a
+// statement that takes the acting user as $3 into a uuid column, "text"
+// for another column, "" for none.
+type ormMergeStatement struct {
+	SQL   string `json:"sql"`
+	Actor string `json:"actor,omitempty"`
+}
+
+// ormMergeOf is the plan as the runtime reads it, each statement's actor
+// in the form its table's column of the audit field holds one.
+func ormMergeOf(plan *sqlutil.MergePlan, tables []sqlutil.TableModel) *ormMerge {
+	statement := func(source string, st sqlutil.MergeStatement) ormMergeStatement {
+		out := ormMergeStatement{SQL: st.SQL}
+		if st.Actor == "" {
+			return out
+		}
+		out.Actor = "text"
+		for i := range tables {
+			if tables[i].Type != source {
+				continue
+			}
+			if c := tables[i].AuditColumn(st.Actor); c != nil && c.Class.UUIDLike {
+				out.Actor = "uuid"
+			}
+		}
+		return out
+	}
+	out := &ormMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser, Steps: []ormMergeStep{}}
+	for _, step := range plan.Steps {
+		s := ormMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		for _, before := range step.Before {
+			s.Before = append(s.Before, statement(step.Source, before))
+		}
+		for _, collision := range step.Collisions {
+			s.Collisions = append(s.Collisions, statement(step.Source, collision))
+		}
+		out.Steps = append(out.Steps, s)
+	}
+	return out
 }
 
 // ormFence is a fence of a table, a @fenced field (D119), the runtime's
@@ -503,6 +565,15 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
 		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
+		mergeable := false
+		if td := schema.Types[t.Type]; td != nil && td.Mergeable {
+			mergeable = true
+			plan, err := sqlutil.MergePlanOf(schema, tables, t.Type)
+			if err != nil {
+				return nil, err
+			}
+			onPostgres.Merge = ormMergeOf(plan, tables)
+		}
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}
@@ -515,6 +586,13 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				info.SQLiteRefused = append(info.SQLiteRefused, ORMRefusal{Type: t.Type, Reason: reason})
 			} else {
 				onSQLite.Statements = tableStatements(sqlutil.SQLiteTableStatementsOf(t).AllStatements())
+				if mergeable {
+					plan, err := sqlutil.SQLiteMergePlanOf(schema, tables, t.Type)
+					if err != nil {
+						return nil, err
+					}
+					onSQLite.Merge = ormMergeOf(plan, tables)
+				}
 				for _, k := range t.UniqueKeys {
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
@@ -722,7 +800,9 @@ func (t *ORMTable) add(c sqlutil.ColumnModel, column ormColumn, member ORMMember
 	// A table the repositories only read has no create and no update
 	// (D139).
 	owned := c.Def.Owned()
-	insertable := !c.Internal && c.Audit == "" && !owned && !t.ReadOnly
+	// A value a create gives (D147: Aliased's name) is the create's, which
+	// the core hands the behavior; no update sets it.
+	insertable := !c.Internal && c.Audit == "" && (!owned || c.Def.GivenAtCreate()) && !t.ReadOnly
 	if insertable {
 		create := member
 		create.Optional = !c.Required || column.Auto || c.Key || len(column.Default) > 0

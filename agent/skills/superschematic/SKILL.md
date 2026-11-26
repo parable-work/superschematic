@@ -236,7 +236,16 @@ path for when the store is unavailable.
   row a unique key would then refuse, and deletes `from` (D147). Don't
   write the repointing against the relations you remember: the build
   enumerates them. It copies no field of `from`, so update `into` first
-  with what to keep.
+  with what to keep. The Rust repositories merge on Postgres and SQLite
+  (`merge_into(&from, &into)`), in the caller's transaction.
+- **A name people know a row by, with its old names, is an Aliased
+  field.** Type it `name: Aliased<string>` (or `Aliased<string, {
+  normalize: "slug" }>`), not a `@unique` column and an aliases table of
+  your own (D147). A create gives the name; change it with
+  `name.rename`, which keeps the old one as an alias, and keep the rest
+  with `name.addAlias` and `name.removeAlias`; find a row by any of them
+  with `name.resolve({ name })`. A name another row holds is refused with
+  that row's key (`name_taken`), and a merge moves the aliases.
 - **Payloads you don't control gain keys.** A `@webhook`'s input drops the
   keys its type does not declare; mark any other such type
   `@allowUnknownFields`, rather than a manual route to read the body.

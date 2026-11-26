@@ -27,7 +27,8 @@
     "Holds",
     "Calendar",
     "Payments",
-    "Blueprint"
+    "Blueprint",
+    "Aliased"
   ],
   "scenarios": [
     {

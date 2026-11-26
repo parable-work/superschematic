@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 35] = [
+const TRANSCRIPTS: [(&str, usize); 36] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -127,6 +127,7 @@ const TRANSCRIPTS: [(&str, usize); 35] = [
     ("core-refunds", REFUNDS_FLOOR),
     ("core-payments", PAYMENTS_FLOOR),
     ("core-blueprint", BLUEPRINT_FLOOR),
+    ("core-aliased", ALIASED_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -354,6 +355,12 @@ const PAYMENTS_FLOOR: usize = 73;
 /// change set creates each child of the template in the child's table,
 /// its relation to the parent and its blockers in Dependencies' sub-table.
 const BLUEPRINT_FLOOR: usize = 151;
+/// core-aliased's floor (D147): 46 steps of the scenarios written by hand,
+/// 36 commands and 10 checks: names claimed in the use's shared table, a
+/// name another row holds refused with its key, rename, addAlias and
+/// removeAlias, resolve a command without a row, and a delete that deletes
+/// the row's rows of the shared table.
+const ALIASED_FLOOR: usize = 46;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

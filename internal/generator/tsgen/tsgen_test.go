@@ -172,6 +172,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// API's views, which read the database's.
 		{service: "fixture-variant-field-db", sqlite: true},
 		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
+		// Aliased (D147): the name a create gives in each create input,
+		// rename, addAlias, removeAlias and resolve under each field, and
+		// Company's merge, whose steps move its aliases and names.
+		{service: "fixture-aliased-db", behaviors: true},
 	}
 
 	for _, tc := range cases {
