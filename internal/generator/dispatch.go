@@ -636,7 +636,6 @@ func (r run) generateAPI() error {
 		if err := r.warnGoTableOperationsUnserved(); err != nil {
 			return err
 		}
-		r.warnGraphOperationsUnserved("Go")
 		return r.generateGoAPI()
 	case APILanguageRust:
 		return r.generateRustAPI()

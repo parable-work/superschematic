@@ -117,20 +117,26 @@ func TestGraphOperationsByServerLanguage(t *testing.T) {
 		t.Errorf("the TypeScript interface holds other than getRecipe:\n%s", interfaces)
 	}
 
+	// The Go server serves the set from graphs.go: its build warns of
+	// nothing, and its interface holds getRecipe alone.
 	result, dir = build(APILanguageGo)
-	want := "fixture-graph-api: the Go server writes no handlers for RecipeOperations, a @graphOperations set of Recipe's version graph (D138): its 16 operations (" + operations + ") each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them"
-	if warnings := graphWarnings(result); len(warnings) != 1 || warnings[0] != want {
-		t.Errorf("the Go build's warnings = %q,\nwant one, %q", warnings, want)
+	if warnings := graphWarnings(result); len(warnings) != 0 {
+		t.Errorf("a Go build warned of the set it serves: %v", warnings)
 	}
 	goInterfaces := read(filepath.Join(dir, "interfaces.go"))
-	for _, method := range []string{"Branch(", "Save(", "EntityHistory(", "Released(", "GetRecipe("} {
-		if !strings.Contains(goInterfaces, method) {
-			t.Errorf("the Go interface lacks %s, a method the project writes", method)
+	if !strings.Contains(goInterfaces, "GetRecipe(") || strings.Contains(goInterfaces, "Branch(") || strings.Contains(goInterfaces, "EntityHistory(") {
+		t.Errorf("the Go interface holds other than GetRecipe:\n%s", goInterfaces)
+	}
+	if routes := read(filepath.Join(dir, "routes.go")); !strings.Contains(routes, "/recipes/{id}/refs/{ref}/edits") || !strings.Contains(routes, "createRecipeSaveHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe})") {
+		t.Error("the Go router does not route save at its path to graphs.go")
+	}
+	goGraphs := read(filepath.Join(dir, "graphs.go"))
+	for _, method := range []string{"Branch(", "Save(", "EntityHistory(", "Released("} {
+		if !strings.Contains(goGraphs, ") "+method) {
+			t.Errorf("graphs.go serves no %s", method)
 		}
 	}
-	if routes := read(filepath.Join(dir, "routes.go")); !strings.Contains(routes, "/recipes/{id}/refs/{ref}/edits") {
-		t.Error("the Go router does not route save at its path")
-	}
+	want := "fixture-graph-api: the Go server writes no handlers for RecipeOperations, a @graphOperations set of Recipe's version graph (D138): its 16 operations (" + operations + ") each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them"
 
 	result, dir = build(APILanguageRust)
 	want = strings.Replace(want, "the Go server", "the Rust server", 1)

@@ -143,36 +143,50 @@ func TestOpenAPIGraphOperations(t *testing.T) {
 	}
 }
 
-// TestGraphOperationsOnAGoServer: the Go server serves no graph operation
-// yet (D138), so every one stays among the endpoints its implementation's
-// interface declares, with its route and its types, and the build names
-// the set once (apigen.UnservedGraphSets). The module's files are held to
-// their golden copies. Regenerate with:
+// TestGraphOperationsOnAGoServer: the Go server serves the graph
+// operations (D138), so the implementation's interface has getRecipe
+// alone, and graphs.go serves each operation of the Recipe graph through
+// its facade, with the set's row rule and the permission that lifts it.
+// The module's files are held to their golden copies. Regenerate with:
 // go test ./internal/generator/apigen -run TestGraphOperationsOnAGoServer -update
 func TestGraphOperationsOnAGoServer(t *testing.T) {
-	output, api := generateGraphAPI(t)
-	if !output.HasGraphOperations() {
+	output, _ := generateGraphAPI(t)
+	if !output.HasGraphOperations() || !output.HasGraphEndpoints() || !output.TakesDatabase() {
 		t.Fatal("the output has no graph operation")
 	}
 	view, err := apigen.ImplementedOutput(output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var implemented []string
+	var implemented, served []string
 	for _, ep := range view.Endpoints {
 		implemented = append(implemented, ep.Name)
 	}
-	for _, name := range append([]string{"getRecipe"}, ir.GraphOperationNames...) {
-		if !slices.Contains(implemented, name) {
-			t.Errorf("the implementation's interface has no %s: %v", name, implemented)
+	for _, ep := range view.GraphEndpoints {
+		served = append(served, ep.Name)
+		if ep.GraphRoutes != "recipeOperationsRoutes" || ep.GraphMember != "Recipe" {
+			t.Errorf("%s is served by %q of %q", ep.Name, ep.GraphRoutes, ep.GraphMember)
 		}
 	}
-	if len(view.BehaviorEndpoints) != 0 || len(view.TableEndpoints) != 0 {
-		t.Errorf("the view routes %d behavior and %d table endpoints", len(view.BehaviorEndpoints), len(view.TableEndpoints))
+	if !slices.Equal(implemented, []string{"getRecipe"}) {
+		t.Errorf("the implementation's interface holds %v, want getRecipe alone", implemented)
 	}
-	want := []apigen.UnservedGraphSet{{Set: "RecipeOperations", Root: "Recipe", Operations: ir.GraphOperationNames}}
-	if got := apigen.UnservedGraphSets(api); !reflect.DeepEqual(got, want) {
-		t.Errorf("UnservedGraphSets = %+v, want %+v", got, want)
+	slices.Sort(served)
+	names := slices.Clone(ir.GraphOperationNames)
+	slices.Sort(names)
+	if !slices.Equal(served, names) {
+		t.Errorf("graphs.go serves %v, want every graph operation", served)
+	}
+	if len(view.BehaviorEndpoints) != 0 || len(view.TableEndpoints) != 0 || len(view.HandlerEndpoints()) != 1+len(names) {
+		t.Errorf("the view routes %d behavior, %d table and %d handler endpoints", len(view.BehaviorEndpoints), len(view.TableEndpoints), len(view.HandlerEndpoints()))
+	}
+	if view.Graphs == nil || len(view.Graphs.Sets) != 1 || !view.Graphs.Lifts || view.Graphs.DBTypes != "fixtureversiongraphdb" {
+		t.Fatalf("Graphs = %+v", view.Graphs)
+	}
+	set := view.Graphs.Sets[0]
+	if set.Set != "RecipeOperations" || set.Facade != "RecipeGraph" || set.RootKeyGo != "Id" || !slices.Equal(set.ByMembers, []string{"CreatedBy"}) || set.Override != "recipes.admin" ||
+		set.SnapshotFilter != "ReferencedByRecipeSnapshotEntryCommit" || len(set.Kinds) != 7 || len(set.Endpoints) != len(names) {
+		t.Errorf("the set = %+v", set)
 	}
 
 	paths := naming.LocalPaths{
@@ -180,6 +194,7 @@ func TestGraphOperationsOnAGoServer(t *testing.T) {
 		SchemaIR:        "/repo/ir",
 		SchemaRuntimeGo: "/repo/runtime/schema/go",
 		HTTPRuntimeGo:   "/repo/runtime/http/go",
+		VersionGraphGo:  "/repo/runtime/versiongraph/go",
 	}
 	if err := apigen.SetReplacePaths(output, paths, "/repo/schemas/dist/api/"+graphFixtures.api); err != nil {
 		t.Fatalf("set replace paths: %v", err)
@@ -189,7 +204,7 @@ func TestGraphOperationsOnAGoServer(t *testing.T) {
 		t.Fatalf("write api: %v", err)
 	}
 	goldenDir := filepath.Join("testdata", "golden", graphFixtures.api)
-	for _, name := range []string{"routes.go", "interfaces.go", "openapi.json", "permissions.json"} {
+	for _, name := range []string{"routes.go", "interfaces.go", "graphs.go", "go.mod", "openapi.json", "permissions.json"} {
 		got, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
 			t.Fatalf("read generated %s: %v", name, err)

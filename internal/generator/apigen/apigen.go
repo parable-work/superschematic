@@ -221,6 +221,11 @@ type EndpointInfo struct {
 	// UnservedTableOperations): it is among Endpoints, an operation the
 	// project implements.
 	TableByHand bool
+	// GraphRoutes is, in the view ImplementedOutput returns, the type of
+	// graphs.go that serves a graph operation (D138), and GraphMember the
+	// field of Graphs that holds its graph's facade; "" for any other.
+	GraphRoutes string
+	GraphMember string
 	// BehaviorPreconditions is a behavior operation whose input carries the
 	// caller's preconditions (D16, D104), each use's entry by its use id,
 	// in its member preconditions (BehaviorPreconditionsMember), which the
@@ -411,6 +416,21 @@ type APIOutput struct {
 	TableEndpoints []EndpointInfo
 	Tables         *TablesInfo
 
+	// GraphEndpoints are the operations of the API's @graphOperations sets
+	// (D138), which graphs.go serves through each graph's facade in the ORM
+	// of the API's database: ImplementedOutput moves them here from
+	// Endpoints, so the Go server mounts them on its handlers and
+	// implements none of them, and Graphs is what graphs.go is written
+	// from. Both are nil in the output Generate returns.
+	GraphEndpoints []EndpointInfo
+	Graphs         *GraphsInfo
+
+	// graphOwner is the API's schema, which holds each @graphOperations
+	// set, and graphSchemas its dependencies, its database's among them,
+	// which graphs.go is modelled from.
+	graphOwner   *ir.Schema
+	graphSchemas map[string]*ir.Schema
+
 	// tables is what the table operations' handlers are modelled from:
 	// the schema, its dependencies, the database's among them, and the
 	// type mapper Generate read the operations with.
@@ -560,10 +580,10 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 // TableEndpoints, in Generate's order (by path, then method). Without the
 // last three they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints)
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -1033,6 +1053,15 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		output.tables = &tableSource{schema: schema, dependencies: opts.Dependencies, types: types}
 		if output.Deps.Database == "" {
 			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
+		}
+		output.setTableDeps()
+	}
+	// The graph operations run through the facade of each graph in the ORM
+	// of the API's database (D138), which Deps holds too.
+	if db := graphDatabase(output.Endpoints); db != "" {
+		output.graphOwner, output.graphSchemas = schema, opts.Dependencies
+		if output.Deps.Database == "" {
+			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), VersionGraph: true, Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
 		}
 		output.setTableDeps()
 	}
