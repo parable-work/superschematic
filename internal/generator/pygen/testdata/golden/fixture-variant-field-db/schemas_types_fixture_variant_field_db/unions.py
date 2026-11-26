@@ -294,13 +294,19 @@ def _variant_field_value(data: Dict[str, Any], keys: Tuple[str, str]) -> Tuple[O
 
 def read_variant_value(name: str, by: Optional[str], value: Any) -> Any:
     """Read value, a field of the variant union name, as the member by
-    names, by its from_dict_non_strict. A member model is returned as it is;
-    a value while by names no member is read as read_union_value reads it,
-    and validate_all reports it as "variant"."""
+    names, by its from_dict_non_strict, and raise ValueError when the value
+    does not decode under the member's types (the structural predicate's
+    _reads_type), as read_union_value refuses a value no member reads. A
+    member model is returned as it is; a value while by names no member is
+    read as read_union_value reads it, and validate_all reports it as
+    "variant"."""
     members = _UNION_MEMBERS[name]
     index = _VARIANT_ARMS[name].get(by) if by is not None else None
     if index is None or isinstance(value, members) or not isinstance(value, dict):
         return read_union_value(name, value)
+    member = _READ_UNIONS[name].members[index].type_name
+    if not _reads_type(member, value):
+        raise ValueError(f"{name}: the payload does not read as {member}, which its sibling names")
     return members[index].from_dict_non_strict(value)
 
 def read_variant_field(name: str, data: Any, field: Tuple[str, str], by: Tuple[str, str]) -> Any:

@@ -1,0 +1,99 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-variant-field-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "kind",
+          "in": [
+            "verify",
+            "review",
+            "note"
+          ],
+          "name": "ck_step_kind"
+        },
+        {
+          "column": "result",
+          "name": "ck_step_result",
+          "variant": {
+            "arms": [
+              {
+                "keys": [
+                  {
+                    "key": "passed",
+                    "kind": "boolean",
+                    "required": true
+                  },
+                  {
+                    "key": "checks",
+                    "kind": "array"
+                  }
+                ],
+                "values": [
+                  "verify"
+                ]
+              },
+              {
+                "keys": [
+                  {
+                    "in": [
+                      "approved",
+                      "changes_requested"
+                    ],
+                    "key": "verdict",
+                    "kind": "string",
+                    "required": true
+                  },
+                  {
+                    "key": "notes",
+                    "kind": "string"
+                  }
+                ],
+                "values": [
+                  "review"
+                ]
+              }
+            ],
+            "by": "kind"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Step.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Step.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "Step.kind",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "result",
+          "nullable": true,
+          "origin": "Step.result",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "step",
+      "origin": "Step",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "step_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

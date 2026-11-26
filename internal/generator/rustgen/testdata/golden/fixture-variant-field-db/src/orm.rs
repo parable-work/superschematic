@@ -90,8 +90,6 @@ pub struct StepFilter {
     pub title: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<orm::Text<StepKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<orm::Text<StepResult>>,
     /// The rows every one of the filters finds, beside the other members (D99).
     #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
     pub all_of: Vec<StepFilter>,
@@ -198,14 +196,7 @@ pub const POSTGRES: &str = r#"{
           "column": "result",
           "field": "result",
           "qualified": "step.result",
-          "filter": [
-            "eq",
-            "ne",
-            "in",
-            "notIn",
-            "ilike",
-            "isNull"
-          ]
+          "json": true
         }
       ],
       "statements": {
@@ -451,14 +442,7 @@ pub const SQLITE: &str = r#"{
           "column": "result",
           "field": "result",
           "qualified": "step.result",
-          "filter": [
-            "eq",
-            "ne",
-            "in",
-            "notIn",
-            "ilike",
-            "isNull"
-          ]
+          "json": true
         }
       ],
       "statements": {

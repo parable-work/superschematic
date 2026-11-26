@@ -29,7 +29,7 @@ decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { NullFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -62,7 +62,6 @@ export interface StepFilter {
   id?: UuidFilter<T.IdentityUUID>;
   title?: StringFilter<string>;
   kind?: StringFilter<T.StepKind>;
-  result?: StringFilter<T.StepResult> & NullFilter;
   /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
   allOf?: readonly StepFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
@@ -110,7 +109,7 @@ export const stepTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "step.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
     { name: "title", column: "title", field: "title", qualified: "step.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "kind", column: "kind", field: "kind", qualified: "step.kind", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
-    { name: "result", column: "result", field: "result", qualified: "step.result", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "result", column: "result", field: "result", qualified: "step.result", json: true },
   ],
   statements: {
     columns: "\"id\", \"title\", \"kind\", \"result\"",
