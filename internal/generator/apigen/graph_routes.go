@@ -133,6 +133,9 @@ func planGraphs(output *APIOutput, endpoints []EndpointInfo) (*GraphsInfo, map[*
 	if output.Deps.Database != dbName || output.Deps.ORMModule == "" {
 		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, and the Go server's Deps hold the ORM of %q (D138)", output.SchemaName, dbName, output.Deps.Database)
 	}
+	if output.IsPublic && output.ORMModule != output.Deps.ORMModule {
+		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, and its Config.DB is the ORM of %s, its auth schema: the Go server reads a graph's roots through the ORM of the graph's database, so serve the graph from an API whose auth schema it is (D138)", output.SchemaName, dbName, output.UpstreamSchema)
+	}
 	alias := output.Deps.DatabaseTypesAlias
 	if alias == "" || output.Deps.DatabaseTypes == "" {
 		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, and its Deps name no Go types module of it (D138)", output.SchemaName, dbName)
