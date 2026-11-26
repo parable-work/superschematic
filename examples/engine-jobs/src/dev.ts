@@ -24,9 +24,10 @@
 //   blocked job at its claim, and a claim here skips one the read shows
 //   dependenciesBlocked.
 // - A job keeps no result field. A table's Retries takes no resultField,
-//   and a worker writes no job but through the work's operations, which the
-//   policy as data cannot tell from a create: the result is the successful
-//   attempt's detail, in Retries' attempts.
+//   and a worker writes a job only through the work's operations, since
+//   the policy as data cannot tell an update from a create and so grants a
+//   worker no update: the result is the successful attempt's detail, in
+//   Retries' attempts.
 // - The types are Job, Worker and Batch; the engine names the schemas
 //   jobs, workers and batches. A row is its own fields beside its
 //   behaviors' fields, each named after its behavior (workflowStatus,
