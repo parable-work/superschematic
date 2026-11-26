@@ -78,6 +78,7 @@ const (
 	kindMinusToken                  = tsast.KindMinusToken
 	kindTypeLiteral                 = tsast.KindTypeLiteral
 	kindTupleType                   = tsast.KindTupleType
+	kindIndexedAccessType           = tsast.KindIndexedAccessType
 	kindPropertySignature           = tsast.KindPropertySignature
 	kindLiteralType                 = tsast.KindLiteralType
 	kindParameter                   = tsast.KindParameter

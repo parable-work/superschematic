@@ -65,6 +65,8 @@ type Registry struct {
 	toolInvocation *ToolInvocationPolicy
 	// behaviors holds every RegisterBehavior declaration by name.
 	behaviors map[string]Behavior
+	// bundles holds the core's bundle declarations by name (D103, step 5).
+	bundles map[string]Bundle
 	// stack holds the stack model's platforms, connectors, targets, DNS
 	// platforms and provisioners (stack.go).
 	stack stackSpecs
@@ -108,6 +110,7 @@ func New(n naming.Naming) *Registry {
 		generators:    map[string]GeneratorSpec{},
 		authProviders: map[string]AuthProvider{},
 		behaviors:     map[string]Behavior{},
+		bundles:       map[string]Bundle{},
 		stack:         newStackSpecs(),
 		authoring:     map[string]bool{},
 		extensions:    map[string]bool{},
@@ -134,6 +137,13 @@ func New(n naming.Naming) *Registry {
 	for _, spec := range coreBehaviorSpecs() {
 		if err := r.RegisterBehavior(spec); err != nil {
 			panic("registry: core behaviors: " + err.Error())
+		}
+	}
+	// The core's bundles (bundles.go, D103's step 5), whose parts are the
+	// core's behaviors above.
+	for _, data := range coreBundleDeclarations() {
+		if err := r.registerBundle(data); err != nil {
+			panic("registry: core bundles: " + err.Error())
 		}
 	}
 	// The core session provider is the only one the core registers; every

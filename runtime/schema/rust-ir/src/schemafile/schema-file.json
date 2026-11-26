@@ -4202,6 +4202,199 @@
       ],
       "type": "object"
     },
+    "BundleRef": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Assignment"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "assign": {
+                    "description": "The permission a caller needs to assign the row to another subject or unassign another; no caller may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "take": {
+                    "description": "The permission a caller needs to assign the row to itself; any caller may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Barrier"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "link": {
+                    "description": "The to-one relation of that table to the barrier.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "releasePermission": {
+                    "description": "The permission a caller needs to release the barrier: a person's go-ahead.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "rows": {
+                    "description": "The table whose rows relate to the barrier, each of which says it is ready by finishing its Workflow with the outcome success.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "timeoutMs": {
+                    "description": "How long after the barrier begins waiting its deadline releases it, in milliseconds.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "rows",
+                  "link",
+                  "timeoutMs",
+                  "releasePermission"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "settings"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Mailbox"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "takePermission": {
+                    "description": "The permission a caller needs to take a message, Lease's acquirePermission; any caller who may write the row when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "ttlMs": {
+                    "description": "How long a taker's lease lasts after its acquire or its last heartbeat, in milliseconds; Lease's 60000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Reservation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "description": "The own integer field that holds what a booking owes, in the currency's minor units.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "description": "The currency of the amount: an ISO 4217 code.",
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  },
+                  "interval": {
+                    "additionalProperties": false,
+                    "description": "The booking's time: the own date-time fields it starts and ends at.",
+                    "properties": {
+                      "end": {
+                        "description": "The own date-time field the booking ends at.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "start": {
+                        "description": "The own date-time field the booking starts at.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "type": "object"
+                  },
+                  "resource": {
+                    "description": "The to-one relation of the table to the resource whose time a booking holds: a table that implements Calendar.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "resource",
+                  "interval",
+                  "amount",
+                  "currency"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "settings"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "Assignment",
+            "Barrier",
+            "Mailbox",
+            "Reservation"
+          ],
+          "type": "string"
+        },
+        "settings": {
+          "default": {}
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "CalendarSourceDef": {
       "additionalProperties": false,
       "properties": {
@@ -7254,6 +7447,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/BehaviorRef"
+          },
+          "type": "array"
+        },
+        "bundles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BundleRef"
           },
           "type": "array"
         },

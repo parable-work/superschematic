@@ -571,7 +571,7 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 	}
 	// A behavior the table implements (D103) comes after extends and
 	// before the traits.
-	implements = append(append(e.implementedBehaviors(def), e.identityTraits(def)...), implements...)
+	implements = append(append(append(e.implementedBehaviors(def), e.implementedBundles(def)...), e.identityTraits(def)...), implements...)
 	// Resolved names drive the imports; the raw text is what renders.
 	e.recordHeritageImports(def.Extends)
 	for _, tr := range def.Implements {
@@ -617,6 +617,40 @@ func (e *emitter) implementedBehaviors(def *ir.TypeDef) []string {
 			}
 		}
 		out = append(out, fmt.Sprintf("%s<%s, %s>", carrier, e.ident(def.Name, "type"), literalType(config)))
+	}
+	return out
+}
+
+// implementedBundles renders the bundles a table implements (D103, step
+// 5), `Reservation<Booking, { resource: "room"; ... }>`: the bundle's alias
+// from @superschematic/db, the table itself and its settings as a type
+// literal, which the reader reads back to the same settings and parts. A
+// bundle that takes no settings, the empty object, is written with {}.
+func (e *emitter) implementedBundles(def *ir.TypeDef) []string {
+	var out []string
+	for _, ref := range def.Bundles {
+		owner := fmt.Sprintf("type %s implements the bundle %s", def.Name, ref.Name)
+		if !identifierPattern.MatchString(ref.Name) {
+			e.failf("%s: the bundle has no alias in %s, so it has no TypeScript authoring form", owner, behaviorFieldPackage)
+			continue
+		}
+		alias := ref.Name
+		if e.declares(alias) {
+			renamed := alias + "Bundle"
+			for i := 2; e.declares(renamed); i++ {
+				renamed = fmt.Sprintf("%sBundle%d", alias, i)
+			}
+			alias = e.useAs(behaviorFieldPackage, ref.Name, renamed)
+		} else {
+			e.importSymbol(naming.Active().Specifier(behaviorFieldPackage), alias)
+		}
+		settings := any(map[string]any{})
+		if len(ref.Settings) > 0 {
+			if err := json.Unmarshal(ref.Settings, &settings); err != nil {
+				e.failf("%s: settings: %v", owner, err)
+			}
+		}
+		out = append(out, fmt.Sprintf("%s<%s, %s>", alias, e.ident(def.Name, "type"), literalType(settings)))
 	}
 	return out
 }
