@@ -52,9 +52,13 @@ export interface Principal {
 /** The kinds of principal (D156). */
 export type PrincipalKind = 'user' | 'party' | 'agent';
 
-/** Whom a principal acts for (D156): its kind and its subject. */
+/**
+ * Whom a principal acts for (D156): its kind and its subject. The engine's
+ * principal names the subject alone (D77), and passes as this one, so an
+ * absent kind reads as user, as the principal's own does.
+ */
 export interface ActingFor {
-  readonly kind: PrincipalKind;
+  readonly kind?: PrincipalKind;
   readonly subject: string;
 }
 
