@@ -316,7 +316,7 @@ func (r *resolver) wakeWorkers() {
 	for _, name := range sortedKeys(r.deployables) {
 		w := r.deployables[name]
 		run := w.res.Worker
-		if w.res.Kind != ir.DeployableWorker || !(run.Drains() || w.platform.WakesWorkers) || run.Instances == 0 || run.Database == "" {
+		if w.res.Kind != ir.DeployableWorker || (!run.Drains() && !w.platform.WakesWorkers) || run.Instances == 0 || run.Database == "" {
 			continue
 		}
 		queues := []string{run.Queue}
