@@ -33,7 +33,7 @@ Three rules hold throughout:
 | Built | Not built yet |
 | --- | --- |
 | the `MemoryStore` kind, `@channel` and `@key`, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, and `enabled: false` | |
-| typed definitions of each store in Go, TypeScript and Rust, and `inventory.json` | the scaffolded implementations do not depend on the definitions package yet; add it by hand |
+| typed definitions of each store in Go, TypeScript and Rust, and `inventory.json`; a scaffolded implementation depends on the definitions of each store its API lists | |
 | `Deps` gains a store per listed store, in Go, TypeScript and Rust, on Redis or Valkey, with a disabled and an in-process store | |
 | the shared rate limit in each language | |
 | `stack dev` runs one Valkey container per environment | |

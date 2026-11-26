@@ -10,6 +10,14 @@ that read it. Neither changes a server or an SDK: the argument or field
 keeps its own type and its own rules. The OpenAPI document and the tool
 documents describe both ([In the documents](#in-the-documents)).
 
+Two features of a DB schema have similar names and do other things. A row
+that points at a row of any table, and lists what points at it, is
+`@references`
+([References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row)).
+One ranked search over the rows of every `@searchable` table of a
+database is
+[Search across tables](/superschematic/guides/database-tables/#search-across-tables).
+
 ## `RefersTo`: a value that names an item
 
 `RefersTo<T, Target, { options, value, label }>` says that a value of type
@@ -278,7 +286,10 @@ its search or without one
 ([Filters](/superschematic/guides/api-routes/#filters)).
 
 A search keeps the items whose searchable text contains each of its words,
-case-insensitively, and does not rank them. A word is a run of characters
+case-insensitively, and does not rank them; a ranked search across tables
+is `@searchable`'s
+([Search across tables](/superschematic/guides/database-tables/#search-across-tables)).
+A word is a run of characters
 that are not Unicode `White_Space`; the first 8 count, and a blank search
 keeps every item. Each server's runtime gives the steps an implementation
 needs, held to one set of answers by

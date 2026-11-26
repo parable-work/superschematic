@@ -7,7 +7,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -15,10 +14,12 @@ import (
 // against the classes they are on, their fields and the service, in every
 // form, once the access expansion added their fields.
 //
-// An @audience table is a table of a DB service built for Postgres alone:
-// its effective audience is a list of UUIDs the reads compare by array
-// containment, and a trigger function keeps it, neither of which the
-// sqlite dialect has yet. Its owner is a field that holds a UUID or a
+// An @audience table is a plain table of a DB service: its effective
+// audience is a list of UUIDs the reads compare by array containment on
+// Postgres and through json_each on SQLite, which triggers keep. On SQLite
+// only the TypeScript repositories read it so far, so a service that lists
+// sqlite takes no other language's types (D182, refuseSQLiteReaders). Its
+// owner is a field that holds a UUID or a
 // to-one relation, or createdBy, which the table then declares. Its
 // inheritFrom is a to-one relation to a table that is @audience too. It
 // declares none of the audience columns itself.
@@ -73,9 +74,7 @@ func checkAudience(schema *ir.Schema, in Input, td *ir.TypeDef, bases map[string
 		fail("%s is no table the generated repositories read with statements of their own; an audience is built for a plain table", td.Name)
 		return
 	}
-	if slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
-		fail("%s lists the sqlite dialect, and an audience is a list of ids a read compares by array containment and a trigger function keeps, which only Postgres has so far; build %s for postgres alone (outputs.sql.dialects: [\"postgres\"])", schema.Name, schema.Name)
-	}
+	refuseSQLiteReaders(schema, in, td, "@audience", r)
 	for _, fd := range td.Fields {
 		if fd != nil && slices.Contains(ir.AudienceFields, fd.Name) && fd.Origin != ir.OriginAccess {
 			fail("%s declares %s, a column @audience adds; rename the field", td.Name, fd.Name)

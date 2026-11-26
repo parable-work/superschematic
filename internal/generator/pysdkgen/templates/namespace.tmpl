@@ -15,7 +15,7 @@ from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import DownloadedFile, EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilteredEndpoints}} FilterField,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasFilteredEndpoints}}, filter_query_params{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
+from ..client import {{if .Namespace.HasBinaryStream}}BinaryStream, {{end}}DownloadedFile, EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilteredEndpoints}} FilterField,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasFilteredEndpoints}}, filter_query_params{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
 from ..errors import SDKError, ValidationError
 {{- if .Namespace.HasPagedEndpoints}}
 from ..page import Page{{if ne .Namespace.PageType "Page"}} as {{.Namespace.PageType}}{{end}}
@@ -893,6 +893,9 @@ class {{.ClassName}}:
 {{- if .FileDownload}}
             response_file=True,
 {{- end}}
+{{- if .BinaryStreamContentType}}
+            stream_content_type="{{.BinaryStreamContentType}}",
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else if .HasEncryptedBody}}
@@ -918,6 +921,9 @@ class {{.ClassName}}:
 {{- if .FileDownload}}
             response_file=True,
 {{- end}}
+{{- if .BinaryStreamContentType}}
+            stream_content_type="{{.BinaryStreamContentType}}",
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else}}
@@ -939,6 +945,9 @@ class {{.ClassName}}:
             extra_headers=extra_headers,
 {{- if .FileDownload}}
             response_file=True,
+{{- end}}
+{{- if .BinaryStreamContentType}}
+            stream_content_type="{{.BinaryStreamContentType}}",
 {{- end}}
         )
         return {{template "coerceResponse" .}}
@@ -997,6 +1006,9 @@ class {{.ClassName}}:
 {{- if .FileDownload}}
             response_file=True,
 {{- end}}
+{{- if .BinaryStreamContentType}}
+            stream_content_type="{{.BinaryStreamContentType}}",
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else}}
@@ -1010,6 +1022,9 @@ class {{.ClassName}}:
             extra_headers=extra_headers,
 {{- if .FileDownload}}
             response_file=True,
+{{- end}}
+{{- if .BinaryStreamContentType}}
+            stream_content_type="{{.BinaryStreamContentType}}",
 {{- end}}
         )
         return {{template "coerceResponse" .}}
@@ -1046,7 +1061,7 @@ a list of lists of them row by row, and any other response as
 _coerce_response reads it.
 */ -}}
 {{- define "coerceResponse" -}}
-{{if .FileDownload}}response{{else if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsMap .OutputModelName}}self._coerce_map_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+{{if or .FileDownload .BinaryStreamContentType}}response{{else if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsMap .OutputModelName}}self._coerce_map_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- end}}
 {{- /*
 scalarArgsPayload builds the JSON body of an endpoint's scalar arguments.

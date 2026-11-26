@@ -9,9 +9,10 @@ sidebar:
 `build`, `build-all` and `migrate plan` load it from there, or from
 `--naming`; `migrate plan` loads the previous version's from that
 version's own schemas root when it has one. `format` walks up from the
-file you pass and loads the first one it finds. `json-schema` and
-`behaviors` have no service directory; they use the built-in defaults
-unless you pass `--naming`.
+file you pass and loads the first one it finds, and so does
+`engine-client`, from its first schema file, unless you pass `--naming`.
+`json-schema`, `behaviors` and `catalog` have no service directory; they
+use the built-in defaults unless you pass `--naming`.
 
 A missing file is `Default()`. A key left out keeps its default. An
 unknown top-level key is an error, except keys under `[extension.<name>]`,

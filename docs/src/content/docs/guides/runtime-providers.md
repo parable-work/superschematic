@@ -25,8 +25,8 @@ depends on none of them.
 | the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | the interfaces in the Rust runtime |
 | the same in the Go HTTP runtime's `providers` package, and a generated Go server that imports each provider's Go module and builds `Providers` in its `Deps` ([In Go](#in-go)) | a generated TypeScript server that links the packages and builds `Providers` in its `Deps` |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
-| `@providers` on an API's `@envVars` class, and the API config's `providers` | |
-| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | attachments, which registers as it is built |
+| `@providers` on an API's `@envVars` class, and the API config's `providers` | provider packages in `build-all`'s dependency graph and its build cache key |
+| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)

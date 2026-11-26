@@ -131,6 +131,14 @@ type Input struct {
 	// feature the Go server does not serve yet (D180).
 	GoServer bool
 
+	// TypesLanguages are the languages whose types a DB service's config
+	// enables (outputs.types), sorted, which the loader reads from the
+	// config. The features whose SQLite tables only some languages'
+	// repositories read on SQLite are held to them (D182,
+	// sqlite_features.go). Nil when the loader has no config to read them
+	// from, which leaves those rules unchecked.
+	TypesLanguages []string
+
 	// RustOutput names the output of the service's config that builds Rust
 	// (D181): "outputs.types.rust" for a DB service's Rust types,
 	// "outputs.api.language: rust" for an API's Rust server; empty when it
@@ -284,6 +292,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkMiddleware(schema, r)
 	checkPages(schema, r)
 	checkFileTransfers(schema, r)
+	checkHTTPBinaryStreams(schema, r)
 	checkMCPToolsLeftOut(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)

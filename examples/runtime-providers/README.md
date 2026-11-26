@@ -5,7 +5,9 @@ channel adapter for SMS, a credential broker, a sandbox for agent runs, a
 model provider and a file processor. Each provider is a package of its own
 under `providers/`, which declares in its `package.json` the interface it
 implements. The core names none of them, and the app's code names none
-either: an environment's config picks each one.
+either: an environment's config picks each one. The
+[Runtime providers](https://parable-work.github.io/superschematic/guides/runtime-providers/)
+guide covers them in full.
 
 | Path | What it is |
 |---|---|
@@ -18,7 +20,7 @@ either: an environment's config picks each one.
 | `providers/text-preview` | A file processor with no dependency: the text of plain text and Markdown with an SVG preview, and a thumbnail of a greyscale PGM image |
 | `schemas/services/notes-db` | DB: notes, which raise `note.changed`, and the notifier's tables (D153), so every environment that runs notes-api needs a channel adapter |
 | `schemas/services/notes-api` | API over notes-db. Its config lists the six packages under `providers`, and `NotesApiConfig` names five slots with `@providers`: `SMS`, `VAULT`, `RUNNER`, `MODEL` and `PREVIEWS`, each with the settings fields after it |
-| `schemas/services/notes-stack` | The stack: `Dev`, on this machine, sends SMS through sms-relay-a and names every slot; `Cloudflare` sends through sms-relay-b and names no sandbox or model |
+| `schemas/services/notes-stack` | The stack: `Dev`, on this machine, sends SMS through sms-relay-a and names every slot; `Cloudflare` sends through sms-relay-b and names no vault, sandbox or model |
 | `src/app.ts` | The server's wiring: `notesProviders`, which reads the providers a loaded config names with `providersFrom`, and `sendNotice` and `receiveReplies`, which send through and read from whichever adapter `SMS` names |
 | `test/providers.test.ts` | Each provider against a stub service behind a fetch the test gives: the same notice through either relay with only the config changed, signed replies read as the adapter's own principal, the broker's list and a browser fill with no value in any log or record, a sandbox run and a cancel, a tool call, and text and previews from `fixtures/` |
 | `test/injection.typecheck.ts` | What the credential types hold, which tsc checks: an `Injection` has no value to read, and no object literal passes for one |
@@ -66,4 +68,5 @@ superschematic build schemas/services/notes-stack --out /tmp/notes-out
 
 `TestRuntimeProvidersExampleStack` and
 `TestRuntimeProvidersExampleRefusals` (`cmd/superschematic`) build it in
-CI, with a test feature that stands in for notifications.
+CI with the installed binary, whose core registers notifications (D153)
+as the feature that needs a channel adapter.

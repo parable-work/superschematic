@@ -29,8 +29,9 @@ export abstract class JobsApiConfig {
 @worker({ queue: NoticeWork, concurrency: 2 })
 export abstract class Notify {}
 
-// Takes each run request a granted party's message made (D157). Until the
-// agent dispatcher (D158) takes it, the example's handler files the
-// message onto the job the party's grant names.
+// Takes each run request a granted party's message made (D157). The
+// example's handler files the message onto the job the party's grant
+// names; examples/agent-orchestration hands the queue to the agent
+// dispatcher (D158) instead.
 @worker({ queue: RunRequest, concurrency: 2 })
 export abstract class Runs {}

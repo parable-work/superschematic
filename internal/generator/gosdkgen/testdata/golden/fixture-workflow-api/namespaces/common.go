@@ -11,6 +11,7 @@ import (
 type jsonClient interface {
 	DoJSON(ctx context.Context, method string, path string, query url.Values, body any, out any) error
 	DoFile(ctx context.Context, method string, path string, query url.Values, body any) (*runtime.DownloadedFile, error)
+	DoStream(ctx context.Context, method string, path string, query url.Values, body any, contentType string) (*runtime.BinaryStream, error)
 	EncryptRequestPayload(payload any, override *runtime.PublicEncryptionKey) (*runtime.EncryptedPayloadEnvelope, error)
 }
 

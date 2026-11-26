@@ -6,7 +6,7 @@
 //! relation, and only those, computed at a read with nothing written; all
 //! and any with outcomes, a state Workflow's finished names counting (D113);
 //! the gate, whoever asks, an any gate, a table whose relation no longer
-//! points here holding none, the read bound past one linked page; a rollup
+//! points here holding none, every linked page read, the read bound; a rollup
 //! over the table itself (a task done as its subtasks are); and the config
 //! change.
 
@@ -14,7 +14,7 @@ mod support;
 mod tables;
 
 use serde_json::{json, Map, Value};
-use superschematic_rules::{Action, Caller, FieldSpec, Outcome, TypeSpec, UseSpec};
+use superschematic_rules::{Action, Caller, FieldSpec, Outcome, TypeSpec, UseSpec, LINKED_PAGE};
 use superschematic_rules_behaviors::{core, rollups};
 use support::{changed, define, refused, result, rule, shape, undescribed, veto_of};
 use tables::Host;
@@ -453,16 +453,52 @@ fn a_relation_that_points_elsewhere_holds_none() {
     assert_eq!(values(&mut host, "p1"), json!({"owned": 0, "ghosts": 0}));
 }
 
-/// A rollup reads one linked page: past it the rollup is {"over": true} and
-/// its gate does not hold.
+/// A rollup reads every linked page: past the first one it still counts
+/// every row, and its gate holds once every row is in a terminal state.
 #[test]
-fn past_one_page_a_rollup_has_no_value() {
+fn a_rollup_reads_every_linked_page() {
+    let mut host = host(json!({
+        "tasks": {"schema": "Task", "link": "project", "function": "count"},
+        "byStatus": {"schema": "Task", "link": "project", "function": "countBy", "field": "Workflow.status"},
+        "finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"]}
+    }));
+    let rows = 2 * LINKED_PAGE + 1;
+    for n in 0..rows {
+        add_task(&mut host, &format!("t{n:05}"), json!({"projectId": "p1"}));
+    }
+    assert_eq!(
+        values(&mut host, "p1"),
+        json!({"tasks": rows, "byStatus": {"todo": rows}, "finished": false})
+    );
+    // The last row is on the third page: the gate waits for it too.
+    for n in 0..rows - 1 {
+        changed(mv(&mut host, "Task", &format!("t{n:05}"), "dropped"));
+    }
+    let (code, _) = veto_of(mv(&mut host, "Project", "p1", "done"));
+    assert_eq!(code, "not_held");
+    changed(mv(
+        &mut host,
+        "Task",
+        &format!("t{:05}", rows - 1),
+        "dropped",
+    ));
+    assert_eq!(
+        values(&mut host, "p1"),
+        json!({"tasks": rows, "byStatus": {"dropped": rows}, "finished": true})
+    );
+    changed(mv(&mut host, "Project", "p1", "done"));
+}
+
+/// A rollup reads at most MAX_ROLLUP_READ rows: past them the rollup is
+/// {"over": true} and its gate does not hold.
+#[test]
+fn past_the_bound_a_rollup_has_no_value() {
     let mut host = host(json!({
         "tasks": {"schema": "Task", "link": "project", "function": "count"},
         "finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"]}
     }));
     for n in 0..=rollups::MAX_ROLLUP_READ {
-        add_task(&mut host, &format!("t{n:04}"), json!({"projectId": "p1"}));
+        add_task(&mut host, &format!("t{n:05}"), json!({"projectId": "p1"}));
     }
     assert_eq!(
         values(&mut host, "p1"),

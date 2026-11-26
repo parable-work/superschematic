@@ -214,6 +214,11 @@ type {{.FilesStructName}} struct {
 // query.{{.FilterGoName}} keeps the rows its members find (D106){{if .Page}}; a cursor holds no
 // filter, so each next page is asked with the same one, as {{.AllMethodName}} does{{end}}.
 {{- end}}
+{{- if .BinaryStreamContentType}}
+//
+// It returns the {{.BinaryStreamContentType}} success body unread (D167): read
+// stream.Body and close it.
+{{- end}}
 func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- template "parameters" .}}
 ) ({{.OutputGoType}}, error) {
@@ -629,7 +634,22 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 
 
-	{{- if .FileDownload}}
+	{{- if .BinaryStreamContentType}}
+	// The success body streams as {{.BinaryStreamContentType}}, not in the
+	// JSON envelope (D167). The caller reads it and must close it.
+	return n.client.DoStream(
+		ctx,
+		"{{.HTTPMethod}}",
+		path,
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Page}}
+		queryValues,
+		{{- else}}
+		nil,
+		{{- end}}
+		requestBody,
+		"{{.BinaryStreamContentType}}",
+	)
+	{{- else if .FileDownload}}
 	// A FileDownload result (D81): the file, not a JSON value.
 	return n.client.DoFile(
 		ctx,
