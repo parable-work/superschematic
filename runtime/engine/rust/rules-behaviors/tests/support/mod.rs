@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    key_of, merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange, KeyedRow,
-    LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange, Source,
-    SubRow, SubRowChange, TypeSpec,
+    key_of, merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange,
+    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange,
+    Source, SubRow, SubRowChange, TypeSpec,
 };
 
 pub const START: i64 = 1_000_000;

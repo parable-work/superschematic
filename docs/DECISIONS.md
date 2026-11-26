@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D199 is the highest so far.
+  the highest number any branch has used. D200 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -2653,3 +2653,85 @@ Left:
   deleted, which a row trigger cannot tell.
 - The calendar, search, the notifier's queues, parties and agents on
   SQLite and D1 (D186, D189), on these shapes.
+
+## D200. Approvals takes requirements each instance sets: rows a gate reads, who counts and as whom, the proof, whom it excludes and when it applies, a reset per requirement and pins on named fields; the caller carries its Agent and assurance; and a generated index name past 63 bytes is shortened (D56, D103, D104 amended)
+
+A forge declared in superschematic schemas, which many teams run as
+instances of their own, gates each change's landing on approvals. Each
+team's rules differ, so the gate is a set of options each instance sets,
+not logic the app hard-codes. One team's values: a merge needs passing
+checks and approvals; agents may approve some classes of change alone
+(test fixes, golden updates, build scripts); some changes need an
+engineering or a security lead; a person who instructs an agent counts as
+that person; and a person approves through an MCP tool with no passkey
+each time. Another team may ask for a passkey with user verification on
+each approval. The forge's schema assumed options of the core's Approvals
+that it did not have. This entry builds them as options of the core
+behavior, each with a default that keeps a gate written before it as it
+was.
+
+D103's rule stands: a config is fixed at build time. The config fixes where
+a gate's requirements come from; the requirements themselves are rows,
+data the gate reads at each guard as Rollups reads its linked rows.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A gate is one requirement written in the config (`count`, `permission` and the members below), or reads its requirements from the rows of a type: `requirementsFrom: { schema, link, in? }`, the rows of `schema` whose to-one relation `link` points at the row, or with `in`, at one of the keys the row's own list field `in` holds. Absent, the gate is its own requirement. The rows are read a linked page at a time, as Rollups reads (D149), up to 10,000; a sign-off counts toward every requirement it meets; an archived row (`archivedAt`) asks for nothing. The configSchema needs `count` and `permission` unless `requirementsFrom` is there (`if`/`else`), and a gate that reads rows names none of the requirement's members. | Gates fixed in the schema, which a team changes only by a build. A config that holds the rows' ids, which an instance cannot change. One requirement per gate, which cannot say "a review, and a lead when the lead flag is set". |
+| A requirement's members, with their defaults: `count` (1 on a row), `permission` (needed); `callers`, absent: every caller counts, as its subject; `proof`, `none`; `proofWithinMs`, needed by `recent-sign-in` and taken by nothing else; `excludeCreator`, true; `excludeCreatorPerson`, false; `excludeSubjectsIn`, none; `recheckPermission`, false; `when`, none: it always applies. A row may also hold `name`, how a refusal names it (its key when absent), and `resetOn`. | Defaults that tighten an old gate (callers person only, recheck on), which would change every gate already built. |
+| `callers` lists `person`, a person calling as themselves, counted by its subject; `acting-for-person`, an agent run acting for a person, counted as that person; `agent`, an agent run, counted as its Agent. A caller that fits several counts as the person it acts for, then as its Agent, then as itself, in the order of the classes the requirement lists. So two runs for one person are one signer, and two runs of one Agent are one. A person's approval through an agent they instruct counts as theirs where the requirement lists `acting-for-person`; a requirement that lists `person` alone takes only the person themself. | Counting each run by its subject, which lets one Agent's runs make a count of two. Refusing every agent run a person's approval, which the forge's teams want an option for, not a rule. |
+| `proof` reads the assurance the host reports for the call (`Caller.assurance`: `signedInAt`, `userVerified`): `recent-sign-in` holds for a sign-in at most `proofWithinMs` before the sign-off, or user verification on it; `user-verification` for a passkey assertion with the UV flag over a challenge bound to the call. A caller with no assurance proves nothing. The core trusts the report as it trusts the subject. | The core checking a WebAuthn assertion, which is the authenticator's job and differs per host. |
+| `excludeCreator` refuses the subject `createdBy` holds, by the signer's subject or whom it counts as. `excludeCreatorPerson` also refuses the subject the row's own `createdFor` holds, the person the creator acted for. `excludeSubjectsIn` names own fields that list subjects, persons and Agents (`pushers`, `problemAgents`); a caller is excluded when its subject, the person it acts for or its run's Agent is listed. The guard reads each again, so a signer a later write lists stops counting. | Comparing the subject alone, which cannot exclude "the same Agent", since each run is a principal of its own (D156, D158). Recording the creator's actingFor in the core, which a table's create does not hand the core today. |
+| `recheckPermission` reads each signer's permission at each guard, through a new read, `ReadRequest::Permissions { subjects }` (`View::permissions_of`), for whom the sign-off counts as; a subject the host cannot answer for counts for nothing. Without it a row's requirement counts the permissions the caller held when it signed, which each sign-off records (`held`, every one, so a row whose permission moves later counts a signer who held the new one), and a gate written in the config reads no permission again, as before. | Withdrawing sign-offs when a role changes, which needs every role write to reach every gated row. |
+| `when` is a list of conditions on own fields, all of which hold for the requirement to apply: `{ field, test, values, negate? }`, `test` one of `every-matches` and `any-matches` (glob patterns: `*` within a path segment, `**` across them, `**/` none too, `?` one character), `contains` and `at-most` (one number). A requirement that does not apply asks for nothing, and a gate whose requirements ask for nothing holds. A condition on a field with no value holds, negated or not, so a fact not yet written never exempts. Separate requirements say "or". So an agent approves a class alone where the person's requirement leaves the class out, for example with a negated `every-matches` over the touched paths. | A condition language of its own, which a row would have to parse and a reader to learn. A field with no value making the condition fail, which would exempt a change before its facts are written. |
+| A reset spends a sign-off for one requirement, not for the gate. Each sign-off records the values of every field a row of the gate resets on (`values`), and a requirement counts it only while its own `resetOn` fields still hold the values recorded; a field the sign-off recorded no value of spends it, so a row that starts resetting on a new field asks again. The gate itself resets on what its own `resetOn` names, which a gate that reads rows must name: `[]` there keeps the writes of the facts the rows read from spending any sign-off. | A requirement's `resetOn` consuming sign-offs, which the requirements share, so one requirement's reset would spend another's. A gate without `resetOn` on rows, whose `resetOnChange` would spend every sign-off at every write of a fact. |
+| `pinOn` names own fields a sign-off is pinned to: `signOff` then takes `read`, the value of each as its signer read it, and one that is not the field's value now is `stale`, `{ field, read, current }`, before any other check, as `version` is. A write to another field makes no signer stale. | `pinned` (the row's version), which the evaluator's own writes move, so a signer races them. |
+| A row that does not parse, or names a field the type lacks, is broken: it applies and is never met, and `approvals_missing` names why in `missing[].broken`. A gate whose `in` holds no value yet does not hold and takes no sign-off; one whose `in` is an empty list asks for nothing. `approvals_missing` keeps `{ state, required, count }`, the first unmet requirement's, and adds `missing` for a gate that reads rows. A sign-off that would count toward no requirement whose permission the caller holds is `not_counted`, details by requirement; a caller who holds none of the permissions is forbidden, as before. | Skipping a broken row, which would loosen the gate when a row is written wrongly. |
+| The core's `Caller` carries `kind` and `actingForKind` (D156), `agent`, the run's Agent (D158), and `assurance`. The TypeScript and Rust hosts hand the core the principal's kind, whom it acts for, an agent run's Agent (its `agent` claim) and its authenticator's assurance (`Principal.assurance`, new in both runtimes); neither handed the core `actingFor` before, which Provenance (D73) now records from a route too. The Go contract carries the fields. | A run's Agent read from a row by the core, which would make every guard read the agents table. |
+| A flag's clearing permission stays in the app: the forge's flag row names `setPermission`, `clearPermission` and `clearedBySetter`, and its flag routes check them. A generic option would be a write's permission read from a related row, a rule of Constants or StateRules over another table's row, which no behavior has yet, for one route's check. | A core option now, for one caller. |
+| A role grant's event and a reviewed role edit are designed here and not built: the user model's `UserRoleGrant` table is the loader's, so a schema cannot put `@enqueueOnChange` on it, and its writes are the identity store's, not the core's. Its option is an `@enqueueOnChange` the `UserRole` class declares for its grants, which the loader copies onto `UserRoleGrant` (default none), and a `review: { permission }` on the user model that makes a role's edit, and a grant of a role, a proposal a holder of the permission approves (default none). An app enqueues an event on its own `UserRole` table today. | Building it here, beside the Approvals core it does not touch. |
+| Seeded rows other than roles are designed here and not built: `@seedRows([...])` on any DB table, rows `create.sql` inserts and a migration plan adds when new, never deleting one, as `@seedRoles` does (D88); default none. A row an app writes when a parent row is made, such as a repository's first merge rule, is the app's code, which this does not replace. | |
+| An index an expansion adds to a table (`ir.IndexDef.Origin` set: a behavior's sub-table index among them), which no author can name, is shortened when its default name passes PostgreSQL's 63 bytes: its first bytes, whole characters only, then `_` and the first eight hex digits of the SHA-256 of the whole name (`sqlutil.ShortIdentifier`). Revisions on `MergeRequirement` built `idx_merge_requirement_revisions_proposals_merge_requirement_proposal`, 68 bytes, which the build refused, with a remedy, `@index(..., { name })`, that cannot reach a behavior's index. The author's own indexes are still refused, with that remedy. | Shortening every name, which would take the author's choice of a readable name away. Truncating as PostgreSQL does, which can collapse two names into one. |
+| The core holds the configSchema through its schema walker (`ajv.rs`, which gains `else`), as Stock and Holds do, so the declaration and its check are one text. A gate with neither `count` nor `requirementsFrom` now also reports `must match "else" schema`, in the core and the engine alike. | Hand-written checks of the new members beside the schema, which drift. |
+
+The engine's Approvals, which shares the declaration, refuses each new
+member at define and `read` as a bad parameter, as it refuses `resetOn`,
+`pinned` and `version` (D104), and so does the build on an engine type.
+
+Built: the options in the core (`runtime/engine/rust/rules-behaviors/src/approvals.rs`),
+the permissions read and the caller's fields (`runtime/engine/rust/rules`),
+`else` in `ajv.rs`; the declaration (`internal/registry/behaviors/approvals.behavior.json`);
+the engine's refusals (`runtime/engine/rust/behaviors/src/approvals.rs`);
+the build's checks (`internal/loader/verify/behaviors_approvals.go`: the
+fields each member names, `createdFor`, the requirement table, its
+relation, its `permission` and the types of its members), and the layout
+reading `createdBy` for a gate that reads rows; the TypeScript config
+types (`ApprovalsGateOn<T>`, a requirement gate or a rows gate); the hosts'
+callers (`principalCaller` in TypeScript, `orm::Caller::of` and the
+generated routes in Rust), `Assurance` on both runtimes' `Principal`, and
+the Go and TypeScript contracts; `sqlutil.ShortIdentifier` and
+`GeneratedIndexNameIn`. The tests: `approval_requirements.rs` runs each
+option on the core, among them a requirement row that changes at run time,
+each requirement's reset on recorded values, the pin and a broken row;
+`TestApprovalsRequirementsAreHeldToTheTable` (verify);
+`approvals.typecheck.ts`; the TypeScript and Rust caller tests; and
+`TestABehaviorsLongIndexNameIsShortened`, which runs the loader and the
+SQL generator over a Revisions table named `MergeRequirement`. The forge's
+schema, checked from a copy against this branch, reports no Approvals
+error, and its database's `create.sql` applies to PostgreSQL 17.
+
+Left:
+
+- The permissions read in the production hosts: the Rust, TypeScript and
+  Go adapters refuse it as internal, so a requirement with
+  `recheckPermission` fails closed on them until each answers it from its
+  identity store.
+- An authenticator that reports assurance: the identity runtime's session
+  sign-in time, and a passkey assertion with user verification bound to a
+  call. Until one does, `recent-sign-in` and `user-verification` are never
+  met.
+- The Go server's caller, which hands the core a subject and permissions
+  alone until D180's principals land there.
+- Holding a requirement row to its members at its own write, rather than at
+  the gate's read.
+- The role grant event and the reviewed role edit, and `@seedRows`, as
+  designed above.

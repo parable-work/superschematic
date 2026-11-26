@@ -482,7 +482,10 @@ impl ApprovalsConfig {
             let requirements = match gate.get("requirementsFrom") {
                 Some(rows) => {
                     let schema = text(rows.get("schema"));
-                    if let Some(member) = ROW_MEMBERS.iter().find(|member| members.contains_key(**member)) {
+                    if let Some(member) = ROW_MEMBERS
+                        .iter()
+                        .find(|member| members.contains_key(**member))
+                    {
                         return Err(format!(
                             "gate \"{state}\" reads its requirements from {schema}'s rows, so it names no {member}: each row holds its own"
                         )
@@ -691,7 +694,9 @@ fn requirement_of(
                 }
             }
             if classes.is_empty() {
-                return Err("callers names no caller, so no sign-off counts".to_owned().into());
+                return Err("callers names no caller, so no sign-off counts"
+                    .to_owned()
+                    .into());
             }
             Some(classes)
         }
@@ -719,7 +724,9 @@ fn requirement_of(
         );
     }
     if source == Source::Config && proof != Proof::RecentSignIn && proof_within_ms.is_some() {
-        return Err("proofWithinMs is for proof recent-sign-in".to_owned().into());
+        return Err("proofWithinMs is for proof recent-sign-in"
+            .to_owned()
+            .into());
     }
     let exclude_creator = flag("excludeCreator", true)?;
     if exclude_creator && !has_creator {
@@ -821,7 +828,9 @@ fn conditions_of(value: Option<&Value>, own: &OwnFields) -> Result<Vec<Condition
         let negate = match item.get("negate") {
             None | Some(Value::Null) => false,
             Some(Value::Bool(negate)) => *negate,
-            Some(_) => return Err(format!("when condition {i}'s negate must be true or false").into()),
+            Some(_) => {
+                return Err(format!("when condition {i}'s negate must be true or false").into())
+            }
         };
         conditions.push(Condition {
             field,
@@ -1059,7 +1068,10 @@ impl Behavior for Approvals {
         let Some((first, counted)) = missing.first() else {
             return Ok(None);
         };
-        let required = first.requirement.as_ref().map_or(1, |requirement| requirement.count);
+        let required = first
+            .requirement
+            .as_ref()
+            .map_or(1, |requirement| requirement.count);
         let mut details = Map::new();
         details.insert("state".into(), Value::from(to));
         details.insert("required".into(), Value::from(required));
@@ -1077,10 +1089,9 @@ impl Behavior for Approvals {
         let named: Vec<String> = missing
             .iter()
             .map(|(found, counted)| match &found.requirement {
-                Ok(requirement) => format!(
-                    "{} ({counted} of {})",
-                    requirement.name, requirement.count
-                ),
+                Ok(requirement) => {
+                    format!("{} ({counted} of {})", requirement.name, requirement.count)
+                }
                 Err(reason) => format!("{} (broken: {reason})", found.name),
             })
             .collect();
@@ -1265,9 +1276,13 @@ fn requirements_of(
                 )))
             }
             Some(Value::Array(items)) => {
+                // A list's UUIDs reach the core as the column holds them,
+                // hyphenated, where a relation's key reaches it in base62,
+                // its wire form: each key is read in that form, as the
+                // row's own key is, so a key in either form finds its rows.
                 let mut keys: Vec<String> = Vec::new();
                 for item in &items {
-                    let Some(key) = key_of(item) else {
+                    let Some(key) = key_of(item).map(|key| canonical_subject(&key)) else {
                         return Ok(Err(format!("its {list} holds {item}, which is no key")));
                     };
                     if !keys.contains(&key) {
@@ -1277,7 +1292,9 @@ fn requirements_of(
                 keys
             }
             Some(other) => {
-                return Ok(Err(format!("its {list} holds {other}, which is no list of keys")))
+                return Ok(Err(format!(
+                    "its {list} holds {other}, which is no list of keys"
+                )))
             }
         },
     };
@@ -1309,25 +1326,19 @@ fn requirements_of(
     let has_creator = config.creator_type.is_some();
     Ok(Ok(rows
         .iter()
-        .filter(|found| {
-            found
-                .row
-                .own
-                .get(ARCHIVED_AT)
-                .is_none_or(Value::is_null)
-        })
+        .filter(|found| found.row.own.get(ARCHIVED_AT).is_none_or(Value::is_null))
         .map(|found| {
             let name = match found.row.own.get(ROW_NAME) {
                 Some(Value::String(name)) if !name.is_empty() => name.clone(),
                 _ => found.key.clone(),
             };
-            let requirement =
-                requirement_of(&name, &found.row.own, &own, has_creator, Source::Row).map_err(
-                    |why| match why {
-                        Broken::Reason(reason) => reason,
-                        Broken::Creator => "it excludes the creator, and there is no createdBy".to_owned(),
-                    },
-                );
+            let requirement = requirement_of(&name, &found.row.own, &own, has_creator, Source::Row)
+                .map_err(|why| match why {
+                    Broken::Reason(reason) => reason,
+                    Broken::Creator => {
+                        "it excludes the creator, and there is no createdBy".to_owned()
+                    }
+                });
             ReadRequirement {
                 key: Some(found.key.clone()),
                 name,
@@ -1355,7 +1366,12 @@ fn missing_of(found: &ReadRequirement, counted: i64) -> Value {
             if let Some(callers) = &requirement.callers {
                 out.insert(
                     "callers".into(),
-                    Value::Array(callers.iter().map(|class| Value::from(class.name())).collect()),
+                    Value::Array(
+                        callers
+                            .iter()
+                            .map(|class| Value::from(class.name()))
+                            .collect(),
+                    ),
                 );
             }
         }
@@ -1395,7 +1411,9 @@ fn condition_holds(condition: &Condition, own: &Map<String, Value>) -> bool {
         ConditionTest::Contains => texts.iter().any(|text| condition.values.contains(text)),
         ConditionTest::AtMost => {
             let (Some(number), Some(most)) = (
-                value.as_f64().or_else(|| value.as_str().and_then(number_of_text)),
+                value
+                    .as_f64()
+                    .or_else(|| value.as_str().and_then(number_of_text)),
                 number_of_text(&condition.values[0]),
             ) else {
                 return true;
@@ -1526,11 +1544,15 @@ impl Signer {
     // identities is the caller's subject, the person it acts for and its
     // run's Agent, each canonical: what an exclusion matches.
     fn identities(&self) -> Vec<String> {
-        [Some(&self.subject), self.acting_for.as_ref(), self.agent.as_ref()]
-            .into_iter()
-            .flatten()
-            .map(|subject| canonical_subject(subject))
-            .collect()
+        [
+            Some(&self.subject),
+            self.acting_for.as_ref(),
+            self.agent.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|subject| canonical_subject(subject))
+        .collect()
     }
 
     // counted_as is whom the sign-off counts as toward a requirement: its
@@ -1545,7 +1567,9 @@ impl Signer {
             return self.acting_for.as_deref().map(canonical_subject);
         }
         if classes.contains(&CallerClass::Agent) && self.is_agent_run() {
-            return Some(canonical_subject(self.agent.as_deref().unwrap_or(&self.subject)));
+            return Some(canonical_subject(
+                self.agent.as_deref().unwrap_or(&self.subject),
+            ));
         }
         if classes.contains(&CallerClass::Person) && self.is_person() {
             return Some(canonical_subject(&self.subject));
@@ -1618,15 +1642,17 @@ fn shortfall(
     }
     let identities = signer.identities();
     if requirement.exclude_creator_person
-        && listed(own.get(CREATED_FOR)).iter().any(|held| identities.contains(held))
+        && listed(own.get(CREATED_FOR))
+            .iter()
+            .any(|held| identities.contains(held))
     {
         return Err(Shortfall::CreatorPerson);
     }
-    if requirement
-        .exclude_subjects_in
-        .iter()
-        .any(|field| listed(own.get(field)).iter().any(|held| identities.contains(held)))
-    {
+    if requirement.exclude_subjects_in.iter().any(|field| {
+        listed(own.get(field))
+            .iter()
+            .any(|held| identities.contains(held))
+    }) {
         return Err(Shortfall::Listed);
     }
     if !signer.proves(requirement) {
@@ -1664,7 +1690,11 @@ fn rechecked<'r>(
         if !requirement.recheck_permission {
             continue;
         }
-        subjects.extend(signers.iter().filter_map(|signer| signer.counted_as(requirement)));
+        subjects.extend(
+            signers
+                .iter()
+                .filter_map(|signer| signer.counted_as(requirement)),
+        );
     }
     if subjects.is_empty() {
         return Ok(None);
@@ -1703,10 +1733,9 @@ fn met_by(
             continue;
         }
         let unchanged = requirement.reset_on.iter().all(|field| {
-            signer
-                .values
-                .as_ref()
-                .is_some_and(|values| values.contains_key(field) && equal(values.get(field), own.get(field)))
+            signer.values.as_ref().is_some_and(|values| {
+                values.contains_key(field) && equal(values.get(field), own.get(field))
+            })
         });
         if unchanged {
             counted.insert(whom);
@@ -1727,7 +1756,10 @@ fn sign_off(cx: &Cx<'_, ApprovalsConfig>, params: &Value) -> Hook<Value> {
         Err(reason) => {
             return Err(refuse(
                 cx,
-                format!("{subject}'s sign-off on {} for {state} cannot count: {reason}", row(cx)),
+                format!(
+                    "{subject}'s sign-off on {} for {state} cannot count: {reason}",
+                    row(cx)
+                ),
                 "not_counted",
             ))
         }
@@ -1747,6 +1779,7 @@ fn sign_off(cx: &Cx<'_, ApprovalsConfig>, params: &Value) -> Hook<Value> {
             .iter()
             .map(|requirement| requirement.permission.as_str())
             .collect();
+        permissions.sort_unstable();
         permissions.dedup();
         return Err(match permissions.as_slice() {
             [] => refuse(
@@ -1836,7 +1869,12 @@ fn sign_off(cx: &Cx<'_, ApprovalsConfig>, params: &Value) -> Hook<Value> {
             "already_signed",
         ));
     }
-    let next = rows_of_sign_offs.iter().filter_map(number_of).max().unwrap_or(0) + 1;
+    let next = rows_of_sign_offs
+        .iter()
+        .filter_map(number_of)
+        .max()
+        .unwrap_or(0)
+        + 1;
     let note = params.get("note").and_then(Value::as_str);
     let caller = cx.caller();
     let mut values = Map::new();
@@ -2096,10 +2134,7 @@ fn text_of(value: &Value) -> Option<String> {
 
 // text reads a string member a schema let through; empty when absent.
 fn text(value: Option<&Value>) -> String {
-    value
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
+    value.and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
 // json_of reads a JSON column's value, which a host may hand as its text.

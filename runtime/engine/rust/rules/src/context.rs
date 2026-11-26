@@ -257,10 +257,7 @@ impl<'r, C> View<'r, C> {
     /// ([`ReadRequest::Permissions`], D200): a subject the host cannot
     /// answer for is absent. A rule that reads a permission again at a
     /// guard, after the caller who held it has gone, reads this.
-    pub fn permissions_of(
-        &self,
-        subjects: &[String],
-    ) -> Hook<&'r BTreeMap<String, Vec<String>>> {
+    pub fn permissions_of(&self, subjects: &[String]) -> Hook<&'r BTreeMap<String, Vec<String>>> {
         self.run
             .read_permissions(&ReadRequest::permissions(subjects.iter().cloned()))
     }
