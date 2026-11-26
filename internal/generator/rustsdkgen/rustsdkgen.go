@@ -165,6 +165,12 @@ type EndpointInfo struct {
 	HasFileUpload          bool
 	FileUploadFields       []FileUploadField
 	FilesStructName        string
+
+	// BinaryStreamContentType is the media type an @httpBinaryStream
+	// operation streams its success body as (D167), "" for every other:
+	// the method returns runtime::BinaryStream, not the declared result.
+	BinaryStreamContentType string
+
 	// Filter is the operation's FilterBy (D106), nil for an operation
 	// without one. Its method takes the filter typed, FilterStructName
 	// (ListPartsFilter) with a member per field in FilterFields, as the
@@ -905,6 +911,11 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		FilterFields:           filterFields,
 		SupportsListAll:        supportsListAll,
 		ListAllPageSize:        listAllPageSize,
+	}
+	if ep.BinaryStream != nil {
+		// The stream (D167), unread, not the declared result.
+		converted.BinaryStreamContentType = ep.BinaryStream.ContentType
+		converted.OutputRustType = "runtime::BinaryStream"
 	}
 	if ep.Filter != nil {
 		converted.FilterStructName = methodPrefix + "Filter"

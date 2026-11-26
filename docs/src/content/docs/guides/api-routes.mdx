@@ -703,6 +703,45 @@ revalidates a file it was allowed to keep, so pair validators with a
 The Go and TypeScript servers answer each case alike
 (`runtime/http/testdata/file_answer_parity.json`).
 
+### A stream
+
+An operation with `@httpBinaryStream` answers a stream, not the JSON
+envelope (D167): rows a caller reads as they arrive, such as an Arrow IPC
+stream or newline-delimited JSON. A reporting API exports a report's rows:
+
+```ts
+export class Reports {
+  @rest(HttpMethod.POST, "reports/{reportId}/export")
+  @manualRouteRegistration
+  @httpBinaryStream({ contentType: "application/vnd.apache.arrow.stream", responseHeaders: ["X-Export-Id"] })
+  exportReport(reportId: string, input: ExportReportInput, format: QueryParam<Nullable<string>>): ReportSummary {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- `contentType` is the media type of the success body, lowercase and
+  without parameters. JSON, `application/json` or a `+json` type, is
+  refused: a JSON result is the declared type, without the decorator.
+- `responseHeaders` names the headers the stream answers with, each a
+  header name, once.
+- The generated routes answer the envelope, so the operation is also
+  `@manualRouteRegistration`. Each router gates the route and hands it to
+  your handler, which writes the stream: the body, its `Content-Type`
+  and the headers. A refusal is a problem body, as any route's.
+- Each SDK method returns the stream unread, with its headers
+  ([Client SDKs](/superschematic/guides/client-sdks/#streams)).
+- The OpenAPI document describes the 200 as the stream's media type, a
+  binary string, with the `responseHeaders`, and no envelope. The
+  refusals stay `application/problem+json`.
+- A client sends the input type as a JSON body, beside the path and
+  query parameters, so the operation is no `@webhook`, not encrypted,
+  takes no [upload](#uploads) and no `FilterBy`, and is not `@paginated`
+  or `@idempotent`.
+- The declared result, `ReportSummary` here, is the operation's result
+  in the [tool documents](/superschematic/reference/mcp-tools/): the value
+  a tool binding hands its caller after it reads the stream.
+
 ## Errors
 
 An implementation returns an error to fail the call. The generated package

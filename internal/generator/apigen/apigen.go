@@ -268,6 +268,13 @@ type EndpointInfo struct {
 	// and OutputType is empty.
 	FileDownload *ir.FileDownloadDef
 
+	// BinaryStream is the operation's @httpBinaryStream (D167), nil for
+	// every other endpoint: its success body is a stream of the media type
+	// it names, which the route's handler writes, and each SDK method
+	// returns that stream unread. OutputType stays the declared result,
+	// which the tool documents read.
+	BinaryStream *ir.HTTPBinaryStreamDef
+
 	// Middleware values resolved from the operation set defaults plus
 	// field-level overrides. Nil means no directive.
 	RateLimit *int
@@ -1442,6 +1449,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
 		FileDownload:                 op.FileDownload,
+		BinaryStream:                 op.HTTPBinaryStream,
 		RateLimit:                    rateLimit,
 		RateLimitKey:                 rateLimitKey,
 		BodyLimit:                    bodyLimit,

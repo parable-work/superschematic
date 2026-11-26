@@ -207,9 +207,29 @@ export interface HttpRequestOptions {
   forward?: ForwardedUser;
   /**
    * 'file' reads a success body as a file (D81), a DownloadedFile, not the
-   * JSON envelope; an error is read as any other's.
+   * JSON envelope; an error is read as any other's. 'stream' returns a
+   * success body of streamContentType unread (D167), a
+   * BinaryStreamResponse.
    */
-  responseType?: 'json' | 'file';
+  responseType?: 'json' | 'file' | 'stream';
+  /**
+   * The media type a 'stream' request's success body is: the request asks
+   * for it, and the client checks the answer against it.
+   */
+  streamContentType?: string;
+}
+
+/**
+ * The success body of an @httpBinaryStream operation (D167), unread. Read
+ * or cancel body: cancelling it, or aborting the signal passed to the
+ * method, ends the request.
+ */
+export interface BinaryStreamResponse {
+  /** The media type the operation declares, which the SDK checked. */
+  contentType: string;
+  body: ReadableStream<Uint8Array>;
+  status: number;
+  headers: Record<string, string>;
 }
 
 /**
