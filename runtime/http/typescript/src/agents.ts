@@ -614,6 +614,9 @@ export function createAgents(options: AgentsOptions): Agents {
       await repository.updateOne(run, { status, ...extra });
       return;
     }
+    // The fields go in before the status moves, so a reader that sees a run
+    // ended also sees its outcome, cost and transcript.
+    if (Object.keys(extra).length > 0) await repository.updateOne(run, extra);
     const current = await repository.findOne({ id: { eq: run } });
     if (current && current.status !== status) {
       try {
@@ -622,7 +625,6 @@ export function createAgents(options: AgentsOptions): Agents {
         log.warn('a run did not move', { run, from: String(current.status), to: status, detail: err instanceof Error ? err.message : String(err) });
       }
     }
-    if (Object.keys(extra).length > 0) await repository.updateOne(run, extra);
   };
 
   const finish = async (runId: string, outcome: string, detail?: string): Promise<void> => {
