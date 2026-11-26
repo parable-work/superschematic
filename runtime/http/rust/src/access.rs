@@ -389,7 +389,8 @@ mod grants {
     /// Why `grant` is not active at `now`, or none when it is (D156): it
     /// was revoked, it has not started, it has ended by its date, its
     /// target's field holds the state that ends it, or its target is gone.
-    /// The target is read as the system actor.
+    /// The target is counted as the system actor, with no value of its
+    /// read, so an encrypted field of it needs no key.
     pub async fn grant_ended<C: GenericClient + Sync>(
         client: &C,
         definition: &Definition,
@@ -413,25 +414,18 @@ mod grants {
             return Ok(Some("target gone"));
         };
         let system = Repositories::new(client, definition)?.as_system();
+        let rows = system.table(&target.name)?;
         let mut filter = Values::new();
         filter.insert(
             target.key.clone(),
             eq(grant.get("targetId").cloned().unwrap_or(Value::Null)),
         );
-        let Some(row) = system
-            .table(&target.name)?
-            .find_one(Some(&filter), &FindOptions::default())
-            .await?
-        else {
+        if rows.count(Some(&filter)).await? == 0 {
             return Ok(Some("target gone"));
-        };
-        let state = text(grant.get("endsWhenState")).unwrap_or_default();
-        let held = match row.get(field) {
-            Some(Value::String(value)) => value.clone(),
-            Some(other) => other.to_string(),
-            None => String::new(),
-        };
-        Ok((held == state).then_some("target ended"))
+        }
+        let state = grant.get("endsWhenState").cloned().unwrap_or(Value::Null);
+        filter.insert(field.to_owned(), eq(state));
+        Ok((rows.count(Some(&filter)).await? > 0).then_some("target ended"))
     }
 
     /// What [`active_grants`] keeps: a holder's grants, a target's, or

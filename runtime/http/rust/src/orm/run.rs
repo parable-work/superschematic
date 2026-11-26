@@ -190,6 +190,18 @@ impl<C: Client> Runner<'_, C> {
         })
     }
 
+    /// How many live rows `filter` finds, read with no row's value: what a
+    /// check of a row's state reads without its encrypted fields' keys.
+    pub(crate) async fn count_of(&self, filter: Option<&Values>) -> Result<u64, Error> {
+        match self.plan.find_many(filter, &FindOptions::default())? {
+            (Some(count), _) => self.count(&count).await,
+            (None, _) => Err(Error::Definition(format!(
+                "{}: find_many wrote no count",
+                self.table.name
+            ))),
+        }
+    }
+
     pub(crate) async fn find_page(
         &self,
         filter: Option<&Values>,

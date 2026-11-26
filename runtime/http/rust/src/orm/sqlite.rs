@@ -573,6 +573,12 @@ impl Repository<'_> {
         finish(self.runner().find_page(filter, options))
     }
 
+    /// How many live rows `filter` finds, read with no row's value, so no
+    /// encrypted field is opened (D156).
+    pub fn count(&self, filter: Option<&Values>) -> Result<u64, Error> {
+        finish(self.runner().count_of(filter))
+    }
+
     /// Inserts a row; a member left unset takes its column's default, or
     /// the schema's.
     pub fn create_one(&self, input: &Values) -> Result<Values, Error> {

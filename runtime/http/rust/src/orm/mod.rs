@@ -1626,6 +1626,29 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn an_audience_admits_a_caller_by_its_id_and_an_agent_run_by_whom_it_acts_for() {
+        let user = "11111111-1111-4111-8111-111111111111";
+        let owner = "22222222-2222-4222-8222-222222222222";
+        let principal = Principal::new(user, Vec::<String>::new());
+        assert_eq!(AccessCaller::of(Some(&principal)).audience_ids(), [user]);
+        // A subject that is no UUID, and no caller, admit by none.
+        let service = Principal::new("service:billing", Vec::<String>::new());
+        assert!(AccessCaller::of(Some(&service)).audience_ids().is_empty());
+        assert!(AccessCaller::of(None).audience_ids().is_empty());
+        // An agent run by its own id and whom it acts for; any other kind
+        // by its own alone.
+        let run = principal
+            .clone()
+            .of_kind(PrincipalKind::Agent)
+            .acting_for(ActingFor::user(owner));
+        assert_eq!(AccessCaller::of(Some(&run)).audience_ids(), [user, owner]);
+        let party = principal
+            .of_kind(PrincipalKind::Party)
+            .acting_for(ActingFor::user(owner));
+        assert_eq!(AccessCaller::of(Some(&party)).audience_ids(), [user]);
+    }
+
+    #[test]
     fn a_time_is_rfc_3339_to_the_millisecond() {
         let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_791_979_200_125);
         assert_eq!(rfc3339_millis(at), "2026-10-14T12:00:00.125Z");

@@ -471,6 +471,12 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner().find_page(filter, options).await
     }
 
+    /// How many live rows `filter` finds, read with no row's value, so no
+    /// encrypted field is opened (D156).
+    pub async fn count(&self, filter: Option<&Values>) -> Result<u64, Error> {
+        self.runner().count_of(filter).await
+    }
+
     /// Inserts a row; a member left unset takes its column's default, or
     /// the schema's.
     pub async fn create_one(&self, input: &Values) -> Result<Values, Error> {
