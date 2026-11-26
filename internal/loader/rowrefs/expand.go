@@ -1,0 +1,242 @@
+// Package rowrefs expands a DB schema's @references and @attachments
+// declarations (D154) into ordinary types: beside each table that declares
+// one, the sub-table of its references or of its files, a child table of
+// the row that its delete deletes; and the fields of the queues the
+// declarations name, when they declare none. The sql and types generators
+// emit the sub-tables as any table's, with no repository (ir.RowTable), and
+// sqlgen adds the triggers that clear the references to a deleted row and
+// enqueue a file's release.
+//
+// It runs before the verification pass, so the pass reads the added types
+// and fields as the schema's own. Every type and field it adds carries
+// ir.OriginReferences or ir.OriginAttachments, so the schema writer can skip
+// it and write the declaration instead.
+package rowrefs
+
+import (
+	"unicode"
+
+	"github.com/parable-work/superschematic/internal/generator/codegen"
+	ir "github.com/parable-work/superschematic/ir"
+)
+
+// Scalars the added fields use.
+const (
+	uuidScalar     = "Identity.UUID"
+	dateTimeScalar = "Temporal.DateTime"
+	int64Scalar    = "Generic.Int64"
+)
+
+// Expand adds the sub-table of each @references and @attachments table
+// that has none yet, and fills each queue they name that declares no
+// fields. A table whose key is not one field gets no sub-table, which the
+// verification pass refuses. It returns the scalar names the added fields
+// use, so the caller can hydrate any the schema did not already reference.
+func Expand(schema *ir.Schema) []string {
+	used := false
+	for _, td := range schema.RowReferencesTables() {
+		if add(schema, referencesTable(td)) {
+			used = true
+		}
+		if fill(schema, td.RowReferences.Cleared, ir.OriginReferences, clearedFields()) {
+			used = true
+		}
+	}
+	for _, td := range schema.AttachmentsTables() {
+		if add(schema, attachmentsTable(td)) {
+			used = true
+		}
+		if fill(schema, td.Attachments.Released, ir.OriginAttachments, releasedFields()) {
+			used = true
+		}
+	}
+	if !used {
+		return nil
+	}
+	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar}
+	for _, name := range scalars {
+		if schema.Scalars[name] == nil {
+			schema.Scalars[name] = &ir.ScalarDef{Name: name}
+		}
+	}
+	return scalars
+}
+
+// add puts sub in the schema unless a type of its name is there, which the
+// verification pass refuses when it is not the loader's own; it reports
+// whether it added it.
+func add(schema *ir.Schema, sub *ir.TypeDef) bool {
+	if sub == nil || schema.Types[sub.Name] != nil {
+		return false
+	}
+	schema.Types[sub.Name] = sub
+	return true
+}
+
+// fill gives the queue class named queue the fields fields when it is a
+// @queue class of the schema that declares none.
+func fill(schema *ir.Schema, queue, origin string, fields []*ir.FieldDef) bool {
+	td := schema.Types[queue]
+	if queue == "" || td == nil || td.Queue == nil || len(td.Fields) > 0 {
+		return false
+	}
+	for _, fd := range fields {
+		fd.Origin = origin
+	}
+	td.Fields = fields
+	return true
+}
+
+// keyOf is the table's one key field, or nil for a table with none or
+// several.
+func keyOf(td *ir.TypeDef) *ir.FieldDef {
+	var key *ir.FieldDef
+	for _, fd := range td.Fields {
+		if fd != nil && fd.Key {
+			if key != nil {
+				return nil
+			}
+			key = fd
+		}
+	}
+	return key
+}
+
+// RowField is the relation field of the sub-table of td to its row: the
+// row type's name with its first letter in lower case (ticket), which
+// holds the row's key in <name>_id.
+func RowField(td *ir.TypeDef) string {
+	r := []rune(td.Name)
+	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
+// rowRelation is the sub-table's relation to its row, whose delete
+// deletes the sub-table's rows.
+func rowRelation(td *ir.TypeDef, origin string) *ir.FieldDef {
+	return &ir.FieldDef{
+		Name:        RowField(td),
+		Description: "The " + td.Name + " row the rows are of; deleting it deletes them.",
+		TypeRef:     ir.TypeRef{Name: td.Name},
+		Required:    true,
+		Relation:    &ir.RelationDef{Type: td.Name, OnDelete: "CASCADE"},
+		Origin:      origin,
+	}
+}
+
+func now() *string {
+	s := codegen.DefaultNow
+	return &s
+}
+
+func empty() *string {
+	s := ""
+	return &s
+}
+
+// referencesTable is the sub-table of td's references (D154): one row per
+// target and role, unique on the row, the target and the role, and an
+// index on the target that referencedBy and a target's delete read
+// through.
+func referencesTable(td *ir.TypeDef) *ir.TypeDef {
+	if keyOf(td) == nil {
+		return nil
+	}
+	rowField := RowField(td)
+	origin := ir.OriginReferences
+	sub := &ir.TypeDef{
+		Name:     ir.RowReferencesTypeName(td.Name),
+		Owner:    td.Owner,
+		Comment:  "The rows each " + td.Name + " row points at, by their table and key, each with a role, which a target's delete clears (D154).",
+		Role:     ir.RoleDBTable,
+		Origin:   origin,
+		RowTable: &ir.RowTable{Row: td.Name, Feature: origin, RowField: rowField},
+		Fields: []*ir.FieldDef{
+			{Name: ir.RefIDField, TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true},
+			rowRelation(td, origin),
+			{Name: ir.RefTargetTableField, Description: "The target's table, by its type's name.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.RefTargetKeyField, Description: "The target's key as the database writes it as text.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.RefRoleField, Description: "The reference's role, a label the app gives it; empty for none.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: empty()},
+			{Name: ir.RefAddedByField, Description: "Who added it; null for no one.", TypeRef: ir.TypeRef{Name: uuidScalar}},
+			{Name: ir.RefAddedAtField, Description: "When it was added.", TypeRef: ir.TypeRef{Name: dateTimeScalar}, Required: true, Default: now()},
+		},
+		Indexes: []ir.IndexDef{
+			{Keys: []string{rowField, ir.RefTargetTableField, ir.RefTargetKeyField, ir.RefRoleField}, Unique: true, Name: "target_role", Origin: origin},
+			{Keys: []string{ir.RefTargetTableField, ir.RefTargetKeyField}, Name: "target", Origin: origin},
+		},
+	}
+	for _, fd := range sub.Fields {
+		fd.Origin = origin
+	}
+	return sub
+}
+
+// attachmentsTable is the sub-table of td's files (D154): one row per file
+// of a row, naming the object that holds its bytes, with an index on the
+// object that a release counts the files that name it through.
+func attachmentsTable(td *ir.TypeDef) *ir.TypeDef {
+	if keyOf(td) == nil {
+		return nil
+	}
+	rowField := RowField(td)
+	origin := ir.OriginAttachments
+	pending := ir.AttachmentPending
+	none := ir.ProcessingNone
+	sub := &ir.TypeDef{
+		Name:     ir.AttachmentsTypeName(td.Name),
+		Owner:    td.Owner,
+		Comment:  "The files each " + td.Name + " row holds in a bucket, each naming the object that holds its bytes, which two rows may share (D154).",
+		Role:     ir.RoleDBTable,
+		Origin:   origin,
+		RowTable: &ir.RowTable{Row: td.Name, Feature: origin, RowField: rowField},
+		Fields: []*ir.FieldDef{
+			{Name: ir.AttIDField, TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true},
+			rowRelation(td, origin),
+			{Name: ir.AttNameField, Description: "The file's name, as its uploader gave it.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.AttMediaTypeField, Description: "Its media type.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.AttSizeField, Description: "Its length in bytes.", TypeRef: ir.TypeRef{Name: int64Scalar}, Required: true},
+			{Name: ir.AttContentHashField, Description: "The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.AttObjectKeyField, Description: "The name of the bucket's object that holds its bytes, which a file filed onto another row shares.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.AttCaptionField, Description: "A caption; null for none.", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: ir.AttStateField, Description: "pending while its upload is under way, ready once its bytes were checked.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &pending},
+			{Name: ir.AttUploadedByField, Description: "Who uploaded it, or filed it onto the row; null for no one.", TypeRef: ir.TypeRef{Name: uuidScalar}},
+			{Name: ir.AttUploadedAtField, Description: "When it was uploaded, or filed onto the row.", TypeRef: ir.TypeRef{Name: dateTimeScalar}, Required: true, Default: now()},
+			{Name: ir.AttExpiresAtField, Description: "When a pending upload's URL expires; null once ready.", TypeRef: ir.TypeRef{Name: dateTimeScalar}},
+			{Name: ir.AttFiledFromField, Description: "The file it was filed from, as table:key:id; null for one uploaded to the row.", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: ir.AttExtractionField, Description: "Its text extraction: none, pending, done or failed, which a file processor moves.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &none},
+			{Name: ir.AttExtractedField, Description: "The text a file processor extracted; null until it has.", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: ir.AttPreviewField, Description: "Its preview: none, pending, done or failed; asked on its first view.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &none},
+			{Name: ir.AttPreviewObjectField, Description: "The object that holds its preview; null until made.", TypeRef: ir.TypeRef{Name: "string"}},
+		},
+		Indexes: []ir.IndexDef{
+			{Keys: []string{rowField}, Name: "row", Origin: origin},
+			{Keys: []string{ir.AttObjectKeyField}, Name: "object", Origin: origin},
+		},
+	}
+	for _, fd := range sub.Fields {
+		fd.Origin = origin
+	}
+	return sub
+}
+
+// clearedFields are the fields of a @references declaration's cleared
+// queue: one message per reference a target's delete cleared.
+func clearedFields() []*ir.FieldDef {
+	return []*ir.FieldDef{
+		{Name: "holderTable", Description: "The table of the row that held the reference, by its type's name.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "holderKey", Description: "That row's key as the database writes it as text.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "targetTable", Description: "The deleted row's table, by its type's name.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "targetKey", Description: "The deleted row's key as text.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "role", Description: "The reference's role; empty for none.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}
+}
+
+// releasedFields are the fields of an @attachments declaration's released
+// queue: one message per file row deleted, or upload expired.
+func releasedFields() []*ir.FieldDef {
+	return []*ir.FieldDef{
+		{Name: "objectKey", Description: "The object the file named.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "contentHash", Description: "The SHA-256 of its bytes.", TypeRef: ir.TypeRef{Name: "string"}},
+		{Name: "reason", Description: "Why: detached, a file row deleted; expired, an upload never completed.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}
+}

@@ -49,7 +49,7 @@ column or a sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
+import type { NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencesMembers, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -494,11 +494,11 @@ export interface FixtureCommentsDbRepositories {
   readonly ticket: TicketRepository;
 }
 
-/** The repositories of fixture-comments-db over a pool, acting as a user or none. */
-export type FixtureCommentsDbOrm = Orm<FixtureCommentsDbRepositories>;
+/** The repositories of fixture-comments-db over a pool, acting as a user or none, with its references. */
+export type FixtureCommentsDbOrm = Orm<FixtureCommentsDbRepositories> & ReferencesMembers;
 
 /** The repositories of fixture-comments-db in a transaction, with its raw SQL. */
-export type FixtureCommentsDbTx = OrmTx<FixtureCommentsDbRepositories>;
+export type FixtureCommentsDbTx = OrmTx<FixtureCommentsDbRepositories> & ReferencesMembers;
 
 /** Where the behaviors' core finds each table whose fields are behaviors (D103): its table, key, version, the column a soft-deletable table's live rows hold NULL, and own columns, each behavior's owned columns and operations, and the type as the core runs it. */
 export const fixtureCommentsDbRules: RulesLayout = {
@@ -1705,6 +1705,7 @@ export const fixtureCommentsDbOrm: OrmDefinition = {
     ticket: ticketTable,
   },
   rules: fixtureCommentsDbRules,
+  references: {"holders":{},"targets":{"Review":{"member":"review","table":"review","key":"id","uuid":true},"Ticket":{"member":"ticket","table":"ticket","key":"id","uuid":true}},"comments":{"Review":{"member":"review","table":"review_comments_messages","row":"review_id","uuid":true,"blocks":"blocks","state":"state","id":"message"},"Ticket":{"member":"ticket","table":"ticket_comments_messages","row":"ticket_id","uuid":true,"blocks":"blocks","state":"state","id":"message"}}},
 };
 
 /**
@@ -1714,5 +1715,5 @@ export const fixtureCommentsDbOrm: OrmDefinition = {
  * runs.
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): FixtureCommentsDbOrm {
-  return ormOf<FixtureCommentsDbRepositories>(pool, fixtureCommentsDbOrm, withRulesCore(options, initSync));
+  return ormOf<FixtureCommentsDbRepositories>(pool, fixtureCommentsDbOrm, withRulesCore(options, initSync)) as FixtureCommentsDbOrm;
 }

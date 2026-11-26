@@ -698,10 +698,10 @@ the version, as the engine's did not.
 
 What Comments left: claiming and settling deliveries (`claimDeliveries`,
 `settleDeliveries`) and their retention's prune, which are recorded and
-not claimed; `searchMessages`, attachment blocks and `moveAnchor`, which
-need no new primitive (the tools still list `moveAnchor`, which the core
-refuses); `via` on a message, which needs the calling service on the
-core's caller; events for a beside write; reads of a conversation by
+not claimed; `searchMessages` and `moveAnchor`, which need no new
+primitive (the tools still list `moveAnchor`, which the core refuses);
+`via` on a message, which needs the calling service on the core's
+caller; events for a beside write; reads of a conversation by
 page; the testkit's mapping of `behaviors.invoke`, without which the
 inbox's steps after a claim stay skipped, and transcripts that record
 signals; streamed replies in runtime mode, whose layout gives a Comments
@@ -1920,6 +1920,85 @@ Left:
 - A path to a list field of ids in a row rule, and a team as a principal
   in an audience.
 - Live deploys: `smoke.sh Cloudflare` and `Gcp` are the maintainer's.
+
+## D154. A row points at a row of any table through `@references` and holds files through `@attachments`, each a sub-table the loader adds and a trigger keeps, every backlink is held to what its reader may read, a browser uploads straight to the bucket, and a table's Comments takes attachment blocks (D54, D77, D103, D156 amended)
+
+A `Relation<>` points at one table the schema names, and Comments' ref
+blocks reached any row only inside a message, which nothing could list
+from the row they named. Files lived in buckets with no row that held
+them. Section 4 of the platform plan asks for references and attachments
+on any row, the backlinks of a row across tables, files filed elsewhere
+with no second upload, and the R2 upload of section 1's Workers target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@references<T>({ tables?, cleared?, maxPerRow? })` and `@attachments<T>({ released, maxFileBytes?, maxRowBytes?, maxFiles?, mediaTypes? })` from `@superschematic/db` on a DB table, schema features as D156's `@audience` is. The loader adds a sub-table beside the table, a child of the row with no repository (`ir.RowTable`): `<table>_references` (target table, target key as text, role, who added it when; unique on row, target and role; indexed on the target) and `<table>_attachments` (name, media type, size, SHA-256, object, caption, state, uploader, time, filed from, extraction and preview). | A behavior on the core, as the plan names it. D103's own test puts these elsewhere, as it folded the engine's Links into `Relation<>`: their rules are a cascade across tables, a read across tables and a bucket's I/O, none of which a per-table pure core sees (Dependencies' `listDependents` stays the engine's for the same reason). Their state changes by inserts and deletes that the runtime and two triggers make. |
+| A target is no foreign key, since it is a row of any table. A statement trigger on each table a reference may point at (`REFERENCING OLD TABLE`) deletes the references to the rows a delete removed, from every references sub-table that may hold one, and enqueues one message per reference on the holder's `cleared` queue, whose fields the loader fills (`holderTable`, `holderKey`, `targetTable`, `targetKey`, `role`). A soft delete clears nothing; a read leaves a deleted row out on its own. | A worker that sweeps references to rows that are gone, which shows dangling references until it runs. Clearing through the core, which would need the core to hear another table's delete. An event of section 3's, which is built in parallel: the queue is D80's, which section 1 drains on Workers, and section 3 may read it. |
+| `orm.references` (`add`, `remove`, `of`, `referencedBy`) and `orm.attachments` on the TypeScript repositories, from the definitions orm.ts carries (`references`, `attachments`). Every read goes through the target's and each holder's own repository, so the caller's audience and grants hold as for any read (D156): a reference to a row the caller cannot read is left out, a target the caller cannot read is not there, and only the owner of a row whose audience is not everyone gets `hidden`, the count of the rest (D156's design). | A filter of `audienceConditions` per holder, which would miss a party's grants and soft deletes that the repositories already apply. A locked chip for a hidden row, which tells that it exists. |
+| `referencedBy` reads the references sub-tables and the Comments messages of every table, a ref block matched by JSONB containment, so a mention in a thread is a backlink without a second copy of it. | Mirroring ref blocks into the references sub-tables, two writes of one fact, and a write of another use's state from Comments. |
+| A browser uploads a file straight to the bucket through a URL `begin` signs, a PUT of its media type, after `begin` held it to the bounds with the row's files and the uploads under way, under an advisory lock of the row. `complete` reads the object back as it streams and hashes it, through workerd's native `DigestStream` on Workers and `Sha256` elsewhere, and holds it to the size and SHA-256 `begin` declared; a file whose bytes differ is removed. | Trusting the declared hash, which a browser could get wrong. A checksum header signed into the URL, which R2's, S3's and Cloud Storage's presigned PUTs take differently and which no offline test can hold to R2. |
+| File elsewhere copies or moves a file's row onto another row, naming the same object, with no second upload, and when the file's table keeps references that may point at the other row, its row points at it with the role `filed`, so the other row lists it among its backlinks. A file's delete enqueues its object's release (a trigger, `released`), and `release`, which that queue's worker calls, deletes the object and its preview's once no file of any table names it, under an advisory lock of the object a filing takes too. An upload never completed is released an hour after its URL expires. | Reference counts in a column, which a raw delete would leave wrong; deleting the object at the file's delete, which another row may still name. |
+| An object is `attachments/<uuid>` until D142 (PR 512) lands. Every row stores the SHA-256 and counts by object name, so D142's content-addressed naming, `sha256/<hex>`, slots in as a naming of the object alone: `begin` asks the content bucket whether it holds the hash and signs no upload when it does, and `release` counts rows by the same name. | Waiting for PR 512, or copying its code here. |
+| A table's Comments takes attachment blocks and the config's `attachments`, held in the core to the engine's batch 5 order: the uri's scheme (`https` unless set; `attachment` names a file of the row's own `@attachments`, `attachment:<id>`), the media type, then the size, each the veto `attachment_not_allowed`. | A block that names the bucket's object, which another row's delete could remove under it. |
+| Postgres alone: the loader refuses either declaration on sqlite, as D156 refuses `@audience`. | |
+
+Settled. A file is at most 100 MiB unless the declaration says otherwise,
+and at most 5 GiB, the largest object one signed PUT uploads to R2, S3 and
+Cloud Storage. A row holds at most 1 GiB and 100 files unless set, uploads
+under way counted until they expire. Text is extracted when an upload
+completes, so search can index it whether or not anyone opens the file, and
+a preview is made on a file's first view (`download`), since most files are
+never viewed. A file processor (D159) moves both: `pending` lists what it
+has to make, `processed` records it on every file that names the object.
+
+Built: `ir/rowrefs.go`, `internal/registry/core_rowrefs.go`,
+`internal/loader/rowrefs`, `internal/loader/verify/rowrefs.go`, the
+triggers in create.sql, drop.sql and migration plans
+(`internal/generator/sqlgen/rowrefs.go`, a statement trigger's
+`Transition`), the definitions in orm.ts (`internal/generator/tsgen/rowrefs.go`),
+`runtime/http/typescript/src/rowfeatures.ts` and `sha256Stream`;
+attachment blocks in the core's Comments; the guide's "References and
+files on any row"; `examples/references-files`. `TestReferencesTablesEndToEnd`
+runs the plan's "done when" on Postgres: a file posted on one row's thread
+is filed onto a second row, which lists the first in its backlinks; a
+caller who cannot read a referenced row sees neither the reference nor a
+count, and its owner sees a count; a target's delete clears its references
+and enqueues a cleared message; an upload whose bytes differ is refused,
+and an object is deleted once no file names it. The uploads go through a
+bucket on an R2 binding whose S3 API a stand-in serves, which checks each
+PUT against the URL's V4 signature; the workerd fixture `uploads` signs,
+sends, checks and hashes a direct upload inside workerd. `examples/deploy-smoke`
+uploads a line item's file to its bucket through the signed URL, completes
+it and files it onto another line item; `smoke.sh Dev` passes, and
+`TestDeploySmokeEnvironments` holds the Cloudflare environment's R2 bucket,
+tokens and bindings. Bucket CORS on the cloudflare target came with #514
+and needed nothing for this.
+
+Left:
+
+- Comments' follows, read state and inbox on a table (`markRead`,
+  `follow`, a reader's `unread`, `inbox`, deliveries). The core runs them,
+  and the build leaves them out of a table's operations
+  (`registry.tableLeavesOut`), since no adapter answers a reader's own
+  fields through the core's read as the caller, and a namespace's
+  operation is not served by `@behaviorOperations`. Serving them touches
+  the layout and every ORM's and API's goldens in three languages.
+- Generated routes, MCP tools and SDK methods for references and
+  attachments; an app writes its routes over `orm.references` and
+  `orm.attachments` now (`examples/references-files/server`).
+- The Go and Rust repositories, and Python's.
+- The file processor (section 9) and its wiring: `pending` and
+  `processed` are its seam. Search (section 5) indexes `extractedText`.
+- D142's content-addressed objects once PR 512 merges, and a multipart
+  upload for files past 5 GiB.
+- A GIN index on Comments messages' `blocks`, which `referencedBy`'s
+  containment reads; it scans a table's messages until one is written.
+- References repointed by a `Mergeable` merge (D147), and the merged row's
+  references cleared as a delete's are.
+- The schema writer (`format --to=ts`) writing `@references` and
+  `@attachments` back, as it does not write `@audience` either.
+- A live direct upload to R2 and to Cloud Storage: `smoke.sh Cloudflare`
+  and `Gcp` are the maintainer's.
 
 ## D159. Five runtime interfaces a running app calls, each provider a package that declares its interface in its package.json, slots in an API's config that each environment binds, a build that refuses a feature with no provider, and providers that act as their own principals (D156 amended)
 

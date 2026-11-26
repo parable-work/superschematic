@@ -22,10 +22,11 @@ export abstract class Review implements Comments<Review, { blocks: ["ref", "code
 const plain: CommentsOn = {};
 const permissions: CommentsOn = { pinPermission: "reviews.pin", resolvePermission: "reviews.resolve" };
 
-// An attachment block waits for attachments on the core, and a config's
-// streamed replies and deliveries for signals and namespace operations.
-// @ts-expect-error a table's Comments takes no attachment block
-const attachments: CommentsOn = { blocks: ["attachment"] };
+// An attachment block, a file of the row's Attachments (D154).
+const attachments: CommentsOn = { blocks: ["attachment"], attachments: { maxBytes: 1048576, schemes: ["attachment"] } };
+
+// A config's streamed replies and deliveries wait for signals and
+// namespace operations.
 // @ts-expect-error a table's Comments takes no composeTimeoutMs
 const drafts: CommentsOn = { composeTimeoutMs: 60000 };
 // @ts-expect-error a table's Comments takes no deliverPermission

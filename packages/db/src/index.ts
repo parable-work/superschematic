@@ -60,6 +60,7 @@ export type {
   CalendarOn,
   Comments,
   CommentsBlockKind,
+  CommentsAttachmentsOn,
   CommentsOn,
   Constants,
   ConstantsOn,
@@ -131,3 +132,5 @@ export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";
 export { accessGrants, accessLog, audience } from "./access";
 export type { AgentAccessValue, AudienceOptions, AudienceValue } from "./access";
+export { attachments, references } from "./rowrefs";
+export type { AttachmentsOptions, ReferencesOptions } from "./rowrefs";
