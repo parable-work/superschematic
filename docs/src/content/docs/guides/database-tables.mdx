@@ -2166,6 +2166,15 @@ over the rules module's SQLite store, and answer as they do on Postgres.
 Its upserts are refused with `ErrSQLiteUnsupported`, as the TypeScript
 repositories refuse its `upsertMany` there.
 
+A filter reaches through a one-to-many relation by its name, as on
+Postgres (D180), so a row rule's path through one holds on SQLite too. The
+repositories on SQLite keep to no audience, grants or access log, and
+write no references or attachments: the build refuses a DB service that
+lists `sqlite` and enables the Go types for an `@audience`,
+`@accessGrants`, `@accessLog`, `@references` or `@attachments` table,
+naming the decorator and the table
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
+
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
 `@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, and a
@@ -2313,7 +2322,7 @@ Postgres refuses to change a row twice in one statement (D89).
 | on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
 | no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
 | `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
-| a table that composes behaviors writes through the core, over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit; the Go and Rust repositories upsert such a table a row at a time too |
+| a table that composes behaviors writes through the core, over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
 | on D1 a write whose later statement needs an earlier one's answer is refused by name: an upsert that seals an `Encrypted<T>` field, and `runEvent` | D1 runs no interactive transaction, so its statements would commit apart |
 | `mergeInto` is refused | a merge's plan runs on Postgres alone so far |
 | a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
