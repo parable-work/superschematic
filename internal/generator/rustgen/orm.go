@@ -70,6 +70,12 @@ type ORMInfo struct {
 	// D185).
 	References  bool
 	Attachments bool
+
+	// Calendar and Searchable are whether a table of the database is a
+	// calendar source (D152) or @searchable (D155), which the runtime's
+	// orm::calendar and orm::search_tables read on Postgres (D188).
+	Calendar   bool
+	Searchable bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -210,6 +216,11 @@ type ormTable struct {
 	// the table is to per-record access: grants, log or roles (D156).
 	Audience *ormAudience `json:"audience,omitempty"`
 	Access   string       `json:"access,omitempty"`
+	// Calendar are the table's @calendarSource declarations (D152), and
+	// Searchable its search index (D155), which the runtime's calendar and
+	// search read (D188); on Postgres alone.
+	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
+	Searchable *rustSearchable      `json:"searchable,omitempty"`
 }
 
 // ormFence is a fence of a table, a @fenced field (D119), the runtime's
@@ -547,6 +558,14 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
 		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
+		if onPostgres.Calendar, err = calendarOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		if onPostgres.Searchable, err = searchableOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		info.Calendar = info.Calendar || len(onPostgres.Calendar) > 0
+		info.Searchable = info.Searchable || onPostgres.Searchable != nil
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}

@@ -327,6 +327,16 @@ pub mod postgres {
     // answer (D154).
     pub use orm::rowfeatures;
 {{- end}}
+{{- if .ORM.Calendar}}
+    // The calendar read, feed and routes over the database's calendar
+    // sources (D152, D188).
+    pub use orm::calendar;
+{{- end}}
+{{- if .ORM.Searchable}}
+    // Search across the database's @searchable tables, its indexing and
+    // its route (D155, D188).
+    pub use orm::search_tables;
+{{- end}}
 {{- if .BindsRules}}
     use orm::postgres::CoreClient;
     use rules::adapter;

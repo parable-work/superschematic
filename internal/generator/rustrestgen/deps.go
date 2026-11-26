@@ -469,10 +469,12 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // DependencyFeatures is what follows the path of the Cargo.toml dependency
 // on the crate name: for the database's Rust types of an API with table
 // operations, the feature of the database's dialect, which the
-// repositories they are served from are behind (D116); empty for any
+// repositories they are served from are behind (D116), and of an API whose
+// database has a calendar source or a @searchable table, whose calendar
+// and search read the repositories' definition (D188); empty for any
 // other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.ReadsAcrossTables) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
