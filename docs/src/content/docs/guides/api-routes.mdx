@@ -1002,12 +1002,12 @@ pool of the API's database:
 | --- | --- | --- |
 | Go | `Config.IdempotencyStore`, an `idempotency.Store`: `idempotency.NewSQLStore(db, idempotency.Postgres, api.IdempotencyTable)`, over a `*sql.DB`; `idempotency.SQLite` for SQLite | `IdempotencyTable` in the API package |
 | TypeScript | `RouterOptions.idempotencyStore`, an `IdempotencyStore`: `postgresIdempotencyStore(pool, idempotencyTable)`, `sqliteIdempotencyStore(db, idempotencyTable)` for SQLite and D1, or `memoryIdempotencyStore()` in a test | `idempotencyTable` in the API package |
-| Rust | none yet: the build refuses to generate a Rust router for an API with an `@idempotent` operation | |
+| Rust | `Implementations.idempotency_store`, an `Arc<dyn idempotency::Store>`, which `Implementations::new` builds over `Deps.db`: `idempotency::PostgresStore::new(pool, &IDEMPOTENCY_TABLE)` with the runtime's `postgres` feature, `idempotency::SqliteStore::new(db, &IDEMPOTENCY_TABLE)` with its `sqlite` feature, or `idempotency::MemoryStore::new()` in a test | `IDEMPOTENCY_TABLE` in the API crate |
 
-The Go and TypeScript routers name a row and hash a request alike, and
-answer each case of the table above alike
-(`runtime/http/testdata/idempotency_parity.json`), so a Go server and a
-TypeScript server over one database share their keys.
+The Go, TypeScript and Rust routers name a row and hash a request alike,
+and answer each case of the table above alike
+(`runtime/http/testdata/idempotency_parity.json`), so servers in any of
+the three over one database share their keys.
 
 What the decorator is refused on, at `check`, each for the reason a
 repeat could not be answered as the first call was:
@@ -1029,9 +1029,10 @@ required where the operation requires it, the 409 and the 422, and the
 status. A generated SDK's method sends a
 key for each call
 ([Client SDKs](/superschematic/guides/client-sdks/#an-idempotency-key)).
-On the TypeScript server's MCP endpoint a tool call has no headers, so the
-tool of an `@idempotent` operation takes the key as an argument,
-`idempotencyKey`, which the endpoint sends to the route as the header
+On the MCP endpoint of a TypeScript or a Rust server a tool call has no
+headers, so the tool of an `@idempotent` operation takes the key as an
+argument, `idempotencyKey`, which the endpoint sends to the route as the
+header
 ([MCP tools](/superschematic/reference/mcp-tools/#a-key-for-a-call-that-runs-once)).
 
 ## Webhooks

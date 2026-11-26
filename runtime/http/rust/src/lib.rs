@@ -38,6 +38,9 @@ pub mod identity;
 // A call from one API of a process to another through the callee's handle
 // (D116), with the `http-client` feature, whose client the SDKs build
 // their requests with.
+/// Idempotency keys (D140): the route step of an `@idempotent` operation
+/// and the stores of its keys.
+pub mod idempotency;
 #[cfg(feature = "http-client")]
 pub mod in_process;
 mod jws;

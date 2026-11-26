@@ -99,8 +99,9 @@ func mcpToolsOf(t *testing.T, dir string) []MCPTool {
 // tools of the tool documents the SDK generators write (sdkgen's golden
 // tools/schema.json for fixture-mcp), as the engine lists its tools: the
 // handle as the name, the @docs title and description, the documents'
-// parameters as the input schema, a read-only hint from the replay mode,
-// and _meta with the guidance and the invocation policy. A hidden or
+// parameters as the input schema, the annotations of the tool's record
+// there (D123), and _meta with the guidance and the invocation policy. A
+// hidden or
 // unclassified operation is no tool. Each argument goes where the route
 // reads it.
 func TestMCPToolsAreTheToolDocuments(t *testing.T) {
@@ -139,8 +140,8 @@ func TestMCPToolsAreTheToolDocuments(t *testing.T) {
 		if got, want := compactJSON(t, tool.InputSchema), compactJSON(t, mustJSON(t, want.Parameters)); got != want {
 			t.Errorf("%s's input schema is not tools/schema.json's parameters:\n got %s\nwant %s", tool.Name, got, want)
 		}
-		if readOnly := want.Replay != nil && want.Replay.Mode == "read_only"; tool.Annotations.ReadOnlyHint != readOnly {
-			t.Errorf("%s readOnlyHint = %v, want %v", tool.Name, tool.Annotations.ReadOnlyHint, readOnly)
+		if resolved := want.MCP.Annotations; resolved == nil || tool.Annotations != (MCPToolAnnotations{ReadOnlyHint: resolved.ReadOnlyHint, DestructiveHint: resolved.DestructiveHint, IdempotentHint: resolved.IdempotentHint}) {
+			t.Errorf("%s's annotations = %+v, want its record's %+v", tool.Name, tool.Annotations, resolved)
 		}
 		if tool.Meta["invocationPolicy"] != want.MCP.Invocation.Value || tool.Meta[apigen.DefaultToolGuidanceKey] == nil {
 			t.Errorf("%s _meta = %v, want the guidance and policy %q", tool.Name, tool.Meta, want.MCP.Invocation.Value)

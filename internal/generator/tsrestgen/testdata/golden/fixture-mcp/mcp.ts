@@ -47,7 +47,9 @@ export const mcpTools: readonly McpRouteTool[] = [
       ]
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "auto",
@@ -92,7 +94,9 @@ export const mcpTools: readonly McpRouteTool[] = [
       ]
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "auto",
@@ -153,7 +157,9 @@ export const mcpTools: readonly McpRouteTool[] = [
       ]
     },
     "annotations": {
-      "readOnlyHint": false
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "ask",
@@ -254,7 +260,9 @@ export const mcpTools: readonly McpRouteTool[] = [
       ]
     },
     "annotations": {
-      "readOnlyHint": false
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
     },
     "_meta": {
       "invocationPolicy": "auto",

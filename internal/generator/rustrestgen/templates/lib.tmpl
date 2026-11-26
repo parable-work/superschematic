@@ -31,6 +31,14 @@ pub use {{ .TypesCrateIdent }} as types;
 /// The http runtime crate the router and the interfaces are built on, for a
 /// crate that builds on this one with the same version of it.
 pub use {{ .RuntimeCrateIdent }} as runtime;
+{{- if .HasIdempotent }}
+
+/// The table of the API's database that keeps the keys of its @idempotent
+/// operations, and its columns (D140): what the store of
+/// `Implementations.idempotency_store` reads and writes, such as
+/// `runtime::idempotency::PostgresStore::new(pool, &IDEMPOTENCY_TABLE)`.
+pub const IDEMPOTENCY_TABLE: runtime::idempotency::Table = {{ .IdempotencyTableLiteral }};
+{{- end }}
 {{- if .HasDatabaseTypes }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the messages its

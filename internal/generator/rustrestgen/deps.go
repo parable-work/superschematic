@@ -159,6 +159,12 @@ type DepsBucket struct {
 
 	// Field is the Deps field that holds the bucket.
 	Field string
+
+	// ContentAddressed is the Bucket service's contentAddressed (D142):
+	// Deps then holds the runtime's bucket::ContentBucket over the bucket,
+	// which puts at most MaxBytes.
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // DepsMemoryStore is a memory store in Deps (D75): an Arc of the HTTP
@@ -513,6 +519,11 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkBehaviorDeps(&deps); err != nil {
 		return err
 	}
+	// Implementations::new builds the store of the idempotency keys over
+	// Deps.db (D140).
+	if o.HasIdempotent() && deps.Database == "" {
+		return fmt.Errorf("rustrestgen: %s has @idempotent operations, whose keys its database keeps (D140), and its Deps names no database", o.SchemaName)
+	}
 	if err := o.checkSQLiteDeps(&deps); err != nil {
 		return err
 	}
@@ -588,8 +599,11 @@ func (o *APIOutput) DepsUses() []string {
 		uses = append(uses, "use serde::{Deserialize, Serialize};")
 	}
 	var runtime []string
-	if o.Deps != nil && len(o.Deps.Buckets) > 0 {
+	if o.Deps != nil && slices.ContainsFunc(o.Deps.Buckets, func(b DepsBucket) bool { return !b.ContentAddressed }) {
 		runtime = append(runtime, "bucket::Bucket")
+	}
+	if o.Deps != nil && slices.ContainsFunc(o.Deps.Buckets, func(b DepsBucket) bool { return b.ContentAddressed }) {
+		runtime = append(runtime, "bucket::ContentBucket")
 	}
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
@@ -647,7 +661,7 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasIdempotent() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {
@@ -670,6 +684,15 @@ func (o *APIOutput) FieldKeysField() string {
 		return ""
 	}
 	return o.Deps.FieldKeys
+}
+
+// IdempotencyStoreType is the HTTP runtime's store of idempotency keys over
+// Deps.db (D140): Postgres's over the pool, or SQLite's over the file.
+func (o *APIOutput) IdempotencyStoreType() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return o.RuntimeCrateIdent + "::idempotency::SqliteStore"
+	}
+	return o.RuntimeCrateIdent + "::idempotency::PostgresStore"
 }
 
 // DatabaseType is the type of Deps.db: a pool of the API's database, or,

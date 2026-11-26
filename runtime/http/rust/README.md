@@ -82,7 +82,10 @@ This crate provides:
   build's table (`mcp::RouteTool`), each call a request to its
   operation's route through `handle`, as the caller the endpoint's
   controls established, with the endpoint request's headers and
-  extensions. `RouterOptions.mcp`, an `mcp::EndpointOptions`, sets its
+  extensions but its `Idempotency-Key`. The tool of an `@idempotent`
+  operation (`RouteTool::idempotent`) takes the call's key in its
+  `idempotencyKey` argument, which goes to the route as that header
+  (D140). `RouterOptions.mcp`, an `mcp::EndpointOptions`, sets its
   server info, its own rate limit and timeout, and the key and the store
   of its confirmations; `tests/mcp_mount.rs` holds it
 - `Authenticator` and `Principal`: how a service tells the router who the
@@ -97,8 +100,8 @@ This crate provides:
   `verify(request, next)` is the body of a generated crate's
   `WebhookVerifier`
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
-  (`@requireService`, `@allowService`), permission check and `@timeout`,
-  applied with `route_layer` in that order. A generated router gives a
+  (`@requireService`, `@allowService`), permission check, `@idempotent`
+  and `@timeout`, applied with `route_layer` in that order. A generated router gives a
   route its operation's limiter from a `RateLimits` registry
   (`rate_limiter(limits.of(&OPERATION))`), one per operation, so the
   routers and the Topcoat procedures and pages that share the registry
@@ -163,6 +166,22 @@ TypeScript runtimes' (D51):
   reads as a JWK. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
+- `idempotency`, with no feature: the keys of an `@idempotent` operation
+  (D140), the twin of Go's `idempotency` package and TypeScript's
+  `idempotency.ts`. `RouteControls::idempotent(store, operation, ttl,
+  required)` keeps a request's `Idempotency-Key` after the permission
+  check and around the timeout: a repeat is the kept answer with
+  `Idempotent-Replay: true`, the key with another request 422
+  `idempotency_key_reused`, a repeat while the first runs 409
+  `idempotency_in_flight` with `Retry-After`, and a 5xx or a panic keeps
+  nothing. On tokio the handler runs as a task of its own, so a caller
+  that goes away does not stop it before its answer is kept. A `Store`
+  keeps the rows: `MemoryStore` in the process, `PostgresStore` over a
+  pool with the `postgres` feature and `SqliteStore` over a SQLite file
+  with the `sqlite` feature, each on the `Table` a generated crate names
+  as `IDEMPOTENCY_TABLE`. `tests/idempotency_parity.rs` holds the three to
+  `runtime/http/testdata/idempotency_parity.json`, on Postgres when
+  `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names one.
 - `client_version`, with no feature: the oldest version of each client an
   API serves (D143), the twin of Go's `clientversion` package and
   TypeScript's `client-version.ts`. `Minimums::parse` reads
@@ -378,7 +397,10 @@ TypeScript runtimes' (D51):
   `Arc<dyn Bucket>`, the twin of Go's `bucket.Bucket` and TypeScript's
   `Bucket`: `put(name, body, PutOptions)` (a `Body` of bytes, text or a
   `Stream` of chunks, such as an axum request's data stream, with its
-  content type), `get(name)` (a `Reader`, the object's `Object` and its
+  content type, and with `if_absent` written only when no object has the
+  name; a `PutResult`, the object and whether this put `created` it,
+  D142), `head(name)` (the object's `Object`, or `None`), `get(name)` (a
+  `Reader`, the object's `Object` and its
   bytes as a `Stream`, which an axum handler answers with as
   `Body::from_stream(reader)`), `delete(name)`, `list(ListOptions)` (a
   `Page` of the objects under a prefix, in name order, up to 1000 unless it
@@ -389,7 +411,14 @@ TypeScript runtimes' (D51):
   or holds a CR, LF or NUL, and options no provider signs, are
   `BucketError::Invalid` before any request, with Go's and TypeScript's
   messages; anything else is `BucketError::Failed`, naming the bucket, the
-  operation and its causes.
+  operation and its causes. `ContentBucket::new(bucket, max_bytes)` is the
+  `Deps` member of a Bucket service whose config says `contentAddressed`
+  (D142): `put` reads a body whole, up to `max_bytes` (32 MiB for 0,
+  `BucketError::TooLarge` past it, writing nothing), and writes it as
+  `sha256/<hex>` if absent; `has`, `missing`, `get` and `signed_url` read
+  by hash, and refuse anything but 64 lowercase hex digits.
+  `tests/content_bucket_parity.rs` holds it to
+  `runtime/http/testdata/content_bucket_parity.json`.
 - The `gcs` feature's `gcs` module: `open_bucket(&stackconfig::Bucket)`, a
   `GcsBucket` over Cloud Storage's JSON API, with no Google library, as
   Cloud SQL's connection has none. On GCS it sends an access token for the
@@ -401,7 +430,9 @@ TypeScript runtimes' (D51):
   bucket through an emulator. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
   reaches an emulator with no credential, and signs its URLs for the
   emulator's host with a key the process makes, which fake-gcs-server takes
-  without checking. `put` is one multipart upload, streamed for a stream;
+  without checking. `put` is one multipart upload, streamed for a stream,
+  with `ifGenerationMatch=0` for `if_absent`, whose 412 it answers with
+  the object that is there; `head` reads the metadata alone;
   `get` reads the metadata, then that generation's bytes; reads that fail
   with 408, 429, a 5xx or no answer are tried twice more. The V4 signature
   is the one `@google-cloud/storage` writes, which a vector of its output
