@@ -1,0 +1,23 @@
+# A sandbox provider that runs each run's instance as a local process
+# (D159, D185): the Rust port of providers/local-sandbox. A stub, not an
+# isolation boundary.
+[package]
+name = "local-sandbox"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "local-sandbox"
+implements = "sandbox"
+
+[package.metadata.superschematic.provider.config]
+WORKDIR = { optional = true, description = "The directory each instance runs in; the server's own when unset." }
+
+[dependencies]
+async-trait = "0.1.89"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

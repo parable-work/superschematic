@@ -107,6 +107,11 @@ type RuntimeProvider struct {
 	// exports definition(). Empty for a provider of TypeScript alone.
 	Crate string `json:"crate,omitempty"`
 
+	// Dir is the directory the loader found the provider in, absolute: what
+	// a Rust server's Cargo.toml names its crate by (D185). It is the
+	// loader's alone, and no schema.json holds it.
+	Dir string `json:"-"`
+
 	// Path is the package's directory as the API's config lists it,
 	// relative to the service's directory, in slash form.
 	Path string `json:"path"`

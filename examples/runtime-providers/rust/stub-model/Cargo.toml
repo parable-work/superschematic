@@ -1,0 +1,23 @@
+# A model provider stub whose answers follow from the turn (D159, D185):
+# the Rust port of providers/stub-model.
+[package]
+name = "stub-model"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "stub-model"
+implements = "model"
+
+[package.metadata.superschematic.provider.config]
+MODEL = { optional = true, description = "The model name the stub reports; stub-1 when unset." }
+
+[dependencies]
+async-trait = "0.1.89"
+serde_json = "1.0.149"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

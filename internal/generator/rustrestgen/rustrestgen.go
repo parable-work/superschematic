@@ -444,6 +444,12 @@ type APIOutput struct {
 	// loader of the service's @envVars type and, for a crate with Deps,
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
+	// Providers are the API's runtime providers (D159, D185): its slots,
+	// the provider crates its config lists, which Cargo.toml depends on,
+	// and the config fields they read. src/providers.rs holds them, and
+	// Deps.providers the Providers an environment configures. Nil for an
+	// API with neither.
+	Providers *ProvidersInfo
 	// Deps is what src/deps.rs's Deps holds beside the config and the span
 	// (D57), which the dispatch layer sets (SetDeps). Nil writes no
 	// src/deps.rs, and the crate is the one it was before.
@@ -807,6 +813,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		PermissionCatalogJSON: api.PermissionCatalogJSON,
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
+	// The runtime providers of the API's @providers slots and the crates
+	// its config lists (D159, D185).
+	providers, perr := providersOf(schema, opts.OutputDir)
+	if perr != nil {
+		return nil, fmt.Errorf("rustrestgen: %s: %w", opts.SchemaName, perr)
+	}
+	output.Providers = providers
 
 	// The user model's operations are the identity runtime's (D50): the
 	// Implementations traits leave them out, and the router mounts the
@@ -1071,6 +1084,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"apps.tmpl", "apps.rs", output.HasApps()},
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
+		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {
