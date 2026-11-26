@@ -118,7 +118,9 @@ impl WorkerQueue for Memory {
         match does {
             Some(ClaimDoes::Fail) => return Err(QueueError::Failed("the database is down".into())),
             Some(ClaimDoes::Hang) => std::future::pending::<()>().await,
-            Some(ClaimDoes::Slow(seconds)) => tokio::time::sleep(Duration::from_secs_f64(seconds)).await,
+            Some(ClaimDoes::Slow(seconds)) => {
+                tokio::time::sleep(Duration::from_secs_f64(seconds)).await
+            }
             None => {}
         }
         let mut state = self.state.lock().unwrap();

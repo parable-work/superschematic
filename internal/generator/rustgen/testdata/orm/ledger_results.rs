@@ -81,6 +81,7 @@ fn refusal(err: &Error) -> Value {
         }
         Error::Constraint(constraint) => json!(format!("{:?}", constraint.kind)),
         Error::Busy(_) => json!("busy"),
+        Error::AccessRefused(_) => json!("access refused"),
         Error::Refused(refusal) => json!({"refused": refusal.code}),
         Error::Encryption(_) => json!("encryption"),
         Error::Definition(message) => json!({"definition": message}),

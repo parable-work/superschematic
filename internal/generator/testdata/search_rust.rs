@@ -18,7 +18,7 @@ use http_body_util::BodyExt;
 use runtime::access::{issue_grant, revoke_grant, GrantAuthenticator, IssueGrant};
 use runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Tables};
 use runtime::orm::search_tables::{
-    call_search_tool, index_search, search_embeddings_of, search_routes, search_tables, Embedder,
+    call_search_tool, index_search, reindex_search, search_embeddings_of, search_routes, search_tables, Embedder,
     SearchEmbeddings, SearchIndexing, SearchOptions, SearchRequest, SearchResult, SearchRoutes,
 };
 use runtime::providers::{ModelCompletion, ModelEmbedRequest, ModelEmbedding, ModelProvider, ModelTurn};
@@ -531,6 +531,14 @@ async fn search_across_tables_on_postgres() {
         // An update that changes no indexed field enqueues nothing.
         db.update(&system, "Unit", &unit_a, json!({ "contractId": contract_a })).await;
         assert_eq!(db.drain(&none).await, 0);
+        // A table's index rows lost are built again by reindex_search, every
+        // row of it, the soft-deleted one removed again.
+        db.sql("DELETE FROM search_index WHERE source_table = 'Note'").await;
+        assert_eq!(db.found(Some(&as_bob), "idea", &none, |_| {}).await.0.total, 0);
+        let mut client = db.pool.get().await.unwrap();
+        let tables = ["Note".to_owned()];
+        assert_eq!(reindex_search(&mut client, postgres_definition().unwrap(), Some(&tables), Some(2), &none).await.unwrap(), 3);
+        assert_eq!(sorted(db.keys(&as_bob, "idea").await), sorted(vec![format!("Note:{note_p1}"), format!("Note:{note_p2}")]));
     }
 
     case("scope keeps a search to the app's filter");
