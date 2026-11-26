@@ -2,11 +2,14 @@ package servergen_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestRustContentAddressedBucketWiring: with rs-media's config saying
@@ -62,4 +65,56 @@ func TestRustContentAddressedBucketWiring(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestRustContentAddressedBucketCompiles builds the Rust fixture with
+// rs-media's config saying contentAddressed, as buildRustFixture builds
+// it: rs-stock's API crate, whose Deps holds the ContentBucket, and its
+// server's, job's and worker's crates, which build it over the bucket each
+// opens, pass clippy with warnings denied and build, with rs-stock's
+// implementation signing its URL through the content bucket's raw bucket
+// (D142).
+func TestRustContentAddressedBucketCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cargo build in -short mode")
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not available; skipping the Rust build")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := testpaths.TempDir(t)
+	f := loadRustFixture(t)
+	f.configs["rs-media"].ContentAddressed = true
+	f.build(t, repoRoot, paths, rustOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	names := naming.Default()
+	for service, code := range map[string]string{"rs-catalog": rustCatalogImplementation, "rs-pricing": rustPricingImplementation, "rs-stock": rustStockImplementation} {
+		if service == "rs-stock" {
+			signs := ".rs_media\n                .signed_url("
+			if !strings.Contains(code, signs) {
+				t.Fatal("rs-stock's implementation no longer signs its URL through rs_media")
+			}
+			code = strings.Replace(code, signs, ".rs_media\n                .raw()\n                .signed_url(", 1)
+		}
+		if err := os.WriteFile(filepath.Join(names.RustImplementationDir(repoRoot, service), "src", "lib.rs"), []byte(code), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.build(t, repoRoot, paths, rustStack, rustMergedStack)
+	if deps := read(t, out, "api", "rs-stock", "src", "deps.rs"); !strings.Contains(deps, "pub rs_media: ContentBucket,") {
+		t.Fatalf("rs-stock's Deps holds no content bucket:\n%s", deps)
+	}
+	target := rustTargetDir(t)
+	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
+	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
+}
+
+func read(t *testing.T, root string, parts ...string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(append([]string{root}, parts...)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
