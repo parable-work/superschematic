@@ -152,6 +152,21 @@ refused, and a person's run waits for an `agents.overBudget` approval.
 pauses every one. Each run in flight is cancelled through its sandbox
 provider and its token revoked.
 
+## Each turn
+
+The sandbox instance posts each turn's tool results to the agent routes'
+`turn`, and the dispatcher completes the turn with the agent's model
+provider over the run's whole transcript: the task, each earlier
+completion as an assistant message with the tool calls it made
+(`toolCalls`), and each tool result after the call it answers. A provider
+that keeps its own record of a turn, such as Claude's thinking blocks and
+their signatures, returns it as the completion's `providerState`. The
+dispatcher keeps it with the completion and passes it back on that
+assistant message, unchanged, in every later turn, so the provider can
+rebuild its API's conversation as that API requires. It is the one part of
+the transcript kept unredacted while the run lives; a read of the
+transcript, and the transcript in the bucket, hold it redacted.
+
 ## Credentials and outside content
 
 A definition names credential references, never values. The sandbox

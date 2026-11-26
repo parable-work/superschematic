@@ -105,7 +105,11 @@ Transcripts are redacted (the run's token, bearer tokens, and the patterns
 the options add) as each entry is written, kept on the run row while it
 runs and in the bucket after, for transcriptRetentionDays (30), after which
 prune deletes the object and stamps the row; the run row itself is history
-and stays.
+and stays. Each turn replays the run's earlier completions as assistant
+messages with the tool calls they made and the provider's own state of
+them (ModelCompletion.providerState), which a completion keeps unredacted
+while the run lives, since a provider checks it as it returned it; a read
+of the transcript and the transcript the run leaves hold it redacted.
 */
 
 /** The triggers of a run (D158). */
@@ -211,6 +215,14 @@ export interface TranscriptEntry {
   readonly content?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly { readonly id: string; readonly name: string; readonly input: unknown }[];
+  /**
+   * A completion's ModelCompletion.providerState, which the turns after it
+   * pass back on its assistant message. It is the one member kept
+   * unredacted while the run lives, since a provider checks it as it
+   * returned it (a Claude thinking block's signature); a read of the
+   * transcript, and the transcript the run leaves, hold it redacted.
+   */
+  readonly providerState?: unknown;
   readonly tool?: string;
   readonly args?: unknown;
   readonly outcome?: string;
@@ -487,7 +499,12 @@ export function createAgents(options: AgentsOptions): Agents {
       const row = await runs(tx).findOne({ id: { eq: runId } });
       if (!row) return;
       const at = now().toISOString();
-      const next = [...((row.transcript as TranscriptEntry[] | null) ?? []), ...entries.map(entry => redact({ at, ...entry }))];
+      // Every member is redacted as it is written but a completion's
+      // providerState, which the turns after it pass back as it was.
+      const next = [
+        ...((row.transcript as TranscriptEntry[] | null) ?? []),
+        ...entries.map(({ providerState, ...entry }) => ({ ...redact({ at, ...entry }), ...(providerState !== undefined ? { providerState } : {}) })),
+      ];
       await runs(tx).updateOne(runId, { transcript: next });
     });
   };
@@ -642,12 +659,14 @@ export function createAgents(options: AgentsOptions): Agents {
         log.warn('a sandbox cost was not read', { run: runId, detail: err instanceof Error ? err.message : String(err) });
       }
     }
-    const entries = (run.transcript as TranscriptEntry[] | null) ?? [];
+    // The transcript a run leaves is redacted whole, its completions'
+    // providerState with the rest, since no later turn passes it back.
+    const entries = redact((run.transcript as TranscriptEntry[] | null) ?? []);
     let transcriptObject: string | null = (run.transcriptObject as string | null) ?? null;
     let transcript: TranscriptEntry[] | null = entries;
     if (options.transcripts) {
       transcriptObject = `agent-runs/${runId}.json`;
-      await options.transcripts.put(transcriptObject, JSON.stringify(redact(entries)), { contentType: 'application/json' });
+      await options.transcripts.put(transcriptObject, JSON.stringify(entries), { contentType: 'application/json' });
       transcript = null;
     }
     const status = outcome === 'done' ? 'done' : outcome === 'failed' ? 'failed' : 'cancelled';
@@ -1353,7 +1372,16 @@ export function createAgents(options: AgentsOptions): Agents {
     for (const entry of history) {
       if (entry.kind === 'task') messages.push({ role: 'user', content: String(entry.content ?? ''), ...(entry.untrusted ? { untrusted: true } : {}) });
       else if (entry.kind === 'message') messages.push({ role: entry.role ?? 'tool', content: String(entry.content ?? ''), ...(entry.toolCallId ? { toolCallId: entry.toolCallId } : {}), ...(entry.untrusted ? { untrusted: true } : {}) });
-      else if (entry.kind === 'completion') messages.push({ role: 'assistant', content: String(entry.content ?? '') });
+      // An earlier completion, with the tool calls the tool messages after
+      // it answer and the provider's state of it, as the provider returned
+      // it (D158).
+      else if (entry.kind === 'completion')
+        messages.push({
+          role: 'assistant',
+          content: String(entry.content ?? ''),
+          ...(entry.toolCalls && entry.toolCalls.length > 0 ? { toolCalls: entry.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })) } : {}),
+          ...(entry.providerState !== undefined ? { providerState: entry.providerState } : {}),
+        });
     }
     const { provider, slot } = await modelOf(definition);
     let completion: ModelCompletion;
@@ -1375,7 +1403,15 @@ export function createAgents(options: AgentsOptions): Agents {
         modelSlot: slot,
       });
     });
-    await append(orm, String(run.id), [{ kind: 'completion', role: 'assistant', content: completion.content, toolCalls: completion.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })) }]);
+    await append(orm, String(run.id), [
+      {
+        kind: 'completion',
+        role: 'assistant',
+        content: completion.content,
+        toolCalls: completion.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })),
+        ...(completion.providerState !== undefined ? { providerState: completion.providerState } : {}),
+      },
+    ]);
     await meterUsage(agent, spent);
     return json(200, { content: redactText(completion.content), toolCalls: redact(completion.toolCalls), stop: completion.stop, usage: completion.usage });
   };
@@ -1496,7 +1532,9 @@ export function createAgents(options: AgentsOptions): Agents {
       const text = typeof read.text === 'function' ? await read.text() : await new Response(read.body!).text();
       return JSON.parse(text) as TranscriptEntry[];
     }
-    return (run.transcript as TranscriptEntry[] | null) ?? [];
+    // A live run's completions keep their providerState unredacted for the
+    // turns after them; a reader gets it redacted, as the rest.
+    return redact((run.transcript as TranscriptEntry[] | null) ?? []);
   };
 
   const prune = async (limit: number): Promise<number> => {

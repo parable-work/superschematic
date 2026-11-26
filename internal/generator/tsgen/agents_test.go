@@ -47,6 +47,7 @@ var agentsProviders = map[string]string{
 var agentsCases = []string{
 	"a run a schedule's deadline starts reads only its target and the rows its role reaches from it",
 	"an agent run's MCP search returns only rows within its scope",
+	"each turn replays the run's earlier completions with their tool calls and the provider's state unchanged, and a reader gets the state redacted",
 	"an ask operation waits for an approval given on any channel, then runs",
 	"the same operation with a changed amount asks again",
 	"hitting a budget cap pauses the agent, and the total cap stops scheduled runs and asks before a principal's",
