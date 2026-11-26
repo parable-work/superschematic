@@ -170,6 +170,18 @@ async fn upload(
         return error(StatusCode::FORBIDDEN, "the account may not write here");
     }
     let mut fake = fake.lock().unwrap();
+    if let Some(generation) = query.get("ifGenerationMatch") {
+        assert_eq!(
+            generation, "0",
+            "a put only when absent matches generation 0"
+        );
+        if fake.objects.contains_key(&(bucket.clone(), name.clone())) {
+            return error(
+                StatusCode::PRECONDITION_FAILED,
+                "At least one of the pre-conditions you specified did not hold.",
+            );
+        }
+    }
     fake.generation += 1;
     let stored = Stored {
         bytes: parts[1].1.clone(),
@@ -447,6 +459,8 @@ async fn a_bucket_on_gcs_puts_gets_lists_and_deletes_as_the_workloads_account() 
         )
         .await
         .unwrap();
+    assert!(stored.created);
+    let stored = stored.object;
     assert_eq!(stored.name, "products/a b.txt");
     assert_eq!(stored.size, 14);
     assert_eq!(stored.content_type.as_deref(), Some("text/plain"));
@@ -530,6 +544,81 @@ async fn a_bucket_on_gcs_puts_gets_lists_and_deletes_as_the_workloads_account() 
         .requests
         .iter()
         .any(|(_, path, _)| path == "object/acme-staging-shop-media/products/a b.txt"));
+}
+
+#[tokio::test]
+async fn a_put_only_when_absent_leaves_the_object_there_and_a_head_reads_its_metadata() {
+    let (fake, address) = serve().await;
+    let clock = TestClock::new();
+    let bucket = gcs_client(&address, &clock)
+        .open(&connection("acme-staging-shop-media", None))
+        .unwrap();
+
+    assert_eq!(bucket.head("docs/a.txt").await.unwrap(), None);
+    let first = bucket
+        .put(
+            "docs/a.txt",
+            "first".into(),
+            PutOptions::content_type("text/plain").if_absent(),
+        )
+        .await
+        .unwrap();
+    assert!(first.created);
+    assert_eq!(first.object.size, 5);
+    // The name is taken: GCS answers 412, and the put answers what is there.
+    let second = bucket
+        .put(
+            "docs/a.txt",
+            "second, longer".into(),
+            PutOptions::default().if_absent(),
+        )
+        .await
+        .unwrap();
+    assert!(!second.created);
+    assert_eq!(
+        (second.object.size, second.object.content_type.as_deref()),
+        (5, Some("text/plain"))
+    );
+    assert_eq!(
+        bucket
+            .get("docs/a.txt")
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+        b"first"
+    );
+    // A plain put replaces it.
+    let replaced = bucket
+        .put("docs/a.txt", "third".into(), PutOptions::default())
+        .await
+        .unwrap();
+    assert!(replaced.created);
+    let head = bucket.head("docs/a.txt").await.unwrap().unwrap();
+    assert_eq!(
+        (head.name.as_str(), head.size, head.content_type),
+        ("docs/a.txt", 5, None)
+    );
+    assert!(bucket
+        .head("")
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("empty"));
+    let refused = bucket.head("forbidden").await.unwrap_err();
+    assert!(
+        refused.to_string().contains("head forbidden") && refused.to_string().contains("403"),
+        "{refused}"
+    );
+
+    let fake = fake.lock().unwrap();
+    let uploads: Vec<_> = fake
+        .requests
+        .iter()
+        .filter(|(method, _, _)| method == "POST")
+        .collect();
+    assert_eq!(uploads.len(), 3, "{uploads:?}");
 }
 
 #[tokio::test]
@@ -848,11 +937,17 @@ async fn a_bucket_on_fake_gcs_server() {
         .unwrap();
     assert_eq!(
         (
-            stored.name.as_str(),
-            stored.size,
-            stored.content_type.as_deref()
+            stored.object.name.as_str(),
+            stored.object.size,
+            stored.object.content_type.as_deref(),
+            stored.created
         ),
-        (format!("{prefix}a.txt").as_str(), 14, Some("text/plain"))
+        (
+            format!("{prefix}a.txt").as_str(),
+            14,
+            Some("text/plain"),
+            true
+        )
     );
     bucket
         .put(
@@ -874,6 +969,23 @@ async fn a_bucket_on_fake_gcs_server() {
     let read = bucket.get(&format!("{prefix}a.txt")).await.unwrap();
     assert_eq!(read.object.content_type.as_deref(), Some("text/plain"));
     assert_eq!(read.bytes().await.unwrap(), b"streamed bytes");
+    // Only when absent: the name is taken, so the emulator answers 412 and
+    // the put leaves the object as it was (D142).
+    let kept = bucket
+        .put(
+            &format!("{prefix}a.txt"),
+            "other bytes".into(),
+            PutOptions::default().if_absent(),
+        )
+        .await
+        .unwrap();
+    assert_eq!((kept.created, kept.object.size), (false, 14));
+    let head = bucket.head(&format!("{prefix}a.txt")).await.unwrap();
+    assert_eq!(head.map(|object| object.size), Some(14));
+    assert_eq!(
+        bucket.head(&format!("{prefix}none.txt")).await.unwrap(),
+        None
+    );
 
     let first = bucket
         .list(ListOptions {
