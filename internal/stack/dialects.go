@@ -16,10 +16,13 @@ import (
 //   - a Go server's and job's Deps.DB is the ORM of their database's first
 //     dialect too (D116), over a pool or the SQLite file, and a Go worker
 //     claims its queue on Postgres alone, so its database must resolve to
-//     postgres;
-//   - a TypeScript API over the user model authenticates with an identity
-//     store on Postgres, and none over SQLite is built, so its database may
-//     not list sqlite first, wherever it runs (D50).
+//     postgres.
+//
+// A TypeScript one's Deps.orm is its database's repositories on that
+// dialect too (D116), and a TypeScript API over the user model keeps its
+// users on a SQLite file as on Postgres, beside the repositories: on a
+// platform that runs no identity store over the database's platform, a
+// Worker's over D1, checkIdentityDatabases refuses it (D50, D92).
 //
 // It runs after deriveEdges, on each sql edge.
 func (r *resolver) checkDatabaseDialects() {
@@ -50,24 +53,6 @@ func (r *resolver) checkDatabaseDialects() {
 				r.fail(CodeUnrealizable, "%s %s is a %s %s on %s, whose DB service lists %s first, and environment %s places %s on %s, a %s database; a Go API's Deps.DB is the ORM of its database's first dialect (D64, D116)",
 					from.Kind, from.Name, registry.APILanguageGo, from.Kind, db, first, r.envName(), db, e.to.res.Name, placed)
 			}
-		}
-	}
-	for _, name := range sortedKeys(r.deployables) {
-		d := r.deployables[name].res
-		if !d.Kind.RunsCode() || d.Language != registry.APILanguageTypeScript {
-			continue
-		}
-		for _, served := range d.Services {
-			svc := r.services[served.Name]
-			if svc == nil || !svc.Identity {
-				continue
-			}
-			db, ok := r.databaseOf(svc)
-			if !ok || firstDialect(r.services[db]) != registry.SQLDialectSQLite {
-				continue
-			}
-			r.fail(CodeUnrealizable, "%s %s serves %s, which authenticates its users with the identity runtime over %s, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)",
-				d.Kind, d.Name, served.Name, db)
 		}
 	}
 }

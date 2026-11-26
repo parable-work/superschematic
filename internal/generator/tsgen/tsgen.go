@@ -303,8 +303,9 @@ type ModuleOutput struct {
 
 	// ORM is the schema's repositories (D79), which orm.ts writes and
 	// package.json exports as "./orm", nil for a schema with no table or a
-	// database that lists no postgres dialect. With one, the package
-	// depends on the HTTP runtime, whose ormOf runs them.
+	// database that lists neither postgres nor sqlite. With one, the
+	// package depends on the HTTP runtime, whose ormOf runs them, and on
+	// SQLite and D1 its ./orm-sqlite (D116).
 	ORM *ORMInfo
 
 	// StateMachines are the schema's @stateMachine declarations (D118),
@@ -444,13 +445,13 @@ type Options struct {
 	EngineDocument []byte
 
 	// SQLite is whether the DB service lists the sqlite dialect, whose
-	// statements each queue in queues.ts then carries beside Postgres's
-	// (D53, amended).
+	// statements each queue in queues.ts and each table in orm.ts then
+	// carries beside Postgres's (D53, amended, D116).
 	SQLite bool
 
 	// NoPostgres is whether the DB service lists no postgres dialect: its
-	// package then writes no orm.ts, whose repositories run on Postgres
-	// alone (D79).
+	// package then writes orm.ts only when it lists sqlite (D116), with no
+	// createOrm over a pg Pool.
 	NoPostgres bool
 
 	// Actor is the DB service's system actor and whether an update needs
@@ -561,7 +562,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if output.Queues, err = TypeScriptQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
-	if !opts.NoPostgres {
+	if !opts.NoPostgres || opts.SQLite {
 		// A projection's row is the ORM's type alone (D90): its fields'
 		// types are written as a table's are, and no ./types entry holds it.
 		projections := convertTypes(codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleProjection), output.Scalars, enumLookup, unionNames)

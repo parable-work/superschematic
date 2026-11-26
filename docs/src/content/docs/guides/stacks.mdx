@@ -2415,10 +2415,17 @@ id: <the database's uuid>}`, and `/readyz` pings it. The same code
 runs under `stack dev`, where the database is a SQLite file under the
 environment's state directory, `databases/<database>.sqlite`, and the
 server opens the `sqlite:` URL its edge derives with the runtime's
-`openSqlite`. Resolution refuses a TypeScript API whose database runs in
-another dialect than its first, a Rust API whose database does, a Go API
-on a SQLite database, and a TypeScript API over the user model on a
-sqlite-first one.
+`openSqlite`. When the database has tables and TypeScript types,
+`Deps.orm` is its repositories on SQLite, `createSqliteOrm` over the file
+under `stack dev` and `createD1Orm` over the binding on Workers, where a
+repository's write of several statements goes as one batch and
+`transaction(fn)` is refused
+([On SQLite and D1](/superschematic/guides/database-tables/#on-sqlite-and-d1)).
+An API over the user model keeps its users on the file too, its identity
+store beside the repositories (D116), and on Workers it is refused: no
+identity store runs over D1. Resolution refuses a TypeScript API whose
+database runs in another dialect than its first, a Rust API whose
+database does, and a Go API on a SQLite database.
 
 A deploy migrates each D1 database from your machine, or the CI job's,
 between its steps: it finds `superschematic-migrate` on `PATH`, or where

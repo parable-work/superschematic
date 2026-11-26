@@ -5,11 +5,24 @@ The repositories of the {{.SchemaName}} database (D79), as the HTTP runtime's
 ormOf runs them: a repository per table, with its row, create, update and
 filter types, and each table as data, its columns, what each holds, and its
 statements on Postgres, which the Go ORM runs too.
+{{- if .ORM.Postgres}}
 
 createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them;
 createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
+{{- end}}
+{{- if .ORM.SQLite}}
+
+On SQLite (D116), each table also carries its statements there, and
+createSqliteOrm(db) opens the repositories over a SQLite file, as
+openSqlite and openNodeSqlite open one, and createD1Orm(db) over a D1
+binding, which has no interactive transaction: there a repository's write
+of several statements goes as one batch, and transaction(fn) is refused.
+{{- range .ORM.SQLiteRefused}}
+{{.Type}} has no repository on SQLite: {{.SQLite.Unsupported}}.
+{{- end}}
+{{- end}}
 A row holds each column by member, a to-one relation's key as <field>Id, a
 UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
 acting user: in an operation the router runs, its caller (D87);
@@ -92,11 +105,19 @@ use's guard holds the write to.
 {{- with .ORM}}
 {{- if .Rules}}
 import { initSync } from '{{$.Naming.RulesNpmPackage}}';
+{{- end}}
+{{- if and .Postgres .Rules}}
 import { ormOf, withRulesCore } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
-{{- else}}
+{{- else if .Postgres}}
 import { ormOf } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
+{{- else if .Rules}}
+import { withRulesCore } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
 {{- end}}
 import type { {{join .RuntimeTypes ", "}} } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
+{{- if .SQLite}}
+import type { SqlDatabase } from '{{$.Naming.HTTPRuntimeNpmPackage}}/d1';
+import { d1OrmOf, sqliteOrmOf } from '{{$.Naming.HTTPRuntimeNpmPackage}}/orm-sqlite';
+{{- end}}
 {{- if .UsesTypes}}
 import type * as T from './types';
 {{- end}}
@@ -346,6 +367,24 @@ export const {{.Const}}: TableDefinition = {
 {{- end}}
   ],
 {{- end}}
+{{- with .SQLite}}
+  sqlite: {
+{{- if .Unsupported}}
+    unsupported: {{jsonString .Unsupported}},
+{{- else}}
+    statements: {
+{{- range .Statements}}
+      {{.Name}}: {{jsonString .SQL}},
+{{- end}}
+    },
+    uniqueKeys: {
+{{- range .UniqueKeys}}
+      {{jsonString .Name}}: {{.Definition}},
+{{- end}}
+    },
+{{- end}}
+  },
+{{- end}}
 };
 {{- end}}
 
@@ -559,7 +598,23 @@ export const {{.Const}}: OrmDefinition = {
 {{- if .Rules}}
   rules: {{.RulesConst}},
 {{- end}}
+{{- if .SQLite}}
+  sqlite: {
+    clauses: {
+{{- range .SQLiteClauses}}
+      {{.Name}}: {{jsonString .SQL}},
+{{- end}}
+    },
+    jsonClauses: {
+{{- range .SQLiteJSONClauses}}
+      {{.Name}}: {{jsonString .SQL}},
+{{- end}}
+    },
+  },
+{{- end}}
 };
+
+{{- if .Postgres}}
 
 /**
  * Opens the repositories of {{$.SchemaName}} over pool, acting as the user
@@ -574,4 +629,35 @@ export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): 
   return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, options);
 {{- end}}
 }
+{{- end}}
+{{- if .SQLite}}
+
+/**
+ * Opens the repositories of {{$.SchemaName}} over db, a SQLite file as
+ * openSqlite or openNodeSqlite opens one (D116), acting as the user options
+ * names, or as the user it is when a string: each transaction holds the
+ * file until it ends.{{if .Rules}} The behaviors' core is options.rules, or the
+ * rules package's, made when a behavior first runs.{{end}}
+ */
+export function createSqliteOrm(db: SqlDatabase, options?: string | null | OrmOptions): {{.Name}}Orm {
+{{- if .Rules}}
+  return sqliteOrmOf<{{.Name}}Repositories>(db, {{.Const}}, withRulesCore(options, initSync));
+{{- else}}
+  return sqliteOrmOf<{{.Name}}Repositories>(db, {{.Const}}, options);
+{{- end}}
+}
+
+/**
+ * Opens the repositories of {{$.SchemaName}} over db, a D1 binding (D116),
+ * which has no interactive transaction: a repository's write of several
+ * statements goes as one batch, and transaction(fn) is refused.
+ */
+export function createD1Orm(db: SqlDatabase, options?: string | null | OrmOptions): {{.Name}}Orm {
+{{- if .Rules}}
+  return d1OrmOf<{{.Name}}Repositories>(db, {{.Const}}, withRulesCore(options, initSync));
+{{- else}}
+  return d1OrmOf<{{.Name}}Repositories>(db, {{.Const}}, options);
+{{- end}}
+}
+{{- end}}
 {{- end}}

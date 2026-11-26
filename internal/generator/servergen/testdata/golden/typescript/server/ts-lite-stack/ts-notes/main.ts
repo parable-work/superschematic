@@ -27,6 +27,7 @@ import { ping as pingSqlDatabase } from '@superschematic/http-runtime/d1';
 import { openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
+import { createSqliteOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
 
 /** The port the server listens on when $PORT is unset. */
 const DEFAULT_PORT = 8080;
@@ -112,6 +113,7 @@ async function main(): Promise<void> {
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   const tsNotesImplementations = await construct('ts-notes', 'implementation', () => tsNotesImpl.create(tsNotesDeps));

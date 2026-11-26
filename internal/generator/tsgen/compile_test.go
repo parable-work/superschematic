@@ -36,6 +36,9 @@ type tsPackageCase struct {
 	deps     map[string]*ir.Schema
 	registry *registry.Registry
 	extra    map[string]string
+	// sqlite is whether the DB service lists the sqlite dialect, whose
+	// statements orm.ts and queues.ts then carry beside Postgres's (D116).
+	sqlite bool
 }
 
 // buildTSPackages writes each case's TypeScript types package, wired
@@ -71,6 +74,7 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 			Dependencies: tc.deps,
 			Registry:     tc.registry,
 			Clock:        fixedClock,
+			SQLite:       tc.sqlite,
 		})
 		if err != nil {
 			t.Fatalf("generate %s: %v", tc.name, err)
@@ -175,7 +179,9 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-optimistic-db", schema: load("fixture-optimistic-db")},
 		{name: "fixture-user-model-db", schema: load("fixture-user-model-db")},
 		behaviorsPackage(t),
-		{name: "fixture-queue-db", schema: load("fixture-queue-db")},
+		// With its statements on SQLite (D116), which createSqliteOrm and
+		// createD1Orm run.
+		{name: "fixture-queue-db", schema: load("fixture-queue-db"), sqlite: true},
 	}
 	// The state machines' helpers (D118), with the file that checks their
 	// types.

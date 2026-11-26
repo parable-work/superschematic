@@ -1,4 +1,6 @@
-import { SqlIdentityStore, driveSync, type SqlParam, type SqlRow, type SqlRunner, type SqlWork } from './sqlstore.js';
+import type { SqlDatabase } from '../d1.js';
+import { inTurn } from '../sqlite-turns.js';
+import { SqlIdentityStore, driveAsync, driveSync, type SqlParam, type SqlRow, type SqlRunner, type SqlWork } from './sqlstore.js';
 
 /*
 The identity store's SQLite binding. It reaches SQLite through
@@ -14,6 +16,14 @@ on the connection while it is open, and an operation never waits on
 another. The connection should have foreign_keys on and a busy_timeout;
 the store deletes a role's grants itself, so it does not rely on the
 cascade.
+
+sqlDatabaseIdentityStore is the same store over a SqlDatabase of a SQLite
+file (openSqlite, openNodeSqlite), the one a server's repositories run on
+(D116): each operation awaits its statements in the file's turn
+(../sqlite-turns), its transaction too, so it never meets a transaction of
+the repositories open on the same connection. A D1 binding has no
+interactive transaction, and an operation's transaction reads before it
+writes, so no store runs over one.
 */
 
 /** A value bound to a placeholder or read from a column. */
@@ -117,4 +127,49 @@ export function sqliteRunner(client: SqliteClient): SqlRunner {
 /** The identity store over a SQLite connection holding the schema's tables. */
 export function sqliteIdentityStore(client: SqliteClient, descriptor: string | unknown): SqlIdentityStore {
   return new SqlIdentityStore(sqliteRunner(client), descriptor);
+}
+
+/**
+ * The SqlRunner over a SqlDatabase of a SQLite file: each operation in the
+ * database's turn, its statements awaited, in one BEGIN IMMEDIATE
+ * transaction when it asks for one.
+ */
+export function sqlDatabaseRunner(db: SqlDatabase): SqlRunner {
+  const execute = async (statement: { kind: 'rows' | 'exec'; sql: string; params: readonly SqlParam[] }): Promise<SqlRow[] | number> => {
+    const { results, meta } = await db
+      .prepare(statement.sql)
+      .bind(...statement.params)
+      .all<SqlRow>();
+    return statement.kind === 'rows' ? results : meta.changes;
+  };
+  return {
+    dialect: 'sqlite',
+    run<T>(work: () => SqlWork<T>, transaction: boolean): Promise<T> {
+      return inTurn(db, async () => {
+        if (!transaction) return driveAsync(work(), execute);
+        await db.exec('BEGIN IMMEDIATE');
+        let out: T;
+        try {
+          out = await driveAsync(work(), execute);
+        } catch (error) {
+          try {
+            await db.exec('ROLLBACK');
+          } catch {
+            // The error that ended the transaction is the one to report.
+          }
+          throw error;
+        }
+        await db.exec('COMMIT');
+        return out;
+      });
+    },
+  };
+}
+
+/**
+ * The identity store over db, a SqlDatabase of a SQLite file holding the
+ * schema's tables, which a server's repositories share (D116).
+ */
+export function sqlDatabaseIdentityStore(db: SqlDatabase, descriptor: string | unknown): SqlIdentityStore {
+  return new SqlIdentityStore(sqlDatabaseRunner(db), descriptor);
 }

@@ -10,6 +10,12 @@ createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them;
 createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
+
+On SQLite (D116), each table also carries its statements there, and
+createSqliteOrm(db) opens the repositories over a SQLite file, as
+openSqlite and openNodeSqlite open one, and createD1Orm(db) over a D1
+binding, which has no interactive transaction: there a repository's write
+of several statements goes as one batch, and transaction(fn) is refused.
 A row holds each column by member, a to-one relation's key as <field>Id, a
 UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
 acting user: in an operation the router runs, its caller (D87);
@@ -30,6 +36,8 @@ query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateTimeFilter, NullFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { SqlDatabase } from '@superschematic/http-runtime/d1';
+import { d1OrmOf, sqliteOrmOf } from '@superschematic/http-runtime/orm-sqlite';
 import type * as T from './types';
 
 /**
@@ -171,6 +179,45 @@ export const ticketTable: TableDefinition = {
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = ticket.id", rows: "SELECT \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\" FROM ticket WHERE (id) IN (%s)" },
   },
+  sqlite: {
+    statements: {
+      columns: "\"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
+      qualifiedColumns: "\"ticket\".\"id\", \"ticket\".\"subject\", \"ticket\".\"state\", \"ticket\".\"review\", \"ticket\".\"escalation\", \"ticket\".\"account_status\", \"ticket\".\"sign_off\", \"ticket\".\"updated_at\"",
+      selectColumn: "\"ticket\".\"%s\"",
+      getOne: "SELECT \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\" FROM ticket WHERE id = ?1",
+      getOneFields: "SELECT %s FROM ticket WHERE id = ?1",
+      getMany: "SELECT \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\" FROM ticket WHERE id IN (%s)",
+      live: "",
+      liveWhere: "",
+      liveCondition: "",
+      findOne: "SELECT %s FROM ticket%s%s LIMIT 1",
+      findMany: "SELECT %s FROM ticket%s%s%s",
+      count: "SELECT COUNT(*) FROM ticket%s",
+      page: "SELECT %s FROM ticket%s%s LIMIT %d",
+      pageAfterKey: "ticket.id %s %s",
+      pageAfter: "(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)",
+      pageAfterNulls: "CASE (SELECT %s IS NULL FROM ticket AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+      pageOrder: " ORDER BY %s %s",
+      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+      pageTiebreak: ", ticket.id %s",
+      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ?1)",
+      insert: "INSERT INTO ticket (%s) VALUES (%s) RETURNING %s",
+      insertMany: "INSERT INTO ticket (%s) VALUES %s RETURNING %s",
+      update: "UPDATE ticket SET %s WHERE id = ?%d",
+      returning: " RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
+      updateMany: "UPDATE ticket SET %s%s",
+      updatedAt: "updated_at = ?%d",
+      updatedBy: "updated_by = ?%d",
+      upsert: "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
+      softDelete: "",
+      softDeleteMany: "",
+      delete: "DELETE FROM ticket WHERE id = ?1",
+      deleteMany: "DELETE FROM ticket%s",
+    },
+    uniqueKeys: {
+      "id": { conflict: "(id)", keep: "id = ticket.id", rows: "SELECT \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\" FROM ticket WHERE (id) IN (VALUES %s)" },
+    },
+  },
 };
 
 /** The repositories of fixture-state-machine-db, by table. */
@@ -228,6 +275,50 @@ export const fixtureStateMachineDbOrm: OrmDefinition = {
   tables: {
     ticket: ticketTable,
   },
+  sqlite: {
+    clauses: {
+      eq: "%s = ?%d",
+      ne: "%s IS DISTINCT FROM ?%d",
+      gt: "%s > ?%d",
+      gte: "%s >= ?%d",
+      lt: "%s < ?%d",
+      lte: "%s <= ?%d",
+      ilike: "%s LIKE ?%d ESCAPE '\\'",
+      in: "%s IN (%s)",
+      noneOf: "(%s IN (%s)) IS NOT TRUE",
+      isNull: "%s IS NULL",
+      isNotNull: "%s IS NOT NULL",
+      search: "%s LIKE ?%d ESCAPE '\\'",
+      exists: "EXISTS (%s)",
+      notExists: "NOT EXISTS (%s)",
+      set: "%s = ?%d",
+      setNull: "%s = NULL",
+      pageKey: "page_key.%s",
+      placeholder: "?%d",
+      default: "",
+      or: " OR ",
+      group: "(%s)",
+      where: " WHERE ",
+      and: " AND ",
+      orderBy: " ORDER BY ",
+      orderTerm: "%s %s",
+      limit: " LIMIT %d",
+      offset: " OFFSET %d",
+      setExcluded: "%s = EXCLUDED.%s",
+      excluded: "EXCLUDED.%s",
+      changed: "(%s) IS DISTINCT FROM (%s)",
+      never: "FALSE",
+      null: "NULL",
+      notIn: "%s NOT IN (%s)",
+    },
+    jsonClauses: {
+      eq: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+      ne: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+      in: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+      noneOf: "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+      value: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    },
+  },
 };
 
 /**
@@ -236,4 +327,23 @@ export const fixtureStateMachineDbOrm: OrmDefinition = {
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): FixtureStateMachineDbOrm {
   return ormOf<FixtureStateMachineDbRepositories>(pool, fixtureStateMachineDbOrm, options);
+}
+
+/**
+ * Opens the repositories of fixture-state-machine-db over db, a SQLite file as
+ * openSqlite or openNodeSqlite opens one (D116), acting as the user options
+ * names, or as the user it is when a string: each transaction holds the
+ * file until it ends.
+ */
+export function createSqliteOrm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureStateMachineDbOrm {
+  return sqliteOrmOf<FixtureStateMachineDbRepositories>(db, fixtureStateMachineDbOrm, options);
+}
+
+/**
+ * Opens the repositories of fixture-state-machine-db over db, a D1 binding (D116),
+ * which has no interactive transaction: a repository's write of several
+ * statements goes as one batch, and transaction(fn) is refused.
+ */
+export function createD1Orm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureStateMachineDbOrm {
+  return d1OrmOf<FixtureStateMachineDbRepositories>(db, fixtureStateMachineDbOrm, options);
 }

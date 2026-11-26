@@ -234,24 +234,18 @@ func TestGenerateTableOperations(t *testing.T) {
 
 // TestTableOperationsNeedTheRepositories: the table operations run
 // through Deps.orm, so Deps without the repositories is refused, saying
-// why there are none, and so is a package written without Deps.
+// why there are none, and so is a package written without Deps. A
+// sqlite-first database's repositories serve them too (D116).
 func TestTableOperationsNeedTheRepositories(t *testing.T) {
-	const prefix = "tsrestgen: fixture-tracker-api serves Issues.deleteIssue, a @tableOperation (a delete of Issue), which runs through Deps.orm, the repositories fixture-tracker-db's TypeScript types export for Postgres; "
-	for name, tc := range map[string]struct {
-		deps DepsInfo
-		why  string
-	}{
-		"no TypeScript types": {DepsInfo{Database: trackerDB, Dialect: "postgres"}, "enable outputs.types.typescript in fixture-tracker-db's config"},
-		"sqlite first":        {DepsInfo{Database: trackerDB, Dialect: SQLiteDialect, ORM: "FixtureTrackerDbOrm", DatabaseTypesPackage: "@schemas/fixture-tracker-db-types"}, "fixture-tracker-db lists sqlite first, and the repositories run on Postgres alone (D106)"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := generateTracker(t, trackerFixture(t, nil)).SetDeps(tc.deps)
-			if err == nil || err.Error() != prefix+tc.why {
-				t.Errorf("SetDeps = %v,\nwant %s", err, prefix+tc.why)
-			}
-		})
+	const prefix = "tsrestgen: fixture-tracker-api serves Issues.deleteIssue, a @tableOperation (a delete of Issue), which runs through Deps.orm, the repositories fixture-tracker-db's TypeScript types export; "
+	err := generateTracker(t, trackerFixture(t, nil)).SetDeps(DepsInfo{Database: trackerDB, Dialect: "postgres"})
+	if want := prefix + "enable outputs.types.typescript in fixture-tracker-db's config"; err == nil || err.Error() != want {
+		t.Errorf("SetDeps without TypeScript types = %v,\nwant %s", err, want)
 	}
-	err := WriteAPI(generateTracker(t, trackerFixture(t, nil)), t.TempDir())
+	if err := generateTracker(t, trackerFixture(t, nil)).SetDeps(DepsInfo{Database: trackerDB, Dialect: SQLiteDialect, ORM: "FixtureTrackerDbOrm", DatabaseTypesPackage: "@schemas/fixture-tracker-db-types"}); err != nil {
+		t.Errorf("SetDeps of a sqlite-first database's repositories = %v, want them taken", err)
+	}
+	err = WriteAPI(generateTracker(t, trackerFixture(t, nil)), t.TempDir())
 	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
 		t.Errorf("WriteAPI without Deps = %v", err)
 	}
