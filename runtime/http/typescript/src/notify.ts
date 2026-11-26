@@ -517,11 +517,16 @@ export function createNotifier(options: NotifierOptions): Notifier {
 
   // ---- raising ----
 
-  const raise = async (tx: any, input: RaiseInput): Promise<string> => {
+  /**
+   * Raises input in tx. A table's own event is one its @event declares; a
+   * behavior's (D104) and a cleared reference's (D154) need no
+   * declaration, which only sets their urgency and title.
+   */
+  const raiseIn = async (tx: any, input: RaiseInput, undeclared = false): Promise<string> => {
     const definition = definitionOf(input.table);
     if (input.table !== undefined && !definition) throw new NotifierError(`raise: ${input.table} is no table of the database`);
     const declared = eventOf(input.table, input.kind);
-    if (input.table !== undefined && !declared && !input.kind.includes('.')) throw new NotifierError(`raise: ${input.table} declares no event ${input.kind}`);
+    if (input.table !== undefined && !declared && !undeclared) throw new NotifierError(`raise: ${input.table} declares no event ${input.kind}; declare it with @event`);
     const payload: Values = {};
     if (declared?.payload?.length && input.key !== undefined && definition) {
       const row = await repo(sys(tx), tableMember(tx, definition.name)).findOne({ [definition.key]: { eq: input.key } });
@@ -540,6 +545,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     await enqueue(tx, options.dispatch, { step: 'route', event });
     return sameId(event.id);
   };
+  const raise = (tx: any, input: RaiseInput): Promise<string> => raiseIn(tx, input);
 
   // ---- recipients ----
 
@@ -1301,10 +1307,10 @@ export function createNotifier(options: NotifierOptions): Notifier {
   return {
     raise,
     async fromBehaviorEvent(tx, table, member, event) {
-      return raise(tx, { table, key: event.key, kind: `${member}.${event.kind}`, payload: (event.payload as Values | undefined) ?? {} });
+      return raiseIn(tx, { table, key: event.key, kind: `${member}.${event.kind}`, payload: (event.payload as Values | undefined) ?? {} }, true);
     },
     async cleared(tx, message) {
-      return raise(tx, { table: message.holderTable, key: message.holderKey, kind: 'reference.cleared', payload: { targetTable: message.targetTable, targetKey: message.targetKey, role: message.role } });
+      return raiseIn(tx, { table: message.holderTable, key: message.holderKey, kind: 'reference.cleared', payload: { targetTable: message.targetTable, targetKey: message.targetKey, role: message.role } }, true);
     },
     handle,
     workerQueue,

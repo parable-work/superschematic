@@ -179,6 +179,8 @@ describe.skipIf(!dsn)('notifications', () => {
     expect(annNotices[0]!.eventId).toBe(event);
     expect(annNotices[0]!.urgency).toBe('urgent');
     expect(annNotices[0]!.payload).toEqual({ title: 'Boiler pressure low' });
+    // A kind the table does not declare is refused, and its transaction with it.
+    await expect(w.orm.transaction(tx => w.notifier.raise(tx, { table: 'Ticket', key: w.ticket, kind: 'ticket.lost' }))).rejects.toThrow('declares no event ticket.lost');
     // Cal cannot read the ticket: no notice, no delivery, no trace.
     expect(await noticesOf(w, w.cal)).toEqual([]);
     expect((await w.orm.asSystem().delivery.findMany({ recipient: { eq: w.cal } })).rows).toEqual([]);
