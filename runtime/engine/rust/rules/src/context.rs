@@ -30,6 +30,7 @@
 //! ([`View::ask`]), and reaches a row only through [`Cx::call_on`] and
 //! [`Cx::create_row`]; a write of its own state is a defect.
 
+use std::collections::BTreeMap;
 use std::ops::Deref;
 
 use serde_json::{Map, Value};
@@ -250,6 +251,18 @@ impl<'r, C> View<'r, C> {
             tables.to_vec(),
             after,
         ))
+    }
+
+    /// The permissions each subject holds now, as the host answers them
+    /// ([`ReadRequest::Permissions`], D200): a subject the host cannot
+    /// answer for is absent. A rule that reads a permission again at a
+    /// guard, after the caller who held it has gone, reads this.
+    pub fn permissions_of(
+        &self,
+        subjects: &[String],
+    ) -> Hook<&'r BTreeMap<String, Vec<String>>> {
+        self.run
+            .read_permissions(&ReadRequest::permissions(subjects.iter().cloned()))
     }
 
     /// The uses of a type whose behaviors' declarations implement a
