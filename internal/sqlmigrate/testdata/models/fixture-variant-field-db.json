@@ -1,0 +1,102 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "service": "fixture-variant-field-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "kind",
+          "in": [
+            "verify",
+            "review",
+            "note"
+          ],
+          "name": "ck_step_kind"
+        },
+        {
+          "column": "result",
+          "name": "ck_step_result",
+          "variant": {
+            "arms": [
+              {
+                "keys": [
+                  {
+                    "key": "passed",
+                    "kind": "boolean",
+                    "required": true
+                  },
+                  {
+                    "key": "checks",
+                    "kind": "array"
+                  }
+                ],
+                "values": [
+                  "verify"
+                ]
+              },
+              {
+                "keys": [
+                  {
+                    "in": [
+                      "approved",
+                      "changes_requested"
+                    ],
+                    "key": "verdict",
+                    "kind": "string",
+                    "required": true
+                  },
+                  {
+                    "key": "notes",
+                    "kind": "string"
+                  }
+                ],
+                "values": [
+                  "review"
+                ]
+              }
+            ],
+            "by": "kind"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Step.id",
+          "type": "UUID"
+        },
+        {
+          "name": "title",
+          "origin": "Step.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "Step.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "result",
+          "nullable": true,
+          "origin": "Step.result",
+          "type": "JSONB"
+        }
+      ],
+      "comment": "One step of a run.",
+      "kind": "entity",
+      "name": "step",
+      "origin": "Step",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "step_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

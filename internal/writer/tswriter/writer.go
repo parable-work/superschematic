@@ -115,6 +115,7 @@ var symbolPackages = map[string]string{
 	// @superschematic/schema
 	"Default": "@superschematic/schema", "Nullable": "@superschematic/schema",
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
+	"Variant": "@superschematic/schema",
 	"Runtime": "@superschematic/schema", "RequiredNull": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
 	"decrypted":         "@superschematic/schema",
@@ -212,7 +213,9 @@ func (e *emitter) emitDocument() {
 		e.failf("schema-level extension data and documents have no TypeScript form; they are document metadata in JSON and YAML only")
 	}
 	for _, name := range sortedKeys(e.doc.Unions) {
-		e.failf("union %s: unions have no TypeScript authoring form", name)
+		if !e.doc.Unions[name].IsVariant() {
+			e.failf("union %s: unions have no TypeScript authoring form but a variant union's (Variant<By, Arms>, D149)", name)
+		}
 	}
 	e.checkScalars()
 
@@ -221,6 +224,11 @@ func (e *emitter) emitDocument() {
 	}
 	for _, name := range e.sortedTypes() {
 		e.emitType(e.doc.Types[name])
+	}
+	for _, name := range sortedKeys(e.doc.Unions) {
+		if def := e.doc.Unions[name]; def.IsVariant() {
+			e.emitVariant(def)
+		}
 	}
 	for _, set := range e.doc.OperationSets {
 		e.emitOperationSet(set)

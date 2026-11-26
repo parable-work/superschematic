@@ -143,6 +143,8 @@ var modelFixtures = []string{
 	filepath.Join(sqlgenFixtures, "fixture-state-machine-db"),
 	// A table's @fenced counters (D119).
 	filepath.Join(sqlgenFixtures, "fixture-fenced-db"),
+	// A variant field's check (D149).
+	filepath.Join(sqlgenFixtures, "fixture-variant-field-db"),
 	vectorsFixture,
 	shopDir,
 }

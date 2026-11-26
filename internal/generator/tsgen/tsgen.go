@@ -132,6 +132,18 @@ type FieldInfo struct {
 	// IsUnion marks a field whose type is a union, local or imported:
 	// parse<Type>FromJSON reads each of its values with parse<Union>FromJSON.
 	IsUnion bool
+
+	// Variant is set on a field of a variant union (D149): validate<Type>
+	// checks its value as the member its sibling names, and
+	// parse<Type>FromJSON reads it as that member.
+	Variant *VariantInfo
+}
+
+// VariantInfo is a variant field as validate<Type> and parse<Type>FromJSON
+// read it (codegen.VariantField).
+type VariantInfo struct {
+	// ByKey is the sibling's JSON key, which names the member.
+	ByKey string
 }
 
 // TypeInfo holds information about a complex type for TypeScript generation.
@@ -177,6 +189,12 @@ type UnionInfo struct {
 	// Members are the member types in declaration order, index-aligned with
 	// Types.
 	Members []UnionMemberInfo
+
+	// By and Arms make the union a variant union (D149): validators/unions.ts
+	// writes its validate<Union>By and parse<Union>FromJSONBy, which read a
+	// value as the member a sibling's value names.
+	By   string
+	Arms []codegen.UnionArmIndex
 }
 
 // DiscriminatorValueList returns the members' discriminator values, each
@@ -530,6 +548,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	output.Types = convertTypes(objectTypes, output.Scalars, enumLookup, unionNames)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, enumLookup, unionNames)...)
+	if err := annotateVariantFields(output.Types, schema, opts.Dependencies); err != nil {
+		return nil, err
+	}
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	if err := annotateUnionMembers(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), output.ImportedTypes, opts.Dependencies, enumLookup); err != nil {
 		return nil, err
@@ -645,9 +666,37 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 			Discriminator:           u.Discriminator,
 			DispatchByDiscriminator: byDiscriminator,
 			Members:                 members,
+			By:                      u.By,
+			Arms:                    u.ArmIndexes(),
 		}
 	}
 	return unions
+}
+
+// annotateVariantFields marks each field of a variant union (D149) in
+// types with its sibling, read from the schema's own type of that name or
+// input. A field whose sibling breaks the rules, which only a dependency's
+// union can reach past the loader, fails the build.
+func annotateVariantFields(types []TypeInfo, schema *ir.Schema, dependencies map[string]*ir.Schema) error {
+	for i := range types {
+		t := &types[i]
+		td := schema.Types[t.Name]
+		if td == nil {
+			td = schema.Inputs[t.Name]
+		}
+		variants, err := codegen.VariantFieldsOf(td, schema, dependencies)
+		if err != nil {
+			return fmt.Errorf("tsgen: %w", err)
+		}
+		for _, v := range variants {
+			for j := range t.Fields {
+				if t.Fields[j].Name == v.Field.Name {
+					t.Fields[j].Variant = &VariantInfo{ByKey: v.ByKey()}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // annotateUnionMembers sets where each union member's parser is imported

@@ -542,6 +542,30 @@ field `TEXT`; a migration plan from a database it built casts the column
 with `USING shipping_address::JSONB`, which fails on text that is not JSON
 (`data-dependent`).
 
+A field of a union is a `JSONB` column too. A field of a variant union,
+whose member a sibling field names (see
+[Modeling types](/superschematic/guides/modeling-types/#a-field-whose-shape-another-field-picks)),
+gets a `CHECK` over its column, `ck_<table>_<column>`, on Postgres and on
+SQLite. It holds the column to nothing, SQL `NULL` or JSON `null`, while
+the sibling's column names no member, and otherwise to nothing or to the
+member's object one level deep:
+
+- each required key is present and not null, and a `RequiredNull` key is
+  present and null;
+- each key present holds its JSON kind: a string, a number, a boolean, an
+  object (a nested object, a map or a union) or an array (a list);
+- an enum key holds one of its values.
+
+The `CHECK` does not say what a list, a nested object or a map holds, a
+scalar's format, whether a number is an integer, a field's own rules
+(lengths, ranges and patterns), or that a `@strictJSON` member has no
+other key: those are the validators'. Every member's shape gets a check,
+so a result its kind names no member for, and one that is no object of
+its member's shape, are refused whatever writes them. A migration plan
+adds the check in `contract` over a
+column the previous version has, `data-dependent`, and replaces it when
+an arm changes; SQLite rebuilds the table to change it.
+
 ## Encrypted fields
 
 `Secret<T>` keeps a value out of logs; its column still holds the value.

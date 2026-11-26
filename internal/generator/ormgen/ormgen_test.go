@@ -306,6 +306,9 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_label_note.go", "repository_label_pair.go", "repository_label_slot.go", "repository_purchase.go",
 			"repository_subscription.go", "fences.go", "merge.go", "rules.go",
 		}},
+		// A variant field (D149): Step's result is read from its JSON
+		// column as the member its kind names.
+		{"fixture-variant-field-db", []string{"repository_step.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

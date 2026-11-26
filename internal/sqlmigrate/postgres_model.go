@@ -341,6 +341,7 @@ func entityTable(t *sqlgen.Table, ns *pgNamespace) (*Table, error) {
 		table.Checks = append(table.Checks, &Check{
 			Name: check.Name, Column: check.Column, In: append([]string(nil), spec.In...),
 			Min: spec.Min, Max: spec.Max, MinLength: spec.MinLength, MaxLength: spec.MaxLength,
+			Variant: spec.Variant,
 		})
 	}
 	if len(t.SearchFields) > 0 {

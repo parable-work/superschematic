@@ -304,6 +304,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkSorts(schema, in, r)
 	checkFilters(schema, in, r)
 	checkTableOperations(schema, in, r)
+	checkVariants(schema, in, r)
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
 	}

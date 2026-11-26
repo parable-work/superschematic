@@ -161,6 +161,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		// MergeableRepository, and each one's definition in orm.ts holds
 		// its merge, the statements of every relation that references it.
 		{service: "fixture-merge-db", behaviors: true},
+		// A table with a variant field (D149): validators/unions.ts's
+		// validateStepResultBy and parseStepResultFromJSONBy, which Step's
+		// validator and parser read its result with, by its kind; and the
+		// API's views, which read the database's.
+		{service: "fixture-variant-field-db", sqlite: true},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
 	}
 
 	for _, tc := range cases {

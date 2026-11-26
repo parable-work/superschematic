@@ -82,6 +82,10 @@ type ModuleOutput struct {
 	// readUnions are the unions UnionReads picks the members of.
 	readUnions map[string]bool
 
+	// variants are the types' variant fields (D149), by type and field
+	// name.
+	variants map[string]map[string]*PyVariant
+
 	// stateMachines are the @stateMachine declarations each model carries
 	// (D118), by type name; StateMachinesOf reads them.
 	stateMachines map[string][]StateMachineInfo
@@ -161,6 +165,103 @@ type CompositeDefaultInfo struct {
 	JSONLiteral  string
 }
 
+// PyVariant is a variant field (D149) as its model reads and validates it:
+// the union, the module whose unions.py holds its arms, and the field and
+// its sibling by wire and attribute name.
+type PyVariant struct {
+	Union  string
+	Module string
+	Key    string
+	Attr   string
+	ByKey  string
+	ByAttr string
+	Snake  string
+}
+
+// Variant is typeName's variant field named field, or nil.
+func (o *ModuleOutput) Variant(typeName, field string) *PyVariant {
+	return o.variants[typeName][field]
+}
+
+// VariantsOf are typeName's variant fields in field order.
+func (o *ModuleOutput) VariantsOf(t codegen.TypeInfo) []*PyVariant {
+	var out []*PyVariant
+	for _, f := range t.Fields {
+		if v := o.variants[t.Name][f.Name]; v != nil {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// HasVariants reports whether a model holds a variant field, which types.py
+// then imports model_validator for.
+func (o *ModuleOutput) HasVariants() bool {
+	return len(o.variants) > 0
+}
+
+// buildVariants records each type's variant fields (D149), each with the
+// module of the unions.py that holds its union's arms: this package's, or
+// the dependency's that declares the union. A field whose sibling breaks
+// the rules, which only a dependency's union can reach past the loader,
+// fails the build.
+func buildVariants(schema *ir.Schema, opts Options, output *ModuleOutput) error {
+	for _, t := range output.Types {
+		td := schema.Types[t.Name]
+		if td == nil {
+			td = schema.Inputs[t.Name]
+		}
+		variants, err := codegen.VariantFieldsOf(td, schema, opts.Dependencies)
+		if err != nil {
+			return fmt.Errorf("pygen: %w", err)
+		}
+		attrs := map[string]string{}
+		for _, f := range t.Fields {
+			attrs[f.Name] = f.TargetName
+		}
+		for _, v := range variants {
+			module := ".unions"
+			if schema.Unions[v.Union.Name] == nil {
+				for _, name := range sortedDependencyNames(opts.Dependencies) {
+					if opts.Dependencies[name].Unions[v.Union.Name] != nil {
+						module = opts.Naming.PythonTypesModule(moduleStem(name)) + ".unions"
+						break
+					}
+				}
+			}
+			if output.variants == nil {
+				output.variants = map[string]map[string]*PyVariant{}
+			}
+			if output.variants[t.Name] == nil {
+				output.variants[t.Name] = map[string]*PyVariant{}
+			}
+			output.variants[t.Name][v.Field.Name] = &PyVariant{
+				Union:  v.Union.Name,
+				Module: module,
+				Key:    v.FieldKey(),
+				Attr:   attrs[v.Field.Name],
+				ByKey:  v.ByKey(),
+				ByAttr: attrs[v.By.Name],
+				Snake:  codegen.ToSnakeCase(v.Field.Name),
+			}
+		}
+	}
+	return nil
+}
+
+// sortedDependencyNames returns the names of the loaded dependencies in
+// order.
+func sortedDependencyNames(dependencies map[string]*ir.Schema) []string {
+	names := make([]string, 0, len(dependencies))
+	for name, dep := range dependencies {
+		if dep != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // ReadsUnion reports whether field holds a union unions.py picks the
 // member of, which its model reads with read_union_field.
 func (o *ModuleOutput) ReadsUnion(field codegen.FieldInfo) bool {
@@ -178,6 +279,18 @@ func (o *ModuleOutput) HasUnionFieldReads() bool {
 		}
 	}
 	return false
+}
+
+// VariantUnions are the package's variant unions (D149), whose arms
+// unions.py holds for read_variant_field and check_variant_field.
+func (o *ModuleOutput) VariantUnions() []codegen.UnionInfo {
+	var out []codegen.UnionInfo
+	for _, u := range o.Unions {
+		if u.IsVariant() {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // UnionMemberTypeNames returns the sorted unique member type names across
@@ -352,6 +465,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		}
 	}
 	applyUnionDiscriminatorLiterals(output)
+	if err := buildVariants(schema, opts, output); err != nil {
+		return nil, err
+	}
 	collectModelRebuildTypes(output, imported.enumNames)
 	if err := buildStateMachines(schema, opts, output); err != nil {
 		return nil, err

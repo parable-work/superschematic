@@ -22,7 +22,7 @@ import re
 from collections.abc import Mapping
 from types import MappingProxyType
 {{- end}}
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasUnionFieldReads}}, field_validator{{end}}{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasUnionFieldReads}}, field_validator{{end}}{{if .HasVariants}}, model_validator{{end}}{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
 
 {{if gt (len .Scalars) 0 -}}
 from .scalars import (
@@ -419,6 +419,17 @@ class {{.Name}}(BaseModel):
             return False
         return target in cls.{{.Const}}_TRANSITIONS.get(current, frozenset())
 {{- end}}
+{{- range $.VariantsOf .}}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_{{.Attr}}_variant(cls, data: Any) -> Any:
+        """Read {{.Key}} as the member of {{.Union}} its sibling {{.ByKey}}
+        names (D149), as the Go, TypeScript and Rust decoders read it."""
+        from {{.Module}} import read_variant_field
+
+        return read_variant_field("{{.Union}}", data, ("{{.Key}}", "{{.Attr}}"), ("{{.ByKey}}", "{{.ByAttr}}"))
+{{- end}}
 {{- range .Fields}}
 {{- if $.ReadsUnion .}}
 
@@ -476,9 +487,22 @@ class {{.Name}}(BaseModel):
         """
         errors = ValidationErrors()
 
+        {{- $type := .}}
         {{range .Fields}}
         # Validate {{.Name}}
-        {{- if .RequiredNull}}
+        {{- $variant := $.Variant $type.Name .Name}}
+        {{- if $variant}}
+        # A variant field (D149): its value is the member its sibling
+        # {{$variant.ByKey}} names, or the field holds none.
+        {{- if .Required}}
+        if self.{{.TargetName}} is None:
+            errors.add_field_error("{{$variant.Snake}}", "required", "required field")
+        {{- end}}
+        if self.{{.TargetName}} is not None:
+            from {{$variant.Module}} import check_variant_field
+
+            check_variant_field("{{$variant.Union}}", errors, "{{$variant.Snake}}", getattr(self, "{{$variant.ByAttr}}", None), self.{{.TargetName}}, by_alias)
+        {{- else if .RequiredNull}}
         # RequiredNull: the value is None and nothing else (D130).
         if self.{{.TargetName}} is not None:
             errors.add_field_error("{{snakeCase .Name}}", "invalid", "expected null")
@@ -538,7 +562,7 @@ class {{.Name}}(BaseModel):
             {{- end}}
 {{template "ruleChecks" .}}
         {{- end}}
-        {{- if holdsModels .}}
+        {{- if and (holdsModels .) (not $variant)}}
         _add_model_errors(errors, "{{snakeCase .Name}}", self.{{.TargetName}}, by_alias)
         {{- end}}
         {{end}}

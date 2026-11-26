@@ -46,6 +46,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-fenced-db"},
 		// Types that compose behaviors: behaviors.py (D58).
 		{service: behaviortypestest.Service},
+		// A variant field (D149): Step reads its result with
+		// read_variant_field and validate_all checks it with
+		// check_variant_field, by its kind; the API's views read the
+		// database's unions.py.
+		{service: "fixture-variant-field-db"},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
 	}
 
 	for _, tc := range cases {

@@ -172,6 +172,11 @@ export interface UnionDef {
   name: string;
   description: string;
   types: string[];
+  // A discriminated-union field type (D149): the sibling field whose value
+  // picks the member, and each such value's member. Absent for a union
+  // picked by its payload's shape.
+  by?: string;
+  arms?: Record<string, string>;
 }
 
 export interface OperationSet {

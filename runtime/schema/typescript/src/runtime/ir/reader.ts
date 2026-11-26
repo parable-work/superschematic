@@ -331,11 +331,31 @@ function parseIRScalar(raw: unknown, path: string): ScalarDef {
 
 function parseIRUnion(name: string, raw: unknown, path: string): UnionDef {
   const definition = asObject(raw, path);
-  return {
+  const union: UnionDef = {
     name,
     description: docText(definition),
     types: asStringArray(definition.types),
   };
+  // A variant union (D149): the sibling field that names the member, and
+  // each of its values' member.
+  if (typeof definition.by === 'string' && definition.by !== '') {
+    union.by = definition.by;
+    union.arms = parseArms(definition.arms);
+  }
+  return union;
+}
+
+/** parseArms reads a variant union's arms: each value of its by and the member it names. */
+function parseArms(raw: unknown): Record<string, string> {
+  const arms: Record<string, string> = {};
+  if (isObject(raw)) {
+    for (const [value, member] of Object.entries(raw)) {
+      if (typeof member === 'string') {
+        arms[value] = member;
+      }
+    }
+  }
+  return arms;
 }
 
 function parseIRImports(raw: unknown): Import[] {

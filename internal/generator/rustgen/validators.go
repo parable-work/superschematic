@@ -32,6 +32,9 @@ const (
 	// fieldUnion is a union with a validator (UnionValidator): its value is
 	// validated as the member the union picks, as in TypeScript.
 	fieldUnion = "union"
+	// fieldVariant is a variant field (D149): its value is validated as the
+	// member its sibling names (validate_<union>_by).
+	fieldVariant = "variant"
 	// fieldOther is anything else (an object type of a crate with no
 	// validators, a union one of whose members has none, the object
 	// primitive): only its presence is checked, as in TypeScript.
@@ -170,6 +173,11 @@ type UnionValidator struct {
 	// union dispatches by it; "" for a union serde decodes by shape.
 	Discriminator string
 	Members       []UnionMemberValidator
+
+	// By and Arms make the union a variant union (D149), which writes
+	// validate_<union>_by.
+	By   string
+	Arms []codegen.UnionArmIndex
 }
 
 // UnionMemberValidator is one member of a UnionValidator: its variant, the
@@ -202,6 +210,9 @@ type FieldValidator struct {
 	// Primitive is the runtime's type check of a builtin primitive field.
 	Primitive string
 
+	// By is a variant field's sibling, by its wire name (D149).
+	By string
+
 	// RulesID names the field's own rules (fieldRules); empty for none.
 	RulesID string
 	Rules   []string
@@ -214,7 +225,7 @@ func (f FieldValidator) HasChecks(strict bool) bool {
 		return true
 	case f.Kind == fieldScalar || f.Kind == fieldEnum || f.Kind == fieldPrimitive:
 		return true
-	case f.Kind == fieldObject || f.Kind == fieldUnion || (f.Kind == fieldSelf && !strict):
+	case f.Kind == fieldObject || f.Kind == fieldUnion || f.Kind == fieldVariant || (f.Kind == fieldSelf && !strict):
 		return true
 	case f.Required && !f.InternalMetadata:
 		return true
@@ -250,6 +261,9 @@ type validatorInputs struct {
 	// validators module.
 	unions         []UnionInfo
 	importedUnions map[string]string
+	// dependencies are the schemas a variant field's union (D149) may be
+	// declared by.
+	dependencies map[string]*ir.Schema
 	// readModel is the structural predicate the unions pick their members
 	// by (D31, amended), nil without a union.
 	readModel  *codegen.ReadModel
@@ -357,6 +371,12 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 				// (D14, amended).
 				fv.Kind = fieldObject
 				fv.Nested = in.importedObjects[f.Type] + "::" + validatorFnName(f.Type)
+			case !f.IsScalar && unionFns[f.Type] != "" && variantBy(in, t.Name, f.Name) != "":
+				// A variant field (D149): validated as the member its
+				// sibling names.
+				fv.Kind = fieldVariant
+				fv.Nested = unionFns[f.Type] + "_by"
+				fv.By = variantBy(in, t.Name, f.Name)
 			case !f.IsScalar && unionFns[f.Type] != "":
 				fv.Kind = fieldUnion
 				fv.Nested = unionFns[f.Type]
@@ -398,6 +418,26 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 	return info
 }
 
+// variantBy is the wire name of the sibling that names the member of the
+// variant field typeName.field (D149), or "" when the field is none.
+func variantBy(in validatorInputs, typeName, field string) string {
+	td := in.schema.Types[typeName]
+	if td == nil {
+		td = in.schema.Inputs[typeName]
+	}
+	if td == nil {
+		return ""
+	}
+	for _, fd := range td.Fields {
+		if fd != nil && fd.Name == field {
+			if v := codegen.VariantFieldOf(td, fd, in.schema, in.dependencies); v != nil {
+				return v.ByKey()
+			}
+		}
+	}
+	return ""
+}
+
 // buildUnionValidator builds a union's validator, or reports false when a
 // member has no prepare_<type>: neither this crate nor its dependency's
 // generates it with validators.
@@ -410,6 +450,8 @@ func buildUnionValidator(u UnionInfo, generated map[string]bool, importedObjects
 		ParseFn:       "parse_" + codegen.ToSnakeCase(u.Name),
 		RustPath:      "crate::unions::" + u.Name,
 		Discriminator: u.Discriminator,
+		By:            u.By,
+		Arms:          u.Arms,
 	}
 	for _, m := range u.Members {
 		prepare := "prepare_" + codegen.ToSnakeCase(m.Name)

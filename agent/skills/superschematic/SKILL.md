@@ -348,6 +348,18 @@ Most are load errors; knowing them saves a build round-trip:
   that still counts as finished, a done task that may be reopened, goes
   in `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }`
   (D113), a table's alone; `outcomes` keeps the states nothing leaves.
+- A field whose shape another field picks (a step's result by its kind)
+  is a variant union, from `@superschematic/schema` (D149), declared as an
+  exported alias and given to the field: `export type StepResult =
+  Variant<"kind", { verify: VerifyResult; review: ReviewResult }>`, then
+  `result?: StepResult` beside `kind: StepKind`. Each key is a value of
+  the sibling, a member of its enum, and names a `@jsonField` class (an
+  object type outside a DB schema). Every validator refuses a value while
+  the sibling names no member with the rule `variant`, and every decoder
+  reads the member the sibling names; a table's column gets a `CHECK`.
+  The build refuses the union as a list, a map, an argument or a result,
+  and a type that holds the field without the sibling. Not
+  `@behavior("Variants", ...)`, the engine's form, for a table or a view.
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read

@@ -230,6 +230,56 @@
       }
     },
     "types": {
+      "AlphaArm": {
+        "name": "AlphaArm",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "level",
+            "typeRef": {
+              "name": "ParityShade"
+            },
+            "required": true
+          },
+          {
+            "name": "count",
+            "typeRef": {
+              "name": "number"
+            },
+            "validateMin": 0
+          },
+          {
+            "name": "label",
+            "typeRef": {
+              "name": "string"
+            },
+            "validateMaxLength": 3
+          }
+        ],
+        "jsonField": true
+      },
+      "BetaArm": {
+        "name": "BetaArm",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "flag",
+            "typeRef": {
+              "name": "boolean"
+            },
+            "required": true
+          },
+          {
+            "name": "shade",
+            "typeRef": {
+              "name": "ParityShade"
+            }
+          }
+        ],
+        "jsonField": true
+      },
       "DigitMatrix": {
         "name": "DigitMatrix",
         "owner": "src/parity-matrix.schema.json",
@@ -826,6 +876,39 @@
           }
         ],
         "jsonField": true
+      },
+      "VariantMatrix": {
+        "name": "VariantMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "kind",
+            "typeRef": {
+              "name": "VariantKind"
+            }
+          },
+          {
+            "name": "payload",
+            "typeRef": {
+              "name": "VariantPayload"
+            }
+          },
+          {
+            "name": "tag",
+            "typeRef": {
+              "name": "string"
+            }
+          },
+          {
+            "name": "reqPayload",
+            "typeRef": {
+              "name": "TaggedPayload"
+            },
+            "required": true
+          }
+        ],
+        "jsonField": true
       }
     },
     "enums": {
@@ -842,6 +925,51 @@
             "serializedAs": "dark"
           }
         ]
+      },
+      "VariantKind": {
+        "name": "VariantKind",
+        "owner": "parity-fixture",
+        "values": [
+          {
+            "name": "Alpha",
+            "serializedAs": "alpha"
+          },
+          {
+            "name": "Beta",
+            "serializedAs": "beta"
+          },
+          {
+            "name": "Neither",
+            "serializedAs": "neither"
+          }
+        ]
+      }
+    },
+    "unions": {
+      "TaggedPayload": {
+        "name": "TaggedPayload",
+        "types": [
+          "AlphaArm",
+          "BetaArm"
+        ],
+        "by": "tag",
+        "arms": {
+          "a": "AlphaArm",
+          "also-a": "AlphaArm",
+          "b": "BetaArm"
+        }
+      },
+      "VariantPayload": {
+        "name": "VariantPayload",
+        "types": [
+          "AlphaArm",
+          "BetaArm"
+        ],
+        "by": "kind",
+        "arms": {
+          "alpha": "AlphaArm",
+          "beta": "BetaArm"
+        }
       }
     }
   },
@@ -4201,6 +4329,319 @@
       },
       "want": {
         "reqLoc": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "variant_alpha",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "alpha",
+        "payload": {
+          "level": "dark",
+          "count": 2,
+          "label": "abc"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_beta",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "beta",
+        "payload": {
+          "flag": false,
+          "shade": "dark"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_unknown_key",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "alpha",
+        "payload": {
+          "level": "dark",
+          "flag": true
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_absent_and_null",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "beta",
+        "payload": null,
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_unnamed_absent",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "neither",
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_unnamed_value",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "neither",
+        "payload": {
+          "level": "dark"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload": [
+          "variant"
+        ]
+      }
+    },
+    {
+      "name": "variant_sibling_absent",
+      "type": "VariantMatrix",
+      "payload": {
+        "payload": {
+          "flag": true
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload": [
+          "variant"
+        ]
+      }
+    },
+    {
+      "name": "variant_sibling_picks_the_member",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "alpha",
+        "payload": {
+          "flag": true
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload.level": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "variant_member_rules",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "alpha",
+        "payload": {
+          "level": "light",
+          "count": -1,
+          "label": "toolong"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload.count": [
+          "min"
+        ],
+        "payload.label": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "variant_member_wrong_type",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "beta",
+        "payload": {
+          "flag": "yes"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload.flag": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "variant_member_bad_enum",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "beta",
+        "payload": {
+          "flag": true,
+          "shade": "purple"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload.shade": [
+          "enum"
+        ]
+      }
+    },
+    {
+      "name": "variant_not_an_object",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "alpha",
+        "payload": 5,
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "payload": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "variant_sibling_bad_enum",
+      "type": "VariantMatrix",
+      "payload": {
+        "kind": "Alpha",
+        "payload": {
+          "level": "dark"
+        },
+        "reqPayload": {
+          "level": "light"
+        },
+        "tag": "a"
+      },
+      "want": {
+        "kind": [
+          "enum"
+        ],
+        "payload": [
+          "variant"
+        ]
+      }
+    },
+    {
+      "name": "variant_string_sibling",
+      "type": "VariantMatrix",
+      "payload": {
+        "reqPayload": {
+          "level": "dark",
+          "count": 0
+        },
+        "tag": "also-a"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_string_sibling_beta",
+      "type": "VariantMatrix",
+      "payload": {
+        "reqPayload": {
+          "flag": true
+        },
+        "tag": "b"
+      },
+      "want": {}
+    },
+    {
+      "name": "variant_string_sibling_unnamed",
+      "type": "VariantMatrix",
+      "payload": {
+        "reqPayload": {
+          "level": "dark"
+        },
+        "tag": "c"
+      },
+      "want": {
+        "reqPayload": [
+          "variant"
+        ]
+      }
+    },
+    {
+      "name": "variant_string_sibling_wrong_type",
+      "type": "VariantMatrix",
+      "payload": {
+        "reqPayload": {
+          "level": "dark"
+        },
+        "tag": 5
+      },
+      "want": {
+        "reqPayload": [
+          "variant"
+        ],
+        "tag": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "variant_required_absent",
+      "type": "VariantMatrix",
+      "payload": {
+        "tag": "a"
+      },
+      "want": {
+        "reqPayload": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "variant_required_null",
+      "type": "VariantMatrix",
+      "payload": {
+        "tag": "c",
+        "reqPayload": null
+      },
+      "want": {
+        "reqPayload": [
           "required"
         ]
       }
