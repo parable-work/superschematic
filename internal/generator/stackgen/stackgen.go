@@ -191,6 +191,9 @@ func loadService(c registry.GenerateContext, name string) (stack.Service, error)
 		if svc.Identity, err = declaresUserModel(c, schema, cfg.Public); err != nil {
 			return stack.Service{}, err
 		}
+		if svc.Features, err = RuntimeFeaturesOf(c.Registry, schema, c.LoadDependency); err != nil {
+			return stack.Service{}, err
+		}
 	}
 	if schema.Kind == ir.SchemaKindSite {
 		if svc.Site, err = SiteOf(schema, c.Options.Naming); err != nil {
@@ -248,4 +251,36 @@ func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
 		Fallback: cfg.Fallback,
 		Dev:      cfg.Dev,
 	}, nil
+}
+
+// RuntimeFeaturesOf returns the runtime features the API schema uses
+// (D159), each with the interface it needs, as the features reg holds
+// decide from the schema and the DB schemas it connects to, its authDb and
+// its DB dependencies, which load reads. With no feature registered it
+// loads nothing and returns nil.
+func RuntimeFeaturesOf(reg *registry.Registry, schema *ir.Schema, load func(string) (*ir.Schema, error)) ([]ir.RuntimeFeatureUse, error) {
+	if reg == nil || schema == nil || len(reg.RuntimeFeatures()) == 0 {
+		return nil, nil
+	}
+	databases := map[string]*ir.Schema{}
+	var names []string
+	if schema.AuthDB != "" {
+		names = append(names, schema.AuthDB)
+	}
+	for _, dep := range schema.Dependencies {
+		if dep.Kind == ir.SchemaKindDB {
+			names = append(names, dep.Name)
+		}
+	}
+	for _, name := range names {
+		if databases[name] != nil || name == schema.Name {
+			continue
+		}
+		db, err := load(name)
+		if err != nil {
+			return nil, fmt.Errorf("load %s, a database of %s, for its runtime features: %w", name, schema.Name, err)
+		}
+		databases[name] = db
+	}
+	return reg.RuntimeFeaturesUsed(registry.RuntimeFeatureInput{API: schema, Databases: databases}), nil
 }

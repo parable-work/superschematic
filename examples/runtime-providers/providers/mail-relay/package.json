@@ -1,0 +1,22 @@
+{
+  "name": "@example-providers/mail-relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel adapter for a mail relay that takes JSON with a Bearer token; it reports no delivery, as most mail relays do, and reads the mail the relay received for the deployment's inbound address (D159, D153, D157).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "mail-relay",
+      "implements": "channel",
+      "operations": ["send", "health", "inbound"],
+      "config": {
+        "URL": { "description": "The relay's base URL." },
+        "TOKEN": { "secret": true, "description": "The relay's API token, which also signs its callbacks." },
+        "FROM": { "description": "The address mail is sent from." }
+      },
+      "role": ["messages.relay"]
+    }
+  }
+}

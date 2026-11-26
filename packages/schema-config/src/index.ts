@@ -409,6 +409,10 @@ export type SchemaConfig = {
    */
   readonly maxBytes?: number;
   /**
+   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   */
+  readonly providers?: readonly string[];
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -474,6 +478,10 @@ export type SchemaConfigDocument = {
    */
   readonly maxBytes?: number;
   /**
+   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   */
+  readonly providers?: readonly string[];
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -514,3 +522,36 @@ export function service<
  * binds.
  */
 export const envVars: ClassDecorator = () => {};
+
+/**
+ * The runtime interfaces a provider slot takes (D159): a credential
+ * provider, a channel adapter, a sandbox provider, a model provider and a
+ * file processor. Their TypeScript types are in
+ * `@superschematic/http-runtime/providers`.
+ */
+export type RuntimeInterface = "credentials" | "channel" | "sandbox" | "model" | "files";
+
+/**
+ * On an API's @envVars class: its provider slots (D159). Each key is a
+ * string field of the class whose value, in each environment, names the
+ * runtime provider that serves it, one of the packages the API's config
+ * lists in `providers` that implements the slot's interface. The provider
+ * reads its own settings from the fields named after the slot, SMS_URL and
+ * SMS_TOKEN for the setting keys URL and TOKEN of slot SMS, which the
+ * class declares, a secret one as Secret<string>. A stack binds them per
+ * environment, so swapping one provider for another is a config change.
+ *
+ * ```ts
+ * @envVars
+ * @providers({ SMS: "channel", VAULT: "credentials" })
+ * export abstract class NotesApiConfig {
+ *   SMS: Nullable<string>;
+ *   SMS_URL: Nullable<string>;
+ *   SMS_TOKEN: Nullable<Secret<string>>;
+ *   VAULT: Nullable<string>;
+ * }
+ * ```
+ */
+export function providers(_slots: Readonly<Record<string, RuntimeInterface>>): ClassDecorator {
+  return () => {};
+}

@@ -176,6 +176,34 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// access log (core_access.go, D156).
 	specs = append(specs, accessDecorators()...)
 
+	// An API's provider slots, each a config field that names a runtime
+	// provider per environment (core_providers.go, D159).
+	specs = append(specs, providersDecorator())
+
+	// A table's references to rows of any table, and the files it holds in
+	// a bucket (core_rowrefs.go, D154).
+	specs = append(specs, rowFeatureDecorators()...)
+
+	// The dates of a table's rows, or its Recurrence's occurrences, that
+	// the calendar merges (core_calendar.go, D152).
+	specs = append(specs, calendarDecorators()...)
+
+	// The fields of a table the database's search index holds, and the queue
+	// a write that changes them enqueues on (core_search.go, D155).
+	specs = append(specs, searchDecorator())
+
+	// The events a table's rows raise, the notifier's tables and the table
+	// of channel identities (core_notifications.go, D153).
+	specs = append(specs, notificationDecorators()...)
+
+	// The agent orchestration's tables and an operation's autonomy class
+	// (core_agents.go, D158).
+	specs = append(specs, agentDecorators()...)
+
+	// The tables whose rows are parties, the conversations' tables and the
+	// queue of run requests (core_parties.go, D157).
+	specs = append(specs, partyDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
@@ -265,6 +293,21 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			return nil
 		},
 		recordsErrors: true,
+	})
+	// An operation whose success body is a stream, not the envelope (D167).
+	specs = append(specs, DecoratorSpec{
+		Name: "httpBinaryStream", Packages: []string{pkgAPI}, Target: TargetOperation,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.HTTPBinaryStream != nil {
+				return fmt.Errorf("operation %s has more than one @httpBinaryStream decorator", n.Field.Name)
+			}
+			stream, err := httpBinaryStreamDef(args)
+			if err != nil {
+				return err
+			}
+			n.Field.HTTPBinaryStream = stream
+			return nil
+		},
 	})
 	// Operation sets and operations share the middleware trio.
 	for _, name := range []string{"rateLimit", "bodyLimit", "timeout"} {
@@ -783,4 +826,51 @@ func idempotentConfig(args []any) (*ir.IdempotentConfig, error) {
 		}
 	}
 	return config, nil
+}
+
+// httpBinaryStreamDef reads @httpBinaryStream({ contentType,
+// responseHeaders? }) (D167): one config object whose contentType is the
+// success body's media type and whose responseHeaders, when present, is a
+// list of the header names the stream answers with.
+// ir.ValidateHTTPBinaryStream holds both to what the SDKs read.
+func httpBinaryStreamDef(args []any) (*ir.HTTPBinaryStreamDef, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("@httpBinaryStream takes exactly one config object")
+	}
+	cfg, ok := args[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("@httpBinaryStream config must be an object literal")
+	}
+	stream := &ir.HTTPBinaryStreamDef{}
+	for _, key := range sortedKeys(cfg) {
+		switch value := cfg[key]; key {
+		case "contentType":
+			contentType, ok := value.(string)
+			if !ok || contentType == "" {
+				return nil, fmt.Errorf("@httpBinaryStream contentType must be a string literal, such as \"application/vnd.apache.arrow.stream\"")
+			}
+			stream.ContentType = contentType
+		case "responseHeaders":
+			list, ok := value.([]any)
+			if !ok || len(list) == 0 {
+				return nil, fmt.Errorf("@httpBinaryStream responseHeaders must be a non-empty list of header names")
+			}
+			for _, item := range list {
+				header, ok := item.(string)
+				if !ok || header == "" {
+					return nil, fmt.Errorf("@httpBinaryStream responseHeaders must be a non-empty list of header names")
+				}
+				stream.ResponseHeaders = append(stream.ResponseHeaders, header)
+			}
+		default:
+			return nil, fmt.Errorf("@httpBinaryStream has no option %q; it takes contentType and responseHeaders", key)
+		}
+	}
+	if stream.ContentType == "" {
+		return nil, fmt.Errorf("@httpBinaryStream requires a contentType, such as \"application/vnd.apache.arrow.stream\"")
+	}
+	if errs := ir.ValidateHTTPBinaryStream("@httpBinaryStream", stream); len(errs) > 0 {
+		return nil, errs[0]
+	}
+	return stream, nil
 }

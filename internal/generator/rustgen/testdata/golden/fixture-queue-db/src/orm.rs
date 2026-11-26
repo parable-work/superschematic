@@ -339,6 +339,13 @@ pub const POSTGRES: &str = r#"{
           "filter": "referencedByOrderLineOrder",
           "probe": "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id"
         }
+      ],
+      "many": [
+        {
+          "name": "orderLines",
+          "target": "OrderLine",
+          "column": "orderId"
+        }
       ]
     },
     {
@@ -569,6 +576,13 @@ pub const POSTGRES: &str = r#"{
           "filter": "referencedByOrderLineProduct",
           "probe": "SELECT 1 FROM order_line WHERE order_line.product_id = product.id"
         }
+      ],
+      "many": [
+        {
+          "name": "orderLines",
+          "target": "OrderLine",
+          "column": "productId"
+        }
       ]
     }
   ]
@@ -655,6 +669,14 @@ pub mod postgres {
         #[must_use]
         pub fn with_caller(self, caller: orm::Caller) -> Self {
             Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it
@@ -824,6 +846,13 @@ pub const SQLITE: &str = r#"{
         {
           "filter": "referencedByOrderLineOrder",
           "probe": "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id"
+        }
+      ],
+      "many": [
+        {
+          "name": "orderLines",
+          "target": "OrderLine",
+          "column": "orderId"
         }
       ]
     },
@@ -1055,6 +1084,13 @@ pub const SQLITE: &str = r#"{
           "filter": "referencedByOrderLineProduct",
           "probe": "SELECT 1 FROM order_line WHERE order_line.product_id = product.id"
         }
+      ],
+      "many": [
+        {
+          "name": "orderLines",
+          "target": "OrderLine",
+          "column": "productId"
+        }
       ]
     }
   ]
@@ -1140,6 +1176,14 @@ pub mod sqlite {
         #[must_use]
         pub fn with_caller(self, caller: orm::Caller) -> Self {
             Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it

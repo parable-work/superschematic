@@ -3,6 +3,7 @@ export {
   allowService,
   app,
   auth,
+  autonomy,
   behaviorOperations,
   behaviorWorker,
   bodyLimit,
@@ -12,6 +13,7 @@ export {
   encrypted,
   graphOperations,
   hmacVerified,
+  httpBinaryStream,
   idempotent,
   icon,
   job,
@@ -36,6 +38,8 @@ export {
 } from "./decorators";
 export type {
   AppOptions,
+  AutonomyClass,
+  AutonomyMode,
   BehaviorWorkerOptions,
   BodyLimitConfig,
   DeriverOptions,
@@ -48,6 +52,7 @@ export type {
   GraphOperationName,
   GraphOperationsOptions,
   HmacVerifiedConfig,
+  HttpBinaryStreamConfig,
   JobOptions,
   MCPConfig,
   MCPInvocationPolicy,

@@ -466,3 +466,62 @@ export interface BehaviorDeclaration {
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;
 }
+
+/**
+ * A recurrence the core dates (D152), the core's expand operation's input:
+ * an anchor (`calendar`, an RFC 5545 RRULE from a wall start; `afterDone`,
+ * `every` after the last completion; `relative`, `offset` from a date and,
+ * with `every`, from each of its anniversaries), the zone its wall times
+ * are read in (UTC when absent), the adjustment of a due date that falls on
+ * a weekend day or a holiday, the lead times (ISO 8601 spans: P14D, -P60D,
+ * PT12H), and the window [from, to) of due instants in epoch milliseconds.
+ */
+export interface ExpandInput {
+  readonly anchor: 'calendar' | 'afterDone' | 'relative';
+  readonly timeZone?: string;
+  /** The RRULE, with or without its `RRULE:` name: FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=31. */
+  readonly rule?: string;
+  /** A wall date or date-time: the rule's start (calendar), the first due when nothing is done and the time of day (afterDone). */
+  readonly start?: string;
+  readonly every?: string;
+  /** When the last occurrence was done, in epoch milliseconds (afterDone). */
+  readonly lastDone?: number;
+  /** A wall date or date-time, or epoch milliseconds (relative). */
+  readonly date?: string | number;
+  readonly offset?: string;
+  readonly adjust?: 'none' | 'before' | 'after';
+  /** The days a due date moves off; Saturday and Sunday when absent. */
+  readonly weekendDays?: readonly string[];
+  /** Wall dates a due date moves off: the holiday calendar's rows. */
+  readonly holidays?: readonly string[];
+  readonly opensBefore?: string;
+  readonly remindBefore?: string;
+  readonly overdueAfter?: string;
+  readonly from?: number;
+  readonly to?: number;
+  /** At most this many occurrences, 1 to 5000; 1000 when absent. */
+  readonly limit?: number;
+}
+
+/** One dated occurrence of a recurrence (D152). */
+export interface ExpandedOccurrence {
+  /** Its nominal wall date-time, before the adjustment: 2026-10-31T09:00. */
+  readonly key: string;
+  /** The wall date-time it falls due at, after the adjustment. */
+  readonly due: string;
+  readonly dueAt: number;
+  readonly opensAt?: number;
+  readonly remindAt?: number;
+  readonly overdueAt: number;
+  /** Why the adjustment moved it. */
+  readonly shifted?: 'weekend' | 'holiday';
+  /** An afterDone occurrence past the first, dated as if each before it were done on its due date. */
+  readonly projected?: true;
+}
+
+/** What the core's expand operation answers (D152). */
+export interface Expansion {
+  readonly occurrences: readonly ExpandedOccurrence[];
+  /** Whether more occurrences lie in the window past the limit. */
+  readonly more: boolean;
+}

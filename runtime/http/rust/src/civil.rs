@@ -18,7 +18,7 @@ pub(crate) fn from_days(days: i64) -> (i64, i64, i64) {
 
 /// The days since 1970-01-01 of a proleptic Gregorian date: Howard
 /// Hinnant's `days_from_civil`.
-#[cfg(any(feature = "gcs", feature = "sqlite"))]
+#[cfg(any(feature = "gcs", feature = "sqlite", feature = "postgres"))]
 pub(crate) fn to_days(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);
@@ -49,7 +49,7 @@ pub(crate) fn basic_timestamp(t: std::time::SystemTime) -> String {
 /// Reads an RFC 3339 timestamp, as Cloud Storage writes an object's
 /// `updated`: `2026-10-19T12:34:56.789Z`, with a fraction of up to nine
 /// digits, and `Z` or an offset. `None` for anything else.
-#[cfg(feature = "gcs")]
+#[cfg(any(feature = "gcs", feature = "postgres"))]
 pub(crate) fn parse_rfc3339(text: &str) -> Option<std::time::SystemTime> {
     use std::time::{Duration, UNIX_EPOCH};
     let b = text.as_bytes();

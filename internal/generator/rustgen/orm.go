@@ -195,11 +195,35 @@ type ormTable struct {
 	Relations    []ormRelation           `json:"relations,omitempty"`
 	Unsupported  string                  `json:"unsupported,omitempty"`
 	Behaviors    *ormBehaviors           `json:"behaviors,omitempty"`
+	// Many are the table's one-to-many relations, which a filter reaches
+	// through, as a row rule's path and a grant's do (D156).
+	Many []ormMany `json:"many,omitempty"`
+	// Audience is an @audience table's resolved columns, and Access what
+	// the table is to per-record access: grants, log or roles (D156).
+	Audience *ormAudience `json:"audience,omitempty"`
+	Access   string       `json:"access,omitempty"`
 }
 
 // ormFence is a fence of a table, a @fenced field (D119), the runtime's
 // orm::Fence: sqlutil's FenceModel, whose bump an update, an update_many
 // and an upsert's update add to their assignments.
+// ormMany is a one-to-many relation as the runtime's orm::Many reads it:
+// the relation's member, the other table's type and its member that holds
+// the foreign key (D156).
+type ormMany struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Column string `json:"column"`
+}
+
+// ormAudience is an @audience table's resolved columns as the runtime's
+// orm::Audience reads them (D156).
+type ormAudience struct {
+	Effective string `json:"effective"`
+	Agents    string `json:"agents"`
+	Probe     string `json:"probe,omitempty"`
+}
+
 type ormFence struct {
 	Column string   `json:"column"`
 	Covers []string `json:"covers,omitempty"`
@@ -373,7 +397,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	// operations write it.
 	owned := map[string]bool{}
 	for _, t := range tables {
-		if td := schema.Types[t.Type]; td != nil && td.BehaviorTable != nil {
+		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex) {
 			owned[t.Type] = true
 		}
 	}
@@ -420,6 +444,10 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			Key:        t.KeyField,
 			SoftDelete: t.SoftDelete,
 			UniqueKeys: map[string]ormUniqueKey{},
+			Access:     t.Access,
+		}
+		if a := t.Audience; a != nil {
+			table.Audience = &ormAudience{Effective: a.Effective, Agents: a.Agents, Probe: a.Probe}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -471,6 +499,12 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				Doc:      fmt.Sprintf("The rows whose %s is among the %s rows the filter finds (D90).", rel.Field, rel.Target),
 				Optional: true,
 			})
+		}
+		for _, many := range t.ToMany {
+			if owned[many.Source] {
+				continue
+			}
+			table.Many = append(table.Many, ormMany{Name: many.Name, Target: many.Source, Column: many.Field + "Id"})
 		}
 		for _, ref := range t.ReferencedBy {
 			if owned[ref.Source] {

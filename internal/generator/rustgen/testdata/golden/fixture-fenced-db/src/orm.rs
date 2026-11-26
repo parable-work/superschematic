@@ -447,6 +447,13 @@ pub const POSTGRES: &str = r#"{
           "filter": "referencedByDeliveryCourier",
           "probe": "SELECT 1 FROM delivery WHERE delivery.courier_id = courier.id"
         }
+      ],
+      "many": [
+        {
+          "name": "deliveries",
+          "target": "Delivery",
+          "column": "courierId"
+        }
       ]
     },
     {
@@ -1064,6 +1071,14 @@ pub mod postgres {
             Self(self.0.with_caller(caller))
         }
 
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
+        }
+
         /// The repositories telling `trace` each statement's text as it
         /// runs.
         #[must_use]
@@ -1231,6 +1246,13 @@ pub const SQLITE: &str = r#"{
         {
           "filter": "referencedByDeliveryCourier",
           "probe": "SELECT 1 FROM delivery WHERE delivery.courier_id = courier.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "deliveries",
+          "target": "Delivery",
+          "column": "courierId"
         }
       ]
     },
@@ -1846,6 +1868,14 @@ pub mod sqlite {
         #[must_use]
         pub fn with_caller(self, caller: orm::Caller) -> Self {
             Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it

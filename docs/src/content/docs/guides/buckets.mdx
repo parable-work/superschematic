@@ -243,6 +243,11 @@ export abstract class Production {}
 | `exposeHeaders` | the response headers the page's script may read beside the ones every browser exposes, `etag` say |
 | `maxAge` | how long a browser may keep the bucket's answer before it asks again, a duration of whole seconds (`10m`, `1h`), a day at most |
 
+A table's files (`@attachments`, D154) upload through such a URL, which
+names the file's media type, so a rule for them admits `PUT` with the
+`content-type` header from the pages that upload
+([References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row)).
+
 A rule that admits `PUT` from `*` is refused. The bucket is private, and a
 page writes to it only through a URL an API signed, so the rule names the
 origins of the pages that upload. `*` is taken for `GET` and `HEAD`, as

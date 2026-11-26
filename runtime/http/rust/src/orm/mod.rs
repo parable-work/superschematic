@@ -28,6 +28,16 @@
 //! upsert of such a table reads whether a row holds the key, then runs the
 //! core's create or update; an update of many rows runs the core's update
 //! of each; and a hard delete of a live row is the core's delete.
+//!
+//! Repositories opened for a caller ([`AccessCaller`], D156) keep every
+//! read and write to what the caller sees, as the TypeScript repositories
+//! do: an `@audience` table's rows whose effective audience holds the
+//! caller ([`audience_conditions`]), and for a party or an agent run the
+//! rows one of its grants reaches, through the relation paths its role
+//! names. A row the caller does not see is the [`Error::NotFound`] of one
+//! that is not there, and a create of a row its grants do not reach is
+//! [`Error::AccessRefused`]. Repositories opened for no caller, a job's or
+//! the system's, read every row.
 
 pub mod fieldcrypt;
 mod plan;
@@ -48,7 +58,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 
+use crate::auth::{ActingFor, GrantReach, Principal, PrincipalKind};
 use crate::civil::from_days;
+use crate::uuid62::parse_uuid;
 
 pub use fieldcrypt::FieldKeyring;
 pub use plan::fill;
@@ -153,6 +165,14 @@ impl Definition {
             .iter()
             .find(|table| table.name == name)
             .ok_or_else(|| Error::Definition(format!("the ORM has no table {name}")))
+    }
+
+    /// The table that is `access` to per-record access (D156):
+    /// [`ACCESS_GRANTS`], [`ACCESS_LOG`] or [`ACCESS_ROLES`].
+    pub fn access_table(&self, access: &str) -> Option<&Table> {
+        self.tables
+            .iter()
+            .find(|table| table.access.as_deref() == Some(access))
     }
 
     /// The id the system acts as, hyphenated.
@@ -320,7 +340,58 @@ pub struct Table {
     /// repository's `Rules` runs.
     #[serde(default)]
     pub behaviors: Option<Behaviors>,
+    /// The one-to-many relations of the table (D90): a filter reaches
+    /// through one to the rows that point back at the row, as a row rule's
+    /// path and a grant's do (D156).
+    #[serde(default)]
+    pub many: Vec<Many>,
+    /// An `@audience` table's resolved columns (D156), which a read for a
+    /// caller compares the caller with.
+    #[serde(default)]
+    pub audience: Option<Audience>,
+    /// What the table is to per-record access (D156): `grants`, the table
+    /// of grants; `log`, the access log; `roles`, the UserRole table whose
+    /// rows a grant's role names. None for every other.
+    #[serde(default)]
+    pub access: Option<String>,
 }
+
+/// A one-to-many relation of a table (D90, D156): the rows of another
+/// table whose to-one relation points back at the row.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Many {
+    /// The relation's member, which a filter reaches through.
+    pub name: String,
+    /// The other table's type.
+    pub target: String,
+    /// The other table's member that holds the foreign key, `<field>Id`.
+    pub column: String,
+}
+
+/// What a read of an `@audience` table compares its caller with (D156):
+/// the row's effective audience, null for everyone or the ids of the
+/// principals it is visible to, and its effective agent access, each a
+/// column qualified by its table. On a projection, `probe` is the view's
+/// key in the keys of its source's rows of the WHERE `%s`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Audience {
+    /// The effective audience's column, a `UUID[]`.
+    pub effective: String,
+    /// The effective agent access's column: `followRole`, `readOnly` or
+    /// `none`.
+    pub agents: String,
+    /// A projection's probe of its source's rows.
+    #[serde(default)]
+    pub probe: Option<String>,
+}
+
+/// What [`Table::access`] names: the table of grants (D156).
+pub const ACCESS_GRANTS: &str = "grants";
+/// What [`Table::access`] names: the access log (D156).
+pub const ACCESS_LOG: &str = "log";
+/// What [`Table::access`] names: the UserRole table a grant's role is a
+/// row of (D156).
+pub const ACCESS_ROLES: &str = "roles";
 
 /// A fence of a table, a @fenced field (D119): a counter every write of a
 /// column it covers sets to the stored value plus one, which a trigger
@@ -354,6 +425,21 @@ pub struct Behaviors {
 }
 
 impl Table {
+    /// The relation `name` of the table, to-one or one-to-many, and the
+    /// type of the table it reaches.
+    pub fn relation_target(&self, name: &str) -> Option<&str> {
+        self.relations
+            .iter()
+            .find(|relation| relation.field == name)
+            .map(|relation| relation.target.as_str())
+            .or_else(|| {
+                self.many
+                    .iter()
+                    .find(|many| many.name == name)
+                    .map(|many| many.target.as_str())
+            })
+    }
+
     fn check(&self) -> Result<(), Error> {
         if self.columns.iter().all(|column| column.name != self.key) {
             return Err(Error::Definition(format!(
@@ -534,6 +620,10 @@ pub enum Error {
     /// The behaviors' core refused the command (D103), as its `Rules`
     /// says it. Boxed, so a result that may hold one stays small.
     Refused(Box<Refusal>),
+    /// A party's or an agent run's write that leaves a row its grants do
+    /// not reach (D156): a create under a target no grant names. A table
+    /// operation answers it 403, and its transaction keeps nothing.
+    AccessRefused(String),
     /// An `Encrypted<T>` column's value could not be sealed or opened.
     Encryption(String),
     /// The definition, or a row the database holds, is not what the
@@ -589,6 +679,7 @@ impl fmt::Display for Error {
             | Error::VersionConflict(message)
             | Error::Invalid(message)
             | Error::Busy(message)
+            | Error::AccessRefused(message)
             | Error::Encryption(message)
             | Error::Definition(message)
             | Error::Database(message) => f.write_str(message),
@@ -1278,6 +1369,126 @@ pub struct Session<'a> {
     /// What is told each statement's text as it runs: a test that holds
     /// the repositories to the Go ORM's statements, or a log.
     pub trace: Option<&'a (dyn Fn(&str) + Sync)>,
+    /// Whom the reads and writes keep to (D156): the caller of the
+    /// operation the repositories serve, the anonymous one for a route
+    /// with no principal. `None` reads every row, as a job and the system
+    /// do.
+    pub access: Option<AccessCaller>,
+}
+
+/// The caller of an operation as the reads hold it (D156): its subject,
+/// its kind and whom it acts for, and the grants it calls through, or no
+/// subject for an operation with no principal, which sees the rows
+/// everyone may. The TypeScript runtime's `AccessCaller`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccessCaller {
+    /// The caller's subject; none for an anonymous caller.
+    pub subject: Option<String>,
+    /// What the caller is.
+    pub kind: PrincipalKind,
+    /// Whom the caller acts for.
+    pub acting_for: Option<ActingFor>,
+    /// The grants the caller calls through: a caller with grants reaches,
+    /// of a table, only the rows one of them reaches.
+    pub grants: Option<Vec<GrantReach>>,
+}
+
+impl AccessCaller {
+    /// The anonymous caller: an operation with no principal.
+    pub fn anonymous() -> Self {
+        Self::default()
+    }
+
+    /// The access caller of a route's principal, or the anonymous one for
+    /// none.
+    pub fn of(principal: Option<&Principal>) -> Self {
+        let Some(principal) = principal else {
+            return Self::anonymous();
+        };
+        Self {
+            subject: Some(principal.subject.clone()),
+            kind: principal.kind,
+            acting_for: principal.acting_for.clone(),
+            grants: principal.grants.clone(),
+        }
+    }
+
+    /// The ids an audience admits the caller by (D156): its subject, and
+    /// for an agent run whom it acts for, each a UUID, hyphenated; a
+    /// subject that is no UUID admits by none.
+    pub fn audience_ids(&self) -> Vec<String> {
+        let acting_for = match self.kind {
+            PrincipalKind::Agent => self.acting_for.as_ref().map(|a| a.subject.as_str()),
+            _ => None,
+        };
+        [self.subject.as_deref(), acting_for]
+            .into_iter()
+            .flatten()
+            .filter_map(parse_uuid)
+            .map(|uuid| uuid.hyphenated().to_string())
+            .collect()
+    }
+}
+
+/// The conditions that keep a read, or with `write` a write, of an
+/// `@audience` table to what `caller` may see (D156), each value appended
+/// to `args`: the reusable audience predicate a read of rows across tables
+/// (a search, a calendar's feed, references, notifications) applies as a
+/// repository does, written as the TypeScript runtime's
+/// `audienceConditions` writes it. The rows whose effective audience is
+/// everyone or holds the caller's id, or for an agent run its own or the
+/// id of whom it acts for, and whose agent access lets an agent run read
+/// them, or with `write` write them. A caller with no id, an anonymous one
+/// or one whose subject is no UUID, sees the rows everyone may. A
+/// projection's probe holds the view to its source's rows that do.
+/// Postgres alone: an audience is a `UUID[]` compared by array overlap.
+pub fn audience_conditions(
+    definition: &Definition,
+    audience: &Audience,
+    caller: &AccessCaller,
+    args: &mut Vec<Bound>,
+    write: bool,
+) -> Result<Vec<String>, Error> {
+    if definition.dialect != Dialect::Postgres {
+        return Err(Error::Definition(format!(
+            "an audience (D156) is a UUID[] column a read compares by array overlap, which {} has none of",
+            definition.dialect
+        )));
+    }
+    let ids = caller.audience_ids();
+    let mut parts = Vec::new();
+    if ids.is_empty() {
+        parts.push(format!("{} IS NULL", audience.effective));
+    } else {
+        let mut placeholders = Vec::with_capacity(ids.len());
+        for id in ids {
+            args.push(Bound {
+                value: Value::String(id),
+                marks: Marks {
+                    uuid: true,
+                    ..Marks::TEXT
+                },
+            });
+            placeholders.push(plan::fill(&definition.clauses.placeholder, &[&args.len()])?);
+        }
+        parts.push(format!(
+            "({effective} IS NULL OR {effective} && ARRAY[{ids}]::uuid[])",
+            effective = audience.effective,
+            ids = placeholders.join(", ")
+        ));
+    }
+    if caller.kind == PrincipalKind::Agent {
+        parts.push(if write {
+            format!("{} = 'followRole'", audience.agents)
+        } else {
+            format!("{} <> 'none'", audience.agents)
+        });
+    }
+    let text = parts.join(" AND ");
+    Ok(vec![match &audience.probe {
+        Some(probe) => plan::fill(probe, &[&format!(" WHERE {text}")])?,
+        None => text,
+    }])
 }
 
 impl fmt::Debug for Session<'_> {
@@ -1286,6 +1497,7 @@ impl fmt::Debug for Session<'_> {
             .field("user", &self.user)
             .field("keys", &self.keys.is_some())
             .field("caller", &self.caller)
+            .field("access", &self.access)
             .finish()
     }
 }
@@ -1437,6 +1649,29 @@ pub fn wire<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn an_audience_admits_a_caller_by_its_id_and_an_agent_run_by_whom_it_acts_for() {
+        let user = "11111111-1111-4111-8111-111111111111";
+        let owner = "22222222-2222-4222-8222-222222222222";
+        let principal = Principal::new(user, Vec::<String>::new());
+        assert_eq!(AccessCaller::of(Some(&principal)).audience_ids(), [user]);
+        // A subject that is no UUID, and no caller, admit by none.
+        let service = Principal::new("service:billing", Vec::<String>::new());
+        assert!(AccessCaller::of(Some(&service)).audience_ids().is_empty());
+        assert!(AccessCaller::of(None).audience_ids().is_empty());
+        // An agent run by its own id and whom it acts for; any other kind
+        // by its own alone.
+        let run = principal
+            .clone()
+            .of_kind(PrincipalKind::Agent)
+            .acting_for(ActingFor::user(owner));
+        assert_eq!(AccessCaller::of(Some(&run)).audience_ids(), [user, owner]);
+        let party = principal
+            .of_kind(PrincipalKind::Party)
+            .acting_for(ActingFor::user(owner));
+        assert_eq!(AccessCaller::of(Some(&party)).audience_ids(), [user]);
+    }
 
     #[test]
     fn a_time_is_rfc_3339_to_the_millisecond() {

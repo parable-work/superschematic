@@ -1,6 +1,6 @@
 {
   "name": "core-comments-beside",
-  "description": "Comments on a table, D103's step 4: every write beside the row (D77's primitive 1), so a post moves no version of the row and asks no other behavior's guard, another principal posting while one holds the row's lease, its holder posting without the token its lease requires, and a precondition presented to a post refused; a moderator editing another's message; code blocks held to their own checks and the config's kinds; and the config members a table's Comments waits for refused at define. Cases written by hand in the recorded format, since the engine's recordings hold none of a table's. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "description": "Comments on a table, D103's step 4: every write beside the row (D77's primitive 1), so a post moves no version of the row and asks no other behavior's guard, another principal posting while one holds the row's lease, its holder posting without the token its lease requires, and a precondition presented to a post refused; a moderator editing another's message; code blocks held to their own checks and the config's kinds, an attachment block among the kinds (D154); and the config members a table's Comments waits for refused at define, and an attachment scheme that runs code. Cases written by hand in the recorded format, since the engine's recordings hold none of a table's. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
   "source": "written by hand (D103's step 4): runtime/engine/testdata/rules/scenarios/core-comments-beside.json",
   "shared": {},
   "scenarios": [
@@ -550,7 +550,12 @@
                         "blocks": [
                           "code",
                           "attachment"
-                        ]
+                        ],
+                        "attachments": {
+                          "schemes": [
+                            "javascript"
+                          ]
+                        }
                       }
                     }
                   ]
@@ -561,12 +566,16 @@
           "error": {
             "class": "SchemaDocumentError",
             "code": "invalid_schema",
-            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+            "message": "schema: /types/Doc/behaviors/0: must match \"then\" schema; /types/Doc/behaviors/0/config/attachments/schemes/0: must NOT be valid",
             "details": {
               "issues": [
                 {
-                  "path": "/types/Doc/behaviors/0/config",
-                  "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                  "path": "/types/Doc/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Doc/behaviors/0/config/attachments/schemes/0",
+                  "message": "must NOT be valid"
                 }
               ]
             }
@@ -765,16 +774,22 @@
             }
           ],
           "error": {
-            "class": "OperationParamsError",
-            "code": "invalid_argument",
-            "message": "operation post of behavior Comments: /blocks/0: is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Comments vetoes post of Doc d1: block 0 is a attachment block, which Comments on Doc does not allow (it allows code, ref)",
             "details": {
-              "issues": [
-                {
-                  "path": "/blocks/0",
-                  "message": "is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
-                }
-              ]
+              "behavior": "Comments",
+              "action": "post",
+              "reason": "block 0 is a attachment block, which Comments on Doc does not allow (it allows code, ref)",
+              "vetoCode": "block_not_allowed",
+              "vetoDetails": {
+                "block": 0,
+                "kind": "attachment",
+                "allowed": [
+                  "code",
+                  "ref"
+                ]
+              }
             }
           }
         },

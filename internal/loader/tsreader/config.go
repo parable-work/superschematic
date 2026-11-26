@@ -311,6 +311,19 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 		}
 		cfg.RateLimitStore = &ServiceDependency{Name: handle.name, Kind: ir.SchemaKind(handle.kind)}
 	}
+	if raw, set := obj["providers"]; set {
+		items, ok := raw.([]any)
+		if !ok {
+			return nil, errorAtNode(at, "providers must be a list of package directories")
+		}
+		for _, item := range items {
+			dir, ok := item.(string)
+			if !ok {
+				return nil, errorAtNode(at, "providers entries must be strings, each a provider package's directory")
+			}
+			cfg.Providers = append(cfg.Providers, dir)
+		}
+	}
 	if outputs, ok := obj["outputs"].(map[string]any); ok {
 		cfg.Outputs = outputs
 	}

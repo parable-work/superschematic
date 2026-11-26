@@ -104,6 +104,14 @@ type ORMInfo struct {
 	Rules      *behaviorlayout.Layout
 	RulesConst string
 
+	// References and Attachments are the database's references and
+	// attachments documents (D154, rowrefs.go), as JSON, which orm.ts
+	// embeds as the definition's references and attachments and the
+	// runtime's orm.references and orm.attachments read; "" for a database
+	// with none.
+	References  string
+	Attachments string
+
 	// Postgres is whether the DB service lists the postgres dialect, whose
 	// repositories createOrm opens over a pg Pool. SQLite is whether it
 	// lists the sqlite dialect (D116): each table then carries its
@@ -217,6 +225,39 @@ type ORMTable struct {
 	// Access is what the table is to the runtime's per-record access
 	// (sqlutil.TableModel.Access, D156): grants, log or roles.
 	Access string
+
+	// Calendar are the table's @calendarSource declarations (D152), which
+	// the runtime's calendar read and feed merge; nil for a table with none.
+	Calendar []ORMCalendarSource
+
+	// Searchable is a @searchable table's SearchableDefinition (D155), as
+	// JSON, which the runtime's search and indexing read; empty for a
+	// table that is not @searchable.
+	Searchable string
+
+	// Notifier is the part of the notifier the table is (D153): inbox,
+	// deliveries, routes, preferences, subscriptions, channelTrust or
+	// replies, or channelIdentities for the table of channel identities;
+	// empty for any other table.
+	Notifier string
+
+	// Agents is the part of the agent orchestration the table is (D158):
+	// definitions, runs, policies, approvals or controls; empty for any
+	// other table.
+	Agents string
+
+	// Events are the table's @event declarations (D153), which the
+	// notifier raises and routes; nil for a table with none.
+	TableEvents []ORMEvent
+
+	// Party marks a @party table (D157), whose rows are principals of kind
+	// party; PartyTitle is the field a party is named by, or "".
+	Party      bool
+	PartyTitle string
+
+	// Conversations is the part of the conversations the table is (D157):
+	// conversations or messages; empty for any other table.
+	Conversations string
 
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
@@ -510,7 +551,7 @@ func RepositoryMember(typeName string) string { return lowerFirst(typeName) }
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries"}
+var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries", "references", "attachments"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
 // no table. output holds the types the rows' members take theirs from, and
@@ -580,7 +621,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	// generated, so no relation reaches it either.
 	owned := map[string]bool{}
 	for _, t := range tables {
-		if td := schema.Types[t.Type]; td != nil && td.BehaviorTable != nil {
+		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex) {
 			owned[t.Type] = true
 		}
 	}
@@ -610,6 +651,25 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		if td := schema.Types[t.Type]; td != nil {
 			table.Doc = codegen.DocText(td.Description, td.Comment)
 			table.ReadOnly, table.ReleasedOf = td.ReleasedOf != "", td.ReleasedOf
+			calendar, err := calendarSourcesOf(schema, td, tables)
+			if err != nil {
+				return nil, err
+			}
+			table.Calendar = calendar
+			if table.Searchable, err = searchableOf(schema, td, tables); err != nil {
+				return nil, err
+			}
+			table.Notifier = notifierPartOf(td)
+			if td.Agents != nil {
+				table.Agents = td.Agents.Part
+			}
+			table.TableEvents = eventsOf(td)
+			if td.Party != nil {
+				table.Party, table.PartyTitle = true, td.Party.Title
+			}
+			if td.Conversations != nil {
+				table.Conversations = td.Conversations.Part
+			}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -714,6 +774,13 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	}
 	out.Views = views
 	if out.Queries, err = typeScriptQueries(schema, opts, types, known); err != nil {
+		return nil, err
+	}
+	members := map[string]string{}
+	for _, table := range out.Tables {
+		members[table.Type] = table.Member
+	}
+	if out.References, out.Attachments, err = rowFeaturesOf(schema, tables, members); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1033,6 +1100,12 @@ func (o *ORMInfo) RuntimeTypes() []string {
 	}
 	if o.Rules != nil {
 		used["RulesLayout"] = true
+	}
+	if o.References != "" {
+		used["ReferencesMembers"] = true
+	}
+	if o.Attachments != "" {
+		used["AttachmentsMembers"] = true
 	}
 	for _, q := range o.Queries {
 		if q.Page != nil {
@@ -1383,4 +1456,41 @@ func (o *ORMInfo) NearestSettingDefinitions() []string {
 		out[i] = def + " }"
 	}
 	return out
+}
+
+// ORMEvent is one @event of a table as the generated repository's
+// definition carries it (D153): its kind, the members its payload carries,
+// the member a notice is titled by, and its default urgency.
+type ORMEvent struct {
+	Kind    string
+	Payload []string
+	Title   string
+	Urgency string
+}
+
+// eventsOf is td's events, each with its default urgency.
+func eventsOf(td *ir.TypeDef) []ORMEvent {
+	var out []ORMEvent
+	for _, event := range td.Events {
+		if event == nil {
+			continue
+		}
+		urgency := event.Urgency
+		if urgency == "" {
+			urgency = ir.UrgencyNormal
+		}
+		out = append(out, ORMEvent{Kind: event.Kind, Payload: event.Payload, Title: event.Title, Urgency: urgency})
+	}
+	return out
+}
+
+// notifierPartOf is what td is to the notifier (D153), or "".
+func notifierPartOf(td *ir.TypeDef) string {
+	switch {
+	case td.ChannelIdentities != nil:
+		return "channelIdentities"
+	case td.Notifier != nil:
+		return td.Notifier.Part
+	}
+	return ""
 }

@@ -66,50 +66,62 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("holdsListHolds")
         .apply(post(handle_booking_holds_holds_list_holds));
     router = router.route("/api/booking/{id}/holds/list-holds", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("holdsRetakeHolds")
         .apply(post(handle_booking_holds_holds_retake_holds));
     router = router.route("/api/booking/{id}/holds/retake-holds", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_booking_holds_status_transition));
     router = router.route("/api/booking/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarFindAvailability")
         .apply(post(handle_desk_calendar_calendar_find_availability));
     router = router.route("/api/desk/calendar/find-availability", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarAddClosure")
         .apply(post(handle_desk_calendar_calendar_add_closure));
     router = router.route("/api/desk/{id}/calendar/add-closure", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarCheckHold")
         .apply(post(handle_desk_calendar_calendar_check_hold));
     router = router.route("/api/desk/{id}/calendar/check-hold", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarCommitFor")
         .apply(post(handle_desk_calendar_calendar_commit_for));
     router = router.route("/api/desk/{id}/calendar/commit-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarHoldFor")
         .apply(post(handle_desk_calendar_calendar_hold_for));
     router = router.route("/api/desk/{id}/calendar/hold-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarListBookings")
         .apply(post(handle_desk_calendar_calendar_list_bookings));
     router = router.route("/api/desk/{id}/calendar/list-bookings", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarReleaseFor")
         .apply(post(handle_desk_calendar_calendar_release_for));
     router = router.route("/api/desk/{id}/calendar/release-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarRemoveClosure")
         .apply(post(handle_desk_calendar_calendar_remove_closure));
     router = router.route("/api/desk/{id}/calendar/remove-closure", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("calendarSetOpeningHours")
         .apply(post(handle_desk_calendar_calendar_set_opening_hours));
     router = router.route("/api/desk/{id}/calendar/set-opening-hours", route);
     router

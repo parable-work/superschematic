@@ -19,14 +19,19 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/access"
+	"github.com/parable-work/superschematic/internal/loader/agents"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/conversations"
 	"github.com/parable-work/superschematic/internal/loader/graphops"
 	"github.com/parable-work/superschematic/internal/loader/idempotency"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
+	"github.com/parable-work/superschematic/internal/loader/notifications"
+	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/loader/search"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
@@ -237,6 +242,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.RustOutput = rustOutput(cfg)
 
 		if len(dataFiles) == 0 {
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
@@ -275,6 +281,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				verified, err = o.runVerify(schema, vin)
 				return err
 			})
+			if err == nil {
+				err = loadProviders(servicePath, verified, cfg)
+			}
 			return verified, cfg, err
 		}
 	} else {
@@ -293,6 +302,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.RustOutput = rustOutput(cfg)
 	}
 
 	var errs []error
@@ -384,6 +394,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		verified, err = o.runVerify(schema, vin)
 		return err
 	})
+	if err == nil {
+		err = loadProviders(servicePath, verified, cfg)
+	}
 	return verified, cfg, err
 }
 
@@ -590,20 +603,24 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 // schema: warnings go to WithWarnings's function or print to
 // [WarningWriter], errors fail the load. Each @stateMachine's transitions
 // are put in the order of its enum's members first (D118,
-// orderStateMachines). The fields its field-anchored
-// behaviors own join their tables before the pass (D103,
-// behaviorfields.Expand), once the behaviors' own checks hold what that
-// relies on (verify.CheckBehaviors), so an index, a uniqueness, a display
-// field, a projection's column and @enqueueOnChange may name one as they
-// name the table's own; when those checks fail, the pass reports them
-// among its findings, over the schema as written but for the fields the
-// sound uses own (behaviorfields.ExpandFields), so a reference to one is
-// not reported beside the check that failed. The API's
+// orderStateMachines). The fields the sound uses of its tables' behaviors
+// own join their tables first (behaviorfields.ExpandFields), so the
+// behaviors' own checks (verify.CheckBehaviors) read each table's fields
+// from a model an index on an owned field does not refuse; once those
+// checks hold what the rest relies on, the uses' sub-tables and queues
+// join the schema before the pass (D103, behaviorfields.Expand), so an
+// index, a uniqueness, a display field, a projection's column and
+// @enqueueOnChange may name an owned field as they name the table's own.
+// When the checks fail, the pass reports them among its findings, over the
+// schema as written but for the owned fields, so a reference to one is not
+// reported beside the check that failed. The API's
 // @behaviorOperations sets are filled from its database the same way
 // (D103, behaviorops.Expand), once their checks pass
 // (verify.CheckBehaviorOperations), and its @behaviorWorker classes are
 // given their table's deadline queue (behaviorops.ExpandWorkers), once
-// theirs do (verify.CheckBehaviorWorkers). A schema that
+// theirs do (verify.CheckBehaviorWorkers). A refusal of any of these
+// checks fails the load even when the pass finds nothing, so no schema
+// loads with an expansion left out. A schema that
 // verifies has its version graphs expanded into ordinary types, the tables
 // its User and UserRole traits own added and its user model route sets
 // filled from its authDb (D50), any scalar only the generated fields use
@@ -624,6 +641,8 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// A @source view of another service's @audience table reads its
 	// audience columns as the table's own (D156).
 	access.ExpandExternal(vin.ExternalTypes)
+	notifications.ExpandExternal(vin.ExternalTypes)
+	agents.ExpandExternal(vin.ExternalTypes)
 	// The table that keeps idempotency keys gets its key and columns
 	// before the pass, which checks it as any other table (D140).
 	keyScalars, err := idempotency.Expand(schema)
@@ -635,7 +654,28 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			return nil, err
 		}
 	}
-	if verify.CheckBehaviors(schema, vin).Err() == nil {
+	// The fields the sound uses own join their tables before the
+	// behaviors' checks, which read each table's fields from its table
+	// model: an index or unique key that names one (a Numbering's number)
+	// would otherwise leave the table with no model, and a config that
+	// names a field of it would read as naming none. The checks then see
+	// the tables the pass below sees, and when they fail, the pass does not
+	// add, to a config the build refuses, a finding for each index or
+	// trigger that names an owned field.
+	if owned := behaviorfields.ExpandFields(schema, reg); len(owned) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// An expansion its checks refused is left out, and the pass below
+	// reports why; should it find nothing, the checks' refusal fails the
+	// load, so no schema loads with its behaviors' tables or operations
+	// left out.
+	var refused []error
+	if err := verify.CheckBehaviors(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		// Expand keeps the fields ExpandFields added, and adds the rest.
 		owned, err := behaviorfields.Expand(schema, reg)
 		if err != nil {
 			return nil, err
@@ -647,20 +687,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 				return nil, err
 			}
 		}
-	} else if owned := behaviorfields.ExpandFields(schema, reg); len(owned) > 0 {
-		// The checks failed, and the pass below reports why. The fields
-		// the sound uses own still join their tables, so the pass does
-		// not add, to a config the build refuses, a finding for each
-		// index or trigger that names one of them.
-		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
-			return nil, err
-		}
 	}
 	// The operations of a table's behaviors join their @behaviorOperations
 	// sets before the pass (D103), once those sets' checks hold what the
 	// expansion relies on, so each meets every check an authored
 	// operation meets.
-	if verify.CheckBehaviorOperations(schema, vin).Err() == nil {
+	if err := verify.CheckBehaviorOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
 		added, err := behaviorops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
@@ -673,7 +707,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	}
 	// The operations of a version graph join their @graphOperations sets
 	// the same way (D138), with the types they take and return.
-	if verify.CheckGraphOperations(schema, vin).Err() == nil {
+	if err := verify.CheckGraphOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
 		added, err := graphops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
@@ -689,7 +725,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// queues before the pass, once its checks hold that they are there,
 	// and the API gains the types of the events it hands to the project's
 	// Workers methods (D104).
-	if verify.CheckBehaviorWorkers(schema, vin).Err() == nil {
+	if err := verify.CheckBehaviorWorkers(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
 		added, err := behaviorops.ExpandWorkers(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
@@ -708,6 +746,47 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			return nil, err
 		}
 	}
+	// Outside parties and inbound messages (D157): the fields of the
+	// conversations' classes and the run requests queue join the schema
+	// before the references and attachments expansion, so a messages class
+	// may hold references and files.
+	if added := conversations.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// References and attachments (D154): the sub-tables of a @references
+	// or an @attachments table, and the fields of the queues they name,
+	// join the schema before the pass, so it reads them as its own.
+	if added := rowrefs.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Events, notifications and channels (D153): the fields of the
+	// notifier's classes and the channel identities join the schema before
+	// the pass, so it reads them as its own.
+	if added := notifications.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Agent orchestration (D158): the fields of each @agents class's part
+	// that the class does not declare join it before the pass, so it reads
+	// them as its own.
+	if added := agents.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Search across tables (D155): the database's search index and the
+	// fields of the queues @searchable names join the schema before the
+	// pass, so it reads them as its own.
+	if added := search.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
 		if o.warn != nil {
@@ -718,6 +797,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	}
 	if err := res.Err(); err != nil {
 		return nil, err
+	}
+	if len(refused) > 0 {
+		return nil, refused[0]
 	}
 	added := versiongraph.Expand(schema)
 	added = append(added, identity.Expand(schema)...)

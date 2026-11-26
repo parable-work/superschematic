@@ -138,6 +138,7 @@ pub mod presence;
 pub mod provenance;
 pub mod reactions;
 pub mod reconcile;
+pub mod recurrence;
 pub mod retries;
 pub mod revisions;
 pub mod rollups;
@@ -175,6 +176,7 @@ pub use reactions::{
     ReactionsThen, ReactionsWhen,
 };
 pub use reconcile::{Reconcile, ReconcileConfig};
+pub use recurrence::{Recurrence, RecurrenceConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
@@ -199,7 +201,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 25] = [
+pub const NAMES: [&str; 26] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -225,6 +227,7 @@ pub const NAMES: [&str; 25] = [
     holds::NAME,
     calendar::behavior::NAME,
     payments::NAME,
+    recurrence::behavior::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -232,7 +235,7 @@ pub const NAMES: [&str; 25] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 25] = [
+pub const DECLARATIONS: [&str; 26] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -258,6 +261,7 @@ pub const DECLARATIONS: [&str; 25] = [
     holds::DECLARATION,
     calendar::behavior::DECLARATION,
     payments::DECLARATION,
+    recurrence::behavior::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -295,6 +299,7 @@ pub fn core() -> Core {
         .with(Holds)
         .with(Calendar)
         .with(Payments)
+        .with(Recurrence)
 }
 
 #[cfg(test)]

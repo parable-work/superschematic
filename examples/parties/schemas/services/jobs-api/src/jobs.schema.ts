@@ -1,0 +1,37 @@
+import { Nullable, Secret } from "@superschematic/schema";
+import { worker } from "@superschematic/api";
+import { envVars, providers } from "@superschematic/schema-config";
+import { NoticeWork, RunRequest } from "@schemas/jobs-db";
+
+// The API's config (D159). SMS and MAIL are channel slots: each
+// environment names the adapter that serves each, and the settings after
+// it. INBOUND_ADDRESS is the deployment's one inbound email address
+// (D157): mail to another is not the deployment's, and an email sent to a
+// party asks for its reply there.
+@envVars
+@providers({ SMS: "channel", MAIL: "channel" })
+export abstract class JobsApiConfig {
+  SMS: Nullable<string>;
+  SMS_URL: Nullable<string>;
+  SMS_TOKEN: Nullable<Secret<string>>;
+  SMS_SENDER: Nullable<string>;
+
+  MAIL: Nullable<string>;
+  MAIL_URL: Nullable<string>;
+  MAIL_TOKEN: Nullable<Secret<string>>;
+  MAIL_FROM: Nullable<string>;
+
+  INBOUND_ADDRESS: Nullable<string>;
+}
+
+// Runs the notifier, which sends a party's verification code and a user's
+// echo (D153).
+@worker({ queue: NoticeWork, concurrency: 2 })
+export abstract class Notify {}
+
+// Takes each run request a granted party's message made (D157). The
+// example's handler files the message onto the job the party's grant
+// names; examples/agent-orchestration hands the queue to the agent
+// dispatcher (D158) instead.
+@worker({ queue: RunRequest, concurrency: 2 })
+export abstract class Runs {}

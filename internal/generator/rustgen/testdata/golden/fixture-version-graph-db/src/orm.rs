@@ -2702,6 +2702,63 @@ pub const POSTGRES: &str = r#"{
           "filter": "referencedByUtensilRecipe",
           "probe": "SELECT 1 FROM utensil WHERE utensil.recipe_id = recipe.id"
         }
+      ],
+      "many": [
+        {
+          "name": "covers",
+          "target": "Cover",
+          "column": "recipeId"
+        },
+        {
+          "name": "ingredients",
+          "target": "Ingredient",
+          "column": "recipeId"
+        },
+        {
+          "name": "notes",
+          "target": "Note",
+          "column": "recipeId"
+        },
+        {
+          "name": "parts",
+          "target": "Part",
+          "column": "recipeId"
+        },
+        {
+          "name": "partReleaseds",
+          "target": "PartReleased",
+          "column": "recipeId"
+        },
+        {
+          "name": "recipeCommits",
+          "target": "RecipeCommit",
+          "column": "rootId"
+        },
+        {
+          "name": "recipeRefs",
+          "target": "RecipeRef",
+          "column": "rootId"
+        },
+        {
+          "name": "recipeReleases",
+          "target": "RecipeRelease",
+          "column": "rootId"
+        },
+        {
+          "name": "steps",
+          "target": "Step",
+          "column": "recipeId"
+        },
+        {
+          "name": "tastings",
+          "target": "Tasting",
+          "column": "recipeId"
+        },
+        {
+          "name": "utensils",
+          "target": "Utensil",
+          "column": "recipeId"
+        }
       ]
     },
     {
@@ -2975,6 +3032,43 @@ pub const POSTGRES: &str = r#"{
           "field": "parentCommit",
           "target": "RecipeCommit",
           "probe": "recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)"
+        }
+      ],
+      "many": [
+        {
+          "name": "partReleaseds",
+          "target": "PartReleased",
+          "column": "commitId"
+        },
+        {
+          "name": "recipeCommits",
+          "target": "RecipeCommit",
+          "column": "parentCommitId"
+        },
+        {
+          "name": "recipePatches",
+          "target": "RecipePatch",
+          "column": "commitId"
+        },
+        {
+          "name": "recipeRefsByBaseCommit",
+          "target": "RecipeRef",
+          "column": "baseCommitId"
+        },
+        {
+          "name": "recipeRefsByHeadCommit",
+          "target": "RecipeRef",
+          "column": "headCommitId"
+        },
+        {
+          "name": "recipeReleases",
+          "target": "RecipeRelease",
+          "column": "commitId"
+        },
+        {
+          "name": "recipeSnapshotEntries",
+          "target": "RecipeSnapshotEntry",
+          "column": "commitId"
         }
       ]
     },
@@ -3493,6 +3587,53 @@ pub const POSTGRES: &str = r#"{
           "field": "headCommit",
           "target": "RecipeCommit",
           "probe": "recipe_ref.head_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)"
+        }
+      ],
+      "many": [
+        {
+          "name": "covers",
+          "target": "Cover",
+          "column": "refId"
+        },
+        {
+          "name": "ingredients",
+          "target": "Ingredient",
+          "column": "refId"
+        },
+        {
+          "name": "notes",
+          "target": "Note",
+          "column": "refId"
+        },
+        {
+          "name": "parts",
+          "target": "Part",
+          "column": "refId"
+        },
+        {
+          "name": "recipeCommits",
+          "target": "RecipeCommit",
+          "column": "refId"
+        },
+        {
+          "name": "recipeRefs",
+          "target": "RecipeRef",
+          "column": "parentRefId"
+        },
+        {
+          "name": "steps",
+          "target": "Step",
+          "column": "refId"
+        },
+        {
+          "name": "tastings",
+          "target": "Tasting",
+          "column": "refId"
+        },
+        {
+          "name": "utensils",
+          "target": "Utensil",
+          "column": "refId"
         }
       ]
     },
@@ -4904,6 +5045,14 @@ pub mod postgres {
         #[must_use]
         pub fn with_caller(self, caller: orm::Caller) -> Self {
             Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it

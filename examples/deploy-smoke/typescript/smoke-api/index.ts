@@ -5,10 +5,13 @@
 // DrainLineItems drains, at once or five seconds on, and the rows three
 // behavior workers move (D151): a follow-up its Timers deadline makes due,
 // a check-in whose Schedules run the worker hands to checkInWakeUpsSchedulesRun,
-// and an alert its Reactions raises when its level changes.
+// and an alert its Reactions raises when its level changes; and a line
+// item's files (D154), uploaded straight to the bucket through a signed
+// URL, checked on completion, filed onto another line item with no second
+// upload, which then lists the first among its backlinks.
 
 import { notFound } from '@superschematic/http-runtime';
-import { enqueue, type CoreCaller } from '@superschematic/http-runtime/postgres';
+import { enqueue, type Attachment, type CoreCaller } from '@superschematic/http-runtime/postgres';
 import type { BehaviorsImplementation, Constructor, Deps, JobsConstructor, LineItemsImplementation, WorkersConstructor } from '@smoke/smoke-api-api';
 import type { AlertRow, CheckInRow, FollowUpRow, LineItemRow } from '@smoke/smoke-db-types/orm';
 import { drainLineItemQueue } from '@smoke/smoke-db-types/queues';
@@ -45,6 +48,11 @@ export const createWorkers: WorkersConstructor = deps => ({
   },
   // A check-in's wake-up ran: record when, in the transaction the event's
   // completion commits in, and report the run told.
+  // A file's object, released: deleted once no file names it.
+  async releaseFiles(message) {
+    const { deleted } = await deps.orm.asSystem().attachments.release(message, { bucket: deps.smokeFiles });
+    deps.logger.info('released', { object: message.objectKey, deleted });
+  },
   async checkInWakeUpsSchedulesRun(event, tx) {
     await tx.checkIn.updateOne(event.key, { ranAt: new Date(Number(event.payload.firedAt)) });
     deps.logger.info('checked in', { checkIn: event.key, run: event.payload.name });
@@ -92,8 +100,30 @@ function view(row: LineItemRow) {
   return { id: row.id, name: row.name, amount: row.amount, drainedAt: row.drainedAt };
 }
 
+function fileView(file: Attachment) {
+  return { id: file.id, lineItemId: file.key, name: file.name, size: file.size, contentHash: file.contentHash, objectKey: file.objectKey, state: file.state };
+}
+
 function lineItemsImplementation(deps: Deps): LineItemsImplementation {
+  const bucket = deps.smokeFiles;
   return {
+    async beginFile({ id, input }) {
+      const { attachment, upload } = await deps.orm.attachments.begin(
+        { to: { table: 'LineItem', key: id }, name: input.name, mediaType: input.mediaType, size: input.size, sha256: input.sha256 },
+        { bucket, expiresInSeconds: 600 }
+      );
+      return { fileId: attachment.id, url: upload.url, contentType: input.mediaType };
+    },
+    async completeFile({ fileId }) {
+      return fileView(await deps.orm.attachments.complete({ table: 'LineItem', id: fileId }, { bucket }));
+    },
+    async fileFile({ fileId, input }) {
+      return fileView(await deps.orm.attachments.file({ table: 'LineItem', id: fileId, to: { table: 'LineItem', key: input.lineItemId } }));
+    },
+    async backlinks({ id }) {
+      const { items } = await deps.orm.references.referencedBy({ table: 'LineItem', key: id });
+      return items.map(item => ({ lineItemId: item.key, role: item.role ?? '' }));
+    },
     async createLineItem({ input }) {
       return view(await deps.orm.lineItem.createOne({ name: input.name, amount: input.amount, embedding: embed(input.name) }));
     },

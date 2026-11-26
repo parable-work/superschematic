@@ -43,6 +43,18 @@ export type HmacVerifiedConfig = {
 };
 
 /**
+ * What `@httpBinaryStream` takes (D167). `contentType` is the success
+ * body's media type, lowercase and without parameters, such as
+ * "application/vnd.apache.arrow.stream"; JSON is refused. `responseHeaders`
+ * names the headers the stream answers with, which the OpenAPI document
+ * lists.
+ */
+export type HttpBinaryStreamConfig = {
+  readonly contentType: string;
+  readonly responseHeaders?: readonly string[];
+};
+
+/**
  * An API service's handle: the sentinel an API service exports from its
  * src/service.generated.ts, built by service() in
  * @superschematic/schema-config. Every ServiceHandle<"API"> is one, and a
@@ -192,6 +204,26 @@ export function mcp(_config: MCPConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/**
+ * The class a policy row may name an operation by (D158): it reads, writes
+ * the app's rows, messages a party, or moves money.
+ */
+export type AutonomyClass = "read" | "internalWrite" | "messageParty" | "moneyMovement";
+
+/** The autonomy an agent has over an operation (D158). */
+export type AutonomyMode = "auto" | "tell" | "ask";
+
+/**
+ * Says what the operation is to an agent's autonomy policy (D158): its
+ * class, and the autonomy an agent has over it when no policy row names
+ * it. A read and an internal write default to auto, a message to a party
+ * and a money movement to ask. An operation that moves money is ask and
+ * nothing else: the build refuses another mode.
+ */
+export function autonomy(_class: AutonomyClass, _mode?: AutonomyMode): MethodDecorator {
+  return noopMethodDecorator;
+}
+
 /** The glyph of the operation's MCP tool. Any name unless an extension restricts it. */
 export function icon(_name: string): MethodDecorator {
   return noopMethodDecorator;
@@ -229,6 +261,20 @@ export const webhook: MethodDecorator = noopMethodDecorator;
  * first, before the rate limit, the body limit and the permission check.
  */
 export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
+  return noopMethodDecorator;
+}
+
+/**
+ * The operation's success body is a stream of `contentType`, not the JSON
+ * envelope (D167). Every SDK method returns the stream unread, with its
+ * headers; a refusal is still an RFC 9457 problem and the SDK's usual
+ * error. The declared result type stays the operation's result in the
+ * tool documents, the value a tool binding hands its caller after it reads
+ * the stream. The generated routes answer JSON, so the operation is also
+ * `@manualRouteRegistration`, and your handler writes the stream. Its
+ * input is an input type or none, beside path and query parameters.
+ */
+export function httpBinaryStream(_cfg: HttpBinaryStreamConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 

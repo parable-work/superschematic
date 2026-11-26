@@ -46,9 +46,13 @@
 //! bound does not. It reads the state from transition's `to`, the only
 //! state Workflow's closed parameters name.
 //!
-//! The bound: a rollup reads one linked page, [`MAX_ROLLUP_READ`] rows
-//! (500). Past it the rollup has no value, its entry is `{"over": true}`,
-//! which no function returns, and its gate does not hold.
+//! The bound: a rollup reads the rows a linked page at a time, as the host
+//! has them, as Reactions' rule over every row does, up to
+//! [`MAX_ROLLUP_READ`] rows (10,000, twenty pages). Past it the rollup has no
+//! value, its entry is `{"over": true}`, which no function returns, and its
+//! gate does not hold. The bound stops a runaway relation from making every
+//! read of the row read without end; it is not a size a rollup is meant to
+//! reach.
 //!
 //! A value is computed as the host has the rows when the read or the
 //! transition runs, through the core's linked read (rows of a table whose
@@ -93,8 +97,8 @@ pub const VALUES: &str = "values";
 /// The veto of a gated transition whose rollup does not hold.
 pub const NOT_HELD: &str = "not_held";
 
-/// The most linked rows one rollup reads: one linked page.
-pub const MAX_ROLLUP_READ: usize = superschematic_rules::LINKED_PAGE;
+/// The most linked rows one rollup reads: twenty linked pages.
+pub const MAX_ROLLUP_READ: usize = 20 * superschematic_rules::LINKED_PAGE;
 
 /// Workflow's status by qualified name, as a rollup's field names it.
 const WORKFLOW_STATUS: &str = "Workflow.status";
@@ -390,8 +394,9 @@ enum Computed {
 }
 
 // linked reads the rows of a rollup's table that point at the view's row
-// through its link: none when no spec names the table or its relation does
-// not point at this table, over when one page does not hold them all.
+// through its link, a page at a time: none when no spec names the table or
+// its relation does not point at this table, over when there are more than
+// MAX_ROLLUP_READ.
 fn linked<C>(view: &View<'_, C>, spec: &RollupSpec) -> Hook<Linked> {
     let none = Linked::Read {
         rows: Vec::new(),
@@ -413,14 +418,20 @@ fn linked<C>(view: &View<'_, C>, spec: &RollupSpec) -> Hook<Linked> {
     let flow = one_workflow(linking);
     let field = field.name.clone();
     let key = view.key().unwrap_or_default().to_owned();
-    let page = view.read_linked(&spec.schema, &field, &key, None)?;
-    if page.more {
-        return Ok(Linked::Over);
+    let mut rows: Vec<KeyedRow> = Vec::new();
+    let mut after: Option<String> = None;
+    loop {
+        let page = view.read_linked(&spec.schema, &field, &key, after.as_deref())?;
+        rows.extend(page.rows.iter().cloned());
+        if rows.len() > MAX_ROLLUP_READ {
+            return Ok(Linked::Over);
+        }
+        match (page.more, page.rows.last()) {
+            (true, Some(last)) => after = Some(last.key.clone()),
+            _ => break,
+        }
     }
-    Ok(Linked::Read {
-        rows: page.rows.clone(),
-        flow,
-    })
+    Ok(Linked::Read { rows, flow })
 }
 
 // one_workflow is a table's one Workflow use, by id with its config; none
