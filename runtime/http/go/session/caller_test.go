@@ -30,7 +30,9 @@ func TestGetCallerIsTheWholePrincipalOrAUserOrNoOne(t *testing.T) {
 	}
 }
 
-type authority struct{ tokens map[string]access.GrantAuthentication }
+type authority struct {
+	tokens map[string]access.GrantAuthentication
+}
 
 func (a authority) AuthenticateGrant(_ context.Context, token string, _ time.Time) (access.GrantAuthentication, error) {
 	if found, ok := a.tokens[token]; ok {
