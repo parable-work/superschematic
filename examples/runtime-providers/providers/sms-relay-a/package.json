@@ -1,0 +1,22 @@
+{
+  "name": "@example-providers/sms-relay-a",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel adapter for an SMS relay that takes JSON and signs its callbacks with HMAC-SHA256 (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "sms-relay-a",
+      "implements": "channel",
+      "operations": ["send", "health", "status", "inbound"],
+      "config": {
+        "URL": { "description": "The relay's base URL." },
+        "TOKEN": { "secret": true, "description": "The relay's API token, which also signs its callbacks." },
+        "SENDER": { "optional": true, "description": "The number messages are sent from; the relay's default when unset." }
+      },
+      "role": ["messages.relay"]
+    }
+  }
+}

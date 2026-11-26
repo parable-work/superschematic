@@ -54,6 +54,7 @@ links is active for every command it runs.
 | MCP tool invocation policy | `RegisterToolInvocationPolicy(ToolInvocationPolicy)` | 3.15 |
 | Behavior | `RegisterBehavior(BehaviorSpec)` | 3.16 |
 | Principal `@rateLimit` key | `RegisterRateLimitKey(RateLimitKey)` | D131 |
+| Runtime feature that needs a provider | `RegisterRuntimeFeature(RuntimeFeature)` | 13 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
@@ -1934,6 +1935,7 @@ its provider, which supplies those two functions. D15 in
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
 | Platforms, connectors, targets, DNS platforms, provisioners | none (`docs/stack-model.md`, section 6) |
+| Runtime features | none yet: notifications, attachments and agents register theirs as they are built (section 13) |
 | Commands | `build`, `build-all`, `json-schema`, `format` |
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
@@ -2104,4 +2106,79 @@ a candidate for a change with its own test.
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
+| `ir/runtime_providers.go`, `internal/registry/core_providers.go`, `internal/loader/providers.go`, `internal/stack/providers.go` | the runtime interfaces' contracts, `@providers` and `RegisterRuntimeFeature`, the provider packages' manifests and slots, the stack's provider and coverage checks (section 13) |
+| `runtime/http/typescript/src/providers/` | the runtime interfaces in TypeScript, `defineProvider`, `providersFrom`, credential injections (section 13) |
+| `examples/runtime-providers/` | six provider packages and an app whose environments choose them (section 13) |
 | `docs/DECISIONS.md` at commit e8e685a51 | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16); the file at main holds only what is not built |
+
+## 13. Runtime extension points
+
+Everything above is build time: an extension is Go linked into the binary.
+A running app also calls outside services, and five of them are runtime
+interfaces the core defines (D159): a credential provider, a channel
+adapter, a sandbox provider, a model provider and a file processor. A
+provider is a package that implements one of them. The core never depends
+on a provider. The docs site's
+[runtime providers](https://parable-work.github.io/superschematic/guides/runtime-providers/)
+guide walks the same surfaces with code.
+
+### 13.1 The interfaces and their contracts
+
+`ir.RuntimeContracts` names each interface and the operations a provider
+of it must and may implement. The TypeScript types are in
+`@superschematic/http-runtime/providers` (`CredentialProvider`,
+`ChannelAdapter`, `SandboxProvider`, `ModelProvider`, `FileProcessor`),
+whose `RUNTIME_CONTRACTS` is held to the Go list by
+`runtime/http/testdata/runtime_contracts.json`. The interfaces exist in
+TypeScript alone so far.
+
+### 13.2 How a package declares its interface
+
+A provider package declares itself in its `package.json`, under
+`"superschematic": {"provider": {name, implements, operations, config,
+role}}`. An API's config lists the packages it may use (`providers`, each
+a directory relative to the service), and the loader reads each manifest
+into `ir.Schema.Providers` and checks it against its contract
+(`ir.RuntimeProvider.Check`): an interface the core defines, every
+required operation and no unknown one, config keys, and a role whose
+every permission names one capability, two dotted segments or more. In
+TypeScript the package exports `defineProvider({...})`, and
+`checkProviderPackage` holds the manifest to it in the package's test.
+
+Not taken: a Go extension that registers each provider, which makes a
+TypeScript package ship Go to be checked; and reading the TypeScript
+definition at build time, which runs the package's code in the build.
+
+### 13.3 Slots, config and secrets
+
+`@providers({ SLOT: "interface" })` on an API's `@envVars` class makes
+each named field a slot: its value in an environment names the provider,
+and the provider reads its settings from the fields named after the slot
+(`ir.ProviderConfigField`: slot `SMS` and key `URL` give `SMS_URL`), a
+secret one a `Secret<T>` field. A stack binds them as any other field, so
+`environment.json` shows the provider of each slot of each deployable
+(`ir.ResolvedDeployable.Providers`), and swapping providers is a change
+of env. The resolver refuses a slot bound to a parameter, one that names
+a provider the API does not list or of another interface, and one whose
+provider's settings have no field, the wrong secrecy or no binding
+(`stack.CodeProvider`).
+
+### 13.4 Coverage
+
+`Registry.RegisterRuntimeFeature(RuntimeFeature{Name, Interface, Uses})`
+registers a feature that needs a provider. `Uses` reads the API's schema
+and the DB schemas it connects to. The stack generator records the
+features each API uses (`stack.Service.Features`), and the resolver
+refuses an environment that runs a deployable of such an API with no
+slot of the feature's interface set (`stack.CodeNoProvider`). The core
+registers none yet.
+
+### 13.5 The provider's principal
+
+Each provider acts as its own principal, of kind `extension`
+(`ir.PrincipalExtension`), subject `extension:<name>`, holding its
+manifest's role. `providersFrom` runs every call into a provider within
+that principal, and `extensionAuthenticator` authenticates a provider
+that calls the app with its own key as it. A credential provider returns
+no value to its caller: `resolve` answers a sealed `Injection`, which only
+the runner opens.

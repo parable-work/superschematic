@@ -61,6 +61,8 @@ const placeholders = {
 };
 
 const superscalarWasm = join(root, 'node_modules', 'superscalar', 'dist', 'workerd', SUPERSCALAR_WASM);
+const RULES_WASM = 'superschematic_rules_wasm.wasm';
+const rulesWasm = join(root, '..', '..', 'rules', 'typescript', 'dist', RULES_WASM);
 let failed = false;
 for (const fixture of readdirSync(fixtures).sort()) {
   const source = join(fixtures, fixture);
@@ -80,6 +82,12 @@ for (const fixture of readdirSync(fixtures).sort()) {
   }
   if (!existsSync(superscalarWasm)) throw new Error(`workerd-test: ${superscalarWasm} is missing; scripts/superscalar-dep.sh builds superscalar's workerd build`);
   copyFileSync(superscalarWasm, join(out, SUPERSCALAR_WASM));
+  // The behaviors' core's module, which a fixture that runs the core embeds
+  // (recurrence, D152), as a Worker's bundle carries it.
+  if (readFileSync(join(source, 'config.capnp'), 'utf8').includes(RULES_WASM)) {
+    if (!existsSync(rulesWasm)) throw new Error(`workerd-test: ${rulesWasm} is missing; run bun run build in runtime/rules/typescript`);
+    copyFileSync(rulesWasm, join(out, RULES_WASM));
+  }
   let config = readFileSync(join(source, 'config.capnp'), 'utf8');
   for (const [placeholder, value] of Object.entries(placeholders)) config = config.split(placeholder).join(value);
   writeFileSync(join(out, 'config.capnp'), config);

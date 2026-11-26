@@ -86,3 +86,45 @@ export function accessGrants(): ClassDecorator {
 export function accessLog(): ClassDecorator {
   return () => {};
 }
+
+/** The options of @calendarSource (D152). */
+export interface CalendarSourceOptions<T> {
+  /** The source's name, which a calendar read's sources and a feed's scope name; the table's name, with its first letter lowered, unless set (and the field's, or occurrences, after a dot when the table has more than one source). */
+  readonly name?: string;
+  /** The date or date-time field each row is dated by. Exactly one of field and occurrences. */
+  readonly field?: keyof T & string;
+  /** The date or date-time field a row's span ends at; a point in time when absent. */
+  readonly end?: keyof T & string;
+  /** Dates each occurrence of the table's Recurrence by its due time, in place of a field. */
+  readonly occurrences?: true;
+  /** The field an entry is titled by. */
+  readonly title: keyof T & string;
+  /** What an entry of the source is, for a reader: deadline, meeting, renewal. */
+  readonly kind: string;
+  /** The key a reader colours its entries by. */
+  readonly color?: string;
+  /** The field that holds a row's owner, which a read's scope "mine" keeps to the caller. */
+  readonly owner?: keyof T & string;
+}
+
+/**
+ * Puts a table's rows on the calendar (D152): each row dated by a field, or
+ * each occurrence of its Recurrence by its due, titled by a field, with a
+ * kind and a colour key. A table repeats it for each source.
+ *
+ * ```ts
+ * @calendarSource<Contract>({ field: "endsOn", title: "title", kind: "renewal" })
+ * export abstract class Contract { ... }
+ *
+ * @calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+ * export abstract class Filing implements Recurrence<Filing, { ... }> { ... }
+ * ```
+ *
+ * The calendar read (readCalendar, its route and its MCP tool) and the
+ * iCalendar feed merge every source, each row read through its table's
+ * repository as the caller, so a row's audience and the caller's grants
+ * hold, and a feed shows only what its token's principal reads.
+ */
+export function calendarSource<T>(_options: CalendarSourceOptions<T>): ClassDecorator {
+  return () => {};
+}

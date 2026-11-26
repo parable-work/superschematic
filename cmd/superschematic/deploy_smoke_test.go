@@ -26,7 +26,9 @@ const deploySmoke = "../../examples/deploy-smoke"
 // to its account id's 30 characters, its whole name in a label (D91,
 // D97); on Cloudflare, smoke-db on Hyperdrive, the worker draining at
 // each minute's Cron firing, and the site's Worker taking the API's paths
-// first and reaching it through a service binding (D91, D92).
+// first and reaching it through a service binding (D91, D92); and on both,
+// the bucket a line item's files upload to through a signed URL, and the
+// worker that releases their objects (D154).
 func TestDeploySmokeEnvironments(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -140,6 +142,22 @@ func TestDeploySmokeEnvironments(t *testing.T) {
 			t.Errorf("%s's version binds no Hyperdrive config: %s (D92)", d, version)
 		}
 	}
+	// A line item's files upload straight to an R2 bucket through URLs
+	// smoke-api signs with its edge's R2 credential, and the worker that
+	// releases their objects drains at each firing (D154).
+	props(t, cf, "smoke-files.bucket")
+	props(t, cf, "smoke-api.r2.smoke-files.token")
+	api, _ := json.Marshal(props(t, cf, "smoke-api.version")["bindings"])
+	for _, want := range []string{`"name":"SMOKE_FILES_BUCKET"`, `"type":"r2_bucket"`, `"name":"SMOKE_FILES_BUCKET_R2_ACCESS_KEY_ID"`, `"name":"SMOKE_FILES_BUCKET_R2_TOKEN"`} {
+		if !bytes.Contains(api, []byte(want)) {
+			t.Errorf("smoke-api's version binds no %s, which a signed upload needs (D154)", want)
+		}
+	}
+	if platforms["smoke-api-release-files"] != "cloudflare.drainer" {
+		t.Errorf("smoke-api-release-files is on %s, want cloudflare.drainer (D154)", platforms["smoke-api-release-files"])
+	}
+	props(t, gcp, "smoke-files.bucket")
+	props(t, gcp, "smoke-api.storage.smoke-files")
 }
 
 // props are the properties of the resource id of an environment.json.

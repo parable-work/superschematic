@@ -163,6 +163,14 @@ type TypeDef struct {
 	// EnvVars indicates this type provides environment variable configuration.
 	EnvVars bool `json:"envVars,omitempty" yaml:"envVars,omitempty"`
 
+	// ProviderSlots are the @providers declaration of an API's @envVars
+	// class (D159): each config field whose value, per environment, names
+	// the runtime provider that serves it, by field, with the runtime
+	// interface the provider implements (RuntimeChannel, ...). The
+	// provider reads its own settings from the fields named after the slot
+	// (ProviderConfigField). Nil for every other type.
+	ProviderSlots map[string]string `json:"providerSlots,omitempty" yaml:"providerSlots,omitempty"`
+
 	// DenyUnknownFields (@denyUnknownFields) makes the generated Rust serde
 	// deserializer reject a payload key the type does not declare instead of
 	// dropping it. Opt-in per type: a strict decoder suits a closed wire
@@ -271,6 +279,63 @@ type TypeDef struct {
 	// their fields. Nil for every other type.
 	AccessGrants *AccessGrantsDef `json:"accessGrants,omitempty" yaml:"accessGrants,omitempty"`
 	AccessLog    *AccessLogDef    `json:"accessLog,omitempty" yaml:"accessLog,omitempty"`
+
+	// RowReferences is the @references declaration of a DB table (D154):
+	// the rows each row points at, in a sub-table the loader adds. Nil for
+	// every other type. See [RowReferencesDef].
+	RowReferences *RowReferencesDef `json:"rowReferences,omitempty" yaml:"rowReferences,omitempty"`
+
+	// Attachments is the @attachments declaration of a DB table (D154):
+	// the files each row holds in a bucket, in a sub-table the loader
+	// adds. Nil for every other type. See [AttachmentsDef].
+	Attachments *AttachmentsDef `json:"attachments,omitempty" yaml:"attachments,omitempty"`
+
+	// RowTable marks the sub-table the loader adds for a @references or an
+	// @attachments table (D154). Nil for every other type. See [RowTable].
+	RowTable *RowTable `json:"rowTable,omitempty" yaml:"rowTable,omitempty" jsonschema:"-"`
+
+	// Events are the @event declarations of a DB table (D153): the events
+	// its rows raise, which the notifier routes. See [EventDef].
+	Events []*EventDef `json:"events,omitempty" yaml:"events,omitempty"`
+
+	// Notifier marks a DB class that is one of the notifier's tables
+	// (D153), and ChannelIdentities the one that is the table of channel
+	// identities; the loader fills their fields. Nil for every other type.
+	Notifier          *NotifierDef          `json:"notifier,omitempty" yaml:"notifier,omitempty"`
+	ChannelIdentities *ChannelIdentitiesDef `json:"channelIdentities,omitempty" yaml:"channelIdentities,omitempty"`
+
+	// Agents marks a DB class that is one of the agent orchestration's
+	// tables (D158); the loader adds the fields of its part the class does
+	// not declare. Nil for every other type. See [AgentsDef].
+	Agents *AgentsDef `json:"agents,omitempty" yaml:"agents,omitempty"`
+	// Party marks a DB table whose rows are parties (D157): principals of
+	// kind party, outside the User table, that act through grants alone.
+	// Nil for every other type. See [PartyDef].
+	Party *PartyDef `json:"party,omitempty" yaml:"party,omitempty"`
+
+	// Conversations marks a DB class that is one of the conversations'
+	// tables (D157), and RunRequests the @queue class that is the queue of
+	// run requests; the loader fills their fields. Nil for every other
+	// type.
+	Conversations *ConversationsDef `json:"conversations,omitempty" yaml:"conversations,omitempty"`
+	RunRequests   *RunRequestsDef   `json:"runRequests,omitempty" yaml:"runRequests,omitempty"`
+
+	// CalendarSources are the @calendarSource declarations of a DB table
+	// (D152): the dates of its rows, or the occurrences of its Recurrence,
+	// that the calendar read and feed merge across tables. See
+	// [CalendarSourceDef].
+	CalendarSources []CalendarSourceDef `json:"calendarSources,omitempty" yaml:"calendarSources,omitempty"`
+
+	// Searchable is the @searchable declaration of a DB table (D155): the
+	// fields that title its rows and hold their body, which the database's
+	// search index holds. Nil for every other type. See [SearchableDef].
+	Searchable *SearchableDef `json:"searchable,omitempty" yaml:"searchable,omitempty"`
+
+	// SearchIndex marks the index table the loader adds to a database with
+	// a @searchable table (D155), [SearchIndexTypeName], which only the
+	// triggers and the runtime's indexing write, and for which no
+	// repository is generated.
+	SearchIndex bool `json:"searchIndex,omitempty" yaml:"searchIndex,omitempty" jsonschema:"-"`
 
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
@@ -422,6 +487,12 @@ type FieldDef struct {
 	// MCP is an operation's MCP classification, declared with @mcp. Nil on
 	// data fields and on operations without @mcp.
 	MCP *OperationMCP `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+
+	// Autonomy is the operation's @autonomy (D158): the class of operation
+	// it is to an agent's autonomy policy, and the autonomy an agent has
+	// over it when no policy row names it. Nil for an operation that
+	// declares none, which an agent's policy reads as an internal write.
+	Autonomy *OperationAutonomy `json:"autonomy,omitempty" yaml:"autonomy,omitempty"`
 
 	// Icon names the glyph a UI shows for the field or operation, declared
 	// with @icon (`x-icon` in the legacy form). On an operation it is the

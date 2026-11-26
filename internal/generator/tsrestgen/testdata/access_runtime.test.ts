@@ -18,7 +18,7 @@ import pg from 'pg';
 import { Hono } from 'hono';
 import type { Principal, RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { accessLogOf, activeGrants, grantAuthenticator, issueGrant, revokeGrant } from '@superschematic/http-runtime/postgres';
+import { accessLogOf, activeGrants, calendarRoutes, grantAuthenticator, issueGrant, revokeGrant } from '@superschematic/http-runtime/postgres';
 import { createOrm } from '@schemas/fixture-access-db-types/orm';
 import { parseIdentityUUID } from 'superscalar/scalars';
 
@@ -311,5 +311,47 @@ describe('the access of fixture-access-api', () => {
     expect(reveals[0]).toMatchObject({ principal: ADMIN_ID, principalKind: 'user', operation: 'getContract', targetType: 'Contract', targetId: contractA.id, field: 'terms' });
     // A grant's holder whose role holds no reveal sees it masked.
     expect((await ok('GET', `/api/contracts/${contractA.id}`, token)).terms).toBe('[secret]');
+  });
+
+  test("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused", async () => {
+    const calendar = calendarRoutes({ orm, authenticate: request => callers({ headers: request.headers } as RequestContext) });
+    await orm.asSystem().role.createOne({ name: 'calendarFeed', permissions: ['documents.calendar'] } as never);
+    const day = 86_400_000;
+    const window = `from=${new Date(Date.now() - day).toISOString()}&to=${new Date(Date.now() + day).toISOString()}`;
+    const send = (path: string, as?: string, init: RequestInit = {}) =>
+      calendar(new Request(`http://api.example.com${path}`, { ...init, headers: { ...(as ? { authorization: `Bearer ${as}` } : {}), 'content-type': 'application/json' } })) as Promise<Response>;
+    // The read: each caller's documents of the day, as each reads them.
+    const read = async (as: string) => ((await (await send(`/api/calendar?${window}`, as)).json()) as any).data.entries.map((entry: any) => entry.title);
+    expect(await read(OWNER)).toEqual(expect.arrayContaining(['Secret plan', 'Public plan']));
+    expect(await read(OTHER)).toContain('Public plan');
+    expect(await read(OTHER)).not.toContain('Secret plan');
+    // The other user's feed, in full, read by a client with no header.
+    const issue = async (as: string, detail: string) => ((await (await send('/api/calendar/feeds', as, { method: 'POST', body: JSON.stringify({ role: 'calendarFeed', detail }) })).json()) as any).data;
+    const other = await issue(OTHER, 'full');
+    expect(other.token.startsWith('grant_')).toBe(true);
+    const fetched = await send(other.path);
+    expect(fetched.status).toBe(200);
+    expect(fetched.headers.get('content-type')).toContain('text/calendar');
+    const ics = await fetched.text();
+    expect(ics).toContain('SUMMARY:Public plan');
+    expect(ics).not.toContain('Secret plan');
+    // The owner's busy feed holds the owner's private document, as Busy
+    // and a reference, and no title.
+    const owner = await issue(OWNER, 'busy');
+    const busy = await (await send(owner.path)).text();
+    expect(busy).not.toContain('plan');
+    expect(busy.split('BEGIN:VEVENT').length - 1).toBe((await read(OWNER)).length);
+    expect(busy).toMatch(/SUMMARY:Busy \([A-Z2-9]{8}\)/u);
+    // A feed's token is no credential of any other route.
+    expect(await status('GET', '/api/documents', other.token)).toBe(401);
+    // Rotated: the old URL is refused, the new one reads.
+    const rotated = ((await (await send(`/api/calendar/feeds/${other.id}/rotate`, OTHER, { method: 'POST' })).json()) as any).data;
+    expect((await send(other.path)).status).toBe(401);
+    expect((await send(rotated.path)).status).toBe(200);
+    // Another user cannot revoke it; its holder can, and it is refused.
+    expect((await send(`/api/calendar/feeds/${rotated.id}`, OWNER, { method: 'DELETE' })).status).toBe(404);
+    expect((await send(`/api/calendar/feeds/${rotated.id}`, OTHER, { method: 'DELETE' })).status).toBe(204);
+    expect((await send(rotated.path)).status).toBe(401);
+    expect((await send('/api/calendar/feed/grant_unknown.ics')).status).toBe(401);
   });
 });

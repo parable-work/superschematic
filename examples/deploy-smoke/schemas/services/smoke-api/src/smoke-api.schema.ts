@@ -13,7 +13,7 @@ import {
   userSessions,
   worker,
 } from "@superschematic/api";
-import { Alert, CheckIn, DrainLineItem, FollowUp, LineItem } from "@smoke/smoke-db";
+import { Alert, CheckIn, DrainLineItem, FileReleased, FollowUp, LineItem } from "@smoke/smoke-db";
 
 // Registration waits for an administrator's approval; the first
 // registrant is the administrator (D81, D88).
@@ -58,6 +58,41 @@ export abstract class DrainRequested {
   enqueued: boolean;
 }
 
+// A file to upload to a line item: what the client declares, which the
+// upload's completion holds its bytes to (D154).
+export abstract class FileInput {
+  name: Validate<string, { minLength: 1; maxLength: 255 }>;
+  mediaType: string;
+  size: Generic.Int64;
+  sha256: Validate<string, { pattern: "^[0-9a-f]{64}$" }>;
+}
+
+// Where the client PUTs the file's bytes, with which content type.
+export abstract class FileUpload {
+  fileId: Identity.UUID;
+  url: string;
+  contentType: string;
+}
+
+export abstract class FileView {
+  id: Identity.UUID;
+  lineItemId: Identity.UUID;
+  name: string;
+  size: Generic.Int64;
+  contentHash: string;
+  objectKey: string;
+  state: string;
+}
+
+export abstract class FileOnto {
+  lineItemId: Identity.UUID;
+}
+
+export abstract class Backlink {
+  lineItemId: Identity.UUID;
+  role: string;
+}
+
 export class LineItems extends Authenticated {
   // Writes the line item with its name's embedding.
   @rest(HttpMethod.POST, "line-items")
@@ -99,6 +134,37 @@ export class LineItems extends Authenticated {
   @rest(HttpMethod.POST, "line-items/{id}/drain-later")
   @requirePermission(["smoke.write"])
   requestDelayedDrain(id: Identity.UUID): DrainRequested {
+    throw new Error("schema declaration only");
+  }
+
+  // Begins a file's upload to the line item: a URL the client PUTs its
+  // bytes to, straight to the bucket (D154).
+  @rest(HttpMethod.POST, "line-items/{id}/files")
+  @requirePermission(["smoke.write"])
+  beginFile(id: Identity.UUID, input: FileInput): FileUpload {
+    throw new Error("schema declaration only");
+  }
+
+  // Completes it: the bytes read back from the bucket, held to the size
+  // and SHA-256 the upload declared.
+  @rest(HttpMethod.POST, "line-items/{id}/files/{fileId}/complete")
+  @requirePermission(["smoke.write"])
+  completeFile(id: Identity.UUID, fileId: Identity.UUID): FileView {
+    throw new Error("schema declaration only");
+  }
+
+  // Files the file onto another line item, with no second upload; the
+  // line item then points at it.
+  @rest(HttpMethod.POST, "line-items/{id}/files/{fileId}/file")
+  @requirePermission(["smoke.write"])
+  fileFile(id: Identity.UUID, fileId: Identity.UUID, input: FileOnto): FileView {
+    throw new Error("schema declaration only");
+  }
+
+  // The line items that point at this one.
+  @rest(HttpMethod.GET, "line-items/{id}/backlinks")
+  @requirePermission(["smoke.read"])
+  backlinks(id: Identity.UUID): Backlink[] {
     throw new Error("schema declaration only");
   }
 }
@@ -193,6 +259,11 @@ export abstract class AlertReactions {}
 // (D92).
 @worker({ queue: DrainLineItem, concurrency: 2 })
 export abstract class DrainLineItems {}
+
+// Deletes the object a line item's file named once no file names it
+// (D154): a worker of FileReleased, which a file's delete enqueues on.
+@worker({ queue: FileReleased })
+export abstract class ReleaseFiles {}
 
 // Named as a finances API names its own: its deployable,
 // smoke-api-sync-all-linked-accounts, is 34 characters, which gcp

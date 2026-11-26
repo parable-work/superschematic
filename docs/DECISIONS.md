@@ -167,8 +167,9 @@ takes own fields only, on the engine and on a table.
   own to design.
 
 **D77** (L 10239). Vectors over messages; Search's every-schema search on
-namespace operations; `readable()` asked per operation; a notifier and an
-agent dispatcher as stack workers; a conversation UI. Comments runs on
+namespace operations; `readable()` asked per operation; the notifier and
+the agent dispatcher in Go and Rust (D153 built the notifier and D158 the
+dispatcher, each a queue's worker, in TypeScript); a conversation UI. Comments runs on
 the core now (D103's status lists what its port left).
 
 **D78** (L 10885). Go and TypeScript apps; the Topcoat asset bundle in the
@@ -208,8 +209,10 @@ trigger's message: a delay is an enqueue's, in Go, TypeScript and Rust,
 and a trigger enqueues due at once.
 
 **D81** (L 11425).
-- Password reset and email verification, which D50 keeps out of the core
-  until there is a channel to send through.
+- Password reset and email verification in Go and Rust, and routes the
+  identity service serves for them; D153 built both in TypeScript
+  (`passwordReset`, the channel identities' codes) as functions an app
+  mounts.
 - An approve action on Topcoat's user pages (they enable and disable).
 - Files up and down in the Rust server and SDK, which refuse them.
 - An MCP endpoint in the Go server (D93 and D116 keep Go refused).
@@ -364,8 +367,10 @@ engine type, where `finished` is refused until it is designed.
 
 **D114** (L 17971). A key's use log beyond `lastUsedAt`; a hint of the
 token in the list; rotation as one call; rate limits per key; a key bound
-to an origin or an address; confirmation of a tool call made with a key;
-keys on Topcoat's account and administration pages; a test of the
+to an origin or an address; confirmation of a tool call made with a key,
+past an agent run's (D158 asks before a run's call its autonomy policy
+holds, the run's token a grant); keys on Topcoat's account and
+administration pages; a test of the
 engine's own server authenticating a key.
 
 **D118** (L 18532). A 409 for a guard's refusal that names the two
@@ -698,10 +703,10 @@ the version, as the engine's did not.
 
 What Comments left: claiming and settling deliveries (`claimDeliveries`,
 `settleDeliveries`) and their retention's prune, which are recorded and
-not claimed; `searchMessages`, attachment blocks and `moveAnchor`, which
-need no new primitive (the tools still list `moveAnchor`, which the core
-refuses); `via` on a message, which needs the calling service on the
-core's caller; events for a beside write; reads of a conversation by
+not claimed; `searchMessages` and `moveAnchor`, which need no new
+primitive (the tools still list `moveAnchor`, which the core refuses);
+`via` on a message, which needs the calling service on the core's
+caller; events for a beside write; reads of a conversation by
 page; the testkit's mapping of `behaviors.invoke`, without which the
 inbox's steps after a claim stay skipped, and transcripts that record
 signals; streamed replies in runtime mode, whose layout gives a Comments
@@ -1887,3 +1892,634 @@ Left:
 - A path to a list field of ids in a row rule, and a team as a principal
   in an audience.
 - Live deploys: `smoke.sh Cloudflare` and `Gcp` are the maintainer's.
+
+## D159. Five runtime interfaces a running app calls, each provider a package that declares its interface in its package.json, slots in an API's config that each environment binds, a build that refuses a feature with no provider, and providers that act as their own principals (D156 amended)
+
+The extension seam was build time alone: Go linked into the binary
+(`docs/extension-model.md`). A running app had no interface for what it
+calls outside: a channel to send a notice through, a store of
+credentials, a sandbox and a model for an agent run, a processor for a
+stored file. Sections 3, 4, 7 and 8 of the platform plan call these; this
+entry defines them. `docs/extension-model.md` section 13 and the
+runtime providers guide hold the design as built.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Five interfaces, each a list of operations in `ir.RuntimeContracts` and a TypeScript interface in `@superschematic/http-runtime/providers`: `credentials` (`CredentialProvider`: `list`, `resolve`), `channel` (`ChannelAdapter`: `send`, `health`, optional `status` and `inbound`), `sandbox` (`SandboxProvider`: `start`, `cancel`, `status`, `cost`), `model` (`ModelProvider`: `complete`, its usage in the answer) and `files` (`FileProcessor`: `extractText`, `preview`). `runtime/http/testdata/runtime_contracts.json` holds the Go list, which the TypeScript one is tested against. | An interface per provider kind (email, SMS, chat), which the channel's `kind` and D153's trust levels tell apart as data |
+| TypeScript only for now. The runtime that sections 3, 4 and 8 build first is TypeScript, and a provider package is an npm package. | Go and Rust at once, before a feature calls them |
+| A package declares its interface in its `package.json`, `"superschematic": {"provider": {name, implements, operations, config, role}}`. An API's config lists the packages it may use (`providers`, directories relative to the service), and the loader reads each into `ir.Schema.Providers` and checks it against its contract: an interface the core defines, every required operation and none it does not define, config keys of upper-case words, and a role. In TypeScript the package exports `defineProvider({...})`, which checks the same, and `checkProviderPackage` holds the manifest to the definition and to the provider it makes, in the package's own test. | A Go extension per provider calling a `RegisterRuntimeProvider`, which makes a TypeScript package ship Go to be checked; reading the definition from the TypeScript module at build time, which runs the package's code in the build; a decorator in the package's own schema, which makes a provider a service |
+| A slot is a field of an API's `@envVars` class that `@providers({ SMS: "channel" })` names: a string whose value in each environment names the provider. The provider's settings are the fields named after the slot and its keys (`SMS_URL` for slot `SMS`, key `URL`), a secret one a `Secret<string>`, so `stack secrets set` enters it per environment. The stack binds them as any other field, and each deployable of `environment.json` lists the provider of each slot (`ResolvedDeployable.Providers`). Swapping a provider is a change of env, with the settings the new one reads declared in the config. | A `providers` key of an environment, a second way to bind config; one JSON field per slot holding every setting, which hides a secret inside a plain field; settings named by the provider alone, which two providers of one slot would collide on |
+| The load refuses a slot that is no string field of the config, is a secret, or takes an interface none of the listed packages implements. The resolver refuses a slot bound to a parameter, one that names a provider the API does not list or of another interface, and one whose provider's settings have no field, the wrong secrecy, or no binding (`provider`). `providersFrom` refuses the same at start, with every problem and no value, for a config no build checked. | A parameter as a slot's value, which a build cannot check |
+| Coverage is data: a feature registers itself with `Registry.RegisterRuntimeFeature(RuntimeFeature{Name, Interface, Uses})`, once per interface it needs, and `Uses` reads the API's schema and the DB schemas it connects to. The stack generator records the features each API uses (`stack.Service.Features`), and the resolver refuses an environment that runs a deployable of such an API with no slot of that interface set, naming the feature, the interface and the slots that would fill it (`no-provider`). The core registers none: notifications, attachments and agents register as they are built. `TestRuntimeProvidersExampleRefusals` proves it with a test feature that an API whose database has a `Notice` table uses. | A list of features in the core, which grows with every section; a decorator per feature naming its interface, which a feature that is a behavior or a table kind has no class for |
+| A provider is its own principal, of a fourth kind, `extension` (`ir.PrincipalExtension`, `PrincipalKind` in the runtime), with the subject `extension:<name>` and the permissions its manifest's `role` lists. Each permission names one capability, two dotted segments or more (`messages.relay`), never an area (`messages`), which would cover all of it. `providersFrom` runs each call into a provider within that principal, so what it writes through an ORM opened with no user records it; `extensionAuthenticator` authenticates a provider that calls the app with its own key, a messaging bridge that connects outward, as it. | An existing kind: a provider is not a user (no session, no sign-in), not a party (no row, no grant) and not an agent run (no run, no sandbox), and the access log tells them apart by kind |
+| A credential provider returns no value to its caller. `list` answers `CredentialListing` (reference, title, sites); `resolve` answers an `Injection`, which holds the value sealed: no member returns it, its JSON and string forms show the reference and target alone, its private field makes the class nominal so no object literal passes for one, and a provider makes one only from a `SecretValue`. `applyInjection` alone opens it, handing it to the runner's `fill` or `setHeader`. `useCredential` resolves, refuses an injection for another reference or target, applies it, and answers `CredentialUse` (reference, provider, target, time), which the run record keeps. | A value with a mask, which the caller could still unwrap; resolution in core with the value passed to the runner, which puts it in core's memory and logs |
+
+Built: the contracts, the manifest and its check, the slots, the
+providers on the IR and on resolved deployables, and the extension
+principal (`ir/runtime_providers.go`, `ir/access.go`); `@providers` and
+`RegisterRuntimeFeature` (`internal/registry/core_providers.go`, aliased
+in `registry`); the config's `providers` (schemaconfig, the TypeScript
+config reader, `@superschematic/schema-config`); the loader's reading and
+checks (`internal/loader/providers.go`); the stack's slots, provider
+checks and coverage (`internal/stack/providers.go`,
+`internal/generator/stackgen`); the TypeScript runtime's `./providers`
+entry, which the Workers check bundles. `examples/runtime-providers`
+ships six packages: two SMS channel adapters of two shapes, a vault
+broker scoped to named vaults, a local-process sandbox, a model stub and
+a file processor, and a stack whose two environments send through the two
+adapters. The tests: `TestRuntimeContractsMatchTheTypeScriptRuntime`,
+`TestARuntimeProviderIsCheckedAgainstItsContract` (ir), the decorator and
+feature registration (registry), the manifest and slot checks (loader),
+the resolver's (`TestAnEnvironmentNamesTheProviderOfEachSlot`,
+`TestAFeatureNeedsAProviderOfItsInterface`,
+`TestAProviderSlotIsCheckedAgainstTheProvider`), the example's stack
+built by the installed binary (`TestRuntimeProvidersExampleStack`,
+`TestRuntimeProvidersExampleRefusals`), the runtime's providers test, and
+the example's own on Node.js and Bun.
+
+Left:
+
+- Go and Rust: the five interfaces, `providersFrom` and the injection in
+  each runtime, and the principal kind in Go's auth hooks (D156's
+  `callerPrincipal`).
+- The generated server: a TypeScript API that lists providers gets its
+  slots from the IR and builds `Providers` into its `Deps`, importing the
+  listed packages; today the project's wiring calls `providersFrom`.
+- A provider package named by its npm name, resolved from the service's
+  `node_modules`, beside a directory.
+- Provider packages in build-all's dependency graph (D136) and in its
+  build cache key, so a change to one's manifest rebuilds the APIs that
+  list it and the stacks that deploy them.
+- The features: attachments (D154) `files`, and credentials for agent
+  runs `credentials`, each with its `Uses`. Notifications (D153) register
+  `channel`, and agents (D158) `sandbox` and `model`.
+- Health: D153 skips an adapter whose `health` fails and alerts on the
+  others; nothing calls `health` on a schedule yet.
+- A secret setting of a slot an environment leaves unset is still a
+  secret of that environment, which `stack secrets set` asks for.
+- A real container platform's sandbox provider, one model API's provider,
+  and a PDF and video file processor, which the plan names as examples and
+  the plan's question on the sandbox platform leaves open.
+
+## D154. A row points at a row of any table through `@references` and holds files through `@attachments`, each a sub-table the loader adds and a trigger keeps, every backlink is held to what its reader may read, a browser uploads straight to the bucket, and a table's Comments takes attachment blocks (D54, D77, D103, D156 amended)
+
+A `Relation<>` points at one table the schema names, and Comments' ref
+blocks reached any row only inside a message, which nothing could list
+from the row they named. Files lived in buckets with no row that held
+them. Section 4 of the platform plan asks for references and attachments
+on any row, the backlinks of a row across tables, files filed elsewhere
+with no second upload, and the R2 upload of section 1's Workers target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@references<T>({ tables?, cleared?, maxPerRow? })` and `@attachments<T>({ released, maxFileBytes?, maxRowBytes?, maxFiles?, mediaTypes? })` from `@superschematic/db` on a DB table, schema features as D156's `@audience` is. The loader adds a sub-table beside the table, a child of the row with no repository (`ir.RowTable`): `<table>_references` (target table, target key as text, role, who added it when; unique on row, target and role; indexed on the target) and `<table>_attachments` (name, media type, size, SHA-256, object, caption, state, uploader, time, filed from, extraction and preview). | A behavior on the core, as the plan names it. D103's own test puts these elsewhere, as it folded the engine's Links into `Relation<>`: their rules are a cascade across tables, a read across tables and a bucket's I/O, none of which a per-table pure core sees (Dependencies' `listDependents` stays the engine's for the same reason). Their state changes by inserts and deletes that the runtime and two triggers make. |
+| A target is no foreign key, since it is a row of any table. A statement trigger on each table a reference may point at (`REFERENCING OLD TABLE`) deletes the references to the rows a delete removed, from every references sub-table that may hold one, and enqueues one message per reference on the holder's `cleared` queue, whose fields the loader fills (`holderTable`, `holderKey`, `targetTable`, `targetKey`, `role`). A soft delete clears nothing; a read leaves a deleted row out on its own. | A worker that sweeps references to rows that are gone, which shows dangling references until it runs. Clearing through the core, which would need the core to hear another table's delete. An event of section 3's, which is built in parallel: the queue is D80's, which section 1 drains on Workers, and section 3 may read it. |
+| `orm.references` (`add`, `remove`, `of`, `referencedBy`) and `orm.attachments` on the TypeScript repositories, from the definitions orm.ts carries (`references`, `attachments`). Every read goes through the target's and each holder's own repository, so the caller's audience and grants hold as for any read (D156): a reference to a row the caller cannot read is left out, a target the caller cannot read is not there, and only the owner of a row whose audience is not everyone gets `hidden`, the count of the rest (D156's design). | A filter of `audienceConditions` per holder, which would miss a party's grants and soft deletes that the repositories already apply. A locked chip for a hidden row, which tells that it exists. |
+| `referencedBy` reads the references sub-tables and the Comments messages of every table, a ref block matched by JSONB containment, so a mention in a thread is a backlink without a second copy of it. | Mirroring ref blocks into the references sub-tables, two writes of one fact, and a write of another use's state from Comments. |
+| A browser uploads a file straight to the bucket through a URL `begin` signs, a PUT of its media type, after `begin` held it to the bounds with the row's files and the uploads under way, under an advisory lock of the row. `complete` reads the object back as it streams and hashes it, through workerd's native `DigestStream` on Workers and `Sha256` elsewhere, and holds it to the size and SHA-256 `begin` declared; a file whose bytes differ is removed. | Trusting the declared hash, which a browser could get wrong. A checksum header signed into the URL, which R2's, S3's and Cloud Storage's presigned PUTs take differently and which no offline test can hold to R2. |
+| File elsewhere copies or moves a file's row onto another row, naming the same object, with no second upload, and when the file's table keeps references that may point at the other row, its row points at it with the role `filed`, so the other row lists it among its backlinks. A file's delete enqueues its object's release (a trigger, `released`), and `release`, which that queue's worker calls, deletes the object and its preview's once no file of any table names it, under an advisory lock of the object a filing takes too. An upload never completed is released an hour after its URL expires. | Reference counts in a column, which a raw delete would leave wrong; deleting the object at the file's delete, which another row may still name. |
+| An object is `attachments/<uuid>` until D142 (PR 512) lands. Every row stores the SHA-256 and counts by object name, so D142's content-addressed naming, `sha256/<hex>`, slots in as a naming of the object alone: `begin` asks the content bucket whether it holds the hash and signs no upload when it does, and `release` counts rows by the same name. | Waiting for PR 512, or copying its code here. |
+| A table's Comments takes attachment blocks and the config's `attachments`, held in the core to the engine's batch 5 order: the uri's scheme (`https` unless set; `attachment` names a file of the row's own `@attachments`, `attachment:<id>`), the media type, then the size, each the veto `attachment_not_allowed`. | A block that names the bucket's object, which another row's delete could remove under it. |
+| Postgres alone: the loader refuses either declaration on sqlite, as D156 refuses `@audience`. | |
+
+Settled. A file is at most 100 MiB unless the declaration says otherwise,
+and at most 5 GiB, the largest object one signed PUT uploads to R2, S3 and
+Cloud Storage. A row holds at most 1 GiB and 100 files unless set, uploads
+under way counted until they expire. Text is extracted when an upload
+completes, so search can index it whether or not anyone opens the file, and
+a preview is made on a file's first view (`download`), since most files are
+never viewed. A file processor (D159) moves both: `pending` lists what it
+has to make, `processed` records it on every file that names the object.
+
+Built: `ir/rowrefs.go`, `internal/registry/core_rowrefs.go`,
+`internal/loader/rowrefs`, `internal/loader/verify/rowrefs.go`, the
+triggers in create.sql, drop.sql and migration plans
+(`internal/generator/sqlgen/rowrefs.go`, a statement trigger's
+`Transition`), the definitions in orm.ts (`internal/generator/tsgen/rowrefs.go`),
+`runtime/http/typescript/src/rowfeatures.ts` and `sha256Stream`;
+attachment blocks in the core's Comments; the guide's "References and
+files on any row"; `examples/references-files`. `TestReferencesTablesEndToEnd`
+runs the plan's "done when" on Postgres: a file posted on one row's thread
+is filed onto a second row, which lists the first in its backlinks; a
+caller who cannot read a referenced row sees neither the reference nor a
+count, and its owner sees a count; a target's delete clears its references
+and enqueues a cleared message; an upload whose bytes differ is refused,
+and an object is deleted once no file names it. The uploads go through a
+bucket on an R2 binding whose S3 API a stand-in serves, which checks each
+PUT against the URL's V4 signature; the workerd fixture `uploads` signs,
+sends, checks and hashes a direct upload inside workerd. `examples/deploy-smoke`
+uploads a line item's file to its bucket through the signed URL, completes
+it and files it onto another line item; `smoke.sh Dev` passes, and
+`TestDeploySmokeEnvironments` holds the Cloudflare environment's R2 bucket,
+tokens and bindings. Bucket CORS on the cloudflare target came with #514
+and needed nothing for this.
+
+Left:
+
+- Comments' follows, read state and inbox on a table (`markRead`,
+  `follow`, a reader's `unread`, `inbox`, deliveries). D153 settles that the
+  in-app inbox is the notifier's, which a Comments mention or reply reaches
+  as an event (D153's left). The core runs them,
+  and the build leaves them out of a table's operations
+  (`registry.tableLeavesOut`), since no adapter answers a reader's own
+  fields through the core's read as the caller, and a namespace's
+  operation is not served by `@behaviorOperations`. Serving them touches
+  the layout and every ORM's and API's goldens in three languages.
+- Generated routes, MCP tools and SDK methods for references and
+  attachments; an app writes its routes over `orm.references` and
+  `orm.attachments` now (`examples/references-files/server`).
+- The Go and Rust repositories, and Python's.
+- The file processor (section 9) and its wiring: `pending` and
+  `processed` are its seam. Search (section 5) indexes `extractedText`.
+- D142's content-addressed objects once PR 512 merges, and a multipart
+  upload for files past 5 GiB.
+- A GIN index on Comments messages' `blocks`, which `referencedBy`'s
+  containment reads; it scans a table's messages until one is written.
+- References repointed by a `Mergeable` merge (D147), and the merged row's
+  references cleared as a delete's are.
+- The schema writer (`format --to=ts`) writing `@references` and
+  `@attachments` back, as it does not write `@audience` either.
+- A live direct upload to R2 and to Cloud Storage: `smoke.sh Cloudflare`
+  and `Gcp` are the maintainer's.
+
+## D152. Recurrence turns a rule into dated occurrences on a row, the core dates them for every language, and a calendar read and feed merge the dates of many tables as each caller reads them (D103, D104, D156 amended)
+
+`Temporal.RecurrenceRule` validated an RFC 5545 rule and nothing expanded
+it. Schedules ran code no more than thirty days apart and kept no record of
+what was due or what was done, and nothing put a table's dates on a
+calendar.
+
+### Recurrence
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `implements Recurrence<T, { anchors, timeZone?, horizonDays?, historyDays?, adjust?, weekendDays?, holidays?, relative?, opensBefore?, remindBefore?, overdueAfter?, permission?, managePermission? }>` on a DB table, a behavior the core alone implements, as Schedules is. A row's anchor is its own: `calendar` (an RRULE from a wall start in a zone), `afterDone` (an interval after the last completion) or `relative` (an offset from a date a to-one relation reaches, and its anniversaries). | A field type, which would allow several on a row: a thing done on several rules is several rows. Schedules with longer intervals, which keeps no occurrences. |
+| The row's rule is an owned field, `recurrence`, beside `nextDueAt` and `lastDoneAt`; the occurrences are the sub-table `occurrences`, keyed by the nominal wall date-time before any adjustment (`2026-10-31T09:00`), holding `due`, `dueAt`, `opensAt`, `remindAt`, `overdueAt`, `state`, `revision`, `shifted`, `moved`, `changedAt`, `remindedAt`, `completedAt`, `completedByTable`, `completedByKey`, `completedByPrincipal` and `note`. | A key of the adjusted date, which a holiday added would change. |
+| An occurrence is `upcoming`, then `open` at its `opensAt`, then `done` (`complete`) or `missed` at its `overdueAt`; `skip` finishes one that is not done, and a missed one is still completed late. With no `opensBefore` it opens when the one before it falls due. | An occurrence open from when it is planned, which a rule change could then never replan. |
+| Each row arms four deadlines on the table's deadline queue, by name: `open` (the earliest upcoming `opensAt`), `remind` (the earliest `remindAt` not reminded), `overdue` (the earliest open `overdueAt`) and `plan` (when nothing is upcoming, the time the horizon reaches the next). Every fire runs one plan, which catches up every occurrence due by its time. On Workers they drain as any deadline does (D151). | A deadline per occurrence and name, which a daily rule would make a thousand messages of per row. |
+| The plan keeps the occurrences the rule dates from the later of when it was set and the latest one that opened, up to `horizonDays` ahead: it inserts a new one, dates an upcoming one again, and deletes an upcoming one the rule no longer dates. Open and finished ones are never touched, so `setRecurrence` changes only the future. An afterDone rule keeps one ahead, dated from the later of its last completion and its latest missed or skipped due, so a missed one never blocks the next. | Regenerating every occurrence on a change, which would move one a person is working on. |
+| A due date on a weekend day or a holiday moves `before` or `after` it, or stays (`none`). Holidays are rows of a table the app fills, `holidays: { table, calendarField, dateField, field }`; which calendar applies is the row's field. Core ships no holidays. The behaviors' layout carries the holiday table and the relative anchor's target read-only (`registry.BehaviorReads`), whose rows every adapter reads at version 0. | Built-in holiday calendars, which ground rule 1 turns down. |
+| `complete({ key?, completedBy?, note? })` records `completedBy` as `{ table, key }`, the key as text, the shape references take (section 4), and the principal that completed it. | A relation to one table. |
+| `complete` and `listOccurrences` need `permission`; `setRecurrence`, `skip` and `moveOne` need `managePermission`, `permission` when absent. | One permission for all. |
+| Occurrences belong to a table with no Workflow: Recurrence keeps its own states. A table's Workflow may read them as it reads any field. | Requiring Workflow, which a duty with no status of its own does not have. |
+| A finished occurrence stays `historyDays` after its due, 1100 unless set (three years, up to a hundred), then a plan prunes it. The row that completed it keeps the evidence. | Keeping every occurrence, which a daily rule grows without bound. |
+
+### Expansion
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core expands every rule (`superschematic_rules_behaviors::recurrence::expand`), and a fourth operation of its C ABI, `rules_expand`, answers it: TypeScript's `RulesCore.expand`, Go's `rules.Expand`. One golden file (`runtime/engine/testdata/rules/recurrence/expand.golden.json`) runs each anchor two years out across a change of the clocks and a holiday that moves a date, and Rust, TypeScript and Go each hold their core to it. | An expander per language, which would drift. |
+| The RRULE is expanded over wall time by the core's own reader (`recurrence::rrule`: `YEARLY` to `HOURLY`, `INTERVAL`, `COUNT`, `UNTIL`, every `BY` part, `BYSETPOS`, `WKST`), and the maintained `rrule` crate is its oracle in a test: 52 rules from six starts, sixty occurrences each, date for date. Each wall time is then an instant in the zone through the IANA database jiff bundles: a time a change skips takes the offset before it, and one it repeats its first pass, as RFC 5545 reads a local time. An `UNTIL` in UTC is made the zone's wall time first. | The `rrule` crate in the build: its chrono turns on `wasmbind` for `wasm32-unknown-unknown`, which gives the module JavaScript imports (it must import nothing) and adds 2.3 MB to its 4.7. `MINUTELY` and `SECONDLY`, which Schedules' cron lines serve. |
+| Lead times are ISO 8601 spans read in the zone's calendar (`P14D`, `-P60D`, `P1M`), so a day is a calendar day across a change. | Milliseconds, which a change of the clocks shifts by an hour. |
+
+### The calendar
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@calendarSource<T>({ name?, field?, end?, occurrences?, title, kind, color?, owner? })` on a DB table, repeated per source: a row dated by a date or date-time field, or each occurrence of its Recurrence. The generated repository's definition carries it (`TableDefinition.calendar`). | A list of sources in the API, which the table's schema would not say. |
+| `readCalendar(orm, principal, { from, to, sources?, scope? })` reads each source through its table's repository as the caller (`orm.as(principal)`), so a row's audience and the caller's grants hold (D156), and shows an occurrence only when its row is read. A source may need a permission (`CalendarOptions.permissions`). `scope: "mine"` keeps to the rows whose `owner` field holds the caller. | A query across tables with an audience predicate of its own, which would miss grants. |
+| `calendarRoutes` serves it at `GET /api/calendar`, and `calendarMcpTool` with `callCalendarTool` as an MCP tool. | |
+| A feed's URL holds a token, since a calendar client sends no header. The token is a grant of the `@accessGrants` table: its holder the user it reads as (`holderKind: user`), its role a UserRole whose permissions bound the feed, its target `CalendarFeed;detail=...;sources=...`. `grantAuthenticator` refuses it on every other route, so a leaked URL reads the feed alone. Its detail is `full` or `busy` ("Busy" and a reference number, a short hash of the entry). | A token store of its own, which would repeat the grants' hashing, revocation and ends. |
+| A feed expires a year after its issue unless the issue says (at most ten years). Rotation revokes it and issues another of the same scope, role and expiry; a revoked or expired feed is refused at the next fetch. Only its holder rotates or revokes it, and the token is shown once. | A feed with no end. |
+
+Built: the expansion, its reader and its oracle and golden tests in Rust,
+TypeScript and Go; `Recurrence` on the core (`recurrence/behavior.rs`), its
+declaration, registry entry, loader check (`verify/behaviors_recurrence.go`)
+and `@superschematic/db` types; the read-only tables of the behaviors'
+layout in the TypeScript, Go and Rust adapters; `@calendarSource`, its IR
+(`ir/calendar.go`), check (`verify/calendar.go`) and the generated
+definition (`tsgen/calendar.go`); `readCalendar`, the feed, its routes and
+its MCP tool (`runtime/http/typescript/src/calendar.ts`); the feed's
+refusal in `grantAuthenticator`. The tests: the core's
+(`tests/recurrence.rs`); `TestGeneratedRecurrenceEndToEnd`, which serves
+the generated API and runs its worker on Postgres (a rule change leaves the
+open occurrence untouched, the remind deadline fires on the worker, a raw
+write of the calendar field is heard, the calendar merges two sources);
+`TestGeneratedAccessEndToEnd`'s feed case (a feed shows only what its
+principal reads, busy or in full, and a rotated or revoked one is refused);
+and the runtime's workerd fixture `recurrence`, which runs the remind
+deadline under the pinned workerd. The guide's "A row's recurrence, and the
+calendar"; `examples/recurring-duties`.
+
+Left:
+
+- An event at an occurrence's due time itself: D153 made opened, reminded
+  and missed (the overdue deadline's) events Recurrence emits, and no
+  deadline is armed at the due, so a "due now" event waits for one.
+- `completedBy` converging with references (section 4) once they merge.
+- Replanning a relative recurrence when its target's date changes: today
+  the row plans again on its own write, at a fire, or at `setRecurrence`.
+- The generated router mounting `calendarRoutes` and the calendar MCP
+  tool; an app wires them, as it wires `grantAuthenticator` (D156).
+- The Go and Rust servers: Recurrence's operations through their adapters
+  end to end, and the calendar read and feed.
+- A hand-written scenario of Recurrence that every adapter replays.
+- The SDK types narrowed by the config (`behaviortypes`: the anchors).
+- A calendar source's permission in the schema, beside the route's option;
+  weekend days per holiday calendar; a recurrence set at create.
+- The calendar on SQLite and D1.
+- `examples/deploy-smoke` with a Recurrence table, and the live
+  `smoke.sh Cloudflare` run, which is the maintainer's.
+
+## D155. A `@searchable` table's rows share one search index in its database, a trigger keeps an index row's access and a queue's worker its text, one query ranks every table with the caller's access checked inside it, and embeddings are an option that re-ranks (D58, D77, D84, D103, D156, D159 amended)
+
+Each table filtered its own rows through `searchText`, a `LIKE` over its
+`@searchField` columns, and only the engine searched across schemas: each
+schema's Search ranked its own instances and the engine fused the
+rankings (D16, D58, D77). Nothing found a row of any table for a UI or an
+agent with one call, and nothing indexed a row's conversation or files.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@searchable<T>({ title, body?, scope?, queue, comments?, attachments? })` from `@superschematic/db` on a DB table, a schema feature as `@audience` and `@references` are. `title` is a text field; `body` a text field or a list of them; `scope` a field holding one value, a text or a key (a relation's among them). | A behavior on the core. D103's own test folded the engine's Search into `@searchField`: an index and a read across tables are a storage shape and a query, which a per-table pure core does not see. Moving the engine's every-schema search onto namespace operations (D77's left item) serves engine schemas, not tables. |
+| The loader adds one index table per database, `search_index` (`ir.SearchIndexTypeName`, marked `TypeDef.SearchIndex`, with no repository): one row per record, unique on its table and key as text, with its title, body, conversation text, files' text, scope, the copied `audience UUID[]` and `agents`, and `text_hash`, `embedding DOUBLE PRECISION[]` and `embedding_model`. A GIN expression index covers the weighed words (`ir.SearchDocument`), one GIN index the audience. | An index once per environment, a service of its own: the access check needs each row's audience and, for a grant, the row itself, in the query that ranks; across databases every write would be two transactions, and the check would run on results, which pages and counts cannot survive. An index per table, the engine's shape: a ranking across tables would fuse per-table rankings, whose pages and totals are not exact. A generated `tsvector` column on each table: one ranking across tables would be a union of every table. |
+| The index lives in each database. An environment with several databases searches each one's index; a search across databases is left. | |
+| A trigger on each `@searchable` table runs after every insert, update and delete of a row, in the writer's transaction: a delete, a soft delete and a change of key delete the index row; on an `@audience` table, a change of the effective audience or agent access is copied into the index row; an insert, a restore and an update that changes a title, body or scope field enqueue the row. A trigger on the table's Comments messages and on its attachments sub-table enqueues the row they belong to when their text changes. | Writing the index row in the trigger: each write would aggregate the row's conversation and files, and a model's embedding would sit inside the transaction. Copying the access columns through the queue too: a row made private would show in search until a worker ran, which D156 turned down for its own cascade. |
+| The queue is the declaration's `@queue` class, whose fields the loader fills (`sourceTable`, `sourceKey`) and whose key it sets (D80): one ready message per row, `skip` on a duplicate, one claim at a time per row. Its worker calls `indexSearch(orm, message, options)`, which reads the row under a share lock, so an audience change waits for it, and writes the index row with the row's access columns in one statement. On Workers the queue drains at each Cron firing (D92, D151); a trigger's enqueue sends no wake, so a changed text is found by its new words within about a minute there, and within the worker's poll interval under `stack dev`. | A behavior change queue (`ir.BehaviorQueueChanges`), whose messages a `@behaviorWorker` hands to the core: the index is not a behavior's state. A wake per enqueue, which D151 leaves for change queues. |
+| A row's index row holds its posted and interrupted messages' bodies (Comments) and its ready files' `extracted_text` (D154), each at most 256 KiB, unless the declaration says `comments: false` or `attachments: false`. Their words weigh C and D, the body B, the title A. | A row of the index per message and per file, which would rank a thread's ten messages as ten hits. |
+| `Encrypted<T>` fields are never indexed: the loader refuses `@searchable` naming one as its title, body or scope, since an index row holds its text in the clear. | Indexing the opened value, which would put a sealed value at rest in the clear. A blind index (D85's left), which matches whole values only. |
+| The ranking is the engine's. A query's words are each a phrase of the words Postgres's parser finds in them (`phraseto_tsquery`), all required, as the engine's Search reads a plain query; the configuration is `simple`, the engine's index where it has no `unaccent` (D58); the order is `ts_rank_cd` with the engine's four weight classes, then table and key. | `websearch_to_tsquery`, a second query syntax beside the engine's. `unaccent`, which needs the extension in every database the migration model creates (left). |
+| `searchTables(orm, principal, { q, tables?, scope?, limit?, offset?, vector? }, options)` answers one page, the exact total, `more`, and for each hit its table, key, title, where the words matched and a snippet in parts (`{ text, match? }`), so no markup in a row's text reaches a page. | Snippets as HTML, which a row's own text could break out of. |
+| Access is checked inside the query. The caller's audience is `audienceConditions` (D156) over the index row's copied columns, exact since the trigger copies them in the writer's transaction. A caller with grants, a party or an agent run, reaches a table's rows through its grants' relation paths, which no copy can hold: for it each table's index rows are kept by an `EXISTS` back to the table, with the conditions the table's own repository applies for that caller (`repository.conditions`), and a table no grant reaches is left out of the query. `options.permissions` names the permission a table's rows need. | Filtering the results after the query, which shows a gap or a wrong count where a hidden row was. An `EXISTS` for every caller, a join per hit for a user whose audience the copy holds exactly. Copying a grant's reach into the index, which a role's paths and a grant's target change without a write of the row. |
+| `scope` is the app's filter: the value of the field each declaration names, copied into the index row as text; a search keeps to the values it names (a UUID in its wire form or hyphenated). A table with no scope field is in no scope. | A scope callback in the runtime, which no index serves. |
+| Embeddings are off unless `options.embeddings` (`{ model, embed, maxChars? }`) is given, which `searchEmbeddingsOf(provider, model)` builds from a model provider (D159) that implements the new optional `embed`. `indexSearch` embeds a row's text after its transaction and stores the unit vector only while `text_hash` still holds; an unchanged text keeps its vector and is never embedded again. A search embeds its query (or takes `vector`) and re-ranks the first `RRF_WINDOW` (200) text hits by reciprocal rank fusion of their text place and their cosine place, `RRF_K` 60, the engine's constants; the hits and the total stay the full-text matches. A model that fails leaves the text order. | pgvector's `vector(n)` with an HNSW index: it needs the extension and one dimension per database, and serves a search by vector alone, which the plan does not ask for (left). An embedding call inside the write's transaction. |
+| `searchRoutes({ orm, authenticate, base? })` serves `GET /api/search?q&tables&scope&limit&offset`, and `searchMcpTool` with `callSearchTool(orm, principal, args)` the MCP tool `search`. An app mounts them, as it mounts the calendar's (D152). | Generated routes and tools, which wait on the generated router mounting the runtime's (left, as D152's). |
+
+Settled. The index lives in each database. What embeddings cost at scale:
+one model call per row whose indexed text changes, none for a write that
+leaves it as it was, and one per search; 8 bytes a dimension a row (a
+1536-dimension model is about 12 KiB a row, 12 GB a million rows); a
+search reads at most 200 vectors. Switching them off is leaving out the
+option: no call is made, no search re-ranks, and stored vectors are kept
+until `UPDATE search_index SET embedding = NULL, embedding_model = NULL`
+clears them. A change of model is `reindexSearch(orm, { embeddings })`,
+which embeds every row again. A table made `@searchable` with rows in it
+needs `reindexSearch` once.
+
+How section 8 calls search for an agent run: the run's token is a grant
+(D156), so the MCP endpoint's authenticator, `grantAuthenticator`, resolves
+the call to the run's principal (`kind: "agent"`, `actingFor`, `grants`),
+and the endpoint answers `tools/call` of `search` with
+`callSearchTool(orm, principal, args, options)`. Its hits keep to the rows
+its grants' paths reach, by the `EXISTS` above, and to the rows whose
+audience holds the run or whom it acts for and whose agent access is not
+`none`. `scope` stays the app's filter; it widens nothing.
+
+Built: `ir/search.go`, `internal/registry/core_search.go`,
+`internal/loader/search`, `internal/loader/verify/searchable.go`, the
+triggers in create.sql, drop.sql and migration plans
+(`internal/generator/sqlgen/searchable.go`), the definition in orm.ts
+(`internal/generator/tsgen/searchable.go`),
+`runtime/http/typescript/src/search-tables.ts` (`searchTables`,
+`indexSearch`, `reindexSearch`, `searchRoutes`, `searchMcpTool`,
+`callSearchTool`, `searchEmbeddingsOf`), `ModelProvider.embed` and the
+stub model's; the guide's "Search across tables";
+`examples/search-across-tables`. `TestSearchTablesEndToEnd` runs the
+plan's "done when" on Postgres: two users search the same text across six
+tables and each gets exactly the rows its list reads show, page by page
+with the same total; a party with a grant finds only the contract its
+grant names and the units and requests its role reaches, through the
+route and the MCP tool too, and nothing once the grant is revoked; a
+row's conversation and files are found with it and an encrypted field is
+never in the index; an audience change and a delete hold at once and a
+changed text once the queue drains; scope; and embeddings re-rank, are
+kept while the text holds and fall back to the text order.
+
+Left:
+
+- The Go and Rust repositories and servers, and Python's.
+- The generated router mounting `searchRoutes` and the MCP tool, and a
+  generated handler for the indexing queue; an app wires them.
+- A list operation's row rule (`by`), which is its operation's and not
+  the repository's: search holds audience, grants and per-table
+  permissions, as the calendar does.
+- `unaccent`, prefixes and a query syntax; a search by vector alone.
+- SQLite and D1.
+- A wake for the indexing queue (D151's change-queue wake).
+- A search across the databases of an environment.
+- `examples/deploy-smoke` with a `@searchable` table, and the live
+  `smoke.sh Cloudflare` and `Gcp` runs, which are the maintainer's.
+
+## D153. A table declares its events, routes and preferences are rows, the notifier holds each recipient to the record's audience when it sends, delivers through the channel adapters an environment configures, and runs a reply as its sender within its channel's trust (D77, D80, D81, D103, D152, D154, D156, D159 amended)
+
+Nothing told anyone that a record changed. D77 named a notifier and never
+built it, D81 kept password reset and email verification out of the core
+until there was a channel, D152 left an occurrence's opening, reminder and
+miss as state no one heard of, and D154 enqueued a cleared reference that
+nothing reported. Section 3 of the platform plan asks for events declared
+on tables, routes as rows, delivery per recipient through channel
+adapters (D159), and replies that are input (ground rule 5).
+
+### Events
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@event<T>({ kind, payload?, title?, urgency?, description? })` from `@superschematic/db` on a DB table, repeated per kind: dotted lower-camel words (`ticket.overdue`), the row's fields its payload carries, the field a notice is titled by, and a default urgency of `urgent`, `normal`, `digest` or `record`. The generated repository's definition carries them (`TableDefinition.events`). | A behavior on the core: an event's routing reads other tables' rows and calls providers, which the pure core does not (D103's test, as D154 and D156 apply it). |
+| A behavior's event is a kind too, its use's member, a dot and the behavior's kind (`recurrence.missed`), which an `@event` may declare to set its urgency and title. Recurrence now emits `opened`, `reminded` and `missed` (its overdue deadline's) from the run that moves an occurrence, in the command's transaction (D104's event queue), and its behavior worker hands each to the project's Workers method, which calls `notifier.fromBehaviorEvent`. | A notifier that reads the occurrences after each fire, which would race the next fire. |
+| `notifier.raise(tx, { table, key, kind, payload?, urgency? })` writes the event as a message of the notifier's dispatch queue, a D80 queue the database declares (`@queue() @notifier("dispatch")`), in the caller's transaction: it commits with the change or not at all, and the enqueue wakes the worker at once on Workers (D151). | Each `@event` table given a D104 event queue of its own, which needs the behaviors' layout for a table with no behavior and a behavior worker per table, all to hand every message to one consumer. A table's change trigger raising events, which cannot tell an assignment from any other write. |
+| A deleted reference (D154) reaches its holder as `reference.cleared`, raised by `notifier.cleared(tx, message)` from the worker of the `cleared` queue. | A second trigger that raises it, a write of the notifier's from another feature's SQL. |
+
+### The notifier's tables and channel identities
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The notifier's state is in classes the database declares and the loader fills, as D156's grants are, one per part with `@notifier("<part>")`: `inbox` (one notice per recipient and event, numbered among the recipient's, the number a reply names), `deliveries`, `routes`, `preferences`, `subscriptions`, `channelTrust`, `replies` and `dispatch`. The inbox, deliveries, routes and dispatch are required. Postgres alone. | Tables the loader adds unasked, which every database would carry. One decorator with every part's table named in it, which hides which class is which. |
+| Channel identities are core tables, a class marked `@channelIdentities()`: the kind of address (`email`, `phone`, `handle`), the address normalised, the principal it resolves to as a reference (`principalKind`, `principalTable`, `principal`), how it was confirmed (`unverified`, `verified` by a code replied with, `entered` by hand), and a pending code's hash, purpose, expiry and attempts. A party (D157) is a row of the same table with `principalKind: party` and its table, with no migration. The lookup (`resolveSender`) answers the verified and entered identities of an address; two principals on one address resolve to no one, so D157 settles whether parties may share one. | A core extension, which password reset (D81) and every reply need from the core. A user foreign key, which a party cannot be. A unique address, which would settle D157's question now. |
+| Notifications are a runtime feature (`registry.RuntimeFeature`, D159) of the core: an API over a database that declares an `@event`, a `@notifier` class or the channel identities needs a `channel` slot in every environment that runs it. | A feature registered by an extension, which every app using the core's notifier would have to link. |
+
+### Routing and sending
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A route is a row: an event kind or `*`, a table, a filter in the repositories' filter syntax, recipients, an urgency in place of the event's, an escalation and whether it is on. A recipient is `{ path }` (a relation path of the record to a field of ids, through to-one relations), `{ principal }`, `{ role }` (the users holding it) or `{ party: { table, key } }`. Editing routes is the permission the app's table operations over the route table require. | Routes in the schema, which ground rule 1 turns down. A permission of the notifier's own, a second gate beside the routes' operations. |
+| Each recipient reads the record through its table's repository as themselves (D156: the audience, and a party's grants), when the event is routed and again when each delivery is sent. One who cannot read it gets no notice and no delivery, and nothing records that they were skipped. | A check at routing alone, which a record made private in between would leak through. A skipped row in the audit, which tells that the record exists. |
+| A preference row maps an event kind and an urgency (each or `*`) to channel kinds in the order a failure falls through, quiet hours, a time zone and a digest rule, for a principal or for everyone (a row of no principal, seed data the app writes). The most specific row wins. Every notice is in the in-app inbox; the channels are beside it. | Preferences per channel slot, which would tie a person's choice to an environment's provider. |
+| `urgent` sends now through quiet hours and, unacknowledged, follows its route's escalation: each step after `afterSeconds` adds channels or recipients. `normal` waits out quiet hours by a delay on its enqueue (D80). `digest` schedules one digest per recipient at the next time its preference's rule dates (`RulesCore.expand`, D152), and the digest carries every digest notice waiting. `record` writes the notice alone. | Escalation on a Timers deadline of the notice: the inbox's fields are the loader's, and Timers on it would put a loader-filled table through the core for one deadline; a delayed message of the dispatch queue is a deadline the same worker already drains. |
+| A delivery is one row per recipient, channel and attempt: `queued`, then `sent`, `delivered` and `read`, or it ends `failed` or `acknowledged`. A send that throws, an address the recipient has no verified identity for, or no report within `deliveryTimeoutSeconds` (300) from an adapter that reports statuses falls through to the recipient's next channel. An adapter with no `status` counts sent as final. | A timeout for every adapter, which would fall through every email. |
+| Before sending, the notifier asks the adapter's `health` (held 60 s). One that fails is skipped, and the notifier raises `channel.down` (urgent, no record), which the routes send on the other channels, once an hour while it stays down. | An alert to a fixed address, which ground rule 1 turns down. |
+| A subscription is a saved query (a table and a filter), a rule, a start and a zone, a recipient and channels; its brief runs the query as its recipient and goes out at each time the rule dates. | A digest of every row, which would leak what the recipient cannot read. |
+
+### Replies
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `notifier.reply({ channel, slot?, from, body, ... })` is the entry point an inbound adapter's route calls with its message (`notifier.inbound(slot, request)` reads an adapter's `@webhook` request and calls it per message). The sender's address, normalised by its kind, resolves through the channel identities to one principal, and the reply runs as it. An unknown sender reaches nothing and answers `unknown`, which D157's triage takes. | A reply authenticated by a token in the message, which an SMS cannot carry. |
+| A reply names its notice by its number (`ack 142`, `done 142`) unless exactly one notice of its sender waits on that channel and address. `ack` acknowledges and stops escalation. Every other verb is a reply action the app gives per event kind: the permission the operation's route requires, `run` and `undo`. It runs in a transaction as the sender (`withCaller`), its behaviors' commands with the sender's permissions, so the same repository write, the same audience and the same permission hold as on the route. | A reply that calls the HTTP route in process, which needs an authenticator that trusts an internal call. |
+| A channel kind's trust is a row: a level and the permissions a reply on it may use of those its sender holds (null for all). A kind with no row is low and runs nothing past an acknowledgement, so SMS, whose sender id can be spoofed, is low unless the app's rows raise it; an identity entered by hand is held to that too. `examples/notifications` seeds SMS low and email standard. | A level the core reads into permissions, a fact ground rule 1 turns down. |
+| Every reply is a row of the replies table: its channel and slot, the sender, the text, what interpreted it (`keyword`), the verb, the notice, the outcome and what undoing it needs. Every action is echoed back on its channel with `UNDO 142`, and `undo 142` undoes the latest action on the notice. | The access log, which records reads. |
+| An address is verified by a six-digit code sent to it and replied with (or given to `confirmIdentity`); five wrong answers spend it. Password reset (D81) is the same code with the purpose `reset`, sent to the address the login names through the email adapter; `complete` checks it, sets the password with the identity service's new `resetPassword`, which ends every session, and verifies the address. `request` answers alike for a login that does not exist. | A reset token in the identity store, a second code store. |
+
+Settled. The in-app inbox is the notifier's, and Comments does not keep
+one of its own beside it: a Comments mention, a reply on a followed thread
+and a message to a principal become events of the conversation's row that
+route into the same inbox (left below), and the core's Comments `inbox`
+operation retires once they do. Comments keeps its read state of a
+conversation, which is a reader's place in a thread, not a notice. A
+delivery that ended is kept 90 days (`deliveryRetentionDays`), then `prune`,
+which the dispatch queue's worker runs with its own, deletes it; notices
+are the recipient's history and replies the audit, and both stay.
+
+Section 8 sends an `ask` approval through this: it raises
+`approval.requested` on the approval row (urgent), a route names the
+principals who hold the approval's permission, and the reply actions
+`approve` and `deny` for that kind run the approval's operation as the
+replier, held to its permission and to the channel's trust.
+
+Built: the IR (`ir/notifications.go`), `@event`, `@notifier`,
+`@channelIdentities` and the notifications feature
+(`internal/registry/core_notifications.go`), the loader's filling
+(`internal/loader/notifications`) and checks
+(`internal/loader/verify/notifications.go`), the definitions in orm.ts
+(`notifier`, `events`), `@superschematic/db`'s decorators, the schema
+file's types; the notifier (`runtime/http/typescript/src/notify.ts`, in
+`./postgres`): `createNotifier`, `raise`, `fromBehaviorEvent`, `cleared`,
+the dispatch queue's handler and `workerQueue`, routing, preferences,
+quiet hours, digests and briefs, deliveries, fall-through, timeouts,
+escalation, health and `channel.down`, `reply`, `inbound`, `statuses`,
+the inbox, identities and their codes, `passwordReset`; the identity
+service's `resetPassword`; Recurrence's events in the core; the mail relay
+of `examples/runtime-providers`, whose notes now raise an event; the
+guide's "Events and notifications"; `examples/notifications`. The tests:
+the registry's, the loader's (`TestNotificationsFixtureLoads`,
+`TestNotificationsRefusals`, `TestNotificationsExampleLoads`), the core's
+Recurrence events, the recurrence API's worker handing them to its Workers
+(`TestGeneratedRecurrenceEndToEnd`), `TestRuntimeProvidersExampleRefusals`
+over the core's feature, and `TestNotificationsEndToEnd`, which runs the
+plan's "done when" on Postgres through the example's SMS and mail relays
+over stand-in services: an urgent event reaches two recipients and skips
+one who cannot read the record, and escalates to email when not
+acknowledged; `ack` and `done 142` change the notice and the record as
+their sender, with the channel and the interpreter in the audit; SMS, low,
+is refused `done`; and password reset sends through the email adapter.
+
+Left:
+
+- Go and Rust: the notifier, `@event` raising, the reply entry point and
+  password reset, and SQLite and D1.
+- Comments raising its mentions and replies into the inbox, and the core's
+  Comments `inbox` operation retired.
+- A generated server that builds the notifier into its `Deps` (with D159's
+  providers), mounts the inbox and the relay routes, and fills a
+  `@worker` of the dispatch queue with `notifier.handle`; an app wires them
+  now (`examples/notifications/server`).
+- An event at an occurrence's due time (D152 arms no deadline there).
+- A schedule that asks every adapter's health on its own; today a send asks.
+- Seed data in the build for the preferences and trust rows, as
+  `@seedRoles` seeds roles; an app writes them now.
+- A reply interpreter other than keywords (a model, D158), which the
+  `interpreter` column names.
+- Quiet hours across a change of the clocks inside the window, which count
+  wall minutes.
+- `examples/deploy-smoke` with a notifier, and the live `smoke.sh
+  Cloudflare` run, which is the maintainer's.
+- The schema writer writing `@event`, `@notifier` and `@channelIdentities`
+  back.
+
+## D157. A party is a row of an app's table that acts through grants, every inbound message takes one path that decides who sent it, conversations are core tables whose messages are rows, an identity whose grants have all ended is verified again, parties may share an address that a thread settles, and sending to a party is a permission (D77, D103, D153, D154, D156 amended)
+
+Every caller was a user with a session or a key. D156 gave grants to
+callers who are no users and D153 resolved a reply's sender through
+channel identities, but nothing recognised a text or an email from someone
+outside the User table, nothing recorded the conversation, and an agent
+run (D158) had no inbound trigger. Section 7 of the platform plan asks for
+parties, one inbound path, messages as rows and sending as a permission.
+
+### Parties and their identities
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@party<T>({ title? })` from `@superschematic/db` marks a DB table whose rows are principals of kind `party` (D156). Its key is one UUID, which a grant names as its holder and a channel identity as its principal (`principalKind: party`, `principalTable`, `principal`, D153's columns, no migration). A schema with a `@party` table declares `@accessGrants`. The generated definition carries `party`. | A core table of parties, which would hold an app's facts (a contractor's trade, a supplier's terms) apart from the app's own rows. A party as a user with no login, which would give it a user's sessions and roles. |
+| `partyPrincipal(orm, party, { grant? })` (`./postgres`, `parties.ts`) resolves a party as `grantAuthenticator` resolves a grant's token: kind `party`, its subject the row's key, the reach of each active grant (or of the one named) and the permissions of those grants' roles. `inbound.principalOf` is the same. | A principal with every grant's permissions over every grant's reach and no way to narrow it, which an agent run acting under one grant needs. |
+| An identity lapses when its party holds no active grant and some grant of it did not end, by its date or its revocation, before the identity was verified (a grant ended by its target's state counts as ended after). A lapsed identity resolves to no one for inbound and is sent nothing; a code replied with, or `confirmIdentity`, verifies it again, which now always restamps `verifiedAt`. It is decided from the rows (`identityLapsed`), with no stamp to keep in step with the grants. | A `lapsedAt` column a revoke writes, which a grant ending by its date or its target's state would not. Re-verifying on every new grant, which would ask a party that kept its number. |
+| An address entered by hand (D153's `entered`) resolves at the lowest trust, as section 3 built it; a party's message records the identity's trust (`trust`), so a run acting on it can be held to it. | A trust level of parties apart from users'. |
+| An opt-out is recorded on every identity of the address (`optedOutAt`, a field the loader adds to `@channelIdentities`): the adapter reads its channel's keywords (`InboundMessage.optOut`, STOP and START for SMS) and the core records them. The notifier's sends and `send` skip an opted-out identity. | Opt-out keywords in the core, which differ by channel and carrier. |
+
+### Two parties on one address
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Two parties may share an address (a household's phone, an office's inbox). A message from it belongs to the party whose conversation it continues: its `In-Reply-To` or `References`, or the service's id of the text it answers, names a message of that party's conversation. One that names neither is held in triage, given to no one. A user never shares: an address that is a user's and a party's resolves to no one, as D153's two principals did. | A unique address, which turns away a real case. The most recent conversation on the address, which guesses, and a guess reaches a grant's rows. |
+
+### One inbound path
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `createInbound({ orm, notifier, runs, providers?, bucket?, inboundAddress?, ... })` (`./postgres`, `inbound.ts`). `inbound.inbound(slot, request)` reads an adapter's `@webhook` request and `receive` takes each message: the sender normalised; an email held to its authentication; an opt-out recorded; the address resolved through `notifier.resolveSender`. A user's message goes to `notifier.reply` as is. A party's with an active grant is a message row with its files and a run request on the `@runRequests` queue. A party's with none is on its timeline (its conversation, and a reference to its row) and in triage. A lapsed identity's, an unknown sender's, and a shared address's that no thread settles: triage alone. A code from an address with no identity verifies through the notifier. | A pipeline of hooks an app orders, which would let one skip the authentication check. The notifier's `inbound` taking parties too: it stays the reply path of an app with no parties. |
+| The adapter reports an email's SPF, DKIM and DMARC (`InboundMessage.authentication`); the core decides (`emailAuthenticated`): DMARC pass, and neither SPF nor DKIM failing (`fail`, `softfail`, `permerror`). Anything else, no report included, is an unknown sender. | Each adapter deciding, which would make trust a provider's choice. All three passing, which turns away forwarded mail whose DKIM carries its DMARC. |
+| One inbound address per deployment (`inboundAddress`, the example's `INBOUND_ADDRESS`): mail to another is dropped (`ignored`), and an outbound email asks for its reply there (`replyTo`). An outbound email carries a `Message-ID` the core makes, and `In-Reply-To` and `References` from the conversation's latest inbound email, through `OutboundMessage`'s new `messageId`, `inReplyTo`, `references` and `replyTo`. | An address per conversation (plus-addressing), which some relays strip. |
+| The run request is `{ trigger: "inbound", party: { table, key }, message, grant }` on the `@queue() @runRequests()` class's queue, enqueued once the message and its files are stored. `grant` is the grant the thread's message ran under while it is active, else the party's newest active grant. `inbound.runWorker(pool, handle)` is the queue as a worker claims it, its handler the agent dispatcher's (D158) or an app's own. `examples/parties`'s stub writes a report on the granted job as the party and files the message onto it. | A run started in process, which ties the inbound route to the run's time and to a sandbox. One request per active grant, which runs one message many times. |
+
+### Conversations are rows
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The conversations are core tables, as section 3's channel identities are: classes the app declares and the loader fills, `@conversations("conversations")` (one per party and channel, or per unknown address and channel) and `@conversations("messages")` (direction, `via` the channel kind and `slot`, the addresses, subject, body, `messageId`, `inReplyTo`, `threadRefs`, `providerMessageId`, `authentication`, `identity` and `trust`, the party, `author`, `authorKind` and `forSubject` on whose behalf, `disposition`, `state`, `triage`, `grant`, `detail`, `at`). The expansion runs before D154's, so the messages class may take `@references` and `@attachments`. Postgres alone. | A core extension, which the inbound path, the notifier's party recipients and the agent runs all need from the core. Tables the loader adds unasked. |
+| A message's files are its `@attachments`: the adapter fetches them (`InboundMessage.attachments`), and the core stores each through `begin`, a put to its object and `complete`, so its hash is checked as a browser's upload's is. `inbound.file({ message, to, as })` files a message onto a row its principal reads: a reference to the row, so the row lists the message among its backlinks (D154), and each file with no second upload. | Files on the conversation, which a message's reference could not carry onto a row. |
+| Triage is a state of a message (`triage: open`, then `closed` by `settle`), read and settled with `parties.triage`. | A triage table beside the messages, a second copy of each. |
+
+### Sending to a party
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `inbound.send({ as, party, channel, body, subject?, about? })` takes `parties.message` (`sendPermission`), granted per role; the sender reads the party's row; the party's identity on the channel is verified or entered, not opted out and not lapsed; a party is sent at most `rateLimit` messages in its window (20 an hour); and `approve`, the approval policy hook D158 sets `ask` policies through, answers `allow`, `deny` or `ask`. An asked message waits as `awaitingApproval` until `release` sends it, its identity checked again, or `reject` refuses it. Each refusal but the permission's is a message row with its reason. | A permission of each channel, which a role would list per provider. A rate limit in the adapter, which knows no party. |
+
+Settled. Channel identities and conversations are core tables, as section 3
+settled identities, for the same reason: the core's own paths read and
+write them. Two parties may share an address, a thread settles which one
+wrote, and a user shares with no one. Comments on tables keeps the `for`
+D103 built (`forSubject`); its `via`, the channel, waits for the core's
+caller to carry one (left below), and a conversation's message records its
+own `via` and `forSubject` meanwhile. Section 3's inbox stays the
+notifier's; a party's notices are its inbox rows of `recipientKind: party`.
+
+Built: the IR (`ir/parties.go`), `@party`, `@conversations` and
+`@runRequests` (`internal/registry/core_parties.go`), the loader's filling
+(`internal/loader/conversations`) and checks
+(`internal/loader/verify/parties.go`), the identity's `optedOutAt`, the
+definitions in orm.ts (`party`, `conversations`), `@superschematic/db`'s
+decorators, the schema file's types; `parties.ts` (`partyPrincipal`,
+`identityLapsed`) and `inbound.ts` (`createInbound`, `emailAuthenticated`)
+in `./postgres`; the notifier skipping opted-out and lapsed identities and
+restamping a verified one; `InboundMessage`'s and `OutboundMessage`'s new
+members; the SMS relay's media and STOP and START, and the mail relay's
+inbound mail, authentication, threading and attachments, in
+`examples/runtime-providers`; the guide's "Outside parties and inbound
+messages"; `examples/parties`. The tests: the registry's, the loader's
+(`TestPartiesFixtureLoads`, `TestPartiesRefusals`,
+`TestPartiesExampleLoads`), the runtime's pure parts, and
+`TestPartiesEndToEnd`, which runs the plan's "done when" on Postgres
+through the relays over stand-in services: a text with a photo from a
+party with a grant becomes a report on the granted job with the photo
+attached, and the message is on the job's, the report's and the party's
+backlinks; a text from an unknown number lands in triage; the same text
+from a party whose grant has ended reaches nothing until the number is
+verified again; email failing DMARC is treated as unknown, and an
+authenticated reply threads to its party's conversation; a party with no
+grant is on its timeline; two parties on one address are told apart by
+the thread; and sending is held to the permission, the rate limit, the
+approval policy and STOP.
+
+Left:
+
+- Go and Rust: the inbound path, party principals and sends, and SQLite
+  and D1.
+- The agent run that takes a run request held to the message's trust:
+  D158 takes the request and narrows its run to the request's grant's
+  role, and records the trust.
+- Comments' `via` on a table: the rules core's caller carries no channel,
+  so a message posted into a row's Comments for a text's sender records
+  its `for` and not its channel. The core's `Caller` gains a channel, the
+  declaration's messages a `via`, and the core is built again for every
+  language.
+- A generated server that builds the inbound path into its `Deps`, mounts
+  each relay's inbound route and fills a `@worker` of the run requests;
+  an app wires them now (`examples/parties/server`).
+- Settling a held message onto a party (adding its identity from triage),
+  and a triage page in Topcoat.
+- A messaging bridge's inbound (D159's examples are SMS and mail).
+- `examples/deploy-smoke` with the inbound path, and the live `smoke.sh
+  Cloudflare` run, which is the maintainer's.
+- The schema writer writing `@party`, `@conversations` and `@runRequests`
+  back.
+
+## D158. Agents are rows, a dispatcher on a queue starts each run in a fresh sandbox with a token that is a grant per target row acting for its principal, autonomy is rows per operation whose ask binds an approval to the parameters' hash, budgets pause, and switches cancel through the sandbox (D77, D93, D104, D114, D153, D156, D159 amended)
+
+D77 named an agent dispatcher and never built it. An agent called the MCP
+endpoint as a user, with that user's session or key: it reached whatever
+the user reached, ran whatever the user could, and nothing metered it,
+asked a person before it moved money, or stopped it. Section 8 of the
+platform plan asks for agents as rows, a fresh sandbox per run, a token its
+task bounds, autonomy per operation, budgets and stop switches.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The orchestration's tables are classes the database declares, one per part with `@agents("<part>")`: `definitions` (`@versioned`), `runs`, `requests` (a `@queue`), `policies`, `approvals` and `controls`, every one required. The loader adds each part's field a class does not declare, and holds one it declares to the part's scalar (the runs' `status` excepted), so the runs may compose Lease and Retries over a Workflow `status`, and the controls a Budget over `budgetLimit`. Postgres alone. | Tables the loader adds unasked, which every database would carry. A class the loader fills only when it is empty, as D153's notifier parts are, which leaves no room for the behaviors D104 meters and retries with. |
+| Each agent is its own principal: its runs act with its definition's `role`, never a user's. A run's principal is `kind: "agent"` with the run's id as its subject, so a row's audience admits the run or whom it acts for (D156). The run records the definition's `_version`. | A principal per agent, whose token would outlive a run. |
+| The run's token is a D156 grant per target row, held by the run (`holderKind: "agent"`), its role the agent's, ending at the definition's `limits.maxSeconds` and revoked when the run ends. `agents.authenticator()` resolves it through `grantAuthenticator`, then reads every active grant of the run and the run's row: a run that ended is a 401, `actingFor` is whom the run acts for, and the permissions are the role's narrowed to those that principal holds (each the two share, the narrower of a pair). | A token with its own claims, which a revocation could not end. The agent's role alone, under which an agent answering a party could do what the party may not. |
+| The dispatcher is a worker of the requests queue (`agents.workerQueue(pool)`, `agents.handle`). A start writes the run, takes its Lease (D104) as the dispatcher's behavior caller, mints the token and starts a sandbox instance (D159) with the definition, the token as a secret, the agent routes' URL and the credential references. A `watch` message, a delayed enqueue (D80), polls the instance and heartbeats the lease until it ends; the run then ends: token revoked, cost metered, transcript written, lease released. A start that fails is recorded with Retries, whose backoff sets when the start is tried again; exhausted, the run fails. On Workers the queue drains as any `@worker`'s does, at each Cron firing and on a wake for a message due within the minute (D92, D151): no process waits on an instance. | A long-running supervisor per run, which Workers has no place for. The queue's own claim lease and attempts in place of Lease and Retries, which the plan names and which give a run a fencing token and per-class backoff. |
+| The model turn runs in the app, not the sandbox: the instance posts its tool results to `<endpoint>/turn`, where the definition's model provider completes the turn with the run's tools, records the usage on the run and the budget, and writes the transcript. The instance calls tools at `<endpoint>/mcp` with its token, and runs the sandbox's own tools (a fetch, a browser) in process. `runAgentInstance` in `./providers` is that side. | The model called from the sandbox, which needs a model key in every instance and a budget the app cannot see. |
+| Credentials are references in the definition. The instance resolves each with `useCredential` into the runner that uses it and reports the reference, provider, target and time to `<endpoint>/credential`, which the run's `credentialUses` keeps. The app passes the broker's own settings to the instance through `sandboxSpec`. | Resolving in the app and passing values to the instance, which puts them in the app's memory and the spec's log. |
+| Triggers are request messages. A notifier route's recipient may be `{ agent }`, which enqueues a request about the event's record in the routing transaction (`createNotifier({ agents })`). `agents.request(tx, ...)` enqueues one for an assignment, a schedule or a principal. A party's inbound message is D157's run request, `{ trigger: "inbound", party, message, grant }` on the `@runRequests` queue, which `inbound.runWorker(pool, m => agents.handle(m))` hands the dispatcher as it is. It names no agent: the definition whose `inbound` is set takes it, acting for the party, permissions narrowed by `partyPrincipal` under the request's grant, its scope the grant's target, the party's row and the message's row, its task the message's body, marked untrusted. | One queue for both, which would make D157's inbound path write a table of D158's. Inbound messages through the notifier's reply path, which runs a sender's own verbs. |
+| A run writes to a party with the `message_party` tool, through D157's `inbound.send` (its permission, the party's identity, its rate limit). `createInbound({ approve: agents.sendApproval })` holds the send to the run's policy as `send_message`, class `messageParty`: ask holds the message `awaitingApproval`, the approval records it (`holds`), and approving it releases the message, denying it refuses it. | Gating the tool as well as the send, which would ask twice for one message. |
+| Autonomy is rows: per agent or every agent, per operation or class (`read`, `internalWrite`, `messageParty`, `moneyMovement`), `auto`, `tell` or `ask`. The most specific row wins; with none, the tool's mode or the operation's `@autonomy`, then the class's default (auto for a read and an internal write, ask otherwise). A money movement is ask whatever a row says: `@autonomy("moneyMovement", mode)` with another mode is the load's refusal, and `setPolicy` refuses such a row. | Autonomy in the schema alone, which ground rule 1 turns down. A mode the runtime merely defaults, which a row could set to auto. |
+| `ask` writes an approval holding the exact parameters and the SHA-256 of the operation and them as canonical JSON (`paramsHash`), raises `approval.requested` on it as urgent, and the call answers `428 approval_required`. Anyone holding the approval's permission (`agents.approve` unless the row names one) decides it, on any channel: `replyActions` are D153's reply actions `approve` and `deny`, and `agents.approve` is the API's. The same call then runs once and spends it. A call of the operation with other parameters supersedes the run's open approvals of it and asks again. `mcpGate`, a new `callGate` of `mountMcp`, holds a generated API's tools to the same policy for a run's token: D93's confirmation for calls a key or a token makes (D114). | A confirmation token the agent carries, which an agent could ask for and redeem itself. An approval of the operation alone, which a changed amount would reuse. |
+| Budgets are the Budget behavior on the controls (D104): each turn's tokens and each instance's wall seconds count on the agent's row, whose meter's scope is every agent's budget row. `agent.budgetWarning` is raised as usage crosses the row's `warnAt` percent. At the agent's cap the agent pauses (`pausedReason: budget`) and its runs are cancelled; at every agent's cap a scheduled run is refused and a principal's run waits on an `agents.overBudget` approval, which `agents.budgets` decides. A limit changes only through `setBudget`, as a principal holding the Budget's `limitPermission`. | A meter of the dispatcher's own, beside the behavior the plan names. |
+| `pause(principal, agent or null)` sets the control row and cancels each run in flight through its sandbox provider; its token is revoked and an assigned row goes back to its queue (`onReturn`). A paused agent's request is recorded as a run refused `paused`. | Letting runs in flight finish, which a stop switch is for stopping. |
+| `ask_principal` posts the question in a target row's thread (its Comments, or the app's `thread`) and enqueues a `followUp` message due at the deadline; a thread no one but the run answered gets the app's `followUp` row. | A wait inside the run, which holds an instance for a day. |
+| A tool marked `untrusted` (the app's or the sandbox's) has its results marked untrusted in every turn after it and counted on the run; an inbound message is the run's task, marked untrusted too. Every tool runs as the run's principal, whose grants were fixed when the run started: no tool widens a run's scope. | Filtering instructions out of outside text, which no filter does reliably. |
+| Administering agents is permissions: `agents.define`, `agents.credentials` (changing a definition's references), `agents.autonomy`, `agents.budgets`, `agents.pause` and `agents.approve`. A principal of kind agent holds none of them, whatever its role says. | An admin flag, which ground rule 2 turns down. |
+
+Settled. A transcript is redacted as each entry is written (the run's
+token, bearer tokens and `options.redact`), kept on the run row while the
+run runs and in the bucket after, `agent-runs/<run>.json`, for 30 days
+(`transcriptRetentionDays`); `prune`, which the dispatcher's worker runs
+with its queue's, deletes the object and stamps `transcriptPrunedAt`. The
+run row is history and stays. Only the dispatcher starts a run: a request
+whose `requestedBy` is an agent run is refused (`agents_cannot_request`),
+so no run starts another with a reach of its own choosing; an agent that
+hands work on asks a principal, whose request starts the next run.
+
+The run-request queue is the class marked `@agents("requests")`: in the
+example and the fixture `AgentRunRequest`, table
+`agent_run_request_queue`, generated as `agentRunRequestQueue`. A message
+is `{ step?, agent?, trigger?, subjectTable?, subjectKey?, targets?,
+event?, input?, requestedBy?, actingFor?, party?, message?, grant?, run?,
+ask? }`. Section 7's inbound message is `{ trigger: "inbound", party:
+{ table, key }, message, grant }`, `message` the message row's key, on D157's
+`@runRequests` queue, not this one: `agents.handle(message)` takes it as it
+is. `createAgents({ inbound })` reads the message through
+`inbound.message`, or the app's `inboundMessage`. A request may also carry
+the message's row as `{ table, key }` or its text as `{ body }`.
+`agents.sendApproval` is `createInbound`'s `approve`, and
+`agents.sendPolicy(principal, operation, params)` the same policy for any
+send.
+
+Built: `ir/agents.go`, `@agents`, `@autonomy` and the agents feature
+(`internal/registry/core_agents.go`), the loader's filling
+(`internal/loader/agents`) and checks (`internal/loader/verify/agents.go`),
+the definition's part in orm.ts, the approvals' `holds`, `@superschematic/db`'s `agents` and
+`@superschematic/api`'s `autonomy`; `runtime/http/typescript/src/agents.ts`
+(`createAgents`, in `./postgres`), `runAgentInstance`
+(`src/providers/agent-runner.ts`), the notifier's `{ agent }` recipient and
+`agents` option, `mountMcp`'s `callGate`, and the wiring to D157's inbound
+path (`inbound`, `message_party`, `sendApproval`); the guide's "Agent runs";
+`examples/agent-orchestration`. The tests: the registry's, the loader's
+(`TestAgentsFixtureLoads`, `TestAgentsRefusals`,
+`TestAgentOrchestrationExampleLoads`,
+`TestAutonomyRefusesMoneyWithoutAsking`), the runtime's `agents.test.ts`,
+and `TestAgentRunsEndToEnd`, which runs the plan's "done when" on Postgres
+with the local-process sandbox running `runAgentInstance` under Bun and the
+model stub: a run a schedule's deadline starts reads only its target and
+the rows its role reaches; its MCP search returns only rows within its
+scope; an ask waits for an approval given by SMS, then runs; a changed
+amount asks again; a budget cap pauses the agent, and every agent's stops
+scheduled runs and asks before a principal's; pausing every agent cancels
+a run in flight and returns its assigned row; the transcript, the run row,
+the approvals and the logs hold no credential value; a party's text down
+D157's inbound path starts a run through its `@runRequests` queue, which
+acts for the party, narrowed to its grant's role, and obeys nothing the
+text says, and the run's message back waits on its approval, given by text,
+before D157's send releases it; an unanswered question makes a
+follow-up row; Retries starts a failed instance again while the run holds
+its Lease; and administration is permissions.
+
+Left:
+
+- An inbound message's trust (`verified`, `entered`, D157) narrowing its
+  run: the run records it (`input.trust`) and runs as a verified one's.
+- Go and Rust: the dispatcher, the run's authenticator, autonomy and the
+  runner; SQLite and D1.
+- The generated server building the dispatcher into its `Deps`, mounting
+  the agent routes and filling the requests queue's `@worker` with
+  `agents.handle`; an app wires them (`examples/agent-orchestration/server`).
+- `@autonomy` in the generated MCP tool records (`mcptools`), so
+  `mcpGate` reads a generated tool's class; it reads an internal write now.
+- A real container platform's sandbox provider and one model API's
+  provider (D159's left), and the live Workers run (`smoke.sh
+  Cloudflare`), which is the maintainer's. The dispatcher's module reaches
+  Postgres through Hyperdrive as the notifier's does.
+- A reply interpreter that is a model (D153's left), through an agent run.
+- A party the run acts for narrowing the role's relation paths to its
+  grant's; today the run's scope is the grant's target, the party's row
+  and the message's, and the agent's role's paths from them.
+- The schema writer writing `@agents` and `@autonomy` back.

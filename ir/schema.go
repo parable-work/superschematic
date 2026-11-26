@@ -110,6 +110,12 @@ type Schema struct {
 	// workers a memoryStore edge, and its Deps a MemoryStore.
 	MemoryStores []ServiceRef `json:"memoryStores,omitempty" yaml:"memoryStores,omitempty"`
 
+	// Providers are the runtime provider packages an API's config lists
+	// (D159), each as its package.json declares it and the loader checked
+	// it against its interface's contract, in the order the config lists
+	// them. An environment's provider slots name one of them.
+	Providers []*RuntimeProvider `json:"providers,omitempty" yaml:"providers,omitempty"`
+
 	// RateLimitStore is the MemoryStore service an API's @rateLimit
 	// routes count in, shared by its replicas: the config's
 	// rateLimitStore, which MemoryStores also lists (D75). Nil keeps each
