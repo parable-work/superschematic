@@ -17,7 +17,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker", "enqueueOnChange", "stateMachine", "fenced", "audience", "accessGrants", "accessLog", "query", "seedRoles", "deriver", "channel", "key", "app", "behaviorWorker"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "decrypted", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
 		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "graphOperations", "auth", "publicRoute", "requirePermission"},
-		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "tableOperation", "docs", "mcp", "icon", "idempotent"},
+		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "tableOperation", "docs", "mcp", "icon", "idempotent", "httpBinaryStream"},
 	}
 	total := 0
 	for target, names := range want {

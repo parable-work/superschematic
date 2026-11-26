@@ -266,6 +266,21 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 		},
 		recordsErrors: true,
 	})
+	// An operation whose success body is a stream, not the envelope (D167).
+	specs = append(specs, DecoratorSpec{
+		Name: "httpBinaryStream", Packages: []string{pkgAPI}, Target: TargetOperation,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.HTTPBinaryStream != nil {
+				return fmt.Errorf("operation %s has more than one @httpBinaryStream decorator", n.Field.Name)
+			}
+			stream, err := httpBinaryStreamDef(args)
+			if err != nil {
+				return err
+			}
+			n.Field.HTTPBinaryStream = stream
+			return nil
+		},
+	})
 	// Operation sets and operations share the middleware trio.
 	for _, name := range []string{"rateLimit", "bodyLimit", "timeout"} {
 		specs = append(specs, DecoratorSpec{
@@ -783,4 +798,51 @@ func idempotentConfig(args []any) (*ir.IdempotentConfig, error) {
 		}
 	}
 	return config, nil
+}
+
+// httpBinaryStreamDef reads @httpBinaryStream({ contentType,
+// responseHeaders? }) (D167): one config object whose contentType is the
+// success body's media type and whose responseHeaders, when present, is a
+// list of the header names the stream answers with.
+// ir.ValidateHTTPBinaryStream holds both to what the SDKs read.
+func httpBinaryStreamDef(args []any) (*ir.HTTPBinaryStreamDef, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("@httpBinaryStream takes exactly one config object")
+	}
+	cfg, ok := args[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("@httpBinaryStream config must be an object literal")
+	}
+	stream := &ir.HTTPBinaryStreamDef{}
+	for _, key := range sortedKeys(cfg) {
+		switch value := cfg[key]; key {
+		case "contentType":
+			contentType, ok := value.(string)
+			if !ok || contentType == "" {
+				return nil, fmt.Errorf("@httpBinaryStream contentType must be a string literal, such as \"application/vnd.apache.arrow.stream\"")
+			}
+			stream.ContentType = contentType
+		case "responseHeaders":
+			list, ok := value.([]any)
+			if !ok || len(list) == 0 {
+				return nil, fmt.Errorf("@httpBinaryStream responseHeaders must be a non-empty list of header names")
+			}
+			for _, item := range list {
+				header, ok := item.(string)
+				if !ok || header == "" {
+					return nil, fmt.Errorf("@httpBinaryStream responseHeaders must be a non-empty list of header names")
+				}
+				stream.ResponseHeaders = append(stream.ResponseHeaders, header)
+			}
+		default:
+			return nil, fmt.Errorf("@httpBinaryStream has no option %q; it takes contentType and responseHeaders", key)
+		}
+	}
+	if stream.ContentType == "" {
+		return nil, fmt.Errorf("@httpBinaryStream requires a contentType, such as \"application/vnd.apache.arrow.stream\"")
+	}
+	if errs := ir.ValidateHTTPBinaryStream("@httpBinaryStream", stream); len(errs) > 0 {
+		return nil, errs[0]
+	}
+	return stream, nil
 }
