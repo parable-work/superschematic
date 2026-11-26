@@ -20,6 +20,8 @@ var scheduleORMCases = []string{
 	"RunEvent whose handler fails rolls the spend and the handler's writes back and returns its error",
 	"RunEvent on a lost claim runs nothing",
 	"RunEvent without a claim spends nothing and runs the handler",
+	"RunEvent runs the functions its handler's AfterCommit added after its commit, and none when the handler fails",
+	"RunEvent in a caller's transaction runs its handler's AfterCommit functions after the caller's commit",
 	"a deleted problem's events stay in its event queue",
 }
 
@@ -281,6 +283,51 @@ func TestScheduleTablesOnPostgres(t *testing.T) {
 		run, err := db.Problem.RunEvent(worker, c.Message, nil, retitle(id, "heard"))
 		if err != nil || !run.Ran || title(t, id) != "heard" || queued(t, id) != 1 {
 			t.Fatalf("RunEvent without a claim = %+v, %v, title %q, %d queued; want it run, the message kept", run, err, title(t, id), queued(t, id))
+		}
+	})
+
+	t.Run("RunEvent runs the functions its handler's AfterCommit added after its commit, and none when the handler fails", func(t *testing.T) {
+		id := create(t)
+		c := enqueue(t, id)
+		seen := ""
+		run, err := db.Problem.RunEvent(worker, c.Message, &rules.Claim{ID: c.ID, Token: c.Token}, func(ctx context.Context, tx TxInterface) error {
+			tx.(*Tx).AfterCommit(func(context.Context) { seen = title(t, id) })
+			return retitle(id, "told")(ctx, tx)
+		})
+		if err != nil || !run.Ran || seen != "told" {
+			t.Fatalf("RunEvent = %+v, %v, its function saw the title %q; want it run after the commit, seeing told", run, err, seen)
+		}
+		c = enqueue(t, create(t))
+		ran := false
+		failed := errors.New("the agent was not told")
+		if _, err := db.Problem.RunEvent(worker, c.Message, &rules.Claim{ID: c.ID, Token: c.Token}, func(ctx context.Context, tx TxInterface) error {
+			tx.(*Tx).AfterCommit(func(context.Context) { ran = true })
+			return failed
+		}); !errors.Is(err, failed) || ran {
+			t.Fatalf("RunEvent = %v and ran %t, want the handler's error and nothing run", err, ran)
+		}
+	})
+
+	t.Run("RunEvent in a caller's transaction runs its handler's AfterCommit functions after the caller's commit", func(t *testing.T) {
+		id := create(t)
+		c := enqueue(t, id)
+		var ran []string
+		err := db.Transaction(worker, func(tx TxInterface) error {
+			tx.(*Tx).AfterCommit(func(context.Context) { ran = append(ran, "caller") })
+			run, err := tx.GetProblemRepository().RunEvent(worker, c.Message, &rules.Claim{ID: c.ID, Token: c.Token}, func(ctx context.Context, handlerTx TxInterface) error {
+				handlerTx.(*Tx).AfterCommit(func(context.Context) { ran = append(ran, "handler") })
+				return nil
+			})
+			if err != nil || !run.Ran {
+				return fmt.Errorf("RunEvent = %+v, %v", run, err)
+			}
+			if len(ran) != 0 {
+				return fmt.Errorf("a function ran before the caller's commit: %v", ran)
+			}
+			return nil
+		})
+		if err != nil || len(ran) != 2 || ran[0] != "caller" || ran[1] != "handler" {
+			t.Fatalf("Transaction = %v and the functions ran as %v, want caller then handler after its commit", err, ran)
 		}
 	})
 
