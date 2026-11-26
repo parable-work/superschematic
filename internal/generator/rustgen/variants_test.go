@@ -142,11 +142,13 @@ fn a_step_round_trips() {
 		t.Fatal(err)
 	}
 	for _, dir := range []string{outDir, apiDir} {
-		cmd := exec.Command(cargoPath, "test", "--quiet")
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(root, "target"))
-		if combined, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("cargo test in %s failed: %v\n%s", filepath.Base(dir), err, combined)
+		for _, args := range [][]string{{"clippy", "--quiet", "--all-targets", "--", "-D", "warnings"}, {"test", "--quiet"}} {
+			cmd := exec.Command(cargoPath, args...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(root, "target"))
+			if combined, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("cargo %s in %s failed: %v\n%s", args[0], filepath.Base(dir), err, combined)
+			}
 		}
 	}
 }
