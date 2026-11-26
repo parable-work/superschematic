@@ -15,17 +15,17 @@ import (
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
 // reveal and the access log. An audience on SQLite is refused for every
-// language (checkAccess). So are references and attachments (D154, D185),
-// on Postgres, and the runtime providers of an API's @providers slots
-// (D159, D185), each a provider crate the server links. So are Recurrence
-// and the calendar (D152) and search across tables (D155), on Postgres
-// (D188): a Rust server serves a Recurrence's operations, deadlines and
-// occurrences through the Rust adapter, the Postgres repositories carry a
-// table's calendar sources and search index, and the runtime's
-// orm::calendar and orm::search_tables read them. A Rust server whose
-// database lists sqlite first is refused Recurrence and the calendar by
-// rustrestgen, which knows the database's dialect; the loader refuses
-// @searchable on SQLite for every language.
+// language but TypeScript (refuseSQLiteReaders, D182). References and
+// attachments (D154, D185) are served on Postgres, and the runtime
+// providers of an API's @providers slots (D159, D185), each a provider
+// crate the server links. So are Recurrence and the calendar (D152) and
+// search across tables (D155), on Postgres (D188): a Rust server serves a
+// Recurrence's operations, deadlines and occurrences through the Rust
+// adapter, the Postgres repositories carry a table's calendar sources and
+// search index, and the runtime's orm::calendar and orm::search_tables
+// read them. A Rust server whose database lists sqlite first is refused
+// Recurrence and the calendar by rustrestgen, which knows the database's
+// dialect; the loader refuses @searchable on SQLite for every language.
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
 // for a listed provider with no Rust crate, an @autonomy operation, and

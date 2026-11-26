@@ -28,7 +28,8 @@ The core has fifteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `superschematic version 1.2.3`, or `0.0.0` for a binary built from a
 checkout; a generated workflow checks the binary it installs with it. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner), which add none. Each release also
+target, the Pulumi provisioner, and the embedded target, which builds an
+environment as one binary, D116), which add none. Each release also
 ships `superschematic-topcoat`, the same binary with the
 [Topcoat](/superschematic/guides/topcoat/) extension linked too, which
 builds a stack whose app needs it. The migration runner,
@@ -1285,7 +1286,8 @@ target only when it links the target's extension and the provisioner's
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
-`prepare` reaches no target and takes its own flags.
+`prepare` reaches no target and takes `--stack`, `--naming` and its own
+flags.
 
 An environment that builds as one binary, as one on the `embedded` target
 does (D116), is built by `stack build` and run by `stack dev`. Every

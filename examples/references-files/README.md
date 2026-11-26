@@ -3,7 +3,9 @@
 An issue tracker whose rows point at one another and hold files (D154):
 references from any row to any row, the backlinks of a row across every
 table, files uploaded straight to a bucket, and a file filed onto another
-row with no second upload.
+row with no second upload. The guide's
+[References and files on any row](https://parable-work.github.io/superschematic/guides/database-tables/#references-and-files-on-any-row)
+section covers it in full.
 
 | Path | What it is |
 |---|---|
@@ -39,3 +41,8 @@ runs end to end against Postgres in `TestReferencesTablesEndToEnd`
 (`internal/generator/tsgen`), over a bucket on an R2 binding whose S3 API a
 stand-in serves. The HTTP runtime's workerd fixture `uploads` signs, sends
 and checks a direct upload to R2 inside workerd.
+
+References and files are the TypeScript repositories', on Postgres: the
+Go and Rust repositories do not keep them yet, and no route, MCP tool or
+SDK method is generated for them, so `server/server.ts` writes its routes
+over `orm.references` and `orm.attachments`.

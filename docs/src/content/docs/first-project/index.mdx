@@ -51,6 +51,7 @@ calls from its pages.
       - shop-cart/ API: a shopper's cart and the pickup slots, served in TypeScript
       - shop-storefront/ API: carts, served in TypeScript
       - shop-stack/ Stack: what runs, and the Dev environment stack dev runs
+      - ... shop-media, a bucket; shop-cache, a memory store; shop-web, a site; the wishlist and its two stacks
   - go/ the Go module: the implementations and tests
     - shop-api/ the implementation of shop-api
     - shop-orders/ the implementation of shop-orders
@@ -62,6 +63,8 @@ calls from its pages.
     - shop-stock/ the implementation of shop-stock
   - rust-server/ shop-orders on the generated Rust server, for the guides
   - topcoat/ a Topcoat app over the Rust server's implementations, for the guides
+  - apps/backoffice/ shop-stock's Topcoat app, which shop-stack runs
+  - web/shop-web/ the site's page
   - testdata/generated/ copies of the generated files these pages quote
   - scripts/
     - check.sh
