@@ -1983,12 +1983,56 @@ buildRouter(implementations, {
 });
 ```
 
+### In Go
+
+The Go server and ORM serve the same access. The auth provider's
+`callerPrincipal` hook names the caller whole, a `session.Caller`: its id,
+its kind, whom it acts for, its grants and its credential. An auth step
+puts one on the request with `session.ContextWithCaller`; a step that puts
+only an id, as the identity runtime does, names a user. Each route binds
+the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
+every read and write of the operation to it, as the TypeScript ones do.
+`orm.AsSystem(ctx)`, and a context outside any operation, read every row.
+
+```go
+router.Use(session.GrantAuthenticator(db, identityMiddleware, nil))
+api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
+```
+
+`session.GrantAuthenticator` runs a request with a `grant_` token as the
+grant's holder; the ORM of a database with an `@accessGrants` table is the
+authority it reads the grant from on every call. The grants are the ORM's:
+
+| Function | Does |
+| --- | --- |
+| `orm.IssueGrant(ctx, db, access.IssueGrantInput{...})` | writes a grant and answers its token |
+| `orm.RevokeGrant(ctx, db, id, at)` | revokes it |
+| `orm.ActiveGrants(ctx, db, access.ActiveGrantsFilter{...})` | lists the grants active now |
+| `orm.AccessConditions(ctx, table, &args, offset, write)` | the conditions a read across tables applies as a repository does |
+
+A row rule's path (`by: ["unit.contract.parties.party"]`) is one filter of
+the row through the relations; the Go filters reach through a one-to-many
+relation by its name (`Parties`). A view's field under
+`@decrypted({ permission })` is masked for a caller without it, and each
+value opened for one with it is recorded in the access log in the
+operation's transaction. A route of an API whose database has an
+`@accessLog` table records its call itself, before the permission check:
+there is no option to pass. A revealed field holds text, and the database
+needs an `@accessLog` table, or the build is refused.
+
+The Go outputs refuse at build time the platform features they do not
+serve yet: `@calendarSource` and Recurrence, `@event`, `@notifier` and
+`@channelIdentities`, `@references` and `@attachments`, `@searchable`,
+`@party`, `@conversations` and `@runRequests`, `@agents`, an API's
+provider slots and `@autonomy`. Build such a service in TypeScript.
+
 ### What access does not do yet
 
 | Not built | Until then |
 | --- | --- |
 | an audience on SQLite and D1 | an `@audience` table is built for Postgres |
-| the Go and Rust servers' and repositories' audience, grants, reveal and access log | the TypeScript server serves them |
+| the Rust server's and repositories' audience, grants, reveal and access log | the TypeScript and Go servers serve them |
+| a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
 | a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |
