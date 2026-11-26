@@ -377,7 +377,8 @@ type {{ $typeName }}OrderByField string
 const (
 	{{- range .Fields }}
 	{{- if not .IsEncrypted }}
-	{{ $typeName }}OrderBy{{ toGoName .Name }} {{ $typeName }}OrderByField = "{{ .DBName }}"
+	{{- /* A field named field orders by OrderByFieldField: OrderByField is the type's. */}}
+	{{ $typeName }}OrderBy{{ toGoName .Name }}{{ if eq (toGoName .Name) "Field" }}Field{{ end }} {{ $typeName }}OrderByField = "{{ .DBName }}"
 	{{- end }}
 	{{- end }}
 )
@@ -571,6 +572,12 @@ type {{ .TypeName }}Filter struct {
 	// those rows{{ if .Nullable }}, so a row whose {{ .Field }} is null is not kept{{ end }}.
 	{{ .GoField }} *{{ .Target }}Filter
 	{{- end }}
+	{{- range .ManyRelations }}
+	// {{ .GoField }} keeps the rows that some{{ if .SourceLive }} live{{ end }} {{ .Source }} row the filter
+	// finds points at by its {{ .Field }} (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	{{ .GoField }} *{{ .Source }}Filter
+	{{- end }}
 	{{- range .ReferencedBy }}
 	// {{ .FilterField }} filters on the presence or absence of a
 	// {{ .SourceTypeName }} whose {{ .FieldName }} points at this row.
@@ -596,6 +603,11 @@ type {{ .TypeName }}Filter struct {
 	// conditions (D90). A filter of no condition keeps every row, and so
 	// does an empty AnyOf.
 	AnyOf []{{ .TypeName }}Filter
+	{{- if $.HeldByAccess }}
+	// scope holds each table a condition through a relation reads to the
+	// caller of the operation that reads it (D156, D180); nil outside one.
+	scope accessScope
+	{{- end }}
 }
 {{- if not .Released }}
 
@@ -800,11 +812,39 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 
 	{{- range .PathRelations }}
 	if f.{{ .GoField }} != nil {
+		{{- if $.HeldByAccess }}
+		f.{{ .GoField }}.scope = f.scope
+		{{- end }}
 		before := len(*args)
 		through := f.{{ .GoField }}.conditions(args, paramNum)
 		paramNum += len(*args) - before
 		{{- if .TargetLive }}
 		through = append(through, {{ goRawString .TargetLive }})
+		{{- end }}
+		{{- if $.HeldByAccess }}
+		through = append(through, f.scope.conditions({{ printf "%q" .Target }}, args, &paramNum)...)
+		{{- end }}
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe }}, where))
+	}
+	{{- end }}
+
+	{{- range .ManyRelations }}
+	if f.{{ .GoField }} != nil {
+		{{- if $.HeldByAccess }}
+		f.{{ .GoField }}.scope = f.scope
+		{{- end }}
+		before := len(*args)
+		through := f.{{ .GoField }}.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		{{- if .SourceLive }}
+		through = append(through, {{ goRawString .SourceLive }})
+		{{- end }}
+		{{- if $.HeldByAccess }}
+		through = append(through, f.scope.conditions({{ printf "%q" .Source }}, args, &paramNum)...)
 		{{- end }}
 		where := ""
 		if len(through) > 0 {
@@ -843,6 +883,9 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
 	// one's placeholders numbered after the last.
 	for i := range f.AllOf {
+		{{- if $.HeldByAccess }}
+		f.AllOf[i].scope = f.scope
+		{{- end }}
 		before := len(*args)
 		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
 		paramNum += len(*args) - before
@@ -853,6 +896,9 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 		branches := make([]string, 0, len(f.AnyOf))
 		every := false
 		for i := range f.AnyOf {
+			{{- if $.HeldByAccess }}
+			f.AnyOf[i].scope = f.scope
+			{{- end }}
 			before := len(*args)
 			branch := f.AnyOf[i].conditions(args, paramNum)
 			paramNum += len(*args) - before

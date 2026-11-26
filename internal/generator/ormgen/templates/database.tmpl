@@ -381,9 +381,17 @@ const SystemActorName = {{ printf "%q" .Actor.SystemName }}
 // AsSystem returns ctx acting as the system actor, SystemActorID, for a
 // write no request's caller makes, a job's or a worker's: it stamps
 // createdBy, updatedBy and deletedBy with SystemActorID (D87).
+{{- if .Access }}
+// Its reads and writes see every row, whatever the caller of the
+// operation it runs in may see (D156, D180).
+func AsSystem(ctx context.Context) context.Context {
+	return asSystemAccess(WithUserID(ctx, SystemActorID))
+}
+{{- else }}
 func AsSystem(ctx context.Context) context.Context {
 	return WithUserID(ctx, SystemActorID)
 }
+{{- end }}
 
 func mustParseUserID(text string) {{ .UserIDGoType }} {
 	userID, err := ParseUserID(text)

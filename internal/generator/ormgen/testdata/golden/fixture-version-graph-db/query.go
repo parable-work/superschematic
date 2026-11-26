@@ -6108,6 +6108,50 @@ type RecipeFilter struct {
 	Title     *StringFilter
 	CreatedAt *DateTimeFilter
 	CreatedBy *UUIDFilter
+	// Covers keeps the rows that some Cover row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Covers *CoverFilter
+	// Ingredients keeps the rows that some Ingredient row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Ingredients *IngredientFilter
+	// Notes keeps the rows that some Note row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Notes *NoteFilter
+	// Parts keeps the rows that some Part row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Parts *PartFilter
+	// PartReleaseds keeps the rows that some PartReleased row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	PartReleaseds *PartReleasedFilter
+	// RecipeCommits keeps the rows that some RecipeCommit row the filter
+	// finds points at by its root (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeCommits *RecipeCommitFilter
+	// RecipeRefs keeps the rows that some live RecipeRef row the filter
+	// finds points at by its root (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeRefs *RecipeRefFilter
+	// RecipeReleases keeps the rows that some RecipeRelease row the filter
+	// finds points at by its root (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeReleases *RecipeReleaseFilter
+	// Steps keeps the rows that some Step row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Steps *StepFilter
+	// Tastings keeps the rows that some Tasting row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Tastings *TastingFilter
+	// Utensils keeps the rows that some Utensil row the filter
+	// finds points at by its recipe (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Utensils *UtensilFilter
 	// ReferencedByCoverRecipe filters on the presence or absence of a
 	// Cover whose recipe points at this row.
 	ReferencedByCoverRecipe *ReferencedByFilter
@@ -6392,6 +6436,117 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			}
 		}
 	}
+	if f.Covers != nil {
+		before := len(*args)
+		through := f.Covers.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT cover.recipe_id FROM cover%s)`, where))
+	}
+	if f.Ingredients != nil {
+		before := len(*args)
+		through := f.Ingredients.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT ingredient.recipe_id FROM ingredient%s)`, where))
+	}
+	if f.Notes != nil {
+		before := len(*args)
+		through := f.Notes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT note.recipe_id FROM note%s)`, where))
+	}
+	if f.Parts != nil {
+		before := len(*args)
+		through := f.Parts.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT part.recipe_id FROM part%s)`, where))
+	}
+	if f.PartReleaseds != nil {
+		before := len(*args)
+		through := f.PartReleaseds.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT part_released.recipe_id FROM part_released%s)`, where))
+	}
+	if f.RecipeCommits != nil {
+		before := len(*args)
+		through := f.RecipeCommits.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT recipe_commit.root_id FROM recipe_commit%s)`, where))
+	}
+	if f.RecipeRefs != nil {
+		before := len(*args)
+		through := f.RecipeRefs.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT recipe_ref.root_id FROM recipe_ref%s)`, where))
+	}
+	if f.RecipeReleases != nil {
+		before := len(*args)
+		through := f.RecipeReleases.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT recipe_release.root_id FROM recipe_release%s)`, where))
+	}
+	if f.Steps != nil {
+		before := len(*args)
+		through := f.Steps.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT step.recipe_id FROM step%s)`, where))
+	}
+	if f.Tastings != nil {
+		before := len(*args)
+		through := f.Tastings.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT tasting.recipe_id FROM tasting%s)`, where))
+	}
+	if f.Utensils != nil {
+		before := len(*args)
+		through := f.Utensils.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe.id IN (SELECT utensil.recipe_id FROM utensil%s)`, where))
+	}
 	if f.ReferencedByCoverRecipe != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id`
 		if f.ReferencedByCoverRecipe.Exists {
@@ -6546,6 +6701,34 @@ type RecipeCommitFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose parentCommit is null is not kept.
 	ParentCommit *RecipeCommitFilter
+	// PartReleaseds keeps the rows that some PartReleased row the filter
+	// finds points at by its commit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	PartReleaseds *PartReleasedFilter
+	// RecipeCommits keeps the rows that some RecipeCommit row the filter
+	// finds points at by its parentCommit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeCommits *RecipeCommitFilter
+	// RecipePatches keeps the rows that some RecipePatch row the filter
+	// finds points at by its commit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipePatches *RecipePatchFilter
+	// RecipeRefsByBaseCommit keeps the rows that some live RecipeRef row the filter
+	// finds points at by its baseCommit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeRefsByBaseCommit *RecipeRefFilter
+	// RecipeRefsByHeadCommit keeps the rows that some live RecipeRef row the filter
+	// finds points at by its headCommit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeRefsByHeadCommit *RecipeRefFilter
+	// RecipeReleases keeps the rows that some RecipeRelease row the filter
+	// finds points at by its commit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeReleases *RecipeReleaseFilter
+	// RecipeSnapshotEntries keeps the rows that some RecipeSnapshotEntry row the filter
+	// finds points at by its commit (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeSnapshotEntries *RecipeSnapshotEntryFilter
 	// ReferencedByPartReleasedCommit filters on the presence or absence of a
 	// PartReleased whose commit points at this row.
 	ReferencedByPartReleasedCommit *ReferencedByFilter
@@ -7184,6 +7367,78 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 		}
 		conditions = append(conditions, fmt.Sprintf(`recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
 	}
+	if f.PartReleaseds != nil {
+		before := len(*args)
+		through := f.PartReleaseds.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT part_released.commit_id FROM part_released%s)`, where))
+	}
+	if f.RecipeCommits != nil {
+		before := len(*args)
+		through := f.RecipeCommits.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_commit.parent_commit_id FROM recipe_commit%s)`, where))
+	}
+	if f.RecipePatches != nil {
+		before := len(*args)
+		through := f.RecipePatches.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_patch.commit_id FROM recipe_patch%s)`, where))
+	}
+	if f.RecipeRefsByBaseCommit != nil {
+		before := len(*args)
+		through := f.RecipeRefsByBaseCommit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_ref.base_commit_id FROM recipe_ref%s)`, where))
+	}
+	if f.RecipeRefsByHeadCommit != nil {
+		before := len(*args)
+		through := f.RecipeRefsByHeadCommit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_ref.head_commit_id FROM recipe_ref%s)`, where))
+	}
+	if f.RecipeReleases != nil {
+		before := len(*args)
+		through := f.RecipeReleases.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_release.commit_id FROM recipe_release%s)`, where))
+	}
+	if f.RecipeSnapshotEntries != nil {
+		before := len(*args)
+		through := f.RecipeSnapshotEntries.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.id IN (SELECT recipe_snapshot_entry.commit_id FROM recipe_snapshot_entry%s)`, where))
+	}
 	if f.ReferencedByPartReleasedCommit != nil {
 		probe := `SELECT 1 FROM part_released WHERE part_released.commit_id = recipe_commit.id`
 		if f.ReferencedByPartReleasedCommit.Exists {
@@ -7768,6 +8023,42 @@ type RecipeRefFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose headCommit is null is not kept.
 	HeadCommit *RecipeCommitFilter
+	// Covers keeps the rows that some Cover row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Covers *CoverFilter
+	// Ingredients keeps the rows that some Ingredient row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Ingredients *IngredientFilter
+	// Notes keeps the rows that some Note row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Notes *NoteFilter
+	// Parts keeps the rows that some Part row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Parts *PartFilter
+	// RecipeCommits keeps the rows that some RecipeCommit row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeCommits *RecipeCommitFilter
+	// RecipeRefs keeps the rows that some live RecipeRef row the filter
+	// finds points at by its parentRef (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	RecipeRefs *RecipeRefFilter
+	// Steps keeps the rows that some Step row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Steps *StepFilter
+	// Tastings keeps the rows that some Tasting row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Tastings *TastingFilter
+	// Utensils keeps the rows that some Utensil row the filter
+	// finds points at by its ref (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Utensils *UtensilFilter
 	// ReferencedByCoverRef filters on the presence or absence of a
 	// Cover whose ref points at this row.
 	ReferencedByCoverRef *ReferencedByFilter
@@ -8522,6 +8813,97 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`recipe_ref.head_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+	if f.Covers != nil {
+		before := len(*args)
+		through := f.Covers.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT cover.ref_id FROM cover%s)`, where))
+	}
+	if f.Ingredients != nil {
+		before := len(*args)
+		through := f.Ingredients.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT ingredient.ref_id FROM ingredient%s)`, where))
+	}
+	if f.Notes != nil {
+		before := len(*args)
+		through := f.Notes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT note.ref_id FROM note%s)`, where))
+	}
+	if f.Parts != nil {
+		before := len(*args)
+		through := f.Parts.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT part.ref_id FROM part%s)`, where))
+	}
+	if f.RecipeCommits != nil {
+		before := len(*args)
+		through := f.RecipeCommits.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT recipe_commit.ref_id FROM recipe_commit%s)`, where))
+	}
+	if f.RecipeRefs != nil {
+		before := len(*args)
+		through := f.RecipeRefs.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT recipe_ref.parent_ref_id FROM recipe_ref%s)`, where))
+	}
+	if f.Steps != nil {
+		before := len(*args)
+		through := f.Steps.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT step.ref_id FROM step%s)`, where))
+	}
+	if f.Tastings != nil {
+		before := len(*args)
+		through := f.Tastings.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT tasting.ref_id FROM tasting%s)`, where))
+	}
+	if f.Utensils != nil {
+		before := len(*args)
+		through := f.Utensils.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.id IN (SELECT utensil.ref_id FROM utensil%s)`, where))
 	}
 	if f.ReferencedByCoverRef != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id`

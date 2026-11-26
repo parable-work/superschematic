@@ -649,6 +649,10 @@ type ProjectFilter struct {
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
+	// Tasks keeps the rows that some Task row the filter
+	// finds points at by its project (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Tasks *TaskFilter
 	// ReferencedByTaskProject filters on the presence or absence of a
 	// Task whose project points at this row.
 	ReferencedByTaskProject *ReferencedByFilter
@@ -972,6 +976,16 @@ func (f *ProjectFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `project._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Tasks != nil {
+		before := len(*args)
+		through := f.Tasks.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`project.id IN (SELECT task.project_id FROM task%s)`, where))
 	}
 	if f.ReferencedByTaskProject != nil {
 		probe := `SELECT 1 FROM task WHERE task.project_id = project.id`

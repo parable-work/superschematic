@@ -1200,6 +1200,10 @@ type InventoryFilter struct {
 	StockOnHand *Int64Filter
 	StockHeld   *Int64Filter
 	Version     *Int64Filter
+	// Checkouts keeps the rows that some Checkout row the filter
+	// finds points at by its wrap (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Checkouts *CheckoutFilter
 	// ReferencedByCheckoutWrap filters on the presence or absence of a
 	// Checkout whose wrap points at this row.
 	ReferencedByCheckoutWrap *ReferencedByFilter
@@ -1693,6 +1697,16 @@ func (f *InventoryFilter) conditions(args *[]interface{}, paramOffset int) []str
 				conditions = append(conditions, `inventory._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Checkouts != nil {
+		before := len(*args)
+		through := f.Checkouts.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`inventory.id IN (SELECT checkout.wrap_id FROM checkout%s)`, where))
 	}
 	if f.ReferencedByCheckoutWrap != nil {
 		probe := `SELECT 1 FROM checkout WHERE checkout.wrap_id = inventory.id`
