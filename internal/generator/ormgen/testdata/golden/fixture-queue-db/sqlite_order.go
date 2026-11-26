@@ -647,72 +647,9 @@ func (r *OrderSQLiteRepository) UpsertOneResult(ctx context.Context, input *type
 	return out, err
 }
 
-// orderSQLiteExcluded are the columns UpsertMany may set from the input a
-// row of it would have inserted: the columns of OrderUpdate.
-var orderSQLiteExcluded = map[string]string{
-	"placed_at": `placed_at`,
-}
-
-// UpsertMany inserts each input, or, when a row already holds its value of
-// the unique key on, sets each field update names of that row to the value
-// the input would have inserted, and returns each input's row and what it
-// did with it, in the inputs' order (D89): a row at a time, in one
-// transaction.
-func (r *OrderSQLiteRepository) UpsertMany(ctx context.Context, inputs []*types.Order, on OrderUniqueKey, update OrderFields, opts *UpsertOptions) ([]UpsertResult[*types.Order], error) {
-	key, ok := orderSQLiteUniqueKeys[on]
-	if !ok {
-		return nil, fmt.Errorf("orm: Order has no unique key %q", string(on))
-	}
-	if key.expression {
-		return nil, upsertExpressionKey("UpsertMany", "Order", string(on))
-	}
-	if opts != nil && opts.Batch < 0 {
-		return nil, fmt.Errorf("orm: UpsertMany writes 1 or more Order rows a statement, not %d", opts.Batch)
-	}
-	var excluded []string
-	for _, column := range orderFieldStrings(update) {
-		quoted, ok := orderSQLiteExcluded[column]
-		if !ok {
-			return nil, fmt.Errorf("orm: UpsertMany of Order sets the fields an update sets, not %s", column)
-		}
-		excluded = append(excluded, quoted)
-	}
-	onlyIfChanged := opts != nil && opts.OnlyIfChanged
-	out := make([]UpsertResult[*types.Order], 0, len(inputs))
-	err := r.within(ctx, func(q sqliteQuerier) error {
-		for _, input := range inputs {
-			if err := r.stampCreate(ctx, input); err != nil {
-				return err
-			}
-			record, err := sqliteMembersOf(input)
-			if err != nil {
-				return fmt.Errorf("upsert Order: %w", err)
-			}
-			var sets, compare, next []string
-			var args []any
-			for _, quoted := range excluded {
-				sets = append(sets, quoted+" = excluded."+quoted)
-				compare, next = append(compare, `"order"`+"."+quoted), append(next, "excluded."+quoted)
-			}
-			if len(sets) > 0 {
-				if sets, args, err = r.stamped(ctx, nil, sets, args); err != nil {
-					return err
-				}
-			}
-			upserted, err := orderSQLite.upsert(ctx, q, record, key, sets, args, compare, next, onlyIfChanged)
-			if err != nil {
-				return err
-			}
-			rows, err := r.decode(ctx, []sqliteRecord{upserted.record}, OrderFields{}, false)
-			if err != nil {
-				return err
-			}
-			out = append(out, UpsertResult[*types.Order]{Row: rows[0], Status: upserted.status})
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+// UpsertMany is refused on SQLite until the repositories write sqlutil's
+// upsert of many rows, a statement per batch (D89, D116): use UpsertOne,
+// or UpsertOneResult, a row at a time, in a transaction.
+func (r *OrderSQLiteRepository) UpsertMany(context.Context, []*types.Order, OrderUniqueKey, OrderFields, *UpsertOptions) ([]UpsertResult[*types.Order], error) {
+	return nil, sqliteRefused("Order", "upserts many rows, which the SQLite repositories do not write yet; upsert a row at a time with UpsertOne")
 }

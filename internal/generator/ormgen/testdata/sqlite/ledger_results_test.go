@@ -257,13 +257,9 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	call("upsertSetsNothing", upserted, err)
 	row, err = accounts.UpsertOne(ctx, &types.Account{Id: keyPtr(5), Name: "Save", Code: "save"}, AccountUniqueById, &AccountUpdate{Name: &loan})
 	call("upsertByKey", row, err)
-	many, err := accounts.UpsertMany(ctx, []*types.Account{
-		{Id: keyPtr(6), Name: "Fund", Code: "fund"},
-		{Id: keyPtr(5), Name: "Savings", Code: "save"},
-	}, AccountUniqueByCode, AccountFields{Name: true}, nil)
-	call("upsertManyAccounts", many, err)
-	many, err = accounts.UpsertMany(ctx, []*types.Account{{Id: keyPtr(5), Name: "Savings", Code: "save"}}, AccountUniqueByCode, AccountFields{Name: true}, &UpsertOptions{OnlyIfChanged: true})
-	call("upsertManyUnchanged", many, err)
+	fund := types.IdentityName("Fund")
+	upserted, err = accounts.UpsertOneResult(ctx, &types.Account{Id: keyPtr(6), Name: fund, Code: "fund"}, AccountUniqueByCode, &AccountUpdate{Name: &fund}, nil)
+	call("upsertFund", upserted, err)
 
 	// Entries: creates, the filters of each kind of column, the negated
 	// ones, and pages across a column's nulls.
@@ -460,6 +456,16 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 
 	onPostgres := script(t, postgres)
 	onSQLite := script(t, lite)
+
+	// An upsert of many rows is refused on SQLite until the repositories
+	// write sqlutil's statement of a batch.
+	user, err := ParseUserID(ada)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lite.GetAccountRepository().UpsertMany(WithUserID(ctx, user), []*types.Account{{Id: keyPtr(7), Name: "Many", Code: "many"}}, AccountUniqueByCode, AccountFields{Name: true}, nil); !errors.Is(err, ErrSQLiteUnsupported) {
+		t.Errorf("UpsertMany on SQLite = %v, want ErrSQLiteUnsupported", err)
+	}
 	if len(onPostgres) != len(onSQLite) {
 		t.Fatalf("Postgres answered %d calls and SQLite %d", len(onPostgres), len(onSQLite))
 	}

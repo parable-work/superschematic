@@ -998,75 +998,9 @@ func (r *AccountSQLiteRepository) UpsertOneResult(ctx context.Context, input *ty
 	return out, err
 }
 
-// accountSQLiteExcluded are the columns UpsertMany may set from the input a
-// row of it would have inserted: the columns of AccountUpdate.
-var accountSQLiteExcluded = map[string]string{
-	"name":            `"name"`,
-	"code":            `code`,
-	"opened_on":       `opened_on`,
-	"mailing_address": `mailing_address`,
-}
-
-// UpsertMany inserts each input, or, when a row already holds its value of
-// the unique key on, sets each field update names of that row to the value
-// the input would have inserted, and returns each input's row and what it
-// did with it, in the inputs' order (D89): a row at a time, in one
-// transaction.
-func (r *AccountSQLiteRepository) UpsertMany(ctx context.Context, inputs []*types.Account, on AccountUniqueKey, update AccountFields, opts *UpsertOptions) ([]UpsertResult[*types.Account], error) {
-	key, ok := accountSQLiteUniqueKeys[on]
-	if !ok {
-		return nil, fmt.Errorf("orm: Account has no unique key %q", string(on))
-	}
-	if key.expression {
-		return nil, upsertExpressionKey("UpsertMany", "Account", string(on))
-	}
-	if opts != nil && opts.Batch < 0 {
-		return nil, fmt.Errorf("orm: UpsertMany writes 1 or more Account rows a statement, not %d", opts.Batch)
-	}
-	var excluded []string
-	for _, column := range accountFieldStrings(update) {
-		quoted, ok := accountSQLiteExcluded[column]
-		if !ok {
-			return nil, fmt.Errorf("orm: UpsertMany of Account sets the fields an update sets, not %s", column)
-		}
-		excluded = append(excluded, quoted)
-	}
-	onlyIfChanged := opts != nil && opts.OnlyIfChanged
-	out := make([]UpsertResult[*types.Account], 0, len(inputs))
-	err := r.within(ctx, func(q sqliteQuerier) error {
-		for _, input := range inputs {
-			if err := r.stampCreate(ctx, input); err != nil {
-				return err
-			}
-			record, err := sqliteMembersOf(input)
-			if err != nil {
-				return fmt.Errorf("upsert Account: %w", err)
-			}
-			var sets, compare, next []string
-			var args []any
-			for _, quoted := range excluded {
-				sets = append(sets, quoted+" = excluded."+quoted)
-				compare, next = append(compare, `account`+"."+quoted), append(next, "excluded."+quoted)
-			}
-			if len(sets) > 0 {
-				if sets, args, err = r.stamped(ctx, nil, sets, args); err != nil {
-					return err
-				}
-			}
-			upserted, err := accountSQLite.upsert(ctx, q, record, key, sets, args, compare, next, onlyIfChanged)
-			if err != nil {
-				return err
-			}
-			rows, err := r.decode(ctx, []sqliteRecord{upserted.record}, AccountFields{}, false)
-			if err != nil {
-				return err
-			}
-			out = append(out, UpsertResult[*types.Account]{Row: rows[0], Status: upserted.status})
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+// UpsertMany is refused on SQLite until the repositories write sqlutil's
+// upsert of many rows, a statement per batch (D89, D116): use UpsertOne,
+// or UpsertOneResult, a row at a time, in a transaction.
+func (r *AccountSQLiteRepository) UpsertMany(context.Context, []*types.Account, AccountUniqueKey, AccountFields, *UpsertOptions) ([]UpsertResult[*types.Account], error) {
+	return nil, sqliteRefused("Account", "upserts many rows, which the SQLite repositories do not write yet; upsert a row at a time with UpsertOne")
 }

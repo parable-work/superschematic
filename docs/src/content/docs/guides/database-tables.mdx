@@ -1766,6 +1766,10 @@ check. What is Postgres's stays Postgres's:
 - SQLite's transactions are serializable. `TransactionWith` checks its
   isolation level and begins an ordinary transaction.
 - The declared queries answer `ErrPostgresOnly`.
+- `UpsertMany` answers `ErrSQLiteUnsupported`: on SQLite, upsert a row at
+  a time with `UpsertOne` or `UpsertOneResult`, which read whether a row
+  holds the key before the statement, since SQLite's cannot say which rows
+  it inserted.
 
 A table that composes behaviors writes its rows through the behaviors'
 core on SQLite too (D103): a create, an update, a delete and each use's
