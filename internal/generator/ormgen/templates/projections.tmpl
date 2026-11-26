@@ -254,7 +254,14 @@ func {{ .TypeName }}In(tx TxInterface) *{{ .Name }} {
 
 // GetOne reads the row whose {{ $pk.Name }} is id; ErrNotFound when there is none.
 func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ $pk.GoType }}) (*{{ .TypeName }}, error) {
+	{{- if $.HeldByAccess }}
+	// The row, if the caller may see it (D156, D180).
+	args := []any{ {{- $pk.KeyArg "id" -}} }
+	conditions := withAccess(ctx, {{ printf "%q" .TypeName }}, []string{ {{- goRawString .QualifiedKey }} + " = $1"}, &args)
+	rows, err := r.read(ctx, fmt.Sprintf({{ goRawString .SQL.FindOne }}, {{ goRawString .SQL.Columns }}, {{ lowerFirst .TypeName }}Where(conditions), ""), args)
+	{{- else }}
 	rows, err := r.read(ctx, {{ goRawString .SQL.GetOne }}, []any{ {{- $pk.KeyArg "id" -}} })
+	{{- end }}
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +278,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		opts = &{{ .TypeName }}FindOptions{}
 	}
 	var args []interface{}
-	query := fmt.Sprintf({{ goRawString .SQL.FindOne }}, {{ goRawString .SQL.Columns }}, {{ lowerFirst .TypeName }}Where(filter.conditions(&args, 0)), {{ lowerFirst .TypeName }}OrderBy(opts.OrderBy))
+	query := fmt.Sprintf({{ goRawString .SQL.FindOne }}, {{ goRawString .SQL.Columns }}, {{ lowerFirst .TypeName }}Where({{ if $.HeldByAccess }}withAccess(ctx, {{ printf "%q" .TypeName }}, filter.conditions(&args, 0), &args){{ else }}filter.conditions(&args, 0){{ end }}), {{ lowerFirst .TypeName }}OrderBy(opts.OrderBy))
 	rows, err := r.read(ctx, query, args)
 	if err != nil {
 		return nil, err
@@ -290,7 +297,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		opts = &{{ .TypeName }}FindOptions{}
 	}
 	var args []interface{}
-	where := {{ lowerFirst .TypeName }}Where(filter.conditions(&args, 0))
+	where := {{ lowerFirst .TypeName }}Where({{ if $.HeldByAccess }}withAccess(ctx, {{ printf "%q" .TypeName }}, filter.conditions(&args, 0), &args){{ else }}filter.conditions(&args, 0){{ end }})
 	total := -1
 	if !opts.SkipCount {
 		counted, err := r.q.Query(ctx, fmt.Sprintf({{ goRawString .SQL.Count }}, where), args...)
@@ -340,7 +347,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 	byKey := field == {{ .TypeName }}SortBy{{ toGoName $pk.Name }}
 	var args []interface{}
-	conditions := filter.conditions(&args, 0)
+	conditions := {{ if $.HeldByAccess }}withAccess(ctx, {{ printf "%q" .TypeName }}, filter.conditions(&args, 0), &args){{ else }}filter.conditions(&args, 0){{ end }}
 	comparison, direction := ">", "ASC"
 	if opts.Sort.Desc {
 		comparison, direction = "<", "DESC"

@@ -45,6 +45,15 @@ type DepsInfo struct {
 	// since Go takes no replace from the ORM's go.mod.
 	Rules bool
 
+	// Access reports whether Database has per-record access (D156, D180):
+	// an @audience, @accessGrants or @accessLog table, whose ORM binds a
+	// request's caller whole (orm.WithPrincipal). AccessHeld is one whose
+	// reads keep to the caller, an @audience table or grants, and AccessLog
+	// one with an @accessLog table, which each route records its call in.
+	Access     bool
+	AccessHeld bool
+	AccessLog  bool
+
 	// Queues reports whether Database declares a queue: its ORM then has
 	// queues.go, whose OnEnqueue an entrypoint gives the wake of the
 	// queues' workers (D145).

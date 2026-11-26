@@ -530,6 +530,24 @@ and what a trigger enqueues add these (D80):
 | a table gains, changes or loses a behavior's change queue (D103: it implements `Timers` or `Reactions`, or another table's `Reactions` hears it) | the queue's table, its D80 indexes (its key, `row_key`, serialized), and its trigger: on Postgres the function `<table>_changes` created after the queue's table and replaced in place when the columns its image holds change, and the trigger `trg_<table>_changes` (`AFTER INSERT OR UPDATE OR DELETE`); on SQLite the triggers `trg_<table>_changes_insert`, `_update` and `_delete`, replaced by a drop and a create, and created again by a rebuild of the table. All go with the last behavior that hears the table. The trigger writes no message for the rows already there: their deadlines reconcile at their next write |
 | a table the previous version has gains an `@enqueueOnChange` with `backfill: true` | the step that creates the trigger then inserts a message for each row that meets `when`, under the queue's `onDuplicate`, in the same transaction (`blocking`: the trigger's lock keeps writes out while it runs). On SQLite the first of its triggers' steps does, or the table's rebuild, after the triggers. Changing an existing trigger backfills nothing ([Backfill](/superschematic/guides/queues/#backfill)) |
 
+## Audiences, references and search
+
+An [`@audience`](/superschematic/guides/database-tables/#who-may-read-a-row)
+table's columns, the sub-tables `@references` and `@attachments` add
+([References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row)),
+and the `search_index` table of `@searchable`
+([Search across tables](/superschematic/guides/database-tables/#search-across-tables))
+migrate as any column and table (D154 to D156). Their triggers only add
+work: an audience's resolves a row's effective audience and passes its
+parent's on, a target's delete clears its references, a file's delete
+enqueues its release, and a search trigger keeps an index row's access
+and enqueues its text. So a plan creates each with its function in
+`expand`, as it creates an `@enqueueOnChange`'s. An `@audience` trigger
+that a table with rows gains resolves every row's audience in the step
+that creates it (`blocking`: the trigger's lock keeps writes out while it
+runs). A table made `@searchable` with rows in it has no index rows until
+`reindexSearch` builds them.
+
 ## Triggers that refuse a write
 
 A [`@stateMachine`](/superschematic/guides/database-tables/#state-machines)'s
@@ -854,13 +872,20 @@ the feature and the dialect:
   trigger as an `@enqueueOnChange` trigger does);
 - projections;
 - an index method other than BTREE, such as the GIN or GIST an `@index`
-  over a list, a JSON or an `LTREE` column picks, and an operator class
-  (`ops`);
+  over a list, a JSON or an `LTREE` column picks, an operator class
+  (`ops`), and a unique index whose nulls collide (`nullsNotDistinct`,
+  D125);
 - the types SQLite has no storage for: `LTREE`, the PostGIS types
   (`POINT`, `GEOGRAPHY`, `GEOMETRY`), and pgvector's `vector(n)`, whose
   error names the fix, `outputs.sql.dialects: ["postgres"]`;
 - a declared query (`@query`) that runs on `sqlite`, which no query is
   verified or run on yet: `dialects: ["postgres"]` limits it.
+
+The load also refuses, in a service that lists `sqlite`, the features
+whose triggers, reads or queue clients only Postgres has so far, each
+naming the fix, `outputs.sql.dialects: ["postgres"]`: `@audience` (D156),
+`@references` and `@attachments` (D154), `@searchable` (D155), and the
+classes of the notifier, parties and agent runs (D153, D157, D158).
 
 ### What SQLite does not keep
 

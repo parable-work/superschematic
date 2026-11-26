@@ -19,6 +19,17 @@ This page is about queues your stack runs. The engine's
 [work queues](/superschematic/guides/work-queues/), which turn an engine
 schema's instances into claimable work, are another thing.
 
+Some of the core's features hand their work to a queue you declare and a
+`@worker` you run, as any other: the queue `@searchable` names
+([Search across tables](/superschematic/guides/database-tables/#search-across-tables)),
+the notifier's dispatch queue
+([Events and notifications](/superschematic/guides/notifications/)), the
+queue a party's run requests go on
+([Outside parties](/superschematic/guides/parties/)) and the agent
+dispatcher's requests ([Agent runs](/superschematic/guides/agent-runs/)).
+Each such worker's handler calls the TypeScript runtime, as the page
+each links to shows.
+
 | Built | Not built yet |
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
@@ -413,9 +424,10 @@ on tokio, on as many connections as its concurrency; a process with no
 runtime calls `drain` on a thread of its own and sleeps until that time,
 or until a write of its own process wakes it, which the file your `Deps`
 hold signals after each write it commits (`db.wake()`). A write another
-process made is heard at the next poll, a second on. A drain extends no
-claim, so a method has its queue's lease to finish, after which its
-message is due again.
+process made is heard at the next poll, a second on. While a method
+runs, a thread of the drain's own extends its message's claim every half
+of the queue's lease, so a method that runs past its lease keeps its
+message until it answers.
 
 A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
 worker claims there: a worker on Workers claims on Postgres through
@@ -819,7 +831,7 @@ Cloudflare the database is a Postgres reached through Hyperdrive
 
 ## On gcp
 
-The gcp target runs a worker, in Go or TypeScript, as a Cloud Run worker
+The gcp target runs a worker, in Go, TypeScript or Rust, as a Cloud Run worker
 pool, `gcp.cloudrunworker`, named after the worker as its service account is:
 no port, no URL and nothing that calls it, scaled by hand to the worker's
 `instances`, with `WORKER_CONCURRENCY` set to its concurrency. Its config,

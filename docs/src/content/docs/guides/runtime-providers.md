@@ -17,7 +17,7 @@ depends on none of them.
 | `credentials` | `list` (titles and sites only), `resolve` into a sealed injection the runner applies | `CredentialProvider` |
 | `channel` | `send`, `health`, and the delivery statuses (`status`) and inbound messages (`inbound`) a `@webhook` route received | `ChannelAdapter` |
 | `sandbox` | `start`, `cancel`, `status` and `cost` of a run's instance | `SandboxProvider` |
-| `model` | `complete` a turn with tools, with its usage | `ModelProvider` |
+| `model` | `complete` a turn with tools, with its usage, and the `providerState` each completion keeps for the turns after it ([agent runs](/superschematic/guides/agent-runs/#each-turn)) | `ModelProvider` |
 | `files` | `extractText` and `preview` | `FileProcessor` |
 
 | Built | Not built yet |
@@ -25,8 +25,8 @@ depends on none of them.
 | the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | the interfaces in the Go and Rust runtimes |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
 | `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated server that links the packages and builds `Providers` in its `Deps` |
-| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | attachments, which registers as it is built |
-| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
+| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
+| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | provider packages in `build-all`'s dependency graph and its build cache key |
 
 D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/runtime-providers` is the

@@ -95,7 +95,51 @@ type DepsInfo struct {
 	// outputs.api.mcpConfirmationKey names. Empty for an API whose
 	// endpoint serves no tool that asks.
 	MCPConfirmationKey string
+
+	// Agents is the agent dispatcher Deps holds when Database uses the
+	// agent orchestration (D158, D183), its repositories in Deps.orm; nil
+	// otherwise.
+	Agents *DepsAgents
 }
+
+// DepsAgents is the agent dispatcher in Deps (D158, D183): createAgents
+// over Deps.orm and the database's @agents("requests") queue, with the
+// options the implementation's createAgentOptions answers. A @worker of
+// the requests queue is the dispatcher's, and so is one of D157's
+// @runRequests queue: the server's entrypoint hands each message to
+// agents.handle, and the Workers interface has no method for either.
+type DepsAgents struct {
+	// Requests is the database's @agents("requests") queue class.
+	Requests string
+
+	// RunRequests is the database's @runRequests queue class (D157),
+	// whose inbound messages' run requests the dispatcher takes as they
+	// are; empty when the database declares none.
+	RunRequests string
+}
+
+// RequestsConst is the name the database's types export the requests
+// queue's definition as.
+func (a *DepsAgents) RequestsConst() string { return tsgen.QueueConst(a.Requests) }
+
+// Dispatches reports whether a @worker of queue is the dispatcher's: the
+// requests queue, or the run requests queue.
+func (a *DepsAgents) Dispatches(queue string) bool {
+	return a != nil && queue != "" && (queue == a.Requests || queue == a.RunRequests)
+}
+
+// AgentsFile is the module of the API package that builds Deps.agents
+// (D183), which index.ts exports.
+const AgentsFile = "agents.ts"
+
+// AgentOptionsFunc is the function an implementation of an API whose Deps
+// holds the agent dispatcher exports, of the generated
+// AgentOptionsConstructor's type: what the dispatcher is built with beside
+// its ORM and its queue (D183).
+const AgentOptionsFunc = "createAgentOptions"
+
+// HasAgents reports whether Deps holds the agent dispatcher (D183).
+func (o *APIOutput) HasAgents() bool { return o.Deps.Agents != nil }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine
 // database, which the entrypoint opens in the background, an
@@ -215,7 +259,7 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "orm", "engine", "logger"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger", "agents"}
 
 // SetDeps sets what Deps holds, refusing a client, a bucket or a memory
 // store whose member
@@ -257,6 +301,16 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
+	if deps.Agents != nil && !depsORM(deps) {
+		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
+	}
+	// A @worker of the dispatcher's queues is the dispatcher's (D183).
+	workers := make([]WorkerInfo, len(o.Workers))
+	for i, w := range o.Workers {
+		w.Dispatcher = w.Behavior == nil && deps.Agents.Dispatches(w.Queue)
+		workers[i] = w
+	}
+	o.Workers = workers
 	o.Deps = deps
 	return nil
 }
@@ -334,6 +388,12 @@ type WorkerInfo struct {
 	// Behavior is set for a @behaviorWorker (D103): a worker whose handler
 	// the generator writes, which the Workers interface has no method for.
 	Behavior *apigen.BehaviorWorkerInfo
+
+	// Dispatcher is set for a @worker of the agent dispatcher's queues
+	// (D183), the requests queue or the run requests queue, whose handler
+	// is Deps.agents.handle: the Workers interface has no method for it.
+	// SetDeps sets it.
+	Dispatcher bool
 }
 
 // jobsOf reads the API's jobs, sorted by name.
@@ -373,11 +433,24 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 }
 
 // OrdinaryWorkers are the API's @worker workers, each a method of the
-// generated Workers interface; a behavior worker is none (D103).
+// generated Workers interface; a behavior worker is none (D103), and
+// neither is the agent dispatcher's (D183).
 func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Behavior == nil {
+		if w.Behavior == nil && !w.Dispatcher {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// DispatcherWorkers are the API's @worker workers of the agent
+// dispatcher's queues (D183), whose handler is Deps.agents.handle.
+func (o *APIOutput) DispatcherWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Dispatcher {
 			out = append(out, w)
 		}
 	}

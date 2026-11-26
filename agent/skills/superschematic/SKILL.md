@@ -1,6 +1,6 @@
 ---
 name: superschematic
-description: Build backends with superschematic by declaring them in schema files (.schema.ts), not by writing SQL, migrations, validation, DTOs, routes, auth checks, OpenAPI or clients. The compiler generates Postgres and SQLite DDL, migration plans, a Go ORM, validated servers in Go, TypeScript or Rust, OpenAPI, SDKs in four languages, MCP tools and deploys. Use whenever a project has a superschematic.toml or schema.config.ts, or the task is to add or change a type, table, field, route, permission, user model, job, queue, bucket, memory store, site or environment in such a project, or to start a new one.
+description: Build backends with superschematic by declaring them in schema files (.schema.ts), not by writing SQL, migrations, validation, DTOs, routes, auth checks, OpenAPI or clients. The compiler generates Postgres and SQLite DDL, migration plans, repositories, validated servers in Go, TypeScript or Rust, OpenAPI, SDKs in four languages, MCP tools and deploys. Use whenever a project has a superschematic.toml or schema.config.ts, or the task is to add or change a type, table, field, route, permission, row access rule, user model, job, queue, search, notification, agent run, bucket, memory store, site or environment in such a project, or to start a new one.
 ---
 
 # superschematic
@@ -38,12 +38,14 @@ does. You never write, edit or duplicate:
   are generated in Go, TypeScript, Python and Rust.
 - The handler that reads, lists, creates, updates or deletes a table's
   rows through `@source` views: mark the method `@tableOperation()` and
-  the TypeScript and Go servers serve it from the repositories, in one
-  transaction and as the caller.
+  the TypeScript, Go and Rust servers serve it from the repositories, in
+  one transaction and as the caller.
 - The check that a row is the caller's: `@tableOperation({ by:
   ["ownerId"] })` keeps a read, a list, an update and a delete to the
   rows one of the named members holds the caller in, and sets them on a
   create.
+- A filter in every read that hides a row from callers who may not see
+  it: `@audience` on the table (below).
 - Routing, argument decoding, 400s, auth and permission checks, rate,
   body and time limits, pagination plumbing, a list's filter parsing,
   webhook signature checks.
@@ -86,7 +88,7 @@ The **kind** decides what a class means:
 | Kind | A class is | Imports | Generates |
 | --- | --- | --- | --- |
 | `General` | a plain type shared by services; with `@envVars`, a service's settings | `@superschematic/schema`, `superscalar` | types, env loader |
-| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, TypeScript repositories, types |
+| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, TypeScript and Rust repositories, types |
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
 | `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |
@@ -173,9 +175,13 @@ path for when the store is unavailable.
   `@tableOperation({ by: ["ownerId"], overridePermission: "notes.admin"
   })` holds it to the rows a member names the caller in, a row of
   someone else's a 404, and sets those members on a create; a rule needs
-  a route that requires a caller. Write the operation by hand, with the
-  same route and types, when it needs a `@virtual` field, a rule that
-  names the caller through another table, or a Rust server.
+  a route that requires a caller. A `by` member may be a dotted path
+  through relations, `by: ["unit.contract.parties.party"]`, which the
+  TypeScript server serves (D156). Write the operation by hand, with the
+  same route and types, when it needs a `@virtual` field, or when the
+  build warns that a server leaves it to you (a projection or a path on
+  Go and Rust; on Go also a member that holds text, or a view that holds
+  a list or JSON).
   `superschematic catalog decorators` has its rules.
 - **A list's page, sort, search and filters are declared.** `@paginated`
   on a `GET` that returns a list, with a `SortBy<Item, [...]>`, a
@@ -198,12 +204,36 @@ path for when the store is unavailable.
   user's permissions or the subset `permissions` names. The subset
   narrows permissions, not routes: give an agent that should reach less a
   user and a role of its own.
+- **Who may see a row is declared on its table.** A private folder, a
+  shared page, a document that inherits its folder's readers:
+  `@audience<Doc>({ owner: "ownerId", inheritFrom: "folder", agents:
+  "readOnly" })`, which every repository read in an operation keeps to,
+  hand-written handlers' and search's too (a `@query` and raw SQL read
+  every row), never a filter per handler.
+  A caller outside the user table reaches rows through grants
+  (`@accessGrants`), a view's `@decrypted({ permission })` field opens an
+  `Encrypted<T>` value only for a caller holding the permission, and
+  `@accessLog` records each reveal (D156). These hold on TypeScript
+  servers and Postgres only, for now (docs:
+  `guides/api-routes/#per-record-access`).
+- **Retries, per-caller budgets and old clients are declared.** A write a
+  client may send twice takes `@idempotent({ ttl? })` and a table
+  `IdempotencyKey implements IdempotencyKeys` in its database (D140; Go and
+  TypeScript). A route that spends something per caller takes
+  `@rateLimit({ requestsPerMinute, key: "principal" })`, its counter store
+  passed to the router (D131). `clientVersions: true` in an API's config
+  answers a client older than `MIN_CLIENT_VERSIONS` 426 (D143).
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
-  transaction as the change that causes them; `key` with `onDuplicate` or
-  `serialize` for one waiting or one running message per key;
-  `@enqueueOnChange` on a table to enqueue whatever writes its rows, with
-  `backfill: true` (or `stack queue backfill`) for the rows already there; and
+  transaction as the change that causes them; `key` (one field, or a list
+  that keys together) with `onDuplicate` or `serialize` for one waiting
+  or one running message per key; a delay given to the enqueue
+  (`{ delaySeconds }`, Go's `Enqueue<Queue>In`) for a message due later,
+  never a sleep or a poller (D80); `@enqueueOnChange` on a table to
+  enqueue whatever writes its rows, with `backfill: true` (or `stack
+  queue backfill`) for the rows already there;
+  `mode: "drain"` in an environment's worker settings for a gcp worker
+  that runs only when an enqueue wakes it (D145; Go and TypeScript); and
   `@deriver` on an API class to fill a table's or an engine type's Derived
   fields from a model.
 - **What every writer must keep is declared.** A status that moves only
@@ -252,10 +282,58 @@ path for when the store is unavailable.
   hand: the build adds the sub-table, clears references to a deleted row,
   keeps backlinks to what the reader may see, and releases an object once
   no file names it. A browser uploads to the URL `begin` signs, never
-  through the API.
+  through the API; give the bucket's environment settings `cors` for the
+  page's origin (D148). These are the TypeScript repositories' on
+  Postgres, and you write the routes over them.
+- **Files stored once by their bytes** are a Bucket service with
+  `contentAddressed: true` (D142): its API's `Deps` gets a content bucket
+  that names each object by its SHA-256 and writes it only when absent. A
+  plain bucket's `put` takes `ifAbsent` rather than a `head` then a `put`,
+  which races.
+- **Drafts, branches and releases of a document are a version graph.**
+  `@versionGraph` on the root, `@graphMember({ graph, parent?, order?,
+  released? })` on each member table, a string `order` field for order
+  keys (D137), `released: true` for a table of the released rows (D139),
+  and `@graphOperations(Root)` on an empty API class to serve the graph's
+  operations as routes, SDK methods and MCP tools (D138, TypeScript
+  server). Docs: `reference/version-graphs/`.
+- **Reads that may lag go to a replica in Go.** `ConnectWithPools(primary,
+  replica)`, then `ReadOnly()` or `ReadOnlyTransaction` (D150); a
+  `@projection` whose rows a write withdraws takes `replica: false`. The
+  TypeScript ORM has no replica.
+- **Search, calendars, notifications, parties and agents are declared;
+  a TypeScript server wires them.** Each is Postgres alone, with no Go
+  or Rust server yet, and the generated server mounts none of their
+  routes or workers: call the helpers the guide names
+  (`@superschematic/http-runtime/postgres`: `searchTables`,
+  `readCalendar`, `createNotifier`, `createInbound`, `createAgents`) from
+  your server, rather than building any of them from tables of your own.
+  - One search over many tables, ranked, holding each caller's access:
+    `@searchable<T>({ title, body?, scope?, queue })`, `searchTables`
+    (D155; `guides/database-tables/#search-across-tables`).
+  - A rule that dates what is due (a filing every quarter, a check 90
+    days after the last): `implements Recurrence<T, { anchors, ... }>`;
+    `@calendarSource` puts a table's dates on `readCalendar` and an
+    iCalendar feed (D152; `guides/database-tables/#a-rows-recurrence-and-the-calendar`).
+  - Telling people: `@event<T>({ kind, urgency? })` on the table, the
+    `@notifier(...)` and `@channelIdentities()` tables, and
+    `notifier.raise(tx, ...)` in the change's transaction; routes and
+    preferences are rows (D153; `guides/notifications/`).
+  - People outside the user table who text or email: `@party<T>()` with
+    `@accessGrants`, `@conversations(...)` and `@runRequests()`
+    (D157; `guides/parties/`).
+  - Agents that act on rows: the `@agents(...)` tables, and
+    `@autonomy(class, mode?)` on each operation an agent may call; a
+    money movement is always `ask` (D158; `guides/agent-runs/`).
+  - The SMS relay, sandbox, model, credential broker or file processor
+    they use, chosen per environment: the API config's `providers` and
+    `@providers({ SMS: "channel" })` on its `@envVars` class (D159;
+    `guides/runtime-providers/`).
 - **Payloads you don't control gain keys.** A `@webhook`'s input drops the
   keys its type does not declare; mark any other such type
-  `@allowUnknownFields`, rather than a manual route to read the body.
+  `@allowUnknownFields`, rather than a manual route to read the body. A
+  member that must be present and null is typed `RequiredNull`, not
+  `Nullable<T>`, which also allows it absent (D130).
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`
@@ -326,7 +404,9 @@ path for when the store is unavailable.
   `@mcp({ invocationPolicy: "ask" })`: the endpoint then runs it only once
   the person confirms the call, by elicitation or a two-step
   `confirmationToken`, and the API's config names the `@envVars` secret
-  that signs confirmations, `outputs.api.mcpConfirmationKey`. Never pass a
+  that signs confirmations, `outputs.api.mcpConfirmationKey`. A tool that
+  only adds takes `@mcp({ additive: true })`, so its record does not call
+  it destructive (D123). Never pass a
   `confirmationToken` the person has not confirmed. A call its route
   would refuse (an argument the tool does not take, a value that fails
   validation, a caller the route refuses) gets the route's 400, 401 or 403
@@ -354,7 +434,12 @@ Most are load errors; knowing them saves a build round-trip:
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
   class and the params and row types it names, and a type that composes
   a behavior with `@behavior` (an engine type) are not tables; one that
-  implements a behavior or types a field as one stays a table.
+  implements a behavior or types a field as one stays a table. A table
+  the build fills takes no `@key` and is usually empty:
+  `@accessGrants() export abstract class Grant {}`, and so `@accessLog()`,
+  `@notifier(...)`, `@channelIdentities()`, `@conversations(...)`,
+  `@runRequests()`, the `@agents(...)` parts and `IdempotencyKey
+  implements IdempotencyKeys`.
 - A Workflow transition may list states in `from` and `to`, in a
   TypeScript schema: `{ from: ["backlog", "todo"]; to: ["done",
   "canceled"]; permission: "issues.close" }` is four transitions, and the
@@ -499,9 +584,11 @@ Most are load errors; knowing them saves a build round-trip:
   restore among them, whoever makes it, and runs one row's in the order
   written, a failed one holding the row's later ones until it runs or is
   dead. Without such a worker on some API over the database the deadlines
-  fall due, the changes pile up and nothing runs them; the build only
-  warns. On SQLite and D1 no behavior worker claims yet, so the change
-  queue only grows there.
+  fall due, the changes pile up and nothing runs them: `check` and
+  `build` only warn, and a stack refuses an environment that runs the
+  database with no worker draining one of its behavior queues (D151). On
+  SQLite only a Rust API's behavior worker claims, and none on D1, so the
+  change queue only grows under the others.
   Writes through the repositories one row at a time (`createOne`,
   `updateOne`, `deleteOne`; `CreateOne`, `UpdateOne`, `DeleteOne` in Go)
   and the operations arm and clear the deadlines in their own
@@ -832,9 +919,12 @@ Most are load errors; knowing them saves a build round-trip:
   signal on its event stream with `signals=1`), read state (`markRead`,
   `follow`, `unread`, `readUpTo`) and the `inbox`. In a build, a table's
   generated API serves none of those yet, nor the deliveries' claims,
-  search, attachments or `moveAnchor`: the build refuses their config
-  members (`composeTimeoutMs`, `deliverPermission`, `attachments`, ...) and
-  leaves their operations out. Comments cannot be removed from a table with
+  search or `moveAnchor`: the build refuses their config members
+  (`composeTimeoutMs`, `deliverPermission`, `anchorPermission`, ...) and
+  leaves their operations out; an in-app inbox is the notifier's (D153),
+  though Comments raises nothing into it yet. A message's attachment
+  block may name a file of the row's own `@attachments` as
+  `attachment:<id>` (D154). Comments cannot be removed from a table with
   rows.
 - When a model should fill fields of a row from its other fields (a
   ticket's category, an article's summary), implement Derived on the
@@ -889,7 +979,11 @@ Most are load errors; knowing them saves a build round-trip:
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the
   settings class extend the one that declares a shared secret, as in
-  `@envVars FinancesConfig extends FieldKeys`.
+  `@envVars FinancesConfig extends FieldKeys`. Parts other code writes are
+  plain classes the config composes, `implements Trait<WorkerEnv>,
+  Trait<Partial<DeployEnv>>` (D120). A setting to change without a
+  restart is `Runtime<T>`, which each loader's Live handle applies
+  (D129).
 - A required date or time column has no default unless it is `createdAt`
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
@@ -948,6 +1042,11 @@ set`, `stack deploy` and `stack destroy` act on cloud accounts and cost
 money. Run `stack plan <environment>` and show it to the user, and run
 those commands only when the user asks for that environment.
 
+An image that needs OS packages or a build step of yours takes `images:
+[{ of, packages?, extend? }]` in `@stack` (D144), `extend` a Dockerfile of
+the project built on the generated image; never edit a generated
+Dockerfile.
+
 On the cloudflare target, a DB service that lists `postgres` first is a
 Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
 through a Hyperdrive config: the user makes the config, names its id in
@@ -957,8 +1056,11 @@ for the deploy's migration and for `stack queue dead|retry|drop|backfill`,
 which run from the user's machine against that origin and refuse a string
 whose host, port, database or user is not the config's. Don't make the
 config or handle the connection string yourself. Queue workers there must be TypeScript; each
-drains its queue once a minute under a Cron Trigger. An API over the user
-model signs users in there when its `authDb` is that Postgres; each
+drains its queue once a minute under a Cron Trigger, a `@behaviorWorker`
+its table's deadline, change and event queues, and a deadline or an
+enqueue due before the next firing wakes it through a Workflow (D151).
+An API over the user model signs users in there when its `authDb` is
+that Postgres; each
 password hash takes about 120 ms of CPU, so it needs Workers Paid.
 
 On gcp, a name the target makes from an API's and a class's names and
@@ -992,7 +1094,11 @@ Also:
   you run.
 - The docs: <https://parable-work.github.io/superschematic/>. The guides
   under `guides/` cover each area; `reference/cli/` lists every command
-  and flag.
+  and flag. A page this skill names (`guides/notifications/`) is a path
+  under that address.
+- Code that must match another compiler's output (its DDL checks, Go
+  shapes, Go router refusals) sets the naming file's `[sql]`, `[go]` and
+  `[go_api]` tables (`reference/naming/`), not edits to generated files.
 
 A binary older than the `catalog` command answers `unknown command
 "catalog"`; read the docs site's capability map, scalar and decorator

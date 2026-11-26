@@ -1,7 +1,9 @@
 # parties
 
 A jobs app whose contractors are outside the user table, and who send in
-their reports by text or email, photos attached (D157).
+their reports by text or email, photos attached (D157). The
+[Outside parties and inbound messages](https://parable-work.github.io/superschematic/guides/parties/)
+guide covers it in full.
 
 | Path | What it is |
 |---|---|
@@ -31,9 +33,10 @@ results of the mail it received.
   pass, or whose SPF or DKIM failed, is treated as unknown. A reply
   threads to the conversation its `In-Reply-To` names, which also tells
   apart two contacts who share an address.
-- **Messages are rows.** `Runs`, a stub until the agent dispatcher takes
-  the queue, writes a report on the granted job as the contact and files
-  the message onto it. The photo joins the report with no second upload,
+- **Messages are rows.** `Runs` stands in for the agent dispatcher, which
+  `examples/agent-orchestration` hands its run requests to (D158): it
+  writes a report on the granted job as the contact and files the message
+  onto it. The photo joins the report with no second upload,
   and the job and the report each list the message in their backlinks.
 - **Sending to a contact is a permission.** `parties.message` lets the
   office write, held to the contact's identity, a rate limit and an
@@ -46,3 +49,8 @@ schemas. The same scenario, under the fixture name `fixture-parties-db`,
 runs end to end against Postgres in `TestPartiesEndToEnd`
 (`internal/generator/tsgen`), through the two relays over stand-in
 services.
+
+The inbound path is the TypeScript runtime's, on Postgres: the Go and
+Rust servers have no inbound path or party principals yet, and the
+generated server does not build the inbound path into its `Deps`, which
+`server/server.ts` wires.

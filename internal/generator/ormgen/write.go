@@ -29,6 +29,10 @@ type RepositoryOutput struct {
 	// whose adapter a table whose fields are behaviors runs its writes
 	// through (D103).
 	RulesGoModule string
+
+	// HeldByAccess is a repository of a database whose reads keep to the
+	// operation's caller (D156, D180, ORMOutput.HeldByAccess).
+	HeldByAccess bool
 }
 
 // VersionGraphOutput wraps one version graph with module-level metadata for
@@ -128,6 +132,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(encryptedFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove encrypted.go: %w", err)
 	}
+	// access.go holds the caller a database's reads keep to, its grants
+	// and its access log (D156, D180); a database without them has none,
+	// so a file an earlier build wrote goes.
+	accessFile := filepath.Join(outputDir, "access.go")
+	if output.Access != nil {
+		if err := generateFile(generator, "access.tmpl", accessFile, output); err != nil {
+			return fmt.Errorf("failed to write access.go: %w", err)
+		}
+	} else if err := os.Remove(accessFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove access.go: %w", err)
+	}
 	// fences.go holds the fences of each table with a @fenced field and
 	// the rule by which a write advances them (D119); a schema without one
 	// has none, so a file an earlier build wrote goes.
@@ -218,6 +233,7 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		}
 		repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
 		repoOutput.RulesGoModule = output.Naming.RulesGoModule
+		repoOutput.HeldByAccess = output.HeldByAccess()
 		repositoryTasks = append(repositoryTasks, func() error {
 			filename := fmt.Sprintf("repository_%s.go", codegen.ToSnakeCase(repo.TypeName))
 			if err := generateFile(generator, "repository.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {

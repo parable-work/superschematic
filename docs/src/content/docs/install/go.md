@@ -41,8 +41,8 @@ and a Go SDK. The build refuses the config without it.
 ## Install the CLI
 
 The CLI is `superschematic`: the core with the official extensions linked,
-the gcp target, the Cloudflare DNS platform and target, and the Pulumi
-provisioner. It
+the gcp target, the Cloudflare DNS platform and target, the `embedded`
+target and the Pulumi provisioner. It
 is the Go module
 `github.com/parable-work/superschematic/cmd/superschematic`.
 
@@ -245,6 +245,26 @@ left unset in Go, which encodes as `""`, is refused by the reader.
 Regenerate the Go clients with a new member before a server sends it, and
 keep a member as long as stored data holds it.
 
+The naming file's [`[go]`](/superschematic/reference/naming/#go) table
+changes some of these shapes, for Go code that another compiler's output
+shaped: a constant per declared limit (`limit_constants`), a pointer for
+an optional field that must keep a stated `0`, `""` or `false`
+(`optional_zero`), how an env loader reads a number scalar, the ORM's
+relation filter names and default selection, an enum's `Title()` and
+`Action()` from its members' comments (`enum_text_methods`), and a DB
+schema's projection capture functions (`[go.projection_capture]`). Every
+key defaults to the output this page describes.
+
+## Use the generated ORM
+
+A DB schema always gets the Go ORM, the module
+`example.com/schemas/orm/<name>` over pgx, which imports the schema's Go
+types. [Database tables](/superschematic/guides/database-tables/) walks
+its repositories, transactions and raw reads, and its
+[read replica](/superschematic/guides/database-tables/#a-read-replica):
+`ConnectWithPools(primary, replica)`, `db.ReadReplica()`, and
+`db.ReadOnly()`, a scope with no write method (D150).
+
 ## Serve a generated API
 
 An API schema with a Go API output writes the module
@@ -376,6 +396,19 @@ sit on each value, the items of a list or the values of a map, and
 query parameter's schema is never nullable: the parameter is present or
 absent, which `required` says.
 
+The naming file's [`[go_api]`](/superschematic/reference/naming/#go_api)
+table changes these answers for clients written against another router:
+it can keep an open input type's undeclared keys, read only a body's first
+JSON value, read an optional input's empty body as `{}`, read body
+arguments as one struct, and rename the validation code, the path
+parameter text and the validators. Every key defaults to the answers
+above, and the TypeScript and Rust routers do not read the table.
+
+A `@rateLimit` with no key counts each client in the replica's memory
+unless the API's config names a `rateLimitStore` or the router's
+`Config.ClientRateLimits` shares the counts between replicas
+([A per-client rate limit across replicas](/superschematic/guides/api-routes/#a-per-client-rate-limit-across-replicas)).
+
 Who may call each route, and how the server learns who is calling, is in
 [Auth and permissions](/superschematic/guides/auth-and-permissions/): an
 API with `public: true` runs `Config.AuthMiddleware` on its protected
@@ -427,6 +460,13 @@ A stack's build fails on an implementation that declares no
 `NewManualRoutes` while its API declares a manual route, and says what to
 add.
 
+The platform features of D152 to D159, runtime providers, references and
+attachments, recurrence and the calendar, search across tables,
+notifications, outside parties and agent runs, are built in TypeScript
+first. Their Go parts, in the runtime, the ORM and the server, are mostly
+not built yet; each guide says what is left
+([Runtime providers](/superschematic/guides/runtime-providers/)).
+
 ### On a SQLite file
 
 An API's `Deps.DB` is an `orm.DatabaseInterface`, the ORM of its
@@ -469,6 +509,14 @@ whose code is `service_unauthorized` calls `Token(ctx, true)` once and
 retries, without the end-user refresh. A server forwards its own caller by
 setting `GetToken` to `serviceauth.ForwardedToken`, which reads the token
 of the request on the call's context.
+
+`SDKConfig.Client`, a `*ClientIdentity`, names the app the SDK runs in,
+which it sends as `X-Client-Version`
+([The client's name and version](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+A method of an `@idempotent` operation sends an `Idempotency-Key`, the one
+`runtime.WithIdempotencyKey(ctx, key)` puts on the call's context or a
+fresh UUID
+([An idempotency key](/superschematic/guides/client-sdks/#an-idempotency-key)).
 
 The client has one field per namespace. Operation sets that share a
 namespace share a field: `ProductQueries` and `ProductMutations` are both

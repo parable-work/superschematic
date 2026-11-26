@@ -25,7 +25,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 | Node | 22.12 or newer; 24 for the engine | Builds superscalar's TypeScript binding and the docs site, and runs [the engine](/superschematic/guides/engine/). |
 | Bun | 1.4 | Installs the TypeScript runtimes and the generated TypeScript packages, which use the `workspace:` protocol. |
 | Python and uv | 3.12, uv 0.12 | Only for Python output: the Python schema runtime. |
-| Postgres | 16 | Only to run the SQL and the Go ORM a DB schema generates. |
+| Postgres | 16 | Only to run the SQL and the repositories a DB schema generates. |
 | Pulumi CLI | 3.259.0 | Only to apply a stack with the Pulumi provisioner, which drives the CLI through Pulumi's Automation API. Building needs no CLI. |
 | jq | any | The example scripts read JSON output with it. |
 
@@ -51,7 +51,7 @@ make build
 
 `make build` writes the CLI to `bin/superschematic`: the core with the
 official extensions linked, the gcp target, the Cloudflare DNS platform
-and target, and the Pulumi provisioner.
+and target, the embedded target, and the Pulumi provisioner.
 
 ### Without Rust
 
@@ -69,9 +69,9 @@ Check it:
 bin/superschematic --help
 ```
 
-It lists the core's fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+It lists the core's fifteen commands: `init`, `check`, `build`, `build-all`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
-`new`, `stack` and `identity` groups.
+`new`, `migrate`, `queries`, `stack` and `identity` groups.
 
 ## Compile generated Go code
 
@@ -94,8 +94,9 @@ the checkout:
 
 - `tsconfig.base.json` maps the authoring packages
   (`@superschematic/schema-config`, `@superschematic/schema`,
-  `@superschematic/db`, `@superschematic/api`) and `superscalar` to their
-  sources, so schema files type-check.
+  `@superschematic/db`, `@superschematic/api`, `@superschematic/stack`,
+  `@superschematic/memory-store`) and `superscalar` to their sources, so
+  schema files type-check.
 - The `[paths]` table of `superschematic.toml` points the generated
   packages' path dependencies (`go.mod` replace lines, npm `file:`
   specifiers) at the runtimes, so the generated code compiles.
