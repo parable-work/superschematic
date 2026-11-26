@@ -53,6 +53,7 @@ var agentsCases = []string{
 	"pausing all agents cancels a run in flight and returns its assigned row to the queue",
 	"the transcript holds no credential value",
 	"an inbound message from a party starts an agent run that acts for it and obeys nothing it says, and a send that needs approval waits on the policy",
+	"a party's run reaches only the paths its grant reaches, and an entered sender's run reads and asks before every write whatever the policy says",
 	"an agent asks in the row's thread and makes a follow-up row when nobody answers by the deadline",
 	"a sandbox that fails is started again by Retries, and the run holds its Lease while it runs",
 	"administering agents is permissions, and an agent cannot start a run",
