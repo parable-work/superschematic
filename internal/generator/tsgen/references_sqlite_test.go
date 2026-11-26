@@ -1,9 +1,11 @@
 package tsgen
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -11,6 +13,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // referencesSQLiteCheck is the file tsc checks the fixture's package
@@ -116,4 +119,67 @@ func TestReferencesTablesEndToEndOnSQLite(t *testing.T) {
 		t.Errorf("bun ran %d cases, and referencesSQLiteCases names %d:\n%s", len(cases), len(referencesSQLiteCases), junit)
 	}
 	t.Logf("bun ran the end-to-end test on SQLite:\n%s", out)
+}
+
+// d1Fixture is the runtime's workerd fixture that runs
+// fixture-references-db's repositories over D1 (D182).
+const d1Fixture = "runtime/http/typescript/test/workerd/fixtures/d1-orm"
+
+// TestTheWorkerdD1FixtureIsCurrent: the workerd fixture d1-orm runs
+// fixture-references-db's generated orm-sqlite.ts and its sqlite/create.sql
+// as this build writes them (D182): records-orm.ts is the file, its import
+// of the runtime's ./d1 entry made the fixture's built dist/d1.js, and
+// records-sql.ts the script. -update rewrites both; scripts/workerd-test.mjs
+// runs the fixture under the pinned workerd.
+func TestTheWorkerdD1FixtureIsCurrent(t *testing.T) {
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, referencesFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load %s: %v", referencesFixture, err)
+	}
+	output, err := Generate(schema, Options{SchemaName: referencesFixture, Registry: reg, SQLite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := WriteTypes(output, dir); err != nil {
+		t.Fatal(err)
+	}
+	orm, err := os.ReadFile(filepath.Join(dir, ORMSQLiteFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runtime = "'@superschematic/http-runtime/d1'"
+	if !strings.Contains(string(orm), runtime) {
+		t.Fatalf("%s imports no %s", ORMSQLiteFile, runtime)
+	}
+	header := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's orm-sqlite.ts, its runtime the built dist/d1.js.\n"
+	records := header + strings.ReplaceAll(string(orm), runtime, "'../../../../dist/d1.js'")
+	model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: referencesFixture}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's sqlite/create.sql.\nexport const createSQL = " + string(quoted) + ";\n"
+	root := filepath.Join(testpaths.RepoRoot(t), d1Fixture)
+	for name, want := range map[string]string{"records-orm.ts": records, "records-sql.ts": sql} {
+		path := filepath.Join(root, name)
+		if *update {
+			if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("%s/%s is not what this build writes (run with -update to accept)", d1Fixture, name)
+		}
+	}
 }
