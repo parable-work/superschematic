@@ -559,6 +559,18 @@ export class SqliteStore implements Store {
             );
             return;
           }
+          // A delete held to its version (D147): one a writer moved or
+          // deleted first deletes nothing, and the command runs again.
+          case 'delete':
+            this.#one(
+              'DELETE FROM dev_shared WHERE schema = ? AND use_id = ? AND tbl = ? AND key = ? AND version = ?',
+              write.type,
+              write.useId,
+              write.table,
+              write.key,
+              change.expectedVersion,
+            );
+            return;
           default:
             throw new RefusalError(refusalOf('internal', `the development store takes no shared-table change of this kind: ${JSON.stringify(change)}`));
         }
