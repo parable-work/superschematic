@@ -1824,7 +1824,16 @@ The `api` generator takes the provider `auth_provider` selects
   `routes.go` they call. `routesConfigPrepare` opens `RegisterRoutes`,
   before it validates `cfg`: statements that fill a core field from the
   provider's fields, such as a store a provider's `Config` takes under
-  another name. A route with a service clause runs
+  another name. `routeUploadBody` and `routeQueryList` replace the core's reading of
+  a request when they are not empty, for a provider whose clients know
+  another server's answers: `routeUploadBody` reads an upload route's
+  body (its data is the `EndpointInfo`) and declares `input` and `files`,
+  which the implementation call reads, and `routeQueryList` reads one list
+  in the query string (its data is the `Param`) and declares the list's
+  variable, named by its `GoName`. A route whose upload the provider reads
+  makes `routes.go` drop the `bytes`, `io` and `mime/multipart` imports
+  that only the core's block uses, and a list the provider reads gets no
+  `bodyargs.Arg`. A route with a service clause runs
   `AuthMiddleware` and `routesProtectedMiddleware` in its own chain, just
   before the permission middleware, instead of on the protected group. The
   generator checks the set when it

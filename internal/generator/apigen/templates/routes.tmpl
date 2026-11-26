@@ -6,6 +6,13 @@
 package {{ toPackageName .SchemaName }}
 
 {{- /* regexp is imported only when at least one @validatePattern produces a MatchString call. Predicates below mirror the usage sites so no orphan regexp.MustCompile declaration is emitted (Go error: "declared and not used"). */ -}}
+{{- /* bytes, io and mime/multipart are imported only when a route reads its upload with the core's block, not the auth provider's routeUploadBody. */ -}}
+{{- $coreUploadBody := false }}
+{{- range .HandlerEndpoints }}
+{{- if and .HasFileUpload (not (authSnippet "routeUploadBody" .)) }}
+{{- $coreUploadBody = true }}
+{{- end }}
+{{- end }}
 {{- $hasPatternValidation := false }}
 {{- range .HandlerEndpoints }}
 {{- range .ArgQueryParams }}
@@ -33,7 +40,7 @@ import (
 {{- if .RefusesEmptyQueryListItems }}
 	"strings"
 {{- end }}
-{{- if .HasFileUpload }}
+{{- if $coreUploadBody }}
 	"bytes"
 	"io"
 	"mime/multipart"
@@ -734,7 +741,9 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	// its rules in the order they are checked (the scalar type's own, then
 	// the argument's).
 	{{- range .QueryListArgs }}
+	{{- if not (authSnippet "routeQueryList" .Param) }}
 	queryList{{ .GoName }}Arg := {{ .NewArg }}
+	{{- end }}
 	{{- end }}
 	{{- end }}
 	{{- with .Filter }}
@@ -1059,6 +1068,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 
 		{{- if .HasFileUpload }}
+		{{- with authSnippet "routeUploadBody" . }}{{ . }}{{- else }}
 		// A multipart input (D81), as every generated server reads one: the
 		// files first, each checked against its field, then the other fields,
 		// from the data part or a JSON body with no file, checked as a JSON
@@ -1202,6 +1212,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 				return
 			}
 		}
+		{{- end }}
 		{{- else if .HasInput }}
 		{{- if .InputAllowsUnknownFields }}
 		// Parse and validate input: a body, JSON and an object, whose keys
@@ -1970,6 +1981,7 @@ func webhookHMACVerifierMiddleware(cfg Config, provider string) runtimerouting.M
 
 {{- /* queryList decodes a list in the query string, a @query parameter or an argument of a GET operation, with bodyargs.QueryList. */ -}}
 {{- define "queryList" }}
+{{- with authSnippet "routeQueryList" . }}{{ . }}{{- else }}
 
 		// {{ .Name }} travels in the query string as repeated keys,
 		// comma-separated values or both. Each item is read as its JSON type
@@ -1993,4 +2005,5 @@ func webhookHMACVerifierMiddleware(cfg Config, provider string) runtimerouting.M
 				return
 			}
 		}
+{{- end }}
 {{- end }}

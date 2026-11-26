@@ -24,6 +24,21 @@
 		cfg.StepGuard = defaultStepGuard
 	}
 {{- end }}
+{{ define "routeUploadBody" }}
+		// providerUploadBody reads {{ .HandlerName }}'s upload its own way.
+		var input types.{{ .InputType }}
+		var files map[string]*FileUploadData
+		if !providerUpload(w, r, &input, &files) {
+			return
+		}
+{{- end }}
+{{ define "routeQueryList" }}
+		// providerQueryList reads {{ .Name }} its own way.
+		var {{ .GoName }} []{{ .GoType }}
+		if !providerQueryList(w, r, {{ printf "%q" .Name }}, &{{ .GoName }}) {
+			return
+		}
+{{- end }}
 {{ define "routesSetupPre" }}{{ end }}
 {{ define "routesSetup" }}{{ end }}
 {{ define "routesProtectedMiddleware" }}{{ end }}
