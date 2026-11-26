@@ -99,12 +99,19 @@ pub fn refusal_status(code: &str) -> Option<StatusCode> {
     Some(match code {
         "no_actor" => StatusCode::FORBIDDEN,
         "not_found" => StatusCode::NOT_FOUND,
-        "version_conflict" | "ref_sealed" | "primary_merge_only" | "schema_epoch" | "name_taken"
-        | "nothing_to_commit" | "not_tagged" | "no_parent" | "merge_into_itself"
+        "version_conflict" | "ref_sealed" | "primary_merge_only" | "schema_epoch"
+        | "name_taken" | "nothing_to_commit" | "not_tagged" | "no_parent" | "merge_into_itself"
         | "root_mismatch" => StatusCode::CONFLICT,
-        "invalid_tree" | "entity_not_found" | "invalid_row" | "unknown_kind"
-        | "duplicate_entity_key" | "order_out_of_range" | "invalid_resolution"
-        | "unmatched_resolution" | "no_order_key" | "order_not_a_key"
+        "invalid_tree"
+        | "entity_not_found"
+        | "invalid_row"
+        | "unknown_kind"
+        | "duplicate_entity_key"
+        | "order_out_of_range"
+        | "invalid_resolution"
+        | "unmatched_resolution"
+        | "no_order_key"
+        | "order_not_a_key"
         | "invalid_arrangement" => StatusCode::UNPROCESSABLE_ENTITY,
         _ => return None,
     })
@@ -154,7 +161,10 @@ pub fn no_parent() -> ApiError {
 
 /// The 422 `unknown_kind` of an arrange of a kind the graph has none of.
 pub fn unknown_kind(graph: &str, kind: &str) -> ApiError {
-    problem("unknown_kind", format!("the {graph} graph has no kind {kind}"))
+    problem(
+        "unknown_kind",
+        format!("the {graph} graph has no kind {kind}"),
+    )
 }
 
 /// A refusal of the graph's engine or core as the problem of its code:
@@ -162,7 +172,11 @@ pub fn unknown_kind(graph: &str, kind: &str) -> ApiError {
 /// `findings`, when set, the core's findings of an invalid tree, answered
 /// as `details.findings`. Any other error, with no code or one no refusal
 /// has, is the route's internal error, with none of its words.
-pub fn refusal(code: Option<&str>, message: impl Into<String>, findings: Option<Value>) -> ApiError {
+pub fn refusal(
+    code: Option<&str>,
+    message: impl Into<String>,
+    findings: Option<Value>,
+) -> ApiError {
     match code.filter(|code| refusal_status(code).is_some()) {
         Some(code) => {
             let error = problem(code, message);
@@ -177,7 +191,11 @@ pub fn refusal(code: Option<&str>, message: impl Into<String>, findings: Option<
 
 /// Whether `principal` holds `permission`, by a grant that covers it.
 pub fn holds(principal: Option<&Principal>, permission: &str) -> bool {
-    principal.is_some_and(|p| p.permissions.iter().any(|granted| covers(granted, permission)))
+    principal.is_some_and(|p| {
+        p.permissions
+            .iter()
+            .any(|granted| covers(granted, permission))
+    })
 }
 
 /// The body of branch.
@@ -246,7 +264,10 @@ impl Resolution {
             .as_deref()
             .map(|text| {
                 serde_json::from_str(text).map_err(|err| {
-                    problem("invalid_resolution", format!("a resolution's value is no JSON: {err}"))
+                    problem(
+                        "invalid_resolution",
+                        format!("a resolution's value is no JSON: {err}"),
+                    )
                 })
             })
             .transpose()
@@ -301,8 +322,11 @@ pub fn body<T: serde::de::DeserializeOwned>(input: &impl serde::Serialize) -> Re
 /// A value of one generated type as another that holds the same members,
 /// through their serde JSON.
 pub fn recode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
-    serde_json::from_value(value)
-        .map_err(|err| ApiError::internal(format!("graph operation: a value of the API's types: {err}")))
+    serde_json::from_value(value).map_err(|err| {
+        ApiError::internal(format!(
+            "graph operation: a value of the API's types: {err}"
+        ))
+    })
 }
 
 /// The edits of one kind as the facade takes them: each upsert a JSON
@@ -327,7 +351,11 @@ pub fn facade_edits(set: &GraphSet, edits: &Value) -> Vec<(String, KindEdits)> {
         let keys = |name: &str| -> Vec<String> {
             own.get(name)
                 .and_then(Value::as_array)
-                .map(|keys| keys.iter().filter_map(|key| key.as_str().map(str::to_owned)).collect())
+                .map(|keys| {
+                    keys.iter()
+                        .filter_map(|key| key.as_str().map(str::to_owned))
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         let upsert = own
@@ -409,10 +437,18 @@ pub fn rows(set: &GraphSet, rows: &Map<String, Value>) -> Value {
 
 /// A tree the facade returned as the API's tree type holds it: each kind's
 /// rows, its content hash and the core's findings, as their serde JSON.
-pub fn tree(set: &GraphSet, kinds: &Map<String, Value>, content_hash: &str, findings: Value) -> Value {
+pub fn tree(
+    set: &GraphSet,
+    kinds: &Map<String, Value>,
+    content_hash: &str,
+    findings: Value,
+) -> Value {
     let mut out = rows(set, kinds);
     if let Value::Object(members) = &mut out {
-        members.insert("contentHash".to_owned(), Value::String(content_hash.to_owned()));
+        members.insert(
+            "contentHash".to_owned(),
+            Value::String(content_hash.to_owned()),
+        );
         members.insert("findings".to_owned(), findings);
     }
     out
@@ -452,10 +488,20 @@ mod tests {
             assert_eq!(error.code, code);
             assert_eq!(error.message, "words");
         }
-        let error = refusal(Some("invalid_tree"), "bad", Some(json!([{"code": "missing_parent"}])));
-        assert_eq!(error.details.as_deref(), Some(&json!({"findings": [{"code": "missing_parent"}]})));
+        let error = refusal(
+            Some("invalid_tree"),
+            "bad",
+            Some(json!([{"code": "missing_parent"}])),
+        );
+        assert_eq!(
+            error.details.as_deref(),
+            Some(&json!({"findings": [{"code": "missing_parent"}]}))
+        );
         assert_eq!(refusal(None, "storage", None).status.as_u16(), 500);
-        assert_eq!(refusal(Some("walk_ceiling"), "deep", None).status.as_u16(), 500);
+        assert_eq!(
+            refusal(Some("walk_ceiling"), "deep", None).status.as_u16(),
+            500
+        );
     }
 
     #[test]
