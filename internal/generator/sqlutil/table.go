@@ -441,6 +441,14 @@ type TableModel struct {
 	SoftDelete bool
 	DeletedBy  bool
 
+	// LiveRoot is, on the table of a graph member's released rows (D139)
+	// whose graph's root has a deletedAt field, the condition that keeps a
+	// read to the rows of a live root: a row goes out of every read while
+	// its root is soft-deleted, and comes back when the root is restored,
+	// since the delete clears no row. Its statements' Live, LiveWhere and
+	// LiveCondition hold it. Empty for every other table.
+	LiveRoot string
+
 	// Versioned is a @versioned table, and HasVersion one with the _version
 	// column, @versioned or @optimistic. HistoryActor is the column a
 	// versioned table's delete tombstone takes its actor in, or "".
@@ -735,6 +743,7 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 		}
 		tables = append(tables, table)
 	}
+	attachLiveRoots(schema, tables)
 	attachReferences(tables)
 	attachRelations(tables)
 	grants := schema.AccessGrantsTable() != nil
@@ -753,6 +762,45 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 		}
 	}
 	return tables, nil
+}
+
+// attachLiveRoots gives each table of a graph member's released rows
+// (D139) whose graph's root is soft-deletable its LiveRoot: the root's
+// live row, by the table's relation to the root, in a subquery that names
+// the root by an alias of its own, so a filter through the relation, which
+// names the root by its table, reads its own rows beside it. The rows of a
+// soft-deleted root stay in the table: a read leaves them out, and a
+// restore of the root sees them again.
+func attachLiveRoots(schema *ir.Schema, tables []TableModel) {
+	byType := make(map[string]*TableModel, len(tables))
+	for i := range tables {
+		byType[tables[i].Type] = &tables[i]
+	}
+	for i := range tables {
+		table := &tables[i]
+		td := schema.Types[table.Type]
+		if td == nil || td.ReleasedOf == "" {
+			continue
+		}
+		member := schema.Types[td.ReleasedOf]
+		if member == nil || member.GraphMember == nil {
+			continue
+		}
+		root := byType[member.GraphMember.Graph]
+		if root == nil || !root.SoftDelete {
+			continue
+		}
+		for _, c := range table.Columns {
+			if c.Relation != root.Type {
+				continue
+			}
+			const alias = "live_root"
+			table.LiveRoot = "EXISTS (SELECT 1 FROM " + root.Quoted + " AS " + alias +
+				" WHERE " + alias + "." + QuoteIdentifier(root.Key) + " = " + c.Qualified +
+				" AND " + alias + "." + root.AuditQuoted(AuditDeletedAt) + " IS NULL)"
+			break
+		}
+	}
 }
 
 // What a table is to the runtime's per-record access (TableModel.Access,
