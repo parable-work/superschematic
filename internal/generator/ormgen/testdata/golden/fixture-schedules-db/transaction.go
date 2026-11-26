@@ -5,6 +5,7 @@ package orm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -62,10 +63,12 @@ func (o TxOptions) begin() (string, error) {
 }
 
 // txOf is a Tx over tx, nested depth savepoints deep, with the
-// repositories bound to it.
-func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
-	wrapped := &Tx{tx: tx, db: db, depth: depth}
-	wrapped.Problem = &ProblemRepository{tx: tx, txDB: db}
+// repositories bound to it. commit is what the
+// transaction runs after it commits, which a nested Tx shares with the Tx
+// it is nested in.
+func (db *Database) txOf(tx pgx.Tx, depth int, commit *txCommit) *Tx {
+	wrapped := &Tx{tx: tx, db: db, depth: depth, commit: commit}
+	wrapped.Problem = &ProblemRepository{tx: tx, txDB: db, txCommit: commit}
 	return wrapped
 }
 
@@ -87,28 +90,28 @@ func (db *Database) TransactionWith(ctx context.Context, opts TxOptions, fn func
 			panic(p)
 		}
 	}()
-	if err := fn(db.txOf(tx, 0)); err != nil {
+	commit := &txCommit{}
+	if err := fn(db.txOf(tx, 0, commit)); err != nil {
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			return fmt.Errorf("failed to rollback transaction: %w (original error: %v)", rbErr, err)
 		}
 		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-	return nil
+	return commitTx(ctx, tx, commit)
 }
 
 // Transaction executes fn within a transaction nested in tx, a savepoint
 // named for its depth: it releases the savepoint when fn returns nil, and
 // when fn returns an error rolls back to it, releases it and returns the
-// error, so tx goes on as it may after a statement of fn's failed.
+// error, so tx goes on as it may after a statement of fn's failed. The
+// functions fn adds with AfterCommit are tx's: they run after the outermost
+// transaction commits, and a rollback to the savepoint keeps them (D166).
 func (tx *Tx) Transaction(ctx context.Context, fn func(TxInterface) error) error {
 	savepoint := fmt.Sprintf("sp_%d", tx.depth+1)
 	if _, err := tx.tx.Exec(ctx, fmt.Sprintf("SAVEPOINT %s", savepoint)); err != nil {
 		return fmt.Errorf("failed to begin savepoint: %w", err)
 	}
-	if err := fn(tx.db.txOf(tx.tx, tx.depth+1)); err != nil {
+	if err := fn(tx.db.txOf(tx.tx, tx.depth+1, tx.commit)); err != nil {
 		if _, rbErr := tx.tx.Exec(ctx, fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepoint)); rbErr != nil {
 			return fmt.Errorf("failed to roll back to savepoint: %w (original error: %v)", rbErr, err)
 		}
@@ -119,6 +122,77 @@ func (tx *Tx) Transaction(ctx context.Context, fn func(TxInterface) error) error
 	}
 	if _, err := tx.tx.Exec(ctx, fmt.Sprintf("RELEASE SAVEPOINT %s", savepoint)); err != nil {
 		return fmt.Errorf("failed to release savepoint: %w", err)
+	}
+	return nil
+}
+
+// CommitHook is work that runs once after a transaction commits (D166).
+// Several writes of the transaction can add to one hook
+// (Tx.AfterCommitHook).
+type CommitHook interface {
+	AfterCommit(ctx context.Context)
+}
+
+// txCommit is what a transaction runs after it commits, and how long its
+// COMMIT took. Every Tx of one transaction, its savepoints' among them,
+// holds the same txCommit.
+type txCommit struct {
+	// after holds the functions AfterCommit added, in order.
+	after []func(context.Context)
+	// hooks holds the hooks AfterCommitHook added, by key.
+	hooks map[any]CommitHook
+	// duration is how long the COMMIT took, zero until it commits.
+	duration time.Duration
+}
+
+// AfterCommit adds fn to the functions that run after the transaction
+// commits (D166). They run in the order added, with the transaction's
+// context, before Transaction or TransactionWith returns. A rollback drops
+// them, and a rollback to a savepoint does not, so fn added inside a nested
+// Transaction that failed still runs. Use it for a side effect that must
+// not happen before the commit, such as a signal that tells another process
+// to read what the transaction wrote. fn cannot fail the transaction: the
+// commit is done when it runs.
+func (tx *Tx) AfterCommit(fn func(context.Context)) {
+	tx.commit.after = append(tx.commit.after, fn)
+}
+
+// AfterCommitHook returns the hook the transaction holds under key (D166).
+// When it holds none, it makes one with newHook, adds its AfterCommit as
+// AfterCommit adds a function, and returns it. Each write of the
+// transaction adds its part to the one hook, so the side effect runs once
+// for the commit, not once for each write.
+func (tx *Tx) AfterCommitHook(key any, newHook func() CommitHook) CommitHook {
+	if hook, held := tx.commit.hooks[key]; held {
+		return hook
+	}
+	hook := newHook()
+	if tx.commit.hooks == nil {
+		tx.commit.hooks = map[any]CommitHook{}
+	}
+	tx.commit.hooks[key] = hook
+	tx.AfterCommit(hook.AfterCommit)
+	return hook
+}
+
+// CommitDuration is how long the transaction's COMMIT took (D166): the
+// deferred triggers that run at commit, the locks they wait for, and the
+// write of the commit record. A function AfterCommit added reads it to
+// measure the commit. It is zero before the commit.
+func (tx *Tx) CommitDuration() time.Duration {
+	return tx.commit.duration
+}
+
+// commitTx commits tx, records in commit how long the COMMIT took, and runs
+// commit's functions in the order AfterCommit added them, with ctx.
+func commitTx(ctx context.Context, tx pgx.Tx, commit *txCommit) error {
+	started := time.Now()
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	commit.duration = time.Since(started)
+	for _, fn := range commit.after {
+		fn(ctx)
 	}
 	return nil
 }

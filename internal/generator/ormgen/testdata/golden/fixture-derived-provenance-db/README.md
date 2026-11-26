@@ -49,6 +49,11 @@ Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
 
+A transaction's `*Tx` runs work after its commit: `AfterCommit(fn)` adds a
+function, `AfterCommitHook(key, newHook)` adds one hook for each key, and
+`CommitDuration()` says how long the commit took. A rollback runs none of
+them, and a rollback to a savepoint keeps them.
+
 `<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
 column qualified by its table, for a query of your own: its values are
 appended to `args`, their placeholders numbered after those already there.

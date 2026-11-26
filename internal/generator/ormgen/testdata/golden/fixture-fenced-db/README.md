@@ -47,6 +47,11 @@ Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
 
+A transaction's `*Tx` runs work after its commit: `AfterCommit(fn)` adds a
+function, `AfterCommitHook(key, newHook)` adds one hook for each key, and
+`CommitDuration()` says how long the commit took. A rollback runs none of
+them, and a rollback to a savepoint keeps them.
+
 A table with a `@fenced` field keeps a counter that every write of a column
 the fence covers sets to the stored value plus one, which a trigger holds
 every writer to. `UpdateOne`, `UpdateMany` and an upsert's update advance it
