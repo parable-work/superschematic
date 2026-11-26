@@ -527,6 +527,11 @@ type RustAPI struct {
 	// and for a job or a worker, which mounts no routes.
 	ManualRoutes string
 
+	// Providers is true when Deps holds the runtime providers the API's
+	// config names (D159, D185), which the API crate's providers::from_config
+	// reads from its config.
+	Providers bool
+
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
@@ -1000,6 +1005,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		derived := map[string]string{}
 		if a.Config != nil && o.HasEnvConfig {
 			api.Config = taken.take(stem + "_config")
+			api.Providers = o.Providers != nil
 			for _, f := range a.Config.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.Key
 			}

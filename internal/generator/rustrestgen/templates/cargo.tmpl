@@ -59,6 +59,11 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 # binds to the API's pool.
 {{ .VersionGraphCrate }} = { path = "{{ .VersionGraphDepPath }}" }
 {{- end }}
+{{- with .Providers }}
+{{- range .Crates }}
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
+{{- end }}
 {{- with .Deps }}
 {{- range .Calls }}
 {{ .Crate }} = { path = "{{ .Path }}" }

@@ -62,6 +62,14 @@ type ORMInfo struct {
 	// writes beside the tables' own.
 	OperationStructs []behaviortypes.Struct
 	OperationEnums   []behaviortypes.Enum
+
+	// References and Attachments are whether the database keeps references
+	// (a @references table, or a table whose Comments ref blocks reach
+	// rows) and files (an @attachments table), which the Postgres
+	// repositories read through references() and attachments() (D154,
+	// D185).
+	References  bool
+	Attachments bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -174,6 +182,10 @@ type ormDefinition struct {
 	HistoryActorCTE   string     `json:"historyActorCTE,omitempty"`
 	ClearHistoryActor string     `json:"clearHistoryActor,omitempty"`
 	Tables            []ormTable `json:"tables"`
+	// References and Attachments are the database's references and files
+	// (D154), on Postgres alone.
+	References  *rustRowReferences `json:"references,omitempty"`
+	Attachments *rustAttachments   `json:"attachments,omitempty"`
 }
 
 type ormActor struct {
@@ -569,6 +581,14 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	if len(info.Tables) == 0 {
 		return nil, nil
 	}
+	repository := map[string]bool{}
+	for _, t := range info.Tables {
+		repository[t.Type] = true
+	}
+	if postgres.References, postgres.Attachments, err = rowFeaturesOf(schema, tables, repository); err != nil {
+		return nil, err
+	}
+	info.References, info.Attachments = postgres.References != nil, postgres.Attachments != nil
 	if info.Rules {
 		encoded, err := json.MarshalIndent(layout, "", "  ")
 		if err != nil {

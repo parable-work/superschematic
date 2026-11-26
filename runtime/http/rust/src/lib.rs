@@ -93,6 +93,9 @@ pub mod orm;
 // repositories, with the `postgres` or `sqlite` feature.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod deriver;
+// The runtime extension points (D159, D185): the five provider interfaces
+// and the providers an environment configures.
+pub mod providers;
 // The words, LIKE patterns and case folding of a SearchQuery (D62).
 pub mod search;
 mod service_auth;
