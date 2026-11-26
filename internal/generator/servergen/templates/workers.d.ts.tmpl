@@ -8,7 +8,7 @@
 declare module 'cloudflare:workers' {
   /** The Worker's bindings: its config's strings, its secrets and its resources, by name. */
   export const env: Readonly<Record<string, unknown>>;
-{{- if eq .BundleEntry "scheduled.ts" }}
+{{- if ne .BundleEntry "fetch.ts" }}
 
   /** The event a Workflow's run receives for its instance. */
   export interface WorkflowEvent<P> {
@@ -26,6 +26,9 @@ declare module 'cloudflare:workers' {
   /** The steps a Workflow's run does its work in. */
   export interface WorkflowStep {
     do<T>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
+{{- if eq .BundleEntry "drain.ts" }}
+    sleepUntil(name: string, timestamp: Date | number): Promise<void>;
+{{- end }}
   }
 
   /** The base class of a Workflow, whose run Cloudflare calls for each instance. */

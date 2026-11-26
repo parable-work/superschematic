@@ -35,6 +35,12 @@
 //     carol, who lacks ledger.close, may not; a sign-in and a cookie call
 //     from another origin are refused, and so is the page's sign-in sent to
 //     the server's own host.
+//   - The server's enqueues wake the sync worker (D151): its QUEUE_WAKES
+//     names a binding per worker, which the fixture's WakeRecorder stands
+//     in for, and a sync enqueued creates an instance named for the second
+//     it is due in.
+
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
 /** A call with a session cookie, which answers its status, its envelope's data or its problem (RFC 9457), and the session cookie it sets. */
 async function as(env, cookie, method, path, body) {
@@ -71,6 +77,21 @@ function check(condition, message) {
 /** Fires a worker's scheduled handler, as its Cron Trigger fires it every minute. */
 async function fire(worker) {
   await worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() });
+}
+
+/** The Workflow instances the server's wakes created (D151), as WakeRecorder records them. */
+const wakes = [];
+
+/**
+ * The stand-in for a worker's Workflow, which workerd does not run (D151):
+ * the server's WAKE_ bindings name it, and each create a wake sends is
+ * recorded, its id the second its message is due in.
+ */
+export class WakeRecorder extends WorkerEntrypoint {
+  async create(options) {
+    wakes.push({ id: options.id, dueAt: options.params?.dueAt });
+    return { id: options.id };
+  }
 }
 
 export default {
@@ -124,6 +145,12 @@ export default {
     }
     const rolledBack = await call(env, 'POST', 'api/syncs', { itemId: 'e', reason: 'ok', rollback: true });
     check(rolledBack.enqueued === false, 'the rolled back sync says it was enqueued');
+    // The enqueues woke the sync worker's Workflow through the binding
+    // QUEUE_WAKES names, once for messages due within a run's cover (D151).
+    check(
+      wakes.length >= 1 && wakes.every(w => /^due-\d+$/u.test(w.id) && typeof w.dueAt === 'number' && w.id === `due-${Math.ceil(w.dueAt / 1000)}`),
+      `the server's enqueues created ${JSON.stringify(wakes)}, want an instance of the sync worker's Workflow named for its due second`
+    );
     s = await state(env);
     check(
       s.syncQueue.map(m => `${m.key}:${m.reason}:${m.state}`).join() === 'a:chain:ready,b:ok:ready,c:flaky:ready,d:poison:ready',

@@ -177,10 +177,16 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if err != nil {
 		return registry.Lowered{}, err
 	}
+	waits, err := addWakes(d, version)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
 	out := registry.Lowered{Resources: workerNodes(d, v, workersDev, settingBool(d.Settings, "logs", true), version)}
 	// The Worker waits for each Worker its service bindings name, so a
 	// destroy removes it, with its bindings, first (calls.go).
 	out.Resources[0].DependsOn = bindingDependencies(d)
+	// Its version waits for each Workflow that wakes a worker (wakes.go).
+	waitForWakes(out.Resources, waits)
 	if d.Exposed && env.Domain != "" {
 		out.Resources = append(out.Resources, customDomain(d, v, env))
 	}

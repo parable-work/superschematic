@@ -4,6 +4,7 @@ import {
   Authenticated,
   HttpMethod,
   QueryParam,
+  behaviorWorker,
   job,
   requirePermission,
   rest,
@@ -12,7 +13,7 @@ import {
   userSessions,
   worker,
 } from "@superschematic/api";
-import { DrainLineItem, LineItem } from "@smoke/smoke-db";
+import { Alert, CheckIn, DrainLineItem, FollowUp, LineItem } from "@smoke/smoke-db";
 
 // Registration waits for an administrator's approval; the first
 // registrant is the administrator (D81, D88).
@@ -92,7 +93,100 @@ export class LineItems extends Authenticated {
   requestDrain(id: Identity.UUID): DrainRequested {
     throw new Error("schema declaration only");
   }
+
+  // Enqueues DrainLineItem due five seconds on (D80): on Cloudflare the
+  // enqueue wakes the worker's Workflow for that time (D151).
+  @rest(HttpMethod.POST, "line-items/{id}/drain-later")
+  @requirePermission(["smoke.write"])
+  requestDelayedDrain(id: Identity.UUID): DrainRequested {
+    throw new Error("schema declaration only");
+  }
 }
+
+export abstract class TitleInput {
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+}
+
+export abstract class FollowUpView {
+  id: Identity.UUID;
+  title: string;
+  status: string;
+}
+
+export abstract class CheckInView {
+  id: Identity.UUID;
+  title: string;
+  ranAt: Nullable<Temporal.DateTime>;
+}
+
+export abstract class AlertView {
+  id: Identity.UUID;
+  level: string;
+  status: string;
+}
+
+// The behaviors' rows (D151): each one's behavior worker moves it, under
+// stack dev as a process and on Cloudflare at a Cron firing or a wake.
+export class Behaviors extends Authenticated {
+  // A follow-up, due five seconds on by its Timers deadline.
+  @rest(HttpMethod.POST, "follow-ups")
+  @requirePermission(["smoke.write"])
+  createFollowUp(input: TitleInput): FollowUpView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "follow-ups/{id}")
+  @requirePermission(["smoke.read"])
+  getFollowUp(id: Identity.UUID): FollowUpView {
+    throw new Error("schema declaration only");
+  }
+
+  // A check-in with a wake-up five seconds on, by its Schedules.
+  @rest(HttpMethod.POST, "check-ins")
+  @requirePermission(["smoke.write"])
+  createCheckIn(input: TitleInput): CheckInView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "check-ins/{id}")
+  @requirePermission(["smoke.read"])
+  getCheckIn(id: Identity.UUID): CheckInView {
+    throw new Error("schema declaration only");
+  }
+
+  // A quiet alert.
+  @rest(HttpMethod.POST, "alerts")
+  @requirePermission(["smoke.write"])
+  createAlert(): AlertView {
+    throw new Error("schema declaration only");
+  }
+
+  // Sets the alert's level to high, which its Reactions hears.
+  @rest(HttpMethod.POST, "alerts/{id}/high")
+  @requirePermission(["smoke.write"])
+  raiseAlert(id: Identity.UUID): AlertView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "alerts/{id}")
+  @requirePermission(["smoke.read"])
+  getAlert(id: Identity.UUID): AlertView {
+    throw new Error("schema declaration only");
+  }
+}
+
+// Runs FollowUp's deadlines and the writes its Timers hears (D103, D151).
+@behaviorWorker(FollowUp)
+export abstract class FollowUpTimers {}
+
+// Runs CheckIn's wake-ups and hands each run to checkInWakeUpsSchedulesRun
+// (D104, D151).
+@behaviorWorker(CheckIn, { permissions: ["smoke.write"] })
+export abstract class CheckInWakeUps {}
+
+// Runs the rule Alert's Reactions holds over its writes (D103, D151).
+@behaviorWorker(Alert)
+export abstract class AlertReactions {}
 
 // Drains smoke-db's DrainLineItem: a Cloud Run worker pool on gcp, and on
 // Cloudflare a Worker that drains it at each firing of a Cron Trigger

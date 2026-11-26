@@ -20,8 +20,8 @@ import {
 import { wakeAfterEnqueue } from './queue-wake.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
-export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, setProcessQueueWaker, WAKE_INTERVAL_MS } from './queue-wake.js';
-export type { QueueWake, QueueWakeHost, QueueWaker } from './queue-wake.js';
+export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, queueWakesSettled, setProcessQueueWaker, WAKE_INTERVAL_MS, wakeRunId } from './queue-wake.js';
+export type { QueueWake, QueueWakeBinding, QueueWakeHost, QueueWaker } from './queue-wake.js';
 export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 
 /*
@@ -147,9 +147,12 @@ export async function enqueue<M>(
     throw new Error(`enqueue on ${queue.table}: ${errorMessage(error)}`, { cause: error });
   }
   // Where the queue's worker runs in drain mode and its platform gives a
-  // wake, the enqueue starts it (D145): sent once the statement has run,
-  // awaited by nothing, and never a failure of the enqueue.
-  wakeAfterEnqueue(queue.name);
+  // wake, the enqueue starts it (D145), and where it drains at a Cron
+  // Trigger's firings, a message due before the next firing starts a run
+  // that waits for it (D151): sent once the statement has run, awaited by
+  // nothing, and never a failure of the enqueue. The due time is this
+  // process's clock plus the delay, near the database's.
+  wakeAfterEnqueue(queue.name, delay > 0 ? Date.now() + delay * 1000 : undefined);
 }
 
 /** What a member a message sets writes to its column: its JSON text, a location's point, a duration's interval, or itself. */

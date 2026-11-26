@@ -320,6 +320,11 @@ type ResolvedWorker struct {
 	Queue    string `json:"queue"`
 	Database string `json:"database"`
 
+	// Queues are a behavior worker's queues, its table's deadline, change
+	// and event queues, each the database holds, Queue first (D103, D151);
+	// empty for a @worker, whose one queue is Queue.
+	Queues []string `json:"queues,omitempty"`
+
 	// Instances is how many instances the environment runs: zero when its
 	// settings turn the worker off. Concurrency is how many messages each
 	// handles at a time.
@@ -349,6 +354,21 @@ func (w *ResolvedWorker) Drains() bool {
 	return w != nil && w.Mode == WorkerModeDrain
 }
 
+// AllQueues returns every queue the worker claims from: a behavior
+// worker's Queues, or its one Queue (D151).
+func (w *ResolvedWorker) AllQueues() []string {
+	if w == nil {
+		return nil
+	}
+	if len(w.Queues) > 0 {
+		return w.Queues
+	}
+	if w.Queue == "" {
+		return nil
+	}
+	return []string{w.Queue}
+}
+
 // ResolvedWaker is one deployable whose enqueue may start a worker in
 // drain mode (D145), and the platform it runs on, by which the worker's
 // platform knows whether it can name the deployable's identity.
@@ -357,9 +377,11 @@ type ResolvedWaker struct {
 	Platform   string `json:"platform"`
 }
 
-// ResolvedWake is one worker in drain mode that a deployable's enqueue may
-// start (D145): the worker's deployable, and the queue it drains, by its
-// `@queue` class, which keys the wake in QueueWakesVariable. Whether an
+// ResolvedWake is one worker in drain mode, or on a platform that drains
+// at a schedule's firings (registry.PlatformSpec.WakesWorkers, D151), that
+// a deployable's enqueue may start: the worker's deployable, and a queue
+// it drains, by its `@queue` class, which keys the wake in
+// QueueWakesVariable; a behavior worker is a wake per queue. Whether an
 // environment's platform provides a wake is the platform's to say: one
 // that does gives the deployable the wake and the right to use it.
 type ResolvedWake struct {

@@ -270,6 +270,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
+	r.checkBehaviorQueues()
 	r.runDerivers()
 	r.runApps()
 	r.runRunners()

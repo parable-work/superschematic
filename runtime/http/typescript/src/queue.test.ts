@@ -125,16 +125,27 @@ function recorder(...results: { rows: unknown[]; rowCount: number | null }[]) {
 describe('an enqueue wakes its queue (D145)', () => {
   test("it tells the process's waker its queue once its statement has run, and not when the statement fails", async () => {
     const woken: string[] = [];
+    const dues: (number | undefined)[] = [];
     setProcessQueueWaker({
-      enqueued: async queue => {
+      enqueued: async (queue, dueAt) => {
         woken.push(queue);
+        dues.push(dueAt);
       },
+      settled: async () => {},
     });
     try {
       const client = recorder({ rows: [], rowCount: 1 });
       await enqueue(client, definition(), { orderId: 'o-1', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
       expect(client.queries).toHaveLength(1);
       expect(woken).toEqual(['OrderPlaced']);
+      expect(dues).toEqual([undefined]);
+      // A delayed message says when it falls due, so a wake can wait for it (D151).
+      const before = Date.now();
+      await enqueue(recorder({ rows: [], rowCount: 1 }), definition(), { orderId: 'o-4', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } }, { delaySeconds: 30 });
+      expect(dues[1]).toBeGreaterThanOrEqual(before + 30_000);
+      expect(dues[1]).toBeLessThanOrEqual(Date.now() + 30_000);
+      woken.length = 0;
+      woken.push('OrderPlaced');
       const broken = {
         query: async () => {
           throw new Error('the database is down');
@@ -149,6 +160,7 @@ describe('an enqueue wakes its queue (D145)', () => {
         enqueued: () => {
           throw new Error('the waker broke');
         },
+        settled: async () => {},
       });
       await enqueue(recorder({ rows: [], rowCount: 1 }), definition(), { orderId: 'o-3', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
     } finally {

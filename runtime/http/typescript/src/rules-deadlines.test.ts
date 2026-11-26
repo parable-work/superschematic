@@ -23,6 +23,7 @@ import {
   type RulesLayout,
   type RulesStore,
 } from './rules';
+import { setProcessQueueWaker } from './queue-wake';
 import { bumpVersion, columnTypes, postgresDatabase, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 
 // The adapter's sub-table rows and deadlines (D103) over a real database of
@@ -234,6 +235,20 @@ for (const dialect of dialects) {
       expect(await rings('a1')).toEqual([{ key: 'ring', values: { dueAt: at, fired: false } }]);
       expect(await armed('a1')).toEqual([{ useId: 'Clock', name: 'ring', at, payload: { n: 1 } }]);
       expect(await messages('a1')).toEqual([{ id: expect.any(String), name: 'ring', at, state: 'ready', dueAt: at }]);
+    });
+
+    test("an armed deadline wakes its table's deadline queue for its time once the unit's statements have run (D151)", async () => {
+      const woken: { queue: string; dueAt: number | undefined }[] = [];
+      setProcessQueueWaker({
+        enqueued: async (queue, dueAt) => void woken.push({ queue, dueAt }),
+        settled: async () => {},
+      });
+      try {
+        await inTransaction(host => runCreate(host, 'Alarm', { title: 'Wake' }, alice, { id: 'a-wake' }));
+        expect(woken).toEqual([{ queue: 'AlarmDeadline', dueAt: now + 1000 }]);
+      } finally {
+        setProcessQueueWaker(undefined);
+      }
     });
 
     test('a read of sub-table rows answers them in key order, each value converted and a NULL absent', async () => {

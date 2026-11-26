@@ -1,14 +1,110 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  BINDING_WAKE_COVER_MS,
+  BINDING_WAKE_HORIZON_MS,
+  HTTP_WAKE_HORIZON_MS,
   parseQueueWakes,
   QUEUE_WAKES_VARIABLE,
   queueWaker,
+  queueWakesSettled,
   setProcessQueueWaker,
   wakeAfterEnqueue,
   WAKE_INTERVAL_MS,
+  wakeRunId,
   type QueueWake,
   type QueueWakeHost,
 } from './queue-wake';
+
+describe('a binding wake (D151)', () => {
+  /** A Workflow binding that records each run it is asked to create, and refuses an id it holds. */
+  function workflow() {
+    const runs: { id: string; dueAt: number }[] = [];
+    return {
+      runs,
+      create: async (options: { id: string; params: { dueAt: number } }) => {
+        if (runs.some(r => r.id === options.id)) throw new Error(`instance.already_exists: ${options.id}`);
+        runs.push({ id: options.id, dueAt: options.params.dueAt });
+        return {};
+      },
+    };
+  }
+
+  test("it starts a run of the worker's Workflow for a message due before the next firing, named for its due second, and none past it", async () => {
+    const wake = workflow();
+    const warnings: string[] = [];
+    const state = { now: 1_000_000 };
+    const host: QueueWakeHost = {
+      fetch: async () => {
+        throw new Error('no HTTP');
+      },
+      now: () => state.now,
+      warn: message => void warnings.push(message),
+      binding: name => (name === 'WAKE_TICKETS' ? wake : undefined),
+    };
+    const waker = queueWaker(parseQueueWakes(JSON.stringify({ TicketDeadline: [{ binding: 'WAKE_TICKETS' }], TicketEvent: [{ binding: 'WAKE_TICKETS' }], Other: [{ binding: 'MISSING' }] })), host);
+    // An event, due at once.
+    await waker.enqueued('TicketEvent');
+    expect(wake.runs).toEqual([{ id: wakeRunId(1_000_000), dueAt: 1_000_000 }]);
+    // A deadline a few seconds on is covered by that run's drain, within the interval.
+    await waker.enqueued('TicketDeadline', 1_000_000 + BINDING_WAKE_COVER_MS);
+    expect(wake.runs).toHaveLength(1);
+    // One past the cover starts a run of its own, due when it is.
+    await waker.enqueued('TicketDeadline', 1_030_000);
+    expect(wake.runs[1]).toEqual({ id: 'due-1030', dueAt: 1_030_000 });
+    // One past the next firing starts none: the firing finds it.
+    await waker.enqueued('TicketDeadline', 1_000_000 + BINDING_WAKE_HORIZON_MS + 1);
+    expect(wake.runs).toHaveLength(2);
+    // After the interval the same second is asked for again, and the run that exists is no failure.
+    state.now += WAKE_INTERVAL_MS;
+    await waker.enqueued('TicketDeadline', 1_030_000);
+    expect(wake.runs).toHaveLength(2);
+    expect(warnings).toEqual([]);
+    // A binding the deployable lacks is warned of and fails nothing.
+    await waker.enqueued('Other');
+    expect(warnings).toEqual(["the wake of a queue's worker failed: its next firing finds the message"]);
+    await waker.settled();
+  });
+
+  test('an HTTP wake is sent for a message due within the drain horizon alone, and settled waits for the wakes in flight', async () => {
+    const posted: string[] = [];
+    let answer: (() => void) | undefined;
+    const host: QueueWakeHost = {
+      fetch: async url => {
+        posted.push(url);
+        await new Promise<void>(resolve => (answer = resolve));
+        return { ok: true, status: 200, json: async () => ({}) };
+      },
+      now: () => 5_000_000,
+      warn: () => {},
+    };
+    const waker = queueWaker(new Map([['OrderPlaced', [{ url: 'https://run.test/jobs/fulfil:run' }]]]), host);
+    void waker.enqueued('OrderPlaced', 5_000_000 + HTTP_WAKE_HORIZON_MS + 1);
+    expect(posted).toEqual([]);
+    void waker.enqueued('OrderPlaced', 5_000_000 + 1_000);
+    let settled = false;
+    const done = waker.settled().then(() => (settled = true));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(posted).toEqual(['https://run.test/jobs/fulfil:run']);
+    expect(settled).toBe(false);
+    answer?.();
+    await done;
+    expect(settled).toBe(true);
+  });
+
+  test('parseQueueWakes reads a binding wake and refuses one whose binding is no name', () => {
+    expect(parseQueueWakes('{"TicketDeadline":[{"binding":"WAKE_TICKETS"}]}').get('TicketDeadline')).toEqual([{ binding: 'WAKE_TICKETS' }]);
+    expect(() => parseQueueWakes('{"TicketDeadline":[{"binding":""}]}')).toThrow('names a binding that is no name');
+    expect(() => parseQueueWakes('{"TicketDeadline":[{}]}')).toThrow('has no url and no binding');
+  });
+
+  test('queueWakesSettled resolves with no waker, and never rejects', async () => {
+    setProcessQueueWaker(undefined);
+    await queueWakesSettled();
+    setProcessQueueWaker({ enqueued: async () => {}, settled: () => Promise.reject(new Error('broken')) });
+    await queueWakesSettled();
+    setProcessQueueWaker(undefined);
+  });
+});
 
 /** A platform's wake and its token endpoint: it records each request, and a test moves its clock. */
 function fakeHost(options: { wakeStatus?: number; tokenStatus?: number; expiresIn?: number } = {}) {

@@ -281,8 +281,8 @@ answer header; `origins` in acme-shop's stacks.
 
 **D92** (L 12596). An identity store over D1, and a TypeScript server over
 a sqlite-first `authDb`; Hyperdrive in a parameterized environment; a
-least-privilege config per API; a separate migrator user on the origin; a
-drainer woken before its next Cron firing, and more than one; the stack
+least-privilege config per API; a separate migrator user on the origin;
+more than one drainer of a worker; the stack
 managing the Hyperdrive config and its caching.
 
 **D94** (L 12785). 67 first-error map walks whose message can name a
@@ -1579,18 +1579,14 @@ Left:
   worker whose mode is drain; and the Rust queue client sends no wake, so
   a message a Rust API enqueues waits for the tick. Its queue descriptor
   holds the `slot` statement already.
-- A behavior worker in drain mode, which resolution refuses: triggers and
-  the clock fill its queues, so no enqueue's wake hears them, and its
-  claim loops take no slot.
-- The wake on Cloudflare: waking a worker's Worker before its next Cron
-  firing (D92) through the same seam, `ir.ResolvedDeployable.Wakes` and
-  `QUEUE_WAKES`. `mode: "drain"` changes nothing there.
+- A behavior worker in drain mode, which resolution refuses: its change
+  queue is filled by a trigger, which no wake hears, and its claim loops
+  take no slot. Its deadlines and events now wake through the rules
+  adapter, and its queues read their next due time (D151); the change
+  queue's wake and the slot are what is left.
 - A wake from an enqueue on SQLite (`Enqueue<Queue>SQLite`,
   `enqueueStatement`), and a slot there: no target runs a drain worker
   over a SQLite file.
-- A TypeScript entrypoint that waits for the wakes it has sent before it
-  exits, as a Go one does: a job that exits right after its one enqueue
-  may end before its wake goes out, and the tick finds the message.
 - A bound on a task's life shorter than a day, and a setting for it.
 - Holding wakes back while the worker holds its slots. A process sends a
   queue's wake whenever five seconds have passed since its last, so on a
@@ -1709,6 +1705,73 @@ its recordings replayed, a table implementing it in each language and
 `examples/engine-jobs` on it; the discriminated-union field type in the
 IR, both readers, every validator, the DDL and both ORMs; and the
 engine's Variants removed with engine types (step 7).
+
+## D151. A behavior worker drains on Workers at a Cron Trigger's firings within its CPU time, a write due before the next firing wakes the worker's Workflow, and an environment whose behavior queue no worker drains is refused (D80, D92, D103, D145 amended)
+
+A TypeScript `@behaviorWorker` was refused on Cloudflare Workers, whose
+drain.ts ran a `@worker`'s handler alone, so on that target nothing that
+waits or reacts fired: no Timers deadline, no Schedules run, no Reaction.
+A worker on Workers drains at each firing of a Cron Trigger, a minute
+apart, and nothing woke it sooner. And the build only warned of a table
+whose deadline, change or event queue no worker runs.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior worker some environment places on Workers gets a drain.ts of its own (`behavior_drain.ts.tmpl`): at each firing it runs its table's queues with the handlers its main.ts runs under `stack dev` (the API package's `<worker>Queues`), through Hyperdrive, every queue at once (`runFiring` in the runtime's `./worker`). | One Worker per queue, three Cron Triggers a table |
+| A claim takes a batch of up to the worker's concurrency of each queue, as under `stack dev`. A behavior worker's window and grace fit within the CPU time a firing may take, 30 s unless its `cpuMs` says (`DefaultCPUMilliseconds`): wall time bounds CPU time, so the firing ends before Cloudflare stops it, whatever its handlers do. The window is `ir.DefaultWorkerDrainSeconds`, 50 s, or less when the CPU time leaves less (22 s with the defaults: 30 s less an 8 s grace), and a `drainSeconds` that does not fit is refused as unrealizable. | Measuring CPU time as the firing runs, which a Worker cannot (its clock stands still while it computes); the 50 s window with no bound, which a busy table's handlers could take past the limit |
+| A firing that stops at its window while its last claim filled every slot, or with handlers it released, leaves a backlog: `runWorker` resolves to what it did (`WorkerRun`), and `runFiring` logs `backlog left for the next firing` with the queue, how many it handled, failed and released, and the window. The next firing, or a wake, takes the rest. | Starting a wake for the rest at once, which a queue that never empties would turn into a run per firing; a metric, which waits for metrics on Workers (D67) |
+| The wake on Cloudflare goes through D145's seam: resolution gives each deployable that may write to the queues of a worker on a platform that takes wakes (`registry.PlatformSpec.WakesWorkers`, set by `cloudflare.drainer`) the worker among its `Wakes`, whatever its mode, a behavior worker once per queue. A wake may name a binding (`ir.QueueWake.Binding`) in place of a URL. | A wake path of its own beside `QUEUE_WAKES` |
+| The object a wake starts is a Workflow per drainer, `<worker>.workflow`, of the class every drain.ts exports (`ir.QueueWakeClass`, `QueueWake`). A server or a job holds a workflow binding to it (`WAKE_<WORKER>`) and `QUEUE_WAKES`, and its version waits for the Workflow's node. A wake creates an instance named for the second its message is due in, so two wakes for one second start one; the instance sleeps until then and runs one firing as a drain, which stops once its queues held and found nothing for 2 s and none falls due within 10 s. The resources live in the cloudflare extension; the class is written by the server generator; the runtime's mechanism names no provider. | A Durable Object per environment holding the earliest due time, whose alarm runs the drain: a Durable Object class is created by a migration Cloudflare applies on a deploy of a script, not on the upload of a version (deployment management, "Durable Object migrations"), and this target deploys every Worker as a version and a deployment. Core, which would name a provider |
+| A message wakes its worker when it is due within the minute before the next firing: an armed deadline due within 60 s, an event, and an enqueue, delayed or not, due within 60 s. One due later is found by a firing, so a sleeping instance is never kept per row. A binding is woken at most once in 5 s for due times a run already covers, those up to 10 s after one sent. The rules adapter sends the wakes of a command's deadlines and events once its statements have run, as an enqueue's are sent (D145). | A wake per armed deadline, at any distance, which keeps an instance asleep per row |
+| Servers and jobs take wakes. A drainer takes none: its version would wait for the other drainer's Workflow, and two drainers over one database wait for each other. What a worker's handlers leave another worker, that worker's next firing takes. | Binding by name with no wait, which a first deploy may upload before the Workflow exists |
+| The check: resolution refuses, as unrealizable, an environment that runs a database one of whose tables keeps a deadline, change or event queue that no worker the environment runs, with at least one instance, claims. The refusal names the environment, the database, the table, the queue and what it holds. The verifier's warning stays, for a schema read alone. | A warning at the deploy too, which lets a change queue grow by a message a write while nothing runs it |
+| Delay on enqueue (D80) was built for every app queue by D80's change: `enqueue(..., { delaySeconds })` in TypeScript, and Go's and Rust's, write `due_at` ahead, and every claim, the drain's on Workers among them, takes only a message whose `due_at` has come. A behavior's deadline is due at its time already; its change and event queues are due at once. What this entry adds is the delayed message's wake: the enqueue says when its message is due, so one due before the next firing starts a run that waits for it. | A `dueAt` option beside `delaySeconds`: a producer that knows a time computes the seconds |
+
+Built: the runtime's binding wake, due times, `settled` and
+`queueWakesSettled` (`queue-wake.ts`), `installQueueWakes` (`./workers`),
+the rules adapter's wakes (`rules.ts`), `WorkerRun`, `runFiring` and the
+wake's idle and horizon (`worker.ts`); `nextDue` on a behavior worker's
+queues (tsrestgen); a behavior worker's drain.ts, the `QueueWake` Workflow
+in every drain.ts, the wakes installed by fetch.ts and scheduled.ts and
+awaited by each invocation, and a job's main awaiting its wakes before it
+exits (servergen); `WakesWorkers`, a behavior worker's `Queues` in the
+resolved worker and its wakes per queue, and the check
+(`internal/stack/workers.go`); the drainer's Workflow, its CPU budget, and
+the servers' and jobs' wake bindings (`extensions/cloudflare/wakes.go`,
+`drainer.go`); the identity runtime's fallback to its portable argon2id
+where node:crypto refuses argon2. The tests: the runtime's wake, firing
+and adapter tests, the adapter's on Postgres too; the resolver's check
+(`TestBehaviorQueuesNeedAWorker`); the cloudflare extension's
+`TestBehaviorWorkerOnWorkers` and `TestBehaviorWorkerWindowFitsItsCPUTime`
+and the ledger's goldens; a behavior worker's drain.ts held to a golden
+and type-checked; the ledger under the pinned workerd, whose server's
+enqueues create instances of a stand-in for the sync worker's Workflow;
+and `examples/deploy-smoke`, whose Timers deadline, Schedules run,
+Reaction and delayed enqueue each move under `smoke.sh Dev`, and whose
+environments hold the Workflows and wake bindings
+(`TestDeploySmokeEnvironments`). The stacks, queues and API routes guides
+say how it runs.
+
+Left:
+
+- The live run: `examples/deploy-smoke/scripts/smoke.sh Cloudflare`, which
+  shows a Timers deadline, a Schedules run, a Reaction and a delayed
+  enqueue fire on Workers, an urgent deadline within ten seconds, and
+  whether a workflow binding's upload needs the Workflow to exist (the
+  version waits for it either way).
+- A wake for a change queue, which a trigger fills: a Reaction on Workers
+  runs at the next firing, within a minute.
+- A wake between drainers, without a cycle in the graph.
+- Go and Rust: neither runs on Workers, and neither runtime sends a wake
+  for a behavior's deadline or event; a Rust queue client sends none at
+  all (D145).
+- A behavior worker in drain mode on gcp (D145): the change queue's wake
+  and the slot.
+- The CPU bound for a `@worker`'s drainer, whose window D92 set at 50 s
+  apart from its CPU time.
+- A wake on SQLite and D1, where no worker claims on Workers.
+- A behavior worker's drain.ts under the pinned workerd, and a Workflow
+  under workerd, which runs none: the fixture stands in for one.
 
 ## D156. Every caller is one principal of three kinds, a table's rows keep to an audience a trigger resolves, a row rule follows relations, grants are rows a party or an agent run reaches rows through, reveal is a permission, and an access log records sensitive reads (D103, D104, D108, D114, D116 amended)
 
