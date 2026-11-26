@@ -664,6 +664,25 @@ impl<'r, C> Cx<'r, C> {
         )
     }
 
+    /// Deletes the row of a key of one of the use's shared tables, held to
+    /// the version it was read at ([`View::shared_row`], D147's second
+    /// primitive): a row a concurrent writer moved past that version, or
+    /// deleted, deletes nothing, and the host runs the command again from
+    /// fresh state. A key a behavior keeps unique across the table's rows
+    /// is freed so: Aliased's removed alias, and a deleted row's names.
+    pub fn delete_shared(&self, table: &str, key: &str, expected_version: i64) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "delete_shared",
+            table,
+            key,
+            SharedRowChange::Delete { expected_version },
+        )
+    }
+
     /// Emits an event of the use's about its row (D104), which the host
     /// writes to the event queue of the row's table in the change set's
     /// transaction, with the command's time, and a worker of the API hands

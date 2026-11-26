@@ -69,7 +69,14 @@ is the behavior's value (Workflow's `status`), which its declaration names
 (`Declaration::value`); the core refuses a field anchor on a behavior that
 names none, and refuses a create or an update whose own fields name a field
 anchor's field, to set it or to clear it, since only the behavior's
-operations change it (`invalid_instance`, rule `owned`). A type anchor's
+operations change it (`invalid_instance`, rule `owned`). A behavior whose
+value a create gives (`Declaration::value_from_create`, a declaration
+file's `"fromCreate": true` on its value field, D147: Aliased's name) is
+the one exception, at a create alone: the create's own member of the
+anchor's name is the use's value, which the core sets on the new row
+before validation, so the use's hooks read it as theirs (`View::get`), and
+which the change set carries as an owned field, not an own one. An update
+still names it as no own field. A type anchor's
 fields sit apart from the own fields, which may take any name.
 
 A type may list its own fields too (`fields`, each a `FieldSpec`: its name,
@@ -172,6 +179,8 @@ with a fallback arm.
   declaration takes create parameters; an entry for any other use is
   refused (`behavior Workflow takes no create parameters`), `{}` included.
   An own field that names a field anchor's field is refused.
+  A member that names a field anchor whose behavior takes its value from a
+  create (D147) is that use's value, not an own field.
 - `Update { key, patch }`: a merge patch (RFC 7396, `merge_patch`) of own
   fields. A member that names a field anchor's field is refused, null
   included.

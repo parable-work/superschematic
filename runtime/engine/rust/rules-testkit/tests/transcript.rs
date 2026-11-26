@@ -18,7 +18,8 @@
 //! Schedules' and Pool's (`core-seats`, `core-reconcile`, `core-schedules`,
 //! `core-pool`) among them, behaviors no engine implements, Schedules' and
 //! Pool's holding the events each command wrote, and Pool's its picks, each
-//! a command without a row (D104).
+//! a command without a row (D104), and Aliased's (`core-aliased`, D147), its
+//! resolves commands without a row.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -413,6 +414,17 @@ const REFUNDS_FLOOR: usize = 52;
 /// `core-payments.json` (D70 on the core, D103's step 4).
 const PAYMENTS_FLOOR: usize = 73;
 
+/// The steps `core-aliased.transcript.json` holds, of the hand-written
+/// `core-aliased.json`'s 54 (D147): its define and publish checks, two of
+/// them refused, and its commands, creates (four refused for a name
+/// another row holds), Aliased's operations, four of them repeats
+/// answered unchanged, resolve's commands without a row, and a delete, 36
+/// commands and 10 checks, each command holding its row's version after
+/// the step, with its aliases as its sub-rows, in its 5 scenarios. The 8
+/// left out are the opens and the reads of rows. An adapter's replay holds
+/// its own count to this one.
+const ALIASED_FLOOR: usize = 46;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -506,6 +518,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-commerce", COMMERCE_FLOOR, false),
         ("core-calendar", CALENDAR_FLOOR, false),
         ("core-payments", PAYMENTS_FLOOR, false),
+        ("core-aliased", ALIASED_FLOOR, true),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

@@ -79,6 +79,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"reconcile", RulesPackage},
 	{"schedules", RulesPackage},
 	{"pool", RulesPackage},
+	{"aliased", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -131,6 +132,8 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	// D103's step 4, its later waves, in the order they were ported.
 	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
 	"Stock", "Holds", "Calendar", "Payments",
+	// D147's Aliased, the core's alone.
+	"Aliased",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a

@@ -566,6 +566,14 @@ impl PgStore {
                             &[&text(&data)?, type_name, use_id, table, key, expected_version],
                         )?;
                     }
+                    // A delete held to its version (D147).
+                    SharedRowChange::Delete { expected_version } => self.one(
+                        &format!(
+                            "DELETE FROM {shared}
+                             WHERE schema = $1 AND use_id = $2 AND tbl = $3 AND key = $4 AND version = $5"
+                        ),
+                        &[type_name, use_id, table, key, expected_version],
+                    )?,
                     other => {
                         return Err(Stop::Refused(Refusal::internal(format!(
                             "the development store takes no shared-table change of this kind: {other:?}"

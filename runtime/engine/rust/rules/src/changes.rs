@@ -347,6 +347,11 @@ pub enum SharedRowChange {
         expected_version: i64,
         values: Map<String, Value>,
     },
+    /// The row of the key's delete, held to the version the host read it
+    /// at (D147's second primitive): a row at another version, or none,
+    /// deletes nothing, and the host runs the command again. A key a
+    /// behavior keeps unique across rows is freed so (Aliased's names).
+    Delete { expected_version: i64 },
 }
 
 /// An event a behavior emits about a row, which the host writes to the

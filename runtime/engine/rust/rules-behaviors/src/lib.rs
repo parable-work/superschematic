@@ -90,6 +90,11 @@
 //! `returnFor` on the supply's row, each write taking the supply row's
 //! lock ([`supply::lock_key`]). [`currency`] holds a config's ISO 4217
 //! code to the table superscalar's `Finance.Currency` keeps.
+//! [`Aliased`], D147's: a name on each row with the names it was also
+//! known by, unique across the table's names and aliases together, kept in
+//! a shared table keyed by the name's normalized form, which a create gives
+//! the behavior (the declaration's `fromCreate`) and a removed alias or a
+//! delete frees ([`superschematic_rules::Cx::delete_shared`]).
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -115,6 +120,7 @@
 //! ```
 
 mod ajv;
+pub mod aliased;
 pub mod approvals;
 pub mod budget;
 pub mod calendar;
@@ -152,6 +158,7 @@ pub mod timers;
 mod values;
 pub mod workflow;
 
+pub use aliased::{Aliased, AliasedConfig, Normalize};
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
 pub use budget::{Budget, BudgetConfig, BudgetMeter, BudgetReset, BudgetScope, INTEGER_SEGMENTS};
 pub use calendar::{Calendar, CalendarConfig};
@@ -199,7 +206,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 25] = [
+pub const NAMES: [&str; 26] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -225,6 +232,7 @@ pub const NAMES: [&str; 25] = [
     holds::NAME,
     calendar::behavior::NAME,
     payments::NAME,
+    aliased::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -232,7 +240,7 @@ pub const NAMES: [&str; 25] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 25] = [
+pub const DECLARATIONS: [&str; 26] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -258,6 +266,7 @@ pub const DECLARATIONS: [&str; 25] = [
     holds::DECLARATION,
     calendar::behavior::DECLARATION,
     payments::DECLARATION,
+    aliased::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -295,6 +304,7 @@ pub fn core() -> Core {
         .with(Holds)
         .with(Calendar)
         .with(Payments)
+        .with(Aliased)
 }
 
 #[cfg(test)]
