@@ -677,8 +677,8 @@ var entrySQLite = &sqliteTable{
 	hasVersion: false,
 	columns: []sqliteColumn{
 		{name: "id", quoted: `"id"`, member: "id", uuid: true, key: true},
-		{name: "account_id", quoted: `"account_id"`, member: "account", relationKey: "id", uuid: true},
-		{name: "transfer_id", quoted: `"transfer_id"`, member: "transfer", relationKey: "id", uuid: true},
+		{name: "account_id", quoted: `"account_id"`, member: "account", relationKey: "id", references: "account", probe: `SELECT 1 FROM account WHERE id = ?1`, uuid: true},
+		{name: "transfer_id", quoted: `"transfer_id"`, member: "transfer", relationKey: "id", references: "account", probe: `SELECT 1 FROM account WHERE id = ?1`, uuid: true},
 		{name: "amount_cents", quoted: `"amount_cents"`, member: "amountCents"},
 		{name: "booked_on", quoted: `"booked_on"`, member: "bookedOn"},
 		{name: "kind", quoted: `"kind"`, member: "kind", enumDefault: "debit"},

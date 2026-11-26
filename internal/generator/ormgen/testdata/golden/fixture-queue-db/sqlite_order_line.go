@@ -274,8 +274,8 @@ var orderLineSQLite = &sqliteTable{
 	hasVersion: false,
 	columns: []sqliteColumn{
 		{name: "id", quoted: `"id"`, member: "id", uuid: true, key: true},
-		{name: "order_id", quoted: `"order_id"`, member: "order", relationKey: "id", uuid: true},
-		{name: "product_id", quoted: `"product_id"`, member: "product", relationKey: "id", uuid: true},
+		{name: "order_id", quoted: `"order_id"`, member: "order", relationKey: "id", references: "order", probe: `SELECT 1 FROM "order" WHERE id = ?1`, uuid: true},
+		{name: "product_id", quoted: `"product_id"`, member: "product", relationKey: "id", references: "product", probe: `SELECT 1 FROM product WHERE id = ?1`, uuid: true},
 		{name: "quantity", quoted: `"quantity"`, member: "quantity"},
 		{name: "note", quoted: `"note"`, member: "note"},
 	},

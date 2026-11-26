@@ -78,6 +78,12 @@ type SQLiteColumn struct {
 	Member      string
 	RelationKey string
 
+	// References is the table a to-one relation's column points at, and
+	// Probe the read of whether a row of it holds a key, ?1, which names
+	// the column a foreign key refused, since SQLite's refusal names none.
+	References string
+	Probe      string
+
 	// UUID, Timestamp, Boolean, Interval and Numeric say how the column,
 	// or each element of a list, holds its value; JSON is a column that
 	// holds a JSON value as its text, and List one that holds a list as a
@@ -202,8 +208,10 @@ func sqliteTableOf(repo *Repository) (*SQLiteTable, error) {
 		case member.IsRelationship:
 			rel := member.Relationship
 			column.RelationKey = "id"
-			if target := relationTargetKey(repo, rel); target != "" {
-				column.RelationKey = target
+			if target, ok := relationTarget(repo, rel); ok {
+				column.RelationKey = target.member
+				column.References = target.table
+				column.Probe = "SELECT 1 FROM " + target.quoted + " WHERE " + target.key + " = ?1"
 			}
 			if !rel.IsArray {
 				out.Relations = append(out.Relations, SQLiteRelation{
@@ -274,13 +282,18 @@ func sqliteTableOf(repo *Repository) (*SQLiteTable, error) {
 	return out, nil
 }
 
-// relationTargetKey is the member of the key of rel's target, as its row's
-// JSON names it, or "" when the repository does not know the target.
-func relationTargetKey(repo *Repository, rel *Relationship) string {
-	if repo.targetKeys == nil {
-		return ""
-	}
-	return repo.targetKeys[rel.TargetType]
+// sqliteTarget is a table a relation points at: the member of its key in
+// its row's JSON, its table, and its table and key as a statement names
+// them.
+type sqliteTarget struct {
+	member, table, quoted, key string
+}
+
+// relationTarget is rel's target table, and whether the repository knows
+// it.
+func relationTarget(repo *Repository, rel *Relationship) (sqliteTarget, bool) {
+	target, ok := repo.sqliteTargets[rel.TargetType]
+	return target, ok
 }
 
 // sqliteRefusal is why repo's table has no repository on SQLite, or "":

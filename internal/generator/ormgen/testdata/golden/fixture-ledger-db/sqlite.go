@@ -322,6 +322,9 @@ type sqliteColumn struct {
 	// default a required enum takes when unset.
 	key, auto, zeroUnset bool
 	enumDefault          string
+	// references is the table a to-one relation's column points at, and
+	// probe the read of whether a row of it holds a key.
+	references, probe string
 }
 
 // sqliteStatements are a table's statements on SQLite (sqlutil).
@@ -810,7 +813,11 @@ func (t *sqliteTable) insert(ctx context.Context, q sqliteQuerier, record sqlite
 	for i := range values {
 		placeholders[i] = "?" + strconv.Itoa(i+1)
 	}
-	return t.one(ctx, q, fmt.Sprintf(t.st.insert, strings.Join(columns, ", "), strings.Join(placeholders, ", "), t.st.columns), values...)
+	written, err := t.one(ctx, q, fmt.Sprintf(t.st.insert, strings.Join(columns, ", "), strings.Join(placeholders, ", "), t.st.columns), values...)
+	if err != nil {
+		return nil, t.reference(ctx, q, err, columns, values)
+	}
+	return written, nil
 }
 
 // where is the WHERE of conditions, and the live rows alone unless
@@ -971,7 +978,11 @@ func (t *sqliteTable) update(ctx context.Context, q sqliteQuerier, key any, sets
 	if err == ErrNotFound && version != nil {
 		return nil, t.versionMiss(ctx, q, key)
 	}
-	return record, err
+	if err != nil {
+		columns, values := sqliteAssigned(sets, args)
+		return nil, t.reference(ctx, q, err, columns, values)
+	}
+	return record, nil
 }
 
 // versionMiss tells apart why a write fenced on _version matched no row:
@@ -1127,7 +1138,7 @@ func (t *sqliteTable) upsert(ctx context.Context, q sqliteQuerier, record sqlite
 	query := fmt.Sprintf(t.st.upsert, strings.Join(columns, ", "), "("+strings.Join(placeholders, ", ")+")", key.conflict, strings.Join(renumbered, ", "), upsertWhere(live, compare, renext, onlyIfChanged || assigned == 0))
 	records, err := t.query(ctx, q, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, t.reference(ctx, q, err, columns, values)
 	}
 	switch {
 	case len(records) > 0 && held == nil:
@@ -1210,12 +1221,135 @@ func sqliteVersionConflict(typeName string) error {
 	return fmt.Errorf("%s: the row is at another version", typeName)
 }
 
-// sqliteFailure is a driver's error as a repository returns it.
+// sqliteFailure is a driver's error as a repository returns it. A write
+// SQLite refuses for a constraint is a *pgconn.PgError of the SQLSTATE
+// Postgres answers it with, unique_violation (23505) with the key's columns
+// in its detail, not_null_violation (23502) with its column,
+// check_violation (23514) or foreign_key_violation (23503), so the code
+// that answers a refusal, a generated route's among it, reads one
+// vocabulary on both dialects. The driver's own message is its Message.
 func sqliteFailure(err error) error {
 	if err == nil {
 		return nil
 	}
+	if refused := sqliteConstraint(err); refused != nil {
+		return fmt.Errorf("sqlite: %w", refused)
+	}
 	return fmt.Errorf("sqlite: %w", err)
+}
+
+// sqliteConstraints are the words SQLite refuses a constraint with, and
+// Postgres's SQLSTATE of each.
+var sqliteConstraints = []struct{ words, code string }{
+	{"UNIQUE constraint failed: ", "23505"},
+	{"NOT NULL constraint failed: ", "23502"},
+	{"CHECK constraint failed: ", "23514"},
+	{"FOREIGN KEY constraint failed", "23503"},
+}
+
+// sqliteConstraint is err as Postgres's refusal of the constraint, or nil
+// for an error that is no constraint's.
+func sqliteConstraint(err error) *pgconn.PgError {
+	var already *pgconn.PgError
+	if errors.As(err, &already) {
+		return already
+	}
+	text := err.Error()
+	for _, c := range sqliteConstraints {
+		at := strings.Index(text, c.words)
+		if at < 0 {
+			continue
+		}
+		named := text[at+len(c.words):]
+		if end := strings.Index(named, " ("); end >= 0 {
+			named = named[:end]
+		}
+		refused := &pgconn.PgError{Severity: "ERROR", Code: c.code, Message: text}
+		var columns []string
+		if c.code == "23505" || c.code == "23502" {
+			// table.column, table.column; an index over an expression is
+			// "index 'name'", which names no column.
+			if !strings.HasPrefix(named, "index ") {
+				for _, part := range strings.Split(named, ", ") {
+					table, column, ok := strings.Cut(part, ".")
+					if !ok {
+						columns = nil
+						break
+					}
+					refused.TableName = table
+					columns = append(columns, column)
+				}
+			}
+		}
+		switch c.code {
+		case "23505":
+			if len(columns) > 0 {
+				refused.Detail = "Key (" + strings.Join(columns, ", ") + ")=(...) already exists."
+			}
+		case "23502":
+			if len(columns) == 1 {
+				refused.ColumnName = columns[0]
+			}
+		case "23514":
+			refused.ConstraintName = named
+		}
+		return refused
+	}
+	return nil
+}
+
+// reference names, on a write the database refused for a foreign key, the
+// column whose value no row of its target holds, among the values of the
+// columns the write set: SQLite's refusal names none, and Postgres's names
+// it in its detail and in its constraint, fk_<table>_<column>.
+func (t *sqliteTable) reference(ctx context.Context, q sqliteQuerier, err error, columns []string, values []any) error {
+	var refused *pgconn.PgError
+	if !errors.As(err, &refused) || refused.Code != "23503" || refused.Detail != "" {
+		return err
+	}
+	for i := range t.columns {
+		c := &t.columns[i]
+		if c.probe == "" {
+			continue
+		}
+		for j, column := range columns {
+			if column != c.quoted && column != c.name || values[j] == nil {
+				continue
+			}
+			rows, probeErr := q.QueryContext(ctx, c.probe, values[j])
+			if probeErr != nil {
+				return err
+			}
+			held := rows.Next()
+			_ = rows.Close()
+			if !held {
+				refused.Detail = fmt.Sprintf("Key (%s)=(%v) is not present in table %q.", c.name, values[j], c.references)
+				refused.ConstraintName = "fk_" + strings.Trim(t.quoted, `"`) + "_" + c.name
+				refused.ColumnName = c.name
+				return err
+			}
+		}
+	}
+	return err
+}
+
+// assigned are the columns sets assign a parameter of args, and the
+// values they assign.
+func sqliteAssigned(sets []string, args []any) ([]string, []any) {
+	var columns []string
+	var values []any
+	for _, set := range sets {
+		column, param, ok := strings.Cut(set, " = ?")
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(param)
+		if err != nil || n < 1 || n > len(args) {
+			continue
+		}
+		columns, values = append(columns, column), append(values, args[n-1])
+	}
+	return columns, values
 }
 
 // sqliteRefused is the error of a table that SQLite does not hold.

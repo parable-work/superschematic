@@ -451,10 +451,10 @@ type Repository struct {
 	EventQueue string
 
 	// SQLite is the table on SQLite, for a database whose DB service lists
-	// the sqlite dialect (D116); nil for any other. targetKeys are the
-	// members of each table's key, by type, which a relation's column holds.
-	SQLite     *SQLiteTable
-	targetKeys map[string]string
+	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
+	// tables of the database by type, whose keys a relation's column holds.
+	SQLite        *SQLiteTable
+	sqliteTargets map[string]sqliteTarget
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -1279,14 +1279,15 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 	if opts.SQLite {
 		// Each table's repository on SQLite (D116), whose relations name
-		// their targets' keys by the members of their rows.
-		keys := make(map[string]string, len(output.Repositories))
+		// their targets' keys by the members of their rows, and read
+		// whether a target row holds a key.
+		targets := make(map[string]sqliteTarget, len(output.Repositories))
 		for _, repo := range output.Repositories {
-			keys[repo.TypeName] = repo.PrimaryKeyField
+			targets[repo.TypeName] = sqliteTarget{member: repo.PrimaryKeyField, table: repo.TableName, quoted: repo.QuotedTableName, key: repo.QuotedPrimaryKey}
 		}
 		for i := range output.Repositories {
 			repo := &output.Repositories[i]
-			repo.targetKeys = keys
+			repo.sqliteTargets = targets
 			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
 				return nil, err
 			}

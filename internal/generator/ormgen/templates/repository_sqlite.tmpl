@@ -129,6 +129,7 @@ var {{ $v }} = &sqliteTable{
 		{{- range .SQLite.Columns }}
 		{name: {{ printf "%q" .Name }}, quoted: {{ goRawString .Quoted }}, member: {{ printf "%q" .Member }}
 		{{- if .RelationKey }}, relationKey: {{ printf "%q" .RelationKey }}{{ end }}
+		{{- if .Probe }}, references: {{ printf "%q" .References }}, probe: {{ goRawString .Probe }}{{ end }}
 		{{- if .UUID }}, uuid: true{{ end }}
 		{{- if .Timestamp }}, timestamp: true{{ end }}
 		{{- if .Boolean }}, boolean: true{{ end }}
