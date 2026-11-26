@@ -31,10 +31,28 @@ It exports the behaviors' adapter (rules.ts, D103), which imports nothing
 from node: or a driver either: a Worker, or a server over openSqlite, runs a
 command of a table that composes behaviors on sqliteRulesStore, over the
 layout its database's generated orm.ts embeds.
+
+It exports the generated repositories over a SqlDatabase (orm-sqlite.ts,
+D182), sqliteOrm, which a types package's ./orm/sqlite entry calls, with
+references and attachments (D154) and the audience and grants each read
+keeps to (D156). They import node:async_hooks alone of node:, which a
+Worker has under the nodejs_als flag, for the caller of the operation being
+run.
 */
 
 export type { EnqueueOptions, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
+// The generated repositories over a SqlDatabase (D182): a types package's
+// ./orm/sqlite entry's createOrm calls sqliteOrm, and the predicates and
+// members a read across tables applies on SQLite as on Postgres.
+export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
+export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, ormOfRuntime } from './orm.js';
+export type * from './orm.js';
+export { RowFeatureError, attachmentBlock, previewObjectOf } from './rowfeatures.js';
+export type * from './rowfeatures.js';
+export { FieldEncryptionError, type FieldEncryptionReason } from './fieldcrypt-error.js';
+export { uuidFromDb, uuidToDb } from './uuid.js';
+export type { FieldKeyring, FieldKeys } from './fieldcrypt.js';
 export {
   MAX_ATTEMPTS,
   RulesRefusal,

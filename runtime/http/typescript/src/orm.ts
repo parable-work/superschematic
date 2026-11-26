@@ -1,10 +1,10 @@
-import pg from 'pg';
 import { accessCallerOf, currentAccess, currentCaller, type AccessCaller, type Caller } from './caller.js';
-import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
-import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
+import { FieldEncryptionError } from './fieldcrypt-error.js';
+import type { FieldCell, FieldKeyring, FieldKeys } from './fieldcrypt.js';
+import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
-import { parseArray } from './queue.js';
+import { parseArray } from './pgtext.js';
 import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
 import { likePattern, searchTerms } from './search.js';
@@ -471,6 +471,15 @@ export interface AudienceDefinition {
   readonly effective: string;
   readonly agents: string;
   readonly probe?: string;
+  /**
+   * How the dialect asks whether the effective audience %s holds one of the
+   * ids %s, when not Postgres's array overlap (D182): on SQLite, whose
+   * audience is a JSON array, an EXISTS over json_each
+   * (sqlutil.AudienceModel's Contains).
+   */
+  readonly contains?: string;
+  /** A parameter, numbered %d, when not Postgres's $%d: SQLite's ?%d. */
+  readonly placeholder?: string;
 }
 
 /**
@@ -511,9 +520,10 @@ export function audienceConditions(definition: AudienceDefinition, caller: Acces
   else {
     const placeholders = ids.map(id => {
       args.push(id);
-      return `$${++n}`;
+      return fill(definition.placeholder ?? '$%d', ++n);
     });
-    parts.push(`(${definition.effective} IS NULL OR ${definition.effective} && ARRAY[${placeholders.join(', ')}]::uuid[])`);
+    const contains = fill(definition.contains ?? '%s && ARRAY[%s]::uuid[]', definition.effective, placeholders.join(', '));
+    parts.push(`(${definition.effective} IS NULL OR ${contains})`);
   }
   if (caller.kind === 'agent') parts.push(write ? `${definition.agents} = 'followRole'` : `${definition.agents} <> 'none'`);
   const text = parts.join(' AND ');
@@ -602,6 +612,12 @@ export interface NearestSettingDefinition {
 
 /** What a database's ./orm entry gives ormOf beside its tables. */
 export interface OrmDefinition {
+  /**
+   * The dialect its statements are written in (D182): Postgres's unless
+   * sqlite, whose definitions a types package's ./orm/sqlite entry holds and
+   * sqliteOrm runs over a SqlDatabase (bun:sqlite or a D1 binding).
+   */
+  readonly dialect?: 'postgres' | 'sqlite';
   readonly clauses: Clauses;
   readonly nearest?: NearestDefinition;
   /** The rows findMany and findPage read unless told. */
@@ -663,6 +679,13 @@ export interface OrmQueryable {
 /** What ormOf needs of a pg Pool: its queries and a connection of its own for a transaction. */
 export interface OrmPool extends OrmQueryable {
   connect(): Promise<OrmQueryable & { release(err?: Error | boolean): void }>;
+  /**
+   * Runs fn in a transaction begin begins, and commits, rolling back when
+   * fn throws, for a pool that runs its own: sqliteOrmPool's, one
+   * connection taken in turn (D182). Absent on a pg Pool, whose transaction
+   * takes a connection of its own.
+   */
+  transaction?<T>(begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T>;
 }
 
 /** A query config a transaction's query takes, as pg's does. */
@@ -1263,38 +1286,45 @@ export function fill(format: string, ...args: readonly unknown[]): string {
   });
 }
 
-const INTERVAL = 1186;
-const INTERVAL_ARRAY = 1187;
-const POINT = 600;
-const POINT_ARRAY = 1017;
-
 /**
- * The types each statement of a repository reads with: the pool's
- * (postgresTypeParsers), and an INTERVAL and a POINT as their text, which
- * the codec reads, whatever the pool was opened with.
+ * What a dialect's entry gives the repositories' runtime beside a pool
+ * (D182): the pg types each statement reads with on Postgres (./postgres's
+ * ormOf), none on SQLite, and how a field keys secret is read into a
+ * keyring, which ./fieldcrypt does with node:crypto. An entry with none (./d1,
+ * whose Worker has no node:crypto) takes a FieldKeyring already read.
  */
-const ormTypes = withTypeParsers(pg.types, {
-  ...postgresTypeParsers,
-  [INTERVAL]: value => value,
-  [INTERVAL_ARRAY]: parseArray,
-  [POINT]: value => value,
-  [POINT_ARRAY]: parseArray,
-});
+export interface OrmRuntime {
+  readonly types?: unknown;
+  readonly parseFieldKeys?: (keys: FieldKeys) => FieldKeyring;
+}
 
 /** Runs a repository's statements: on a pool, or on the connection of a transaction. */
 interface Runner {
   readonly queryable: OrmQueryable;
   readonly inTransaction: boolean;
+  /** The pg types each statement reads with on Postgres; none on SQLite (OrmRuntime). */
+  readonly types?: unknown;
   /** The pool a write that takes more than one statement opens a transaction on, outside one (D89). */
   readonly pool?: OrmPool;
 }
 
 async function run(runner: Runner, text: string, values: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
-  const result = await runner.queryable.query({ text, values, types: ormTypes });
+  const result = await runner.queryable.query(runner.types === undefined ? { text, values } : { text, values, types: runner.types });
   return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount ?? 0 };
 }
 
 type Values = Record<string, unknown>;
+
+/**
+ * The value of a row's one column, which a count or an EXISTS reads: pg
+ * names it count or exists, SQLite after its expression (COUNT(*)), and
+ * SQLite's EXISTS is 1 or 0 (D182).
+ */
+function firstValue(row: Record<string, unknown> | undefined): unknown {
+  if (row === undefined) return undefined;
+  for (const value of Object.values(row)) return value;
+  return undefined;
+}
 
 /** The alias an upsert returns whether it inserted a row as, sqlutil.UpsertInserted (D89). */
 const UPSERT_INSERTED = '_inserted';
@@ -1328,6 +1358,7 @@ function beginStatement(options: TransactionOptions = {}): string {
  * not be ended is not returned to the pool.
  */
 async function inTransaction<T>(pool: OrmPool, begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T> {
+  if (pool.transaction) return pool.transaction(begin, fn);
   const client = await pool.connect();
   let broken: Error | undefined;
   try {
@@ -1707,7 +1738,7 @@ class TableRepository {
     const pool = this.runner.pool;
     if (!pool) throw new Error(`orm: ${this.def.name} has no pool to open a transaction on`);
     return inTransaction(pool, 'BEGIN', client =>
-      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true }, this.acting, this.keys, this.rules, this.behaviorCaller))
+      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true, types: this.runner.types }, this.acting, this.keys, this.rules, this.behaviorCaller))
     );
   }
 
@@ -1752,7 +1783,7 @@ class TableRepository {
     const out = { ...input };
     const key = this.keyColumn();
     const unset = (v: unknown): boolean => v === undefined || v === null || v === '';
-    if (key.uuid && unset(out[key.name])) out[key.name] = newRowKey();
+    if (key.uuid && unset(out[key.name])) out[key.name] = crypto.randomUUID();
     for (const column of this.encrypted) {
       const value = out[column.name];
       if (value === undefined || value === null) continue;
@@ -2048,7 +2079,7 @@ class TableRepository {
     let total: number | undefined;
     if (options.count !== false) {
       const counted = await run(this.runner, fill(s.count, where), args);
-      total = Number((counted.rows[0] as { count?: unknown } | undefined)?.count ?? 0);
+      total = Number(firstValue(counted.rows[0]) ?? 0);
     }
     const columns = selection ? this.selectText(selection) : s.qualifiedColumns;
     const { rows } = await run(this.runner, fill(s.findMany, columns, where, this.orderBy(options.orderBy), limitOffset), args);
@@ -2106,7 +2137,7 @@ class TableRepository {
       // A key whose row no longer exists places no row: only then is the
       // page empty without being the last.
       const exists = await run(this.runner, s.pageKeyExists, [after]);
-      if (!(exists.rows[0] as { exists?: unknown } | undefined)?.exists) {
+      if (!firstValue(exists.rows[0])) {
         throw new PageKeyError(`no ${this.def.name} row has the key's ${this.def.key}`);
       }
     }
@@ -2480,6 +2511,9 @@ class TableRepository {
    * writes its sub-table rows and arms its deadlines.
    */
   private refuseUpsert(method: string): void {
+    if (this.orm.dialect === 'sqlite') {
+      throw new Error(`orm: ${method} of ${this.def.name}: the TypeScript repositories upsert on Postgres alone so far (D182); create the row with createOne, or update it by its key`);
+    }
     const behaviors = this.behaviors;
     if (!behaviors) return;
     const keeping = behaviors.uses.filter(use => (use.tables ?? []).length > 0).map(use => use.behavior);
@@ -2836,6 +2870,7 @@ class TableRepository {
 
   async mergeInto(input: { readonly from: unknown; readonly into: unknown }): Promise<MergeResult> {
     const merge = this.def.merge;
+    if (this.orm.dialect === 'sqlite') throw new Error(`orm: mergeInto of ${this.def.name}: the TypeScript repositories merge on Postgres alone so far (D182)`);
     if (!merge) throw new Error(`orm: ${this.def.name} does not implement Mergeable, so its repository has no mergeInto (D147)`);
     const keyColumn = this.keyColumn();
     const from = this.encode(input.from, keyColumn, 'from');
@@ -2899,6 +2934,9 @@ class TableRepository {
 
   /** The host the behaviors' core runs on: this repository's transaction, with the ORM's types. */
   private rulesHost(): RulesHost {
+    if (this.orm.dialect === 'sqlite') {
+      throw new Error(`orm: ${this.def.name} composes behaviors (D103), which the TypeScript repositories run on Postgres alone so far: on SQLite and D1 its reads are served, and a write or an operation of it is not (D182)`);
+    }
     if (!this.rules || !this.orm.rules) {
       throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the ORM was opened with no core for them; createOrm passes @superschematic/rules's (withRulesCore)`);
     }
@@ -2906,7 +2944,7 @@ class TableRepository {
     return {
       core: this.rules,
       layout: this.orm.rules,
-      store: postgresRulesStore({ query: config => queryable.query({ ...config, types: ormTypes }) }),
+      store: postgresRulesStore({ query: config => queryable.query(this.runner.types === undefined ? config : { ...config, types: this.runner.types }) }),
     };
   }
 
@@ -3293,7 +3331,8 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
       return { rows: result.rows as Row[], rowCount: result.rowCount };
     }
     // The rows read as a repository reads them, with its types.
-    const result = await runner.queryable.query({ ...config, types: config.types ?? ormTypes });
+    const types = config.types ?? runner.types;
+    const result = await runner.queryable.query(types === undefined ? config : { ...config, types });
     const read: (row: Record<string, unknown>) => unknown = Array.isArray(decode)
       ? row => decodeRow(row, decode as readonly RowField[])
       : row => new TableRepository(orm, decode as TableDefinition, runner, acting, keys).read(row);
@@ -3308,8 +3347,8 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
  * acts as the transaction it is nested in, the caller (D87) and the
  * behavior caller among them.
  */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
-  const runner: Runner = { queryable: client, inTransaction: true };
+function txOf<R>(orm: OrmDefinition, types: unknown, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
+  const runner: Runner = { queryable: client, inTransaction: true, types };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
@@ -3317,10 +3356,10 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, behaviorCaller, depth, viewerOf(id)),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth, accessCallerOf(principal)),
-    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth, ALL),
-    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, client, acting, keys, rules, caller ?? undefined, depth, viewer),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, types, client, userOf(id), keys, rules, behaviorCaller, depth, viewerOf(id)),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, types, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth, accessCallerOf(principal)),
+    asSystem: () => txOf<R>(orm, types, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth, ALL),
+    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, types, client, acting, keys, rules, caller ?? undefined, depth, viewer),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
     // A nested transaction is a savepoint, named for its depth, as
@@ -3331,7 +3370,7 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
       await client.query({ text: `SAVEPOINT ${savepoint}`, values: [] });
       let out: T;
       try {
-        out = await fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, depth + 1, viewer));
+        out = await fn(txOf<R>(orm, types, client, acting, keys, rules, behaviorCaller, depth + 1, viewer));
       } catch (error) {
         await client.query({ text: `ROLLBACK TO SAVEPOINT ${savepoint}`, values: [] });
         await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
@@ -3360,6 +3399,7 @@ function rowFeatureHost(orm: OrmDefinition, viewer: Viewer, target: object): Row
     readonly actingUser: string | undefined;
   };
   return {
+    dialect: orm.dialect ?? 'postgres',
     ...(orm.references ? { references: orm.references } : {}),
     ...(orm.attachments ? { attachments: orm.attachments } : {}),
     async query(text, values) {
@@ -3378,20 +3418,29 @@ function rowFeatureHost(orm: OrmDefinition, viewer: Viewer, target: object): Row
  * The repositories of a database's tables over pool, as its types package's
  * ./orm entry describes them, acting as the user options names, or as the
  * user it is when a string, or as no one for null; with no user, as the
- * caller of the operation being run (D87). createOrm there calls it with
- * the definitions and types the result. The field keys are read once, and
- * a malformed secret throws FieldEncryptionError here.
+ * caller of the operation being run (D87). runtime is what the dialect's
+ * entry gives (OrmRuntime): ./postgres's ormOf and ./d1's and ./sqlite's
+ * sqliteOrm call it, and createOrm there with the definitions and types the
+ * result. The field keys are read once, and a malformed secret throws
+ * FieldEncryptionError here.
  */
-export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | null | OrmOptions): Orm<R> {
+export function ormOfRuntime<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, options?: string | null | OrmOptions): Orm<R> {
   const opts: OrmOptions = typeof options === 'object' && options !== null ? options : { user: options };
-  const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
+  const keys = opts.fieldKeys === undefined ? undefined : keyringOf(opts.fieldKeys, runtime);
   // A system actor that is no UUID throws here, not at a job's first write.
   systemActorOf(orm);
-  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules, undefined, opts.user === undefined ? CALLER : viewerOf(opts.user));
+  return ormWith<R>(pool, orm, runtime, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules, undefined, opts.user === undefined ? CALLER : viewerOf(opts.user));
 }
 
-function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Orm<R> {
-  const runner: Runner = { queryable: pool, inTransaction: false, pool };
+/** The keyring of keys: read by the runtime's parseFieldKeys, or, with none, keys when it is a keyring already read. */
+function keyringOf(keys: FieldKeys, runtime: OrmRuntime): FieldKeyring {
+  if (runtime.parseFieldKeys) return runtime.parseFieldKeys(keys);
+  if (typeof keys === 'object' && keys !== null && typeof (keys as FieldKeyring).seal === 'function' && typeof (keys as FieldKeyring).open === 'function') return keys as FieldKeyring;
+  throw new FieldEncryptionError('bad-keys', undefined, 'this entry reads no key secret (it has no node:crypto); pass a FieldKeyring, parseFieldKeys(secret) where node:crypto runs');
+}
+
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Orm<R> {
+  const runner: Runner = { queryable: pool, inTransaction: false, pool, types: runtime.types };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
@@ -3399,12 +3448,12 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: Fie
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules, behaviorCaller, viewerOf(id)),
-    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules, behaviorCaller, accessCallerOf(principal)),
-    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules, behaviorCaller, ALL),
-    withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, acting, keys, rules, caller ?? undefined, viewer),
+    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, runtime, userOf(id), keys, rules, behaviorCaller, viewerOf(id)),
+    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, runtime, userOf(principal?.subject ?? null), keys, rules, behaviorCaller, accessCallerOf(principal)),
+    asSystem: () => ormWith<R>(pool, orm, runtime, systemActorOf(orm).id, keys, rules, behaviorCaller, ALL),
+    withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, runtime, acting, keys, rules, caller ?? undefined, viewer),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, 0, viewer)));
+      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, runtime.types, client, acting, keys, rules, behaviorCaller, 0, viewer)));
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,

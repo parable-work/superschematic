@@ -1159,8 +1159,18 @@ statement it deletes the references to the rows it removed, from every
 references sub-table that may hold one, and enqueues a cleared message for
 each, so the row that held it hears of it through the queue's worker. A
 soft delete is an update and clears nothing: a read leaves a deleted row
-out on its own, and a row restored keeps its references. Both declarations
-are Postgres alone.
+out on its own, and a row restored keeps its references.
+
+On SQLite and D1 (D182) each trigger is a row trigger of the same name,
+since SQLite has no statement triggers: a target's delete clears the
+references to the row and enqueues their cleared messages as each row
+goes, and a file's delete enqueues its object's release unless another
+file of the sub-table still names it, so a statement that deletes the
+files of one object releases it once. Of a statement that deletes a
+holder and a row it points at, a cleared message may name the holder
+the same statement deleted, which its worker finds gone. Go's and Rust's
+repositories on SQLite read neither sub-table yet, so a service that lists
+`sqlite` and declares either takes TypeScript's types alone.
 
 ### References and backlinks
 
@@ -1982,6 +1992,29 @@ returns an error the savepoint is rolled back to and released, and the
 transaction around it goes on, as it may after a statement that failed
 in `fn` (D89).
 
+In Go, a transaction runs work after it commits (D166). The transaction a
+`Transaction`, `TransactionWith` or `ReadOnlyTransaction` function takes is
+a `*orm.Tx`, and it has three methods that the `TxInterface` does not:
+
+- `tx.AfterCommit(fn)` adds `fn` to the functions that run after the
+  commit, in the order added, with the transaction's context, before
+  `Transaction` returns. Use it for a side effect that must not happen
+  before the commit, such as a signal that tells another process to read
+  what the transaction wrote. An error from the transaction's function, a
+  panic, or a failed commit runs none of them. A nested `tx.Transaction`
+  that rolls back to its savepoint keeps them, those it added among them.
+- `tx.AfterCommitHook(key, newHook)` returns the hook the transaction holds
+  under `key`, and makes one with `newHook` the first time. A hook is an
+  `orm.CommitHook`, whose `AfterCommit(ctx)` runs once after the commit,
+  so many writes of one transaction can add to one hook.
+- `tx.CommitDuration()` is how long the `COMMIT` took, zero before it.
+
+A caller takes these methods with a type assertion, `tx.(*orm.Tx)`, or
+asserts a small interface of its own, which the no-op transaction does not
+satisfy. A `RunEvent` handler's transaction is a `*orm.Tx` too: its
+functions run after the event's own transaction commits, or after the
+caller's when `RunEvent` runs in one.
+
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
@@ -2121,7 +2154,42 @@ text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
 reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
-ORM does. SQLite repositories are not built.
+ORM does.
+
+### On SQLite and D1
+
+A DB service whose `outputs.sql.dialects` lists `sqlite` gets the same
+repositories on SQLite too (D182), in its types package's `./orm/sqlite`
+entry (`@acme/shop-db-types/orm/sqlite`): each table's statements in
+SQLite's words, the ones the Rust repositories run there, and `createOrm(db)`
+over a `SqlDatabase`, a D1 binding in a Worker or `openSqlite`'s file under
+Bun. The rows, filters and repository types are the `./orm` entry's, and a
+service that lists `sqlite` and not `postgres` gets an `./orm` of types
+alone. The entry imports the HTTP runtime's `./d1`, which imports neither
+pg nor `node:crypto`, so a Worker bundles it.
+
+```ts
+import { openSqlite, parseFieldKeys } from "@superschematic/http-runtime/sqlite";
+import { createOrm } from "@acme/shop-db-types/orm/sqlite";
+
+const orm = createOrm(openSqlite("shop.sqlite"), { fieldKeys: parseFieldKeys(secret) });
+```
+
+A row holds each value as on Postgres. A statement binds a time as its RFC
+3339 text to the millisecond, as the SQLite DDL's defaults write one, so
+times compare in order as text, and a list as its JSON array. A read keeps
+to the caller's audience and grants, and `orm.references` and
+`orm.attachments` serve references and files, as on Postgres.
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| a transaction on `openSqlite`'s file is `BEGIN IMMEDIATE`, a nested one a savepoint | it takes the file's write lock as it begins, so it never fails to upgrade a read lock while another process writes; SQLite's transaction is serializable whatever isolation it names |
+| the ORM takes its one connection in turn: a statement made while a transaction runs waits for it, and one made within it runs in it | a `SqlDatabase` is one connection, which every request of the process shares |
+| on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
+| no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
+| `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
+| a table that composes behaviors is read, and a write of it is refused, as are upserts and `mergeInto` | the behaviors' core, an upsert's inserted flag and a merge's plan run on Postgres alone so far |
+| a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
 
 ### Relations in a read
 
@@ -3738,8 +3806,9 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads one page of 500 rows; past it the value is
-  `{ "over": true }` and its gate does not hold.
+  details. A rollup reads the rows that relate to the row 500 at a time,
+  up to 10,000; past that the value is `{ "over": true }` and its gate
+  does not hold.
 - Rollups keeps no column. A read of the row computes its values through
   the core; no repository, route or SDK serves that read yet. Rollups
   joins and leaves a table with rows.

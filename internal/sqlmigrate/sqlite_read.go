@@ -49,10 +49,10 @@ the rest:
   - whether a unique index is a unique constraint: it is when the schema's
     table has a unique constraint over the same columns, and an index
     otherwise;
-  - a trigger's origin and backfill. A trigger is the schema's when the
-    schema's model has one of its name on its table. Whether it refuses a
-    write (Trigger.Refuses) is the file's to say: it does when its
-    statement calls RAISE;
+  - a trigger's origin, its backfill and the backfill's note. A trigger is
+    the schema's when the schema's model has one of its name on its table.
+    Whether it refuses a write (Trigger.Refuses) is the file's to say: it
+    does when its statement calls RAISE;
   - an index's InTransaction, and the columns of an expression index, which
     are the schema's for the same index, else the columns its keys name;
   - a spelling: a default, a generated column's expression, an index's
@@ -871,7 +871,7 @@ func (r *databaseReader) trigger(t InspectedTrigger) *Trigger {
 		if sameSQL(definition, st.Definition) {
 			definition = st.Definition
 		}
-		return &Trigger{Name: t.Name, Table: t.Table, Definition: definition, Origin: st.Origin, Backfill: st.Backfill, Refuses: sqliteTriggerRefuses(definition)}
+		return &Trigger{Name: t.Name, Table: t.Table, Definition: definition, Origin: st.Origin, Backfill: st.Backfill, BackfillNote: st.BackfillNote, Refuses: sqliteTriggerRefuses(definition)}
 	}
 	return nil
 }

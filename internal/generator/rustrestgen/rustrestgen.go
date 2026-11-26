@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -347,6 +348,9 @@ func (e EndpointInfo) ControlCalls(limits, authenticator, serviceAuthenticator s
 			perms[i] = rustString(perm)
 		}
 		calls = append(calls, fmt.Sprintf(".authorize(%s, &[%s])", authenticator, strings.Join(perms, ", ")))
+		// The authenticator is told of each call of the operation, which
+		// the access log records (D156).
+		calls = append(calls, fmt.Sprintf(".operation(%s)", rustString(e.Name)))
 	}
 	if e.RateLimit > 0 && e.PrincipalRateLimit {
 		calls = append(calls, fmt.Sprintf(".principal_rate_limit(%s, %s, %d)", principalStore(serviceAuthenticator), rustString(e.RateLimitBucket), e.RateLimit))
@@ -775,6 +779,17 @@ type Options struct {
 func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutput, error) {
 	if api == nil || len(api.Endpoints) == 0 {
 		return nil, nil
+	}
+	// A feature of D152 to D159 the Rust server does not serve yet, of the
+	// API or of a database it reads, is refused, not dropped (D181).
+	var databases []*ir.Schema
+	for _, name := range sortedSchemaNames(opts.Dependencies) {
+		if dep := opts.Dependencies[name]; dep != nil && dep.Kind == ir.SchemaKindDB {
+			databases = append(databases, dep)
+		}
+	}
+	if err := verify.RefuseRustServer(schema, databases...); err != nil {
+		return nil, fmt.Errorf("rustrestgen: %w", err)
 	}
 	b := newBuilder(schema, opts)
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -107,6 +108,37 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	for _, f := range out.Fences {
 		t := f.SQLiteTrigger(qs)
 		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: f.Origin, Refuses: t.Refuses})
+	}
+	// An @audience table's insert and update triggers, which refuse an
+	// audience they do not know and resolve the row's, and a parent's
+	// cascade (D156, D182). The update's trigger resolves a table's rows
+	// once when it is created on one that holds rows.
+	for _, a := range out.AudienceTriggers {
+		for _, t := range a.SQLiteTriggers(qs) {
+			trigger := &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: a.Origin, Refuses: t.Refuses}
+			if strings.HasSuffix(t.Name, "_update") {
+				trigger.Backfill = a.SQLiteBackfillSQL(qs)
+				trigger.BackfillNote = fmt.Sprintf("Backfilling %s resolves the audience of every row of %s.", t.Name, a.Table)
+			}
+			m.Triggers = append(m.Triggers, trigger)
+		}
+	}
+	for _, c := range out.AudienceCascades {
+		t, err := c.SQLiteTrigger(out.AudienceTriggers, qs)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+	}
+	// References' and attachments' row triggers (D154, D182): a target's
+	// clear and a file's release.
+	for _, c := range out.ReferencesClears {
+		t := c.SQLiteTrigger(qs)
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+	}
+	for _, r := range out.AttachmentsReleases {
+		t := r.SQLiteTrigger(qs)
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: r.Origin})
 	}
 
 	graphs, err := modelGraphs(schema, m)

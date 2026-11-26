@@ -38,10 +38,10 @@ use super::plan::{Plan, Statement};
 use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
-    row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
-    CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys,
-    FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted,
-    Values, WriteOptions,
+    row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
+    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
+    FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertOptions,
+    Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -118,10 +118,21 @@ impl<'a> Repositories<'a> {
         self
     }
 
-    /// The repositories acting as the database's system actor (D87).
+    /// The repositories acting as the database's system actor (D87),
+    /// which reads every row (D156).
     #[must_use]
     pub fn as_system(mut self) -> Self {
         self.session.user = Some(self.definition.system_actor_id().to_owned());
+        self.session.access = None;
+        self
+    }
+
+    /// The repositories keeping every read and write to what `caller` sees
+    /// (D156): for a party or an agent run, the rows its grants reach. An
+    /// `@audience` table is Postgres's alone.
+    #[must_use]
+    pub fn with_access(mut self, caller: AccessCaller) -> Self {
+        self.session.access = Some(caller);
         self
     }
 
@@ -292,9 +303,11 @@ impl Tables {
             // The route's caller acts, and runs a behavior's command with
             // the permissions it holds, as the TypeScript server's table
             // routes bind it.
+            // Every read and write keeps to what the caller sees (D156).
             let mut repositories = Repositories::new(connection, (tables.definition)()?)?
                 .acting(routes::acting(principal.as_ref()))
-                .with_caller(Caller::of(principal.as_ref()));
+                .with_caller(Caller::of(principal.as_ref()))
+                .with_access(AccessCaller::of(principal.as_ref()));
             if let Some(keys) = tables.keys.as_deref() {
                 repositories = repositories.with_keys(keys);
             }
@@ -564,6 +577,12 @@ impl Repository<'_> {
         options: &PageOptions,
     ) -> Result<RowPage<Values>, Error> {
         finish(self.runner().find_page(filter, options))
+    }
+
+    /// How many live rows `filter` finds, read with no row's value, so no
+    /// encrypted field is opened (D156).
+    pub fn count(&self, filter: Option<&Values>) -> Result<u64, Error> {
+        finish(self.runner().count_of(filter))
     }
 
     /// Inserts a row; a member left unset takes its column's default, or

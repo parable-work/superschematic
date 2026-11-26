@@ -122,6 +122,7 @@ fn mount(
     router = router.route("/api/events/{id}", get(handle_event_get_event));
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["webhooks.receive"])
+        .operation("receiveGithubEvent")
         .apply(post(handle_webhook_receive_github_event));
     router = router.route(
         "/api/webhooks/github",

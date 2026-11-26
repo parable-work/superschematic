@@ -68,16 +68,21 @@ func (t *TableInfo) Article() string {
 // tableOperation is the runtime's TableOperation, the members the
 // TypeScript router's literal has.
 type tableOperation struct {
-	Kind               string   `json:"kind"`
-	Type               string   `json:"type"`
-	Key                string   `json:"key,omitempty"`
-	Parents            []string `json:"parents,omitempty"`
-	View               []string `json:"view"`
-	Body               []string `json:"body,omitempty"`
-	Search             string   `json:"search,omitempty"`
-	Starts             []string `json:"starts,omitempty"`
-	By                 []string `json:"by,omitempty"`
-	OverridePermission string   `json:"overridePermission,omitempty"`
+	Kind    string   `json:"kind"`
+	Type    string   `json:"type"`
+	Name    string   `json:"name,omitempty"`
+	Key     string   `json:"key,omitempty"`
+	Parents []string `json:"parents,omitempty"`
+	View    []string `json:"view"`
+	// Decrypted are the view's @decrypted members, and Reveal the ones
+	// only a holder of a permission sees, by member (D156).
+	Decrypted          []string          `json:"decrypted,omitempty"`
+	Reveal             map[string]string `json:"reveal,omitempty"`
+	Body               []string          `json:"body,omitempty"`
+	Search             string            `json:"search,omitempty"`
+	Starts             []string          `json:"starts,omitempty"`
+	By                 []string          `json:"by,omitempty"`
+	OverridePermission string            `json:"overridePermission,omitempty"`
 }
 
 // UnservedTable is a table operation the Rust server writes no handler for
@@ -115,16 +120,13 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 	if op.Projection {
 		return unserved("it reads the projection %s, and the Rust repositories read tables so far", op.Type)
 	}
-	for _, member := range op.By {
-		if strings.Contains(member, ".") {
-			return unserved("its row rule names the path %s, and the Rust server holds a rule to the row's own members so far (D156)", member)
-		}
-	}
 	table := &TableInfo{Operation: owner, Kind: op.Kind, Database: op.Database, Type: op.Type}
 	// A create that names the state its row starts in (D109) carries the
 	// members that name it: the runtime's handler creates the row and
-	// makes each Workflow's own transition, through the behaviors' core.
-	data := tableOperation{Kind: op.Kind, Type: op.Type, Key: op.Key, Starts: op.Starts, By: op.By, OverridePermission: op.OverridePermission}
+	// makes each Workflow's own transition, through the behaviors' core. A
+	// member of the row rule may be a path through the table's relations
+	// (D156), which the runtime's handler follows.
+	data := tableOperation{Kind: op.Kind, Type: op.Type, Name: info.Name, Key: op.Key, Starts: op.Starts, By: op.By, OverridePermission: op.OverridePermission}
 
 	pathArg := func(name string) *ParamInfo {
 		for i := range info.PathArgs {
@@ -167,8 +169,19 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 		}
 		// A @decrypted member is the opened value of its Encrypted<T>
 		// column (D85), which the repository's row holds: the repositories
-		// open it with the keys the entrypoint gives them.
+		// open it with the keys the entrypoint gives them. One that names a
+		// permission is opened only for a holder of it, and each value
+		// opened is recorded in the access log (D156).
 		data.View = append(data.View, field.Name)
+		if field.Decrypted {
+			data.Decrypted = append(data.Decrypted, field.Name)
+			if field.RevealPermission != "" {
+				if data.Reveal == nil {
+					data.Reveal = map[string]string{}
+				}
+				data.Reveal[field.Name] = field.RevealPermission
+			}
+		}
 	}
 
 	writesBody := op.Kind == ir.TableOperationCreate || op.Kind == ir.TableOperationUpdate
@@ -225,6 +238,16 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 	}
 	table.Literal = rustutil.RawString(strings.TrimSuffix(buf.String(), "\n"))
 	return table, "", nil
+}
+
+// sortedSchemaNames are the names of schemas, sorted.
+func sortedSchemaNames(schemas map[string]*ir.Schema) []string {
+	names := make([]string, 0, len(schemas))
+	for name := range schemas {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // HasTableOperations reports whether the router serves an operation

@@ -140,6 +140,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: len(output.StateMachines) > 0, Template: "state_machines.tmpl", Filename: StateMachinesFile},
 		{Condition: len(output.Queues) > 0, Template: "queues.tmpl", Filename: QueuesFile},
 		{Condition: output.ORM != nil, Template: "orm.tmpl", Filename: ORMFile},
+		{Condition: output.ORM != nil && output.ORM.SQLite != nil, Template: "orm_sqlite.tmpl", Filename: ORMSQLiteFile},
 	}
 	if err := codegen.WriteConditionalFilesParallel(rootFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templateName, outputPath, output)

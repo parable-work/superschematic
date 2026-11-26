@@ -299,6 +299,10 @@ type EndpointInfo struct {
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the runtime's DownloadedFile, the bytes and the filename.
 	FileDownload bool
+	// BinaryStreamContentType is the media type an @httpBinaryStream
+	// operation streams its success body as (D167), "" for every other:
+	// the method returns *runtime.BinaryStream, not OutputType.
+	BinaryStreamContentType string
 	// Idempotent marks an @idempotent operation (D140): the method sends
 	// an Idempotency-Key, the one its context carries
 	// (runtime.WithIdempotencyKey) or a UUID it makes.
@@ -811,28 +815,35 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		// The file (D81), not a JSON value.
 		outputGoType = "*runtime.DownloadedFile"
 	}
+	binaryStreamContentType := ""
+	if ep.BinaryStream != nil {
+		// The stream (D167), unread, not the declared result.
+		outputGoType = "*runtime.BinaryStream"
+		binaryStreamContentType = ep.BinaryStream.ContentType
+	}
 
 	return EndpointInfo{
-		MethodName:            methodName,
-		HTTPMethod:            strings.ToUpper(sdkHTTPMethod),
-		PathFormat:            pathFormat,
-		PathArgs:              pathArgs,
-		InputType:             qualifyType(ep.InputType, scalarSymbols),
-		OutputType:            ep.OutputType,
-		OutputGoType:          outputGoType,
-		FileDownload:          ep.FileDownload != nil,
-		Idempotent:            ep.Idempotent != nil,
-		OutputArrayDepth:      ep.OutputArrayDepth(),
-		OutputIsMap:           ep.OutputIsMap,
-		OutputNullable:        ep.OutputNullable,
-		HasInput:              ep.HasInput,
-		RequiresAuth:          ep.RequiresAuth,
-		PathParams:            pathParams,
-		QueryParams:           queryParams,
-		ScalarArgs:            scalarArgs,
-		HasScalarArgs:         len(scalarArgs) > 0,
-		ScalarInputStructName: nsPrefix + methodName + "Input",
-		QueryStructName:       nsPrefix + methodName + "QueryParams",
+		MethodName:              methodName,
+		HTTPMethod:              strings.ToUpper(sdkHTTPMethod),
+		PathFormat:              pathFormat,
+		PathArgs:                pathArgs,
+		InputType:               qualifyType(ep.InputType, scalarSymbols),
+		OutputType:              ep.OutputType,
+		OutputGoType:            outputGoType,
+		FileDownload:            ep.FileDownload != nil,
+		BinaryStreamContentType: binaryStreamContentType,
+		Idempotent:              ep.Idempotent != nil,
+		OutputArrayDepth:        ep.OutputArrayDepth(),
+		OutputIsMap:             ep.OutputIsMap,
+		OutputNullable:          ep.OutputNullable,
+		HasInput:                ep.HasInput,
+		RequiresAuth:            ep.RequiresAuth,
+		PathParams:              pathParams,
+		QueryParams:             queryParams,
+		ScalarArgs:              scalarArgs,
+		HasScalarArgs:           len(scalarArgs) > 0,
+		ScalarInputStructName:   nsPrefix + methodName + "Input",
+		QueryStructName:         nsPrefix + methodName + "QueryParams",
 		// The query struct holds the query parameters and the filter (D106).
 		HasQueryParams:   len(queryParams) > 0 || ep.Filter != nil,
 		Description:      ep.Description,
@@ -983,7 +994,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 						}
 					}
 					outputType := normalizeTypeName(endpoint.OutputType)
-					if _, ok := unionTypes[outputType]; !ok {
+					if _, ok := unionTypes[outputType]; !ok || endpoint.BinaryStreamContentType != "" {
 						return
 					}
 					endpoint.IsUnionOutput = true
@@ -1422,7 +1433,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 				}
 			}
 		}
-		if ep.HasEncryptedBody || ep.FileDownload || ep.Idempotent {
+		if ep.HasEncryptedBody || ep.FileDownload || ep.BinaryStreamContentType != "" || ep.Idempotent {
 			needsRuntime = true
 		}
 		if ep.HasInput || ep.HasScalarArgs {

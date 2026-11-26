@@ -703,6 +703,45 @@ revalidates a file it was allowed to keep, so pair validators with a
 The Go and TypeScript servers answer each case alike
 (`runtime/http/testdata/file_answer_parity.json`).
 
+### A stream
+
+An operation with `@httpBinaryStream` answers a stream, not the JSON
+envelope (D167): rows a caller reads as they arrive, such as an Arrow IPC
+stream or newline-delimited JSON. A reporting API exports a report's rows:
+
+```ts
+export class Reports {
+  @rest(HttpMethod.POST, "reports/{reportId}/export")
+  @manualRouteRegistration
+  @httpBinaryStream({ contentType: "application/vnd.apache.arrow.stream", responseHeaders: ["X-Export-Id"] })
+  exportReport(reportId: string, input: ExportReportInput, format: QueryParam<Nullable<string>>): ReportSummary {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- `contentType` is the media type of the success body, lowercase and
+  without parameters. JSON, `application/json` or a `+json` type, is
+  refused: a JSON result is the declared type, without the decorator.
+- `responseHeaders` names the headers the stream answers with, each a
+  header name, once.
+- The generated routes answer the envelope, so the operation is also
+  `@manualRouteRegistration`. Each router gates the route and hands it to
+  your handler, which writes the stream: the body, its `Content-Type`
+  and the headers. A refusal is a problem body, as any route's.
+- Each SDK method returns the stream unread, with its headers
+  ([Client SDKs](/superschematic/guides/client-sdks/#streams)).
+- The OpenAPI document describes the 200 as the stream's media type, a
+  binary string, with the `responseHeaders`, and no envelope. The
+  refusals stay `application/problem+json`.
+- A client sends the input type as a JSON body, beside the path and
+  query parameters, so the operation is no `@webhook`, not encrypted,
+  takes no [upload](#uploads) and no `FilterBy`, and is not `@paginated`
+  or `@idempotent`.
+- The declared result, `ReportSummary` here, is the operation's result
+  in the [tool documents](/superschematic/reference/mcp-tools/): the value
+  a tool binding hands its caller after it reads the stream.
+
 ## Errors
 
 An implementation returns an error to fail the call. The generated package
@@ -1669,8 +1708,8 @@ What a rule does not say yet:
   a 404 and cannot create; give it the override permission.
 - On a Go server, a member that holds text, and a path. The Go handlers
   compare the caller with a member of the row that holds an id; the
-  operation stays one you implement, with a warning. The TypeScript
-  server serves both.
+  operation stays one you implement, with a warning. The TypeScript and
+  Rust servers serve both (D181).
 
 A row rule is the generated handler's. An operation you write by hand,
 an ORM call in a worker and SQL of your own reach every row, as before.
@@ -1893,13 +1932,39 @@ does not see.
 
 The predicate is exported for a read across tables to apply as a
 repository does: `audienceConditions(definition, caller, args, offset)`
-from `@superschematic/http-runtime/postgres`, with `currentAccess()` for
-the caller of the operation being run.
+from `@superschematic/http-runtime/postgres`, or `/d1`, with
+`currentAccess()` for the caller of the operation being run.
 
 The build checks that `owner` holds an id, that `inheritFrom` is a to-one
 relation to an `@audience` table, that the table declares none of the five
-columns, and that a projection of the table holds its key. An audience is
-built for Postgres: a service that lists the `sqlite` dialect is refused.
+columns, and that a projection of the table holds its key.
+
+#### On SQLite and D1
+
+A service that lists `sqlite` keeps an audience too (D182), and its
+TypeScript repositories on SQLite hold every read and write to it as they
+do on Postgres
+([TypeScript on SQLite and D1](/superschematic/guides/database-tables/#on-sqlite-and-d1)).
+`effective_audience` is a JSON array of ids in a `TEXT` column, and a read
+asks whether it holds the caller's id through `json_each`:
+
+```sql
+(note.effective_audience IS NULL
+  OR EXISTS (SELECT 1 FROM json_each(note.effective_audience) WHERE json_each.value IN (?1, ?2)))
+```
+
+SQLite has no trigger functions, and does not fire a trigger that is
+already running, so its triggers count on no other to finish their work:
+
+| Trigger | Fires | Does |
+| --- | --- | --- |
+| `trg_<table>_audience_insert` | after each insert | refuses an audience or an agent access it does not know, and sets the row's resolved columns |
+| `trg_<table>_audience_update` | after each update whose resolved columns are not what its audience resolves to | the same; its condition stops it once they are, whether or not a connection turns recursive triggers on |
+| `trg_<table>_audience_cascade` | on a table another inherits from, after an update that changes a row's resolved columns | sets each inheriting child's from the parent; a table that inherits from itself sets every inheriting row below the parent through a recursive query, and then the children of each in other tables |
+
+Go's and Rust's repositories on SQLite do not keep to an audience yet, so a
+service that lists `sqlite` and enables their types is refused, naming the
+language.
 
 ### Grants
 
@@ -1995,12 +2060,54 @@ buildRouter(implementations, {
 });
 ```
 
+### In the Rust server
+
+The Rust server serves the same access on Postgres (D181). Its runtime's
+`Principal` has the same kind, `acting_for`, grants and credential, and
+the identity service's principal names the API key it called with.
+
+A table operation's repositories keep to the route's caller, and a route
+with no caller sees the rows everyone may. Rust has no ambient caller, so
+a hand-written implementation opens its repositories for one:
+
+```rust
+let repositories = Repositories::new(&client)?
+    .acting(orm::routes::acting(ctx.principal.as_ref()))
+    .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+```
+
+Repositories opened without `with_access`, and `as_system()`, read every
+row, as a job does. `audience_conditions(definition, audience, caller,
+args, write)` in `orm` is the predicate a read across tables applies.
+
+The grants and the access log are in the runtime's `access` module:
+
+| TypeScript | Rust |
+| --- | --- |
+| `issueGrant`, `revokeGrant`, `activeGrants` | `issue_grant`, `revoke_grant`, `active_grants` |
+| `grantAuthenticator({ orm, inner })` | `GrantAuthenticator::new(tables)?.with_inner(inner)` |
+| `accessLog: accessLogOf(orm)` | `Logged::new(authenticator, Arc::new(access_log_of(&tables)?.unwrap()))` |
+
+`Logged` wraps the authenticator the server's `Handlers` take, and records
+a call once the router has its caller, before its permissions are
+checked. A row rule's path and `@decrypted({ permission })` are served by
+the generated table operations, as in TypeScript.
+
+The Rust outputs refuse, at build time, the platform features they do not
+serve yet: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
+`@references`, `@attachments`, `@searchable`, `@party`, `@conversations`,
+`@runRequests` and `@agents` on a table of a DB service with Rust types,
+and on a Rust server `@providers` slots, `@autonomy` and a table that
+composes Recurrence.
+
 ### What access does not do yet
 
 | Not built | Until then |
 | --- | --- |
-| an audience on SQLite and D1 | an `@audience` table is built for Postgres |
-| the Go and Rust servers' and repositories' audience, grants, reveal and access log | the TypeScript server serves them |
+| the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
+| a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
+| the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
+| grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
 | a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |

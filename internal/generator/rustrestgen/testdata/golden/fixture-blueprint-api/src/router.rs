@@ -60,22 +60,27 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_batch_status_transition));
     router = router.route("/api/batch/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("dependenciesAddBlocker")
         .apply(post(handle_job_dependencies_add_blocker));
     router = router.route("/api/job/{id}/dependencies/add-blocker", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("dependenciesListBlockers")
         .apply(post(handle_job_dependencies_list_blockers));
     router = router.route("/api/job/{id}/dependencies/list-blockers", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("dependenciesRemoveBlocker")
         .apply(post(handle_job_dependencies_remove_blocker));
     router = router.route("/api/job/{id}/dependencies/remove-blocker", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_job_status_transition));
     router = router.route("/api/job/{id}/status/transition", route);
     router

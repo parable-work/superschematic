@@ -53,10 +53,11 @@ func TestRouteControlsOfAManualRouteAreListed(t *testing.T) {
 	}
 	for _, want := range []string{
 		"/// - `POST /api/tenant/custom-handler` (tenant.customHandler): apply its controls,\n" +
-			"///   `RouteControls::new().authorize(authenticator, &[\"tenants.admin\"]).apply(route)`\n",
+			"///   `RouteControls::new().authorize(authenticator, &[\"tenants.admin\"]).operation(\"customHandler\").apply(route)`\n",
 		"    let route = RouteControls::under(transport)\n" +
 			"        .body_limit_megabytes(1)\n" +
 			"        .authorize(Arc::clone(&state.implementations.authenticator), &[\"tenants.write\"])\n" +
+			"        .operation(\"createTenant\")\n" +
 			"        .apply(post(handle_tenant_create_tenant));\n",
 	} {
 		if !strings.Contains(string(router), want) {

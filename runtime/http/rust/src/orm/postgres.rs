@@ -29,10 +29,10 @@ use super::plan::{Plan, Statement};
 use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
-    row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
-    CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys,
-    FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values,
-    WriteOptions,
+    row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
+    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
+    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted,
+    Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -197,10 +197,23 @@ impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
         self
     }
 
-    /// The repositories acting as the database's system actor (D87).
+    /// The repositories acting as the database's system actor (D87),
+    /// which reads every row (D156).
     #[must_use]
     pub fn as_system(mut self) -> Self {
         self.session.user = Some(self.definition.system_actor_id().to_owned());
+        self.session.access = None;
+        self
+    }
+
+    /// The repositories keeping every read and write to what `caller` sees
+    /// (D156): an `@audience` table's rows whose audience holds it, and for
+    /// a party or an agent run the rows its grants reach. A table
+    /// operation's repositories keep to the route's caller; a hand-written
+    /// implementation opens its own with `AccessCaller::of(ctx.principal)`.
+    #[must_use]
+    pub fn with_access(mut self, caller: AccessCaller) -> Self {
+        self.session.access = Some(caller);
         self
     }
 
@@ -247,6 +260,11 @@ impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
     /// The client the repositories run on.
     pub fn client(&self) -> &'a C {
         self.client
+    }
+
+    /// The definition of the database the repositories serve.
+    pub fn definition(&self) -> &'a Definition {
+        self.definition
     }
 
     /// The session the repositories act in.
@@ -351,6 +369,11 @@ impl Tables {
         &self.pool
     }
 
+    /// The definition of the database's tables.
+    pub fn definition(&self) -> Result<&'static Definition, Error> {
+        (self.definition)()
+    }
+
     /// Runs `operation` for `principal` in one transaction of the pool,
     /// which commits when the operation answers and rolls back when it
     /// refuses.
@@ -372,9 +395,12 @@ impl Tables {
             // The route's caller acts, and runs a behavior's command with
             // the permissions it holds, as the TypeScript server's table
             // routes bind it.
+            // Every read and write keeps to what the caller sees (D156), the
+            // anonymous caller's for a route with no principal.
             let mut repositories = Repositories::new(&transaction, (self.definition)()?)?
                 .acting(routes::acting(principal.as_ref()))
-                .with_caller(Caller::of(principal.as_ref()));
+                .with_caller(Caller::of(principal.as_ref()))
+                .with_access(AccessCaller::of(principal.as_ref()));
             if let Some(keys) = self.keys.as_deref() {
                 repositories = repositories.with_keys(keys);
             }
@@ -443,6 +469,12 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         options: &PageOptions,
     ) -> Result<RowPage<Values>, Error> {
         self.runner().find_page(filter, options).await
+    }
+
+    /// How many live rows `filter` finds, read with no row's value, so no
+    /// encrypted field is opened (D156).
+    pub async fn count(&self, filter: Option<&Values>) -> Result<u64, Error> {
+        self.runner().count_of(filter).await
     }
 
     /// Inserts a row; a member left unset takes its column's default, or

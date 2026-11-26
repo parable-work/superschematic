@@ -36,8 +36,11 @@ type Tx struct {
 	tx pgx.Tx
 	// db is the Database the transaction runs on, and depth the savepoints
 	// it is nested in, 0 for a transaction of its own (D89).
-	db      *Database
-	depth   int
+	db    *Database
+	depth int
+	// commit is what the transaction runs after it commits (D166), shared
+	// with every Tx nested in it.
+	commit  *txCommit
 	Invoice *InvoiceRepository
 	Ticket  *TicketRepository
 }
@@ -181,18 +184,18 @@ func (tx *Tx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
 	return tx.Ticket
 }
 
-// Transaction executes a function within a database transaction
+// Transaction executes a function within a database transaction. It commits
+// when fn returns nil, then runs the functions the transaction's
+// AfterCommit added (D166), and rolls back when fn returns an error or
+// panics, which runs none of them.
 func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error) error {
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	txWrapper := &Tx{tx: tx, db: db}
-
-	// Initialize transaction repositories with parent database reference
-	txWrapper.Invoice = &InvoiceRepository{tx: tx, txDB: db}
-	txWrapper.Ticket = &TicketRepository{tx: tx, txDB: db}
+	commit := &txCommit{}
+	txWrapper := db.txOf(tx, 0, commit)
 
 	defer func() {
 		if p := recover(); p != nil {
@@ -208,11 +211,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+	// The functions AfterCommit added run after the commit (D166).
+	return commitTx(ctx, tx, commit)
 }
 
 // ReadOnly returns the reads of the Database that ReadReplica returns: the

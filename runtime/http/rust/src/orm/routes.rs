@@ -12,13 +12,27 @@
 //! decoded ([`TableRequest`]). The handler runs in one transaction of the
 //! repositories, as the route's caller, and answers the row's view, or a
 //! page of views.
+//!
+//! A member of the row rule may be a path through the table's relations
+//! (D156): `unit.contract.parties.party` keeps the rows whose unit's
+//! contract has a party row that names the caller, one condition of the
+//! row's WHERE, each step a subquery over the next table's rows. The
+//! repositories hold every read and write of the transaction to what its
+//! caller sees (D156), and a `@decrypted` member that names a permission
+//! is opened only for a caller who holds it, answered masked to any other,
+//! and each value it opens is recorded in the database's access log, in
+//! the transaction.
+
+use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use super::plan::Plan;
 use super::run::{Client, Runner};
 use super::{
-    Column, Constraint, ConstraintKind, Error, PageOptions, Refusal, Table, Values, WriteOptions,
+    Column, Constraint, ConstraintKind, Definition, Error, PageOptions, Refusal, Table, Values,
+    WriteOptions, ACCESS_LOG,
 };
 use crate::auth::{covers, Principal};
 use crate::error::ApiError;
@@ -52,6 +66,10 @@ pub struct TableOperation {
     /// The table, by its type: what a refusal names.
     #[serde(rename = "type")]
     pub table: String,
+    /// The operation's name, which the access log records a reveal under
+    /// (D156).
+    #[serde(default)]
+    pub name: Option<String>,
     /// The table's key: the path parameter of a read, an update and a
     /// delete, and the row's member.
     #[serde(default)]
@@ -63,6 +81,15 @@ pub struct TableOperation {
     /// The members of the result's view, each the row's member of the
     /// same name.
     pub view: Vec<String>,
+    /// The members of the view marked `@decrypted` (D85), each the opened
+    /// value of its `Encrypted<T>` column.
+    #[serde(default)]
+    pub decrypted: Vec<String>,
+    /// The `@decrypted` members only a holder of a permission sees (D156),
+    /// by member: any other caller gets the member masked, and each value
+    /// opened is recorded in the access log.
+    #[serde(default)]
+    pub reveal: BTreeMap<String, String>,
     /// The members of a create's and an update's body, each the row's
     /// member it sets.
     #[serde(default)]
@@ -70,7 +97,8 @@ pub struct TableOperation {
     /// A list's search argument (D62), by its query parameter.
     #[serde(default)]
     pub search: Option<String>,
-    /// The row rule (D108): the row's members that name who may reach it.
+    /// The row rule (D108): the row's members that name who may reach it,
+    /// or a path to one through the table's relations (D156), dotted.
     #[serde(default)]
     pub by: Vec<String>,
     /// The permission whose holder the row rule does not hold back.
@@ -321,6 +349,9 @@ impl From<Error> for ApiError {
             // A merge of a row into itself, or into a row that references
             // it (D147), conflicts with the rows as they are.
             Error::Merge { message, .. } => ApiError::conflict(message),
+            // A party's or an agent run's write that leaves a row its
+            // grants do not reach (D156).
+            Error::AccessRefused(message) => ApiError::forbidden(message),
             // A refusal of the behaviors' core is the problem of its
             // status, code, message and details, as a behavior operation's
             // route answers it; one of status 500, or of no error status,
@@ -369,29 +400,57 @@ enum Reach {
     None,
 }
 
+/// A member of a row rule (D108), or a path to one (D156): the relations
+/// it steps through, each a to-one or a one-to-many relation of the table
+/// the step before reached, and the column at its end, which holds the
+/// subject. A step or a member the repositories do not know is the
+/// generator's error, refused before anything is read: a filter drops no
+/// member it does not know, and a rule that dropped one would reach every
+/// row.
+fn path_of<'d>(
+    operation: &TableOperation,
+    definition: &'d Definition,
+    table: &'d Table,
+    member: &str,
+) -> Result<(Vec<String>, &'d Column), ApiError> {
+    let mut steps: Vec<String> = member.split('.').map(str::to_owned).collect();
+    let last = steps.pop().unwrap_or_default();
+    let mut at = table;
+    for step in &steps {
+        at = at
+            .relation_target(step)
+            .and_then(|target| definition.table(target).ok())
+            .ok_or_else(|| {
+                ApiError::internal(format!(
+                    "table operation: the row rule of {} names {member}, whose step {step} is no relation its repositories reach; rebuild the database's types",
+                    operation.table
+                ))
+            })?;
+    }
+    let column = at
+        .column(&last)
+        .filter(|column| column.filter.iter().any(|op| op == "eq"))
+        .ok_or_else(|| {
+            ApiError::internal(format!(
+                "table operation: the row rule of {} names {member}, which its repository keeps no equality filter for; rebuild the database's types",
+                operation.table
+            ))
+        })?;
+    Ok((steps, column))
+}
+
 fn reach_of(
     operation: &TableOperation,
+    definition: &Definition,
     table: &Table,
     principal: Option<&Principal>,
 ) -> Result<Reach, ApiError> {
     if operation.by.is_empty() {
         return Ok(Reach::Every);
     }
-    // A member the repository keeps no equality filter for is the
-    // generator's error, refused before anything is read: a rule that
-    // dropped one would reach every row.
     let mut members = Vec::with_capacity(operation.by.len());
     for member in &operation.by {
-        let column = table
-            .column(member)
-            .filter(|column| column.filter.iter().any(|op| op == "eq"))
-            .ok_or_else(|| {
-                ApiError::internal(format!(
-                    "table operation: the row rule of {} names {member}, which its repository keeps no equality filter for; rebuild the database's types",
-                    operation.table
-                ))
-            })?;
-        members.push(column);
+        members.push(path_of(operation, definition, table, member)?);
     }
     if let (Some(permission), Some(principal)) = (&operation.override_permission, principal) {
         if principal
@@ -409,11 +468,17 @@ fn reach_of(
         return Ok(Reach::None);
     };
     let mut named = Vec::new();
-    for column in members {
+    for (steps, column) in members {
         if column.uuid && parse_uuid(subject).is_none() {
             continue;
         }
-        named.push(condition(&column.name, "eq", Value::from(subject)));
+        let mut filter = condition(&column.name, "eq", Value::from(subject));
+        for step in steps.iter().rev() {
+            let mut outer = Values::new();
+            outer.insert(step.clone(), Value::Object(filter));
+            filter = outer;
+        }
+        named.push(filter);
     }
     if named.is_empty() {
         return Ok(Reach::None);
@@ -435,14 +500,48 @@ fn condition(member: &str, op: &str, value: Value) -> Values {
     filter
 }
 
-/// The row's view: the members the operation's result lists.
-fn view_of(operation: &TableOperation, row: &Values) -> Value {
+/// What a masked `@decrypted` member answers (D156), the TypeScript
+/// runtime's `SECRET_MASK`.
+pub const SECRET_MASK: &str = "[secret]";
+
+/// The row's view: the members the operation's result lists, but a
+/// `@decrypted` member whose reveal permission the caller does not hold,
+/// which is masked (D156). `opened` collects the members whose value it
+/// opened under a reveal permission, which the access log records.
+fn view_of(
+    operation: &TableOperation,
+    row: &Values,
+    principal: Option<&Principal>,
+    opened: &mut Vec<String>,
+) -> Value {
     let mut view = Map::new();
     for member in &operation.view {
-        view.insert(
-            member.clone(),
-            row.get(member).cloned().unwrap_or(Value::Null),
-        );
+        let value = row.get(member).cloned().unwrap_or(Value::Null);
+        let permission = operation
+            .decrypted
+            .contains(member)
+            .then(|| operation.reveal.get(member))
+            .flatten();
+        let value = match permission {
+            None => value,
+            Some(permission) => {
+                let holds = principal.is_some_and(|principal| {
+                    principal
+                        .permissions
+                        .iter()
+                        .any(|granted| covers(granted, permission))
+                });
+                if value.is_null() {
+                    value
+                } else if holds {
+                    opened.push(member.clone());
+                    value
+                } else {
+                    Value::from(SECRET_MASK)
+                }
+            }
+        };
+        view.insert(member.clone(), value);
     }
     Value::Object(view)
 }
@@ -497,6 +596,99 @@ impl<C: Client> Routes<'_, C> {
 
     fn refused(&self, err: Error) -> ApiError {
         refusal_of(self.operation, self.runner.table, err)
+    }
+
+    /// The row's view, each member opened under a reveal permission
+    /// recorded in the access log (D156).
+    async fn view(&self, row: &Values) -> Result<Value, ApiError> {
+        let mut views = self.views(std::slice::from_ref(row)).await?;
+        Ok(views.pop().unwrap_or(Value::Null))
+    }
+
+    /// The views of rows, each member opened under a reveal permission
+    /// recorded in the database's access log (D156), in the operation's
+    /// transaction, as the system actor, so the caller's own access never
+    /// hides the record. A reveal with no access log to record it in is
+    /// refused: a value is never opened unrecorded.
+    async fn views(&self, rows: &[Values]) -> Result<Vec<Value>, ApiError> {
+        let operation = self.operation;
+        let mut views = Vec::with_capacity(rows.len());
+        let mut records = Vec::new();
+        for row in rows {
+            let mut opened = Vec::new();
+            views.push(view_of(operation, row, self.principal, &mut opened));
+            for field in opened {
+                records.push(self.reveal_entry(row, field));
+            }
+        }
+        if records.is_empty() {
+            return Ok(views);
+        }
+        let plan = &self.runner.plan;
+        let Some(log) = plan.definition.access_table(ACCESS_LOG) else {
+            return Err(ApiError::internal(format!(
+                "table operation: {} reveals {}, and the database has no @accessLog table to record it in (D156)",
+                operation.table,
+                records[0].get("field").and_then(Value::as_str).unwrap_or_default()
+            )));
+        };
+        let mut session = plan.session.clone();
+        session.user = Some(plan.definition.system_actor_id().to_owned());
+        session.access = None;
+        let runner = Runner {
+            plan: Plan::new(plan.definition, log, &session)?,
+            table: log,
+            client: self.runner.client,
+        };
+        for record in &records {
+            runner.create_one(record).await?;
+        }
+        Ok(views)
+    }
+
+    /// The access log's row of a reveal of `field` of `row` (D156).
+    fn reveal_entry(&self, row: &Values, field: String) -> Values {
+        let principal = self.principal;
+        let text = |value: Option<String>| value.map_or(Value::Null, Value::String);
+        let mut entry = Values::new();
+        entry.insert(
+            "at".to_owned(),
+            Value::String(self.runner.plan.session.now()),
+        );
+        entry.insert("kind".to_owned(), Value::from("reveal"));
+        entry.insert(
+            "principal".to_owned(),
+            text(principal.map(|p| p.subject.clone())),
+        );
+        entry.insert(
+            "principalKind".to_owned(),
+            text(principal.map(|p| p.kind.as_str().to_owned())),
+        );
+        entry.insert(
+            "actingFor".to_owned(),
+            text(principal.and_then(|p| p.acting_for.as_ref().map(|a| a.subject.clone()))),
+        );
+        entry.insert(
+            "credential".to_owned(),
+            text(principal.and_then(|p| p.credential.as_ref().map(|c| c.id.clone()))),
+        );
+        entry.insert("operation".to_owned(), text(self.operation.name.clone()));
+        entry.insert(
+            "targetType".to_owned(),
+            Value::from(self.operation.table.clone()),
+        );
+        let target = self
+            .operation
+            .key
+            .as_ref()
+            .and_then(|key| row.get(key))
+            .map(|key| match key {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            });
+        entry.insert("targetId".to_owned(), text(target));
+        entry.insert("field".to_owned(), Value::String(field));
+        entry
     }
 
     /// A write's error as the route answers it. A foreign key SQLite
@@ -574,7 +766,12 @@ impl<C: Client> Routes<'_, C> {
         let mut filter = parents_of(self.operation, request);
         let value = request.path.get(key).cloned().unwrap_or(Value::Null);
         filter.extend(condition(key, "eq", value));
-        match reach_of(self.operation, self.runner.table, self.principal)? {
+        match reach_of(
+            self.operation,
+            self.runner.plan.definition,
+            self.runner.table,
+            self.principal,
+        )? {
             Reach::Every => {}
             Reach::None => return Err(self.not_found()),
             Reach::Rows(reach) => {
@@ -592,7 +789,7 @@ impl<C: Client> Routes<'_, C> {
     /// under the path's parents.
     async fn read(&self, request: &TableRequest) -> Result<Value, ApiError> {
         let row = self.live_row(request).await?;
-        Ok(view_of(self.operation, &row))
+        self.view(&row).await
     }
 
     /// A list (D106): a page of the live rows' views through the
@@ -611,7 +808,12 @@ impl<C: Client> Routes<'_, C> {
         if !parents.is_empty() {
             held.push(Value::Object(parents));
         }
-        match reach_of(operation, table, self.principal)? {
+        match reach_of(
+            operation,
+            self.runner.plan.definition,
+            table,
+            self.principal,
+        )? {
             Reach::Every => {}
             // A caller the row rule names in no row lists none.
             Reach::None => return Ok(Page::last(Vec::new())),
@@ -654,11 +856,7 @@ impl<C: Client> Routes<'_, C> {
             .find_page(Some(&rows), &options)
             .await
             .map_err(|err| self.refused(err))?;
-        let items = found
-            .rows
-            .iter()
-            .map(|row| view_of(operation, row))
-            .collect();
+        let items = self.views(&found.rows).await?;
         let next = match found.next {
             None => None,
             Some(key) => {
@@ -692,8 +890,13 @@ impl<C: Client> Routes<'_, C> {
             input.insert(parent.clone(), value);
         }
         // The row rule's members name the caller in the new row (D108):
-        // createdBy as the repository stamps it, each other one set here.
+        // createdBy as the repository stamps it, each other one set here. A
+        // path names rows of other tables, which a create does not set
+        // (D156).
         for member in &operation.by {
+            if member.contains('.') {
+                continue;
+            }
             let column = table.column(member);
             if column.is_some_and(|column| column.audit.is_some()) {
                 continue;
@@ -744,14 +947,14 @@ impl<C: Client> Routes<'_, C> {
             moved = true;
         }
         if !moved {
-            return Ok(view_of(operation, &created));
+            return self.view(&created).await;
         }
         let row = self
             .runner
             .get_one(&key)
             .await
             .map_err(|err| self.refused(err))?;
-        Ok(view_of(operation, &row))
+        self.view(&row).await
     }
 
     /// An update (D106): of the live row under the path's key and parents,
@@ -776,7 +979,7 @@ impl<C: Client> Routes<'_, C> {
             update.insert(member.clone(), value.clone());
         }
         if update.is_empty() {
-            return Ok(view_of(operation, &row));
+            return self.view(&row).await;
         }
         let key = row.get(&table.key).cloned().unwrap_or(Value::Null);
         let updated = match self
@@ -787,7 +990,7 @@ impl<C: Client> Routes<'_, C> {
             Ok(updated) => updated,
             Err(err) => return Err(self.refused_write(err, &update).await),
         };
-        Ok(view_of(operation, &updated))
+        self.view(&updated).await
     }
 
     /// A delete (D106): of the live row under the path's key and parents,
@@ -803,7 +1006,7 @@ impl<C: Client> Routes<'_, C> {
             .delete_one(&key, &WriteOptions::default())
             .await
             .map_err(|err| self.refused(err))?;
-        Ok(view_of(self.operation, &row))
+        self.view(&row).await
     }
 }
 

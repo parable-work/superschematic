@@ -53,12 +53,21 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 	if got := checked(schema, in); len(got) != 0 {
 		t.Fatalf("a sound schema has findings: %v", got)
 	}
+	// On SQLite the TypeScript repositories serve it (D182).
+	if got := checked(schema, Input{Dialects: []string{"postgres", "sqlite"}, TypesLanguages: []string{"typescript"}}); len(got) != 0 {
+		t.Fatalf("a schema whose TypeScript types alone read it on SQLite has findings: %v", got)
+	}
 	for _, tc := range []struct {
 		name string
 		edit func(*ir.Schema, *Input)
 		want string
 	}{
-		{"the sqlite dialect", func(_ *ir.Schema, in *Input) { in.Dialects = []string{"postgres", "sqlite"} }, "lists the sqlite dialect"},
+		{"the sqlite dialect with Go's types", func(_ *ir.Schema, in *Input) {
+			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"go", "typescript"}
+		}, "docs-db lists the sqlite dialect and enables the Go types"},
+		{"the sqlite dialect with Rust's types", func(_ *ir.Schema, in *Input) {
+			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"rust"}
+		}, "on SQLite only the TypeScript repositories serve @audience so far (D182)"},
 		{"an owner that is no field", func(s *ir.Schema, _ *Input) { s.Types["Folder"].Audience.Owner = "keeper" }, "owner keeper is no field of Folder"},
 		{"an owner that holds no id", func(s *ir.Schema, _ *Input) {
 			s.Types["Folder"].Fields = append(s.Types["Folder"].Fields, &ir.FieldDef{Name: "label", TypeRef: ir.TypeRef{Name: "string"}})

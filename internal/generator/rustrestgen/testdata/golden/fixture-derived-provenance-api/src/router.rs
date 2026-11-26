@@ -62,54 +62,67 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedFailedDerivations")
         .apply(post(handle_article_summaries_derived_failed_derivations));
     router = router.route("/api/article/derived/failed-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedSettleDerivations")
         .apply(post(handle_article_summaries_derived_settle_derivations));
     router = router.route("/api/article/derived/settle-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedStaleDerivations")
         .apply(post(handle_article_summaries_derived_stale_derivations));
     router = router.route("/api/article/derived/stale-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedApplyDerived")
         .apply(post(handle_article_summaries_derived_apply_derived));
     router = router.route("/api/article/{id}/derived/apply-derived", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedRederive")
         .apply(post(handle_article_summaries_derived_rederive));
     router = router.route("/api/article/{id}/derived/rederive", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedFailedDerivations")
         .apply(post(handle_ticket_triage_derived_failed_derivations));
     router = router.route("/api/ticket/derived/failed-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedSettleDerivations")
         .apply(post(handle_ticket_triage_derived_settle_derivations));
     router = router.route("/api/ticket/derived/settle-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedStaleDerivations")
         .apply(post(handle_ticket_triage_derived_stale_derivations));
     router = router.route("/api/ticket/derived/stale-derivations", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedApplyDerived")
         .apply(post(handle_ticket_triage_derived_apply_derived));
     router = router.route("/api/ticket/{id}/derived/apply-derived", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("derivedRederive")
         .apply(post(handle_ticket_triage_derived_rederive));
     router = router.route("/api/ticket/{id}/derived/rederive", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("provenanceAccept")
         .apply(post(handle_ticket_triage_provenance_accept));
     router = router.route("/api/ticket/{id}/provenance/accept", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("provenanceReject")
         .apply(post(handle_ticket_triage_provenance_reject));
     router = router.route("/api/ticket/{id}/provenance/reject", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_ticket_triage_status_transition));
     router = router.route("/api/ticket/{id}/status/transition", route);
     router

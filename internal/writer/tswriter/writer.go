@@ -139,7 +139,7 @@ var symbolPackages = map[string]string{
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
 	"auth": "@superschematic/api", "publicRoute": "@superschematic/api",
-	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
+	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api", "httpBinaryStream": "@superschematic/api",
 	"rateLimit": "@superschematic/api", "requireOwnership": "@superschematic/api",
 	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",

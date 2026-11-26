@@ -105,6 +105,14 @@ type ORMInfo struct {
 	// with none.
 	References  string
 	Attachments string
+
+	// Postgres is whether the DB service lists the postgres dialect: orm.ts
+	// then holds the definitions on Postgres and createOrm over a pool;
+	// without it, its types alone (D182).
+	Postgres bool
+	// SQLite is the definitions on SQLite, which orm-sqlite.ts writes, for a
+	// DB service that lists the sqlite dialect (D182); nil otherwise.
+	SQLite *ORMSQLite
 }
 
 // HearsChanges reports whether a table of the layout keeps a change queue
@@ -535,6 +543,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		HistoryActorCTE:   sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor: sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		RequireUpdatedBy:  opts.Actor.RequireUpdatedBy,
+		Postgres:          !opts.NoPostgres,
+	}
+	if opts.SQLite {
+		out.SQLite = &ORMSQLite{Clauses: sqlutil.SQLiteClauses().AllClauses()}
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
 	if rules != nil {
@@ -679,6 +691,13 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			})
 		}
 		out.Tables = append(out.Tables, table)
+		if out.SQLite != nil {
+			if onSQLite, reason := sqliteORMTable(t, table); reason != "" {
+				out.SQLite.LeftOut = append(out.SQLite.LeftOut, ORMRefusal{Type: t.Type, Reason: reason})
+			} else {
+				out.SQLite.Tables = append(out.SQLite.Tables, onSQLite)
+			}
+		}
 	}
 	// A table that implements Mergeable merges through the statements
 	// sqlutil writes from every table's relations and unique keys (D147).
