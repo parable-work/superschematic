@@ -680,6 +680,24 @@ Most are load errors; knowing them saves a build round-trip:
   `{ from: "review"; to: "done"; by: ["seat:accountable"] }`. Calls are
   `seats.takeSeat({ seat, subject? })`, `leaveSeat` and the read
   `listSeats`; a repeat answers `unchanged: true`.
+- When a table repeats one of the core's bundles, implement the bundle
+  rather than wiring its parts by hand (D103, step 5): `implements
+  Reservation<Booking, { resource: "room"; interval: { start: "startsAt";
+  end: "endsAt" }; amount: "priceCents"; currency: "GBP" }>` for a booking
+  that holds a Calendar's time and waits for its payment; `Barrier<Rollout,
+  { rows: "Agent"; link: "rollout"; timeoutMs: 300000; releasePermission:
+  "rollouts.release" }>` for a row that waits for its related rows to
+  finish; `Mailbox<Message, { ttlMs: 30000; takePermission: "messages.take"
+  }>` for a message a taker leases, the table declaring `createdBy`; and
+  `Assignment<Problem, { take: "problems.take"; assign: "problems.assign"
+  }>` for one assignee, named `seat:assignee` in a `by`. In the data forms
+  write `"bundles": [{ "name": "Reservation", "settings": { ... } }]`. The
+  loader expands a bundle into its parts, each named as the use it is
+  (`status`, `holds_state`, the `holds` and `payments` operations), so do
+  not also write a part, or declare the field a part is anchored on (the
+  build refuses both). A Barrier is released only once every row is
+  ready: its gate holds the deadline's release and the go-ahead alike.
+  `superschematic format` writes the bundle, not its parts.
 - When a row's status should follow what an outside system reports (a
   sandbox at its provider, a deployment at its platform, a payment at its
   processor), type a field as a Reconcile beside the Workflow field rather
