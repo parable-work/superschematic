@@ -20,13 +20,20 @@ Postgres. On openSqlite's file a transaction holds the file's write lock
 from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
 transaction's statements each commit as they run.
 
-The SQLite repositories serve no behaviors' writes, upserts or merges yet:
-a table that composes behaviors is read, and a write of it is refused.
+A table that composes behaviors writes its rows and runs its operations,
+deadlines and changes through the behaviors' core, as on Postgres (D186):
+on openSqlite's file in the transaction, on D1 each change set in one batch.
+createOrm(db, { rules }) takes the core; with none, the rules package's is
+made when a behavior first runs, from its bundled module, which a Worker
+passes instead (initSync(wasmModule)).
+
+The SQLite repositories serve no upserts or merges yet.
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
 fields (D85): parseFieldKeys(secret) of @superschematic/http-runtime/sqlite
 reads one under Bun, and a Worker, which has no node:crypto, has none yet.
 */
-import { sqliteOrm } from '../../../../dist/d1.js';
+import { initSync } from '../../../../../../rules/typescript/dist/index.js';
+import { sqliteOrm, withRulesCore } from '../../../../dist/d1.js';
 import type { OrmDefinition, OrmOptions, RulesLayout, SqlDatabase, TableDefinition } from '../../../../dist/d1.js';
 import type { FixtureReferencesDbOrm, FixtureReferencesDbRepositories } from './orm';
 
@@ -135,7 +142,7 @@ export const ticketTable: TableDefinition = {
   },
 };
 
-/** Where the behaviors' core finds each table whose fields are behaviors (D103), whose writes the SQLite repositories refuse so far. */
+/** Where the behaviors' core finds each table whose fields are behaviors (D103). */
 export const fixtureReferencesDbRules: RulesLayout = {
   "types": {
     "Ticket": {
@@ -772,8 +779,10 @@ export const fixtureReferencesDbOrm: OrmDefinition = {
 
 /**
  * Opens the repositories of fixture-references-db over db, a SqlDatabase, acting
- * as the user options names, or as the user it is when a string.
+ * as the user options names, or as the user it is when a string. The
+ * behaviors' core is options.rules, or the rules package's, made when a
+ * behavior first runs.
  */
 export function createOrm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureReferencesDbOrm {
-  return sqliteOrm<FixtureReferencesDbRepositories>(db, fixtureReferencesDbOrm, options) as FixtureReferencesDbOrm;
+  return sqliteOrm<FixtureReferencesDbRepositories>(db, fixtureReferencesDbOrm, withRulesCore(options, initSync)) as FixtureReferencesDbOrm;
 }

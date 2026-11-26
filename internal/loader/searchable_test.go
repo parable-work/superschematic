@@ -116,13 +116,13 @@ export abstract class Ticket {
   id: AutoGenerate<Identity.UUID>;
   title: string;
 }`, "", "queue names Indexing, which is no @queue class"},
-		{"sqlite", head + `
+		{"sqlite with the Go types", head + `
 @searchable<Ticket>({ title: "title", queue: Indexing })
 export abstract class Ticket {
   @key
   id: AutoGenerate<Identity.UUID>;
   title: string;
-}`, `"postgres", "sqlite"`, "lists the sqlite dialect, and the search index is kept by trigger functions"},
+}`, `"postgres", "sqlite"`, "@searchable on Ticket: tickets-db lists the sqlite dialect and enables the Go types"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dialects := tc.dialects
@@ -130,8 +130,14 @@ export abstract class Ticket {
 				dialects = `"postgres"`
 			}
 			base := filepath.ToSlash(filepath.Join(testpaths.RepoRoot(t), "internal", "loader", "tsreader", "testdata", "tsconfig.base.json"))
+			// A service built for SQLite takes the TypeScript types and
+			// Go's, which the search's SQLite index refuses (D186).
+			types := ""
+			if strings.Contains(dialects, "sqlite") {
+				types = `"types": {"typescript": {"enabled": true}, "go": {"enabled": true}}, `
+			}
 			dir := writeService(t, map[string]string{
-				"schema.config.json":    `{"name": "tickets-db", "kind": "DB", "outputs": {"sql": {"dialects": [` + dialects + `]}}}`,
+				"schema.config.json":    `{"name": "tickets-db", "kind": "DB", "outputs": {` + types + `"sql": {"dialects": [` + dialects + `]}}}`,
 				"tsconfig.json":         `{"extends": "` + base + `", "include": ["src/**/*.ts"]}`,
 				"src/tickets.schema.ts": tc.schema,
 			})

@@ -2,6 +2,7 @@ package tsgen
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,65 +122,83 @@ func TestReferencesTablesEndToEndOnSQLite(t *testing.T) {
 	t.Logf("bun ran the end-to-end test on SQLite:\n%s", out)
 }
 
-// d1Fixture is the runtime's workerd fixture that runs
-// fixture-references-db's repositories over D1 (D182).
+// d1Fixture is the runtime's workerd fixture that runs generated
+// repositories over D1 (D182, D186).
 const d1Fixture = "runtime/http/typescript/test/workerd/fixtures/d1-orm"
 
-// TestTheWorkerdD1FixtureIsCurrent: the workerd fixture d1-orm runs
-// fixture-references-db's generated orm-sqlite.ts and its sqlite/create.sql
-// as this build writes them (D182): records-orm.ts is the file, its import
-// of the runtime's ./d1 entry made the fixture's built dist/d1.js, and
-// records-sql.ts the script. -update rewrites both; scripts/workerd-test.mjs
-// runs the fixture under the pinned workerd.
+// d1FixtureDatabases are the databases the workerd fixture d1-orm runs, by
+// the prefix of their files there: fixture-references-db's references and
+// files (D182), fixture-recurrence-db's Recurrence and calendar and
+// fixture-search-db's search (D186).
+var d1FixtureDatabases = []struct{ prefix, service string }{
+	{"records", referencesFixture},
+	{"filings", recurrenceFixture},
+	{"search", searchFixture},
+}
+
+// recurrenceFixture is the DB service of a Recurrence table and two
+// calendar sources (D152).
+const recurrenceFixture = "fixture-recurrence-db"
+
+// TestTheWorkerdD1FixtureIsCurrent: the workerd fixture d1-orm runs each
+// database of d1FixtureDatabases' generated orm-sqlite.ts and its
+// sqlite/create.sql as this build writes them (D182, D186): <prefix>-orm.ts
+// is the file, its imports of the runtime's ./d1 entry and of the rules
+// package made the built dist/d1.js and the rules package's dist, and
+// <prefix>-sql.ts the script. -update rewrites them;
+// scripts/workerd-test.mjs runs the fixture under the pinned workerd.
 func TestTheWorkerdD1FixtureIsCurrent(t *testing.T) {
-	reg := registry.New(naming.Default())
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, referencesFixture), loader.WithRegistry(reg))
-	if err != nil {
-		t.Fatalf("load %s: %v", referencesFixture, err)
-	}
-	output, err := Generate(schema, Options{SchemaName: referencesFixture, Registry: reg, SQLite: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := WriteTypes(output, dir); err != nil {
-		t.Fatal(err)
-	}
-	orm, err := os.ReadFile(filepath.Join(dir, ORMSQLiteFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	const runtime = "'@superschematic/http-runtime/d1'"
-	if !strings.Contains(string(orm), runtime) {
-		t.Fatalf("%s imports no %s", ORMSQLiteFile, runtime)
-	}
-	header := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's orm-sqlite.ts, its runtime the built dist/d1.js.\n"
-	records := header + strings.ReplaceAll(string(orm), runtime, "'../../../../dist/d1.js'")
-	model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: referencesFixture}, sqlmigrate.SQLite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script, err := sqlmigrate.CreateSQL(model)
-	if err != nil {
-		t.Fatal(err)
-	}
-	quoted, err := json.Marshal(script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sql := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's sqlite/create.sql.\nexport const createSQL = " + string(quoted) + ";\n"
 	root := filepath.Join(testpaths.RepoRoot(t), d1Fixture)
-	for name, want := range map[string]string{"records-orm.ts": records, "records-sql.ts": sql} {
-		path := filepath.Join(root, name)
-		if *update {
-			if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			continue
+	for _, database := range d1FixtureDatabases {
+		reg := registry.New(naming.Default())
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, database.service), loader.WithRegistry(reg))
+		if err != nil {
+			t.Fatalf("load %s: %v", database.service, err)
 		}
-		got, err := os.ReadFile(path)
-		if err != nil || string(got) != want {
-			t.Errorf("%s/%s is not what this build writes (run with -update to accept)", d1Fixture, name)
+		output, err := Generate(schema, Options{SchemaName: database.service, Registry: reg, SQLite: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := WriteTypes(output, dir); err != nil {
+			t.Fatal(err)
+		}
+		orm, err := os.ReadFile(filepath.Join(dir, ORMSQLiteFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		const runtime = "'@superschematic/http-runtime/d1'"
+		if !strings.Contains(string(orm), runtime) {
+			t.Fatalf("%s's %s imports no %s", database.service, ORMSQLiteFile, runtime)
+		}
+		header := fmt.Sprintf("// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// %s's orm-sqlite.ts, its runtime the built dist/d1.js.\n", database.service)
+		text := strings.ReplaceAll(string(orm), runtime, "'../../../../dist/d1.js'")
+		text = strings.ReplaceAll(text, "'@superschematic/rules'", "'../../../../../../rules/typescript/dist/index.js'")
+		model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: database.service}, sqlmigrate.SQLite)
+		if err != nil {
+			t.Fatal(err)
+		}
+		script, err := sqlmigrate.CreateSQL(model)
+		if err != nil {
+			t.Fatal(err)
+		}
+		quoted, err := json.Marshal(script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sql := fmt.Sprintf("// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// %s's sqlite/create.sql.\nexport const createSQL = %s;\n", database.service, quoted)
+		for name, want := range map[string]string{database.prefix + "-orm.ts": header + text, database.prefix + "-sql.ts": sql} {
+			path := filepath.Join(root, name)
+			if *update {
+				if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != want {
+				t.Errorf("%s/%s is not what this build writes (run with -update to accept)", d1Fixture, name)
+			}
 		}
 	}
 }

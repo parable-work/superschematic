@@ -26,6 +26,9 @@ var sqliteReaders = map[string][]string{
 	"@audience":    {registry.LangTypeScript},
 	"@references":  {registry.LangTypeScript, registry.LangRust},
 	"@attachments": {registry.LangTypeScript, registry.LangRust},
+	// The search index on SQLite (D186), which only the TypeScript runtime
+	// searches; Rust's types refuse @searchable on every dialect.
+	"@searchable": {registry.LangTypeScript, registry.LangRust},
 }
 
 // refuseSQLiteReaders refuses decorator on td in a DB service that lists the

@@ -37,8 +37,16 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return m, nil
 	}
 	types := map[string]string{} // table name -> type name
+	searchIndex := ""
 	for i := range out.Tables {
 		types[out.Tables[i].Name] = out.Tables[i].OriginalName
+		if out.Tables[i].OriginalName == ir.SearchIndexTypeName {
+			// The search index's words and audience have GIN indexes on
+			// Postgres; on SQLite its words are its FTS5 table, and its
+			// audience a JSON array a search reads with json_each (D186).
+			searchIndex = out.Tables[i].Name
+			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
+		}
 	}
 	if err := sqliteRefusals(out, types); err != nil {
 		return nil, err
@@ -130,6 +138,19 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		}
 		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 	}
+	// Search's row triggers (D155, D186): each @searchable table's after
+	// each write, which delete its index row with it, copy its audience and
+	// enqueue it, and its sub-tables', which enqueue the row they belong to.
+	for _, s := range out.SearchTriggers {
+		for _, t := range s.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: s.Origin})
+		}
+	}
+	for _, c := range out.SearchChildTriggers {
+		for _, t := range c.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+		}
+	}
 	// References' and attachments' row triggers (D154, D182): a target's
 	// clear and a file's release.
 	for _, c := range out.ReferencesClears {
@@ -151,11 +172,30 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return nil, err
 	}
 	m.RawSQL = modelRawSQL(pieces)
+	if searchIndex != "" {
+		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex))
+	}
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
 	}
 	m.sort()
 	return m, nil
+}
+
+// SearchFTSPiece is the id of the piece of SQL that makes the search
+// index's FTS5 table on SQLite (D186).
+const SearchFTSPiece = "search_index_fts"
+
+// searchFTSPiece is the search index's words on SQLite (D186): its FTS5
+// table and the triggers on the index table that keep it, which the model
+// carries as a piece of SQL of its own, after every object, since it has
+// no form of a virtual table: a file that holds them reads back as having
+// run it, and a plan to a schema that adds the index runs it. Its down
+// drops them. A table made @searchable with rows needs reindexSearch once,
+// as on Postgres.
+func searchFTSPiece(index string) *RawSQL {
+	up, down := sqlgen.SearchFTS(index, qs)
+	return &RawSQL{ID: SearchFTSPiece, Origin: ir.SearchIndexTypeName, Position: ir.RawSQLAfterIndexes, Statements: up, Down: down, Checksum: sqlutil.StatementsChecksum(up)}
 }
 
 // sqliteRefusals lists the features of a schema the SQLite dialect does
