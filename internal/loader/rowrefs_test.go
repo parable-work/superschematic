@@ -119,3 +119,56 @@ export abstract class Ticket {
 		})
 	}
 }
+
+// TestRowFeaturesOnSQLite: a service that lists the sqlite dialect keeps
+// references and files when TypeScript's types alone read them, and is
+// refused, naming the language, when it enables Go's or Rust's, whose
+// repositories do not serve them on SQLite yet (D182).
+func TestRowFeaturesOnSQLite(t *testing.T) {
+	const schema = `
+import { Identity } from "superscalar";
+import { AutoGenerate, attachments, audience, key, queue, references } from "@superschematic/db";
+@queue()
+export abstract class Released {}
+@audience<Ticket>({ owner: "owner" })
+@references<Ticket>({})
+@attachments<Ticket>({ released: Released })
+export abstract class Ticket {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  owner: Identity.UUID;
+}`
+	base := filepath.ToSlash(filepath.Join(testpaths.RepoRoot(t), "internal", "loader", "tsreader", "testdata", "tsconfig.base.json"))
+	for _, tc := range []struct {
+		name, types string
+		want        []string
+	}{
+		{"TypeScript's types alone", `{"typescript": {"enabled": true}}`, nil},
+		{"Go's types too", `{"typescript": {"enabled": true}, "go": {"enabled": true}}`, []string{
+			"@audience on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
+			"@references on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
+			"@attachments on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
+		}},
+		{"Rust's types", `{"rust": {"enabled": true}}`, []string{"enables the Rust types, whose repositories read Ticket's rows on SQLite without it"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeService(t, map[string]string{
+				"schema.config.json":    `{"name": "tickets-db", "kind": "DB", "outputs": {"types": ` + tc.types + `, "sql": {"dialects": ["sqlite", "postgres"]}}}`,
+				"tsconfig.json":         `{"extends": "` + base + `", "include": ["src/**/*.ts"]}`,
+				"src/tickets.schema.ts": schema,
+			})
+			_, err := LoadService(dir)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("LoadService: %v", err)
+				}
+				return
+			}
+			for _, want := range tc.want {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("LoadService = %v, want it to hold %q", err, want)
+				}
+			}
+		})
+	}
+}

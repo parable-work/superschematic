@@ -1,0 +1,1555 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-references-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "AttachmentReleased.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "content_hash",
+          "nullable": true,
+          "origin": "AttachmentReleased.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "reason",
+          "origin": "AttachmentReleased.reason",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "attachment_released_queue",
+      "origin": "AttachmentReleased",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "attachment_released_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Note.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Note.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "owner",
+          "origin": "Note.owner",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Note.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "'everyone'",
+          "name": "audience",
+          "origin": "Note.audience",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "audience_named",
+          "nullable": true,
+          "origin": "Note.audienceNamed",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "agent_access",
+          "origin": "Note.agentAccess",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "effective_audience",
+          "nullable": true,
+          "origin": "Note.effectiveAudience",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "effective_agents",
+          "origin": "Note.effectiveAgents",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "note",
+      "origin": "Note",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "NoteAttachments.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "note_id",
+          "origin": "NoteAttachments.note",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "NoteAttachments.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "media_type",
+          "origin": "NoteAttachments.mediaType",
+          "type": "TEXT"
+        },
+        {
+          "name": "size",
+          "origin": "NoteAttachments.size",
+          "type": "INTEGER"
+        },
+        {
+          "name": "content_hash",
+          "origin": "NoteAttachments.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "NoteAttachments.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "caption",
+          "nullable": true,
+          "origin": "NoteAttachments.caption",
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "origin": "NoteAttachments.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": true,
+          "origin": "NoteAttachments.uploadedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "uploaded_at",
+          "origin": "NoteAttachments.uploadedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "expires_at",
+          "nullable": true,
+          "origin": "NoteAttachments.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "filed_from",
+          "nullable": true,
+          "origin": "NoteAttachments.filedFrom",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "extraction",
+          "origin": "NoteAttachments.extraction",
+          "type": "TEXT"
+        },
+        {
+          "name": "extracted_text",
+          "nullable": true,
+          "origin": "NoteAttachments.extractedText",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "preview",
+          "origin": "NoteAttachments.preview",
+          "type": "TEXT"
+        },
+        {
+          "name": "preview_object",
+          "nullable": true,
+          "origin": "NoteAttachments.previewObject",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "note_id"
+          ],
+          "name": "fk_note_attachments_note_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "note"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "object_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_note_attachments_object"
+        },
+        {
+          "columns": [
+            "note_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_note_attachments_row"
+        }
+      ],
+      "kind": "entity",
+      "name": "note_attachments",
+      "origin": "NoteAttachments",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_attachments_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "NoteReferences.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "note_id",
+          "origin": "NoteReferences.note",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_table",
+          "origin": "NoteReferences.targetTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_key",
+          "origin": "NoteReferences.targetKey",
+          "type": "TEXT"
+        },
+        {
+          "default": "''",
+          "name": "role",
+          "origin": "NoteReferences.role",
+          "type": "TEXT"
+        },
+        {
+          "name": "added_by",
+          "nullable": true,
+          "origin": "NoteReferences.addedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "added_at",
+          "origin": "NoteReferences.addedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "note_id"
+          ],
+          "name": "fk_note_references_note_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "note"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "target_table",
+            "target_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_note_references_target"
+        },
+        {
+          "columns": [
+            "note_id",
+            "target_table",
+            "target_key",
+            "role"
+          ],
+          "method": "BTREE",
+          "name": "uq_note_references_target_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "note_references",
+      "origin": "NoteReferences",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_references_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_table",
+          "origin": "ReferenceCleared.holderTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_key",
+          "origin": "ReferenceCleared.holderKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_table",
+          "origin": "ReferenceCleared.targetTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_key",
+          "origin": "ReferenceCleared.targetKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "role",
+          "origin": "ReferenceCleared.role",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "reference_cleared_queue",
+      "origin": "ReferenceCleared",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "reference_cleared_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Ticket.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Ticket.title",
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "INTEGER"
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket",
+      "origin": "Ticket",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "TicketAttachments.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketAttachments.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "TicketAttachments.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "media_type",
+          "origin": "TicketAttachments.mediaType",
+          "type": "TEXT"
+        },
+        {
+          "name": "size",
+          "origin": "TicketAttachments.size",
+          "type": "INTEGER"
+        },
+        {
+          "name": "content_hash",
+          "origin": "TicketAttachments.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "TicketAttachments.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "caption",
+          "nullable": true,
+          "origin": "TicketAttachments.caption",
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "origin": "TicketAttachments.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": true,
+          "origin": "TicketAttachments.uploadedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "uploaded_at",
+          "origin": "TicketAttachments.uploadedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "expires_at",
+          "nullable": true,
+          "origin": "TicketAttachments.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "filed_from",
+          "nullable": true,
+          "origin": "TicketAttachments.filedFrom",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "extraction",
+          "origin": "TicketAttachments.extraction",
+          "type": "TEXT"
+        },
+        {
+          "name": "extracted_text",
+          "nullable": true,
+          "origin": "TicketAttachments.extractedText",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "preview",
+          "origin": "TicketAttachments.preview",
+          "type": "TEXT"
+        },
+        {
+          "name": "preview_object",
+          "nullable": true,
+          "origin": "TicketAttachments.previewObject",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_attachments_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "object_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_attachments_object"
+        },
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_attachments_row"
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_attachments",
+      "origin": "TicketAttachments",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_attachments_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "conversation",
+          "origin": "TicketCommentsConversations.conversation",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_message",
+          "nullable": true,
+          "origin": "TicketCommentsConversations.lastMessage",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_reaction",
+          "nullable": true,
+          "origin": "TicketCommentsConversations.lastReaction",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_stand",
+          "nullable": true,
+          "origin": "TicketCommentsConversations.lastStand",
+          "type": "INTEGER"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "INTEGER"
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_conversations",
+      "origin": "TicketCommentsConversations",
+      "primaryKey": {
+        "columns": [
+          "conversation"
+        ],
+        "name": "ticket_comments_conversations_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsDeliveries.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "delivery",
+          "origin": "TicketCommentsDeliveries.delivery",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "mention",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.mention",
+          "type": "INTEGER"
+        },
+        {
+          "name": "reply",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.reply",
+          "type": "INTEGER"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "due_at",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.dueAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "token",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.token",
+          "type": "TEXT"
+        },
+        {
+          "name": "claimed_by",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.claimedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "attempts",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.attempts",
+          "type": "INTEGER"
+        },
+        {
+          "name": "error",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.error",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "settled_at",
+          "nullable": true,
+          "origin": "TicketCommentsDeliveries.settledAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_deliveries_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "delivery"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_deliveries_ticket_delivery",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_deliveries",
+      "origin": "TicketCommentsDeliveries",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_deliveries_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsDrafts.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "chunk",
+          "origin": "TicketCommentsDrafts.chunk",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "TicketCommentsDrafts.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "chunk_offset",
+          "nullable": true,
+          "origin": "TicketCommentsDrafts.chunkOffset",
+          "type": "INTEGER"
+        },
+        {
+          "name": "text",
+          "nullable": true,
+          "origin": "TicketCommentsDrafts.text",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_drafts_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "chunk"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_drafts_ticket_chunk",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_drafts",
+      "origin": "TicketCommentsDrafts",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_drafts_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsEdits.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "edit",
+          "origin": "TicketCommentsEdits.edit",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "number",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.number",
+          "type": "INTEGER"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.body",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "blocks",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.blocks",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "mentions",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.mentions",
+          "type": "TEXT"
+        },
+        {
+          "name": "by",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.by",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "at",
+          "nullable": true,
+          "origin": "TicketCommentsEdits.at",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_edits_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "edit"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_edits_ticket_edit",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_edits",
+      "origin": "TicketCommentsEdits",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_edits_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsFollows.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "follow",
+          "origin": "TicketCommentsFollows.follow",
+          "type": "TEXT"
+        },
+        {
+          "name": "thread",
+          "nullable": true,
+          "origin": "TicketCommentsFollows.thread",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "TicketCommentsFollows.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "followed",
+          "nullable": true,
+          "origin": "TicketCommentsFollows.followed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "read_up_to",
+          "nullable": true,
+          "origin": "TicketCommentsFollows.readUpTo",
+          "type": "INTEGER"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "TicketCommentsFollows.updatedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_follows_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "follow"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_follows_ticket_follow",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_follows",
+      "origin": "TicketCommentsFollows",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_follows_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsMessages.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "origin": "TicketCommentsMessages.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "thread",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.thread",
+          "type": "INTEGER"
+        },
+        {
+          "name": "quotes",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.quotes",
+          "type": "INTEGER"
+        },
+        {
+          "name": "author",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.author",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.body",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "blocks",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.blocks",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "mentions",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.mentions",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "posted_at",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.postedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "stand",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.stand",
+          "type": "INTEGER"
+        },
+        {
+          "name": "edited_at",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.editedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "edits",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.edits",
+          "type": "INTEGER"
+        },
+        {
+          "name": "pinned",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.pinned",
+          "type": "INTEGER"
+        },
+        {
+          "name": "client_id",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.clientId",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_by",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.resolvedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_for",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.resolvedFor",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_at",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.resolvedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "draft_length",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.draftLength",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_append_at",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.lastAppendAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_messages_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "message"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_messages_ticket_message",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_messages",
+      "origin": "TicketCommentsMessages",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_messages_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsReactions.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "reaction",
+          "origin": "TicketCommentsReactions.reaction",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "TicketCommentsReactions.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "emoji",
+          "nullable": true,
+          "origin": "TicketCommentsReactions.emoji",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "TicketCommentsReactions.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "TicketCommentsReactions.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "at",
+          "nullable": true,
+          "origin": "TicketCommentsReactions.at",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_reactions_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "reaction"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_reactions_ticket_reaction",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_reactions",
+      "origin": "TicketCommentsReactions",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_reactions_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketCommentsReads.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "origin": "TicketCommentsReads.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "up_to",
+          "nullable": true,
+          "origin": "TicketCommentsReads.upTo",
+          "type": "INTEGER"
+        },
+        {
+          "name": "read_at",
+          "nullable": true,
+          "origin": "TicketCommentsReads.readAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_comments_reads_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ticket_id",
+            "subject"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_comments_reads_ticket_subject",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_comments_reads",
+      "origin": "TicketCommentsReads",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_comments_reads_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "TicketReferences.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "ticket_id",
+          "origin": "TicketReferences.ticket",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_table",
+          "origin": "TicketReferences.targetTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_key",
+          "origin": "TicketReferences.targetKey",
+          "type": "TEXT"
+        },
+        {
+          "default": "''",
+          "name": "role",
+          "origin": "TicketReferences.role",
+          "type": "TEXT"
+        },
+        {
+          "name": "added_by",
+          "nullable": true,
+          "origin": "TicketReferences.addedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "added_at",
+          "origin": "TicketReferences.addedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ticket_id"
+          ],
+          "name": "fk_ticket_references_ticket_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "ticket"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "target_table",
+            "target_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_ticket_references_target"
+        },
+        {
+          "columns": [
+            "ticket_id",
+            "target_table",
+            "target_key",
+            "role"
+          ],
+          "method": "BTREE",
+          "name": "uq_ticket_references_target_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket_references",
+      "origin": "TicketReferences",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_references_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_note_attachments_release\" AFTER DELETE ON \"note_attachments\" FOR EACH ROW\nBEGIN\n  -- The object the file of NoteAttachments deleted named (D154, D182), released\n  -- once no file of the table names it: its worker deletes it once no\n  -- file of any table does.\n  INSERT INTO \"attachment_released_queue\" (\"object_key\", \"content_hash\", \"reason\")\n    SELECT OLD.\"object_key\", OLD.\"content_hash\", 'detached' WHERE NOT EXISTS (SELECT 1 FROM \"note_attachments\" WHERE \"object_key\" = OLD.\"object_key\");\nEND",
+      "name": "trg_note_attachments_release",
+      "origin": "NoteAttachments",
+      "table": "note_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_note_audience_insert\" AFTER INSERT ON \"note\" FOR EACH ROW\nBEGIN\n  -- The @audience of Note (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'note.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'note.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"note\" SET \"effective_audience\" = CASE \"note\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"note\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"note\".\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"note\".\"owner\" AS value WHERE \"note\".\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"note\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"note\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"note\".\"owner\") END END,\n    \"effective_agents\" = \"note\".\"agent_access\"\n    WHERE \"note\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_note_audience_insert",
+      "origin": "Note",
+      "refuses": true,
+      "table": "note"
+    },
+    {
+      "backfill": "UPDATE \"note\" SET \"audience\" = \"audience\"",
+      "backfillNote": "Backfilling trg_note_audience_update resolves the audience of every row of note.",
+      "definition": "CREATE TRIGGER \"trg_note_audience_update\" AFTER UPDATE ON \"note\" FOR EACH ROW\nWHEN NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named')\n  OR NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none')\n  OR NEW.\"effective_audience\" IS NOT CASE NEW.\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN NEW.\"owner\" IS NULL THEN '[]' ELSE json_array(NEW.\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT NEW.\"owner\" AS value WHERE NEW.\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(NEW.\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN NEW.\"owner\" IS NULL THEN '[]' ELSE json_array(NEW.\"owner\") END END\n  OR NEW.\"effective_agents\" IS NOT NEW.\"agent_access\"\nBEGIN\n  -- The @audience of Note (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'note.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'note.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"note\" SET \"effective_audience\" = CASE \"note\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"note\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"note\".\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"note\".\"owner\" AS value WHERE \"note\".\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"note\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"note\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"note\".\"owner\") END END,\n    \"effective_agents\" = \"note\".\"agent_access\"\n    WHERE \"note\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_note_audience_update",
+      "origin": "Note",
+      "refuses": true,
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_note_references_clear\" AFTER DELETE ON \"note\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Note deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Note', CAST(\"note_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"note_references\" WHERE \"target_table\" = 'Note' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"note_references\" WHERE \"target_table\" = 'Note' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Ticket', CAST(\"ticket_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"ticket_references\" WHERE \"target_table\" = 'Note' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"ticket_references\" WHERE \"target_table\" = 'Note' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_note_references_clear",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_attachments_release\" AFTER DELETE ON \"ticket_attachments\" FOR EACH ROW\nBEGIN\n  -- The object the file of TicketAttachments deleted named (D154, D182), released\n  -- once no file of the table names it: its worker deletes it once no\n  -- file of any table does.\n  INSERT INTO \"attachment_released_queue\" (\"object_key\", \"content_hash\", \"reason\")\n    SELECT OLD.\"object_key\", OLD.\"content_hash\", 'detached' WHERE NOT EXISTS (SELECT 1 FROM \"ticket_attachments\" WHERE \"object_key\" = OLD.\"object_key\");\nEND",
+      "name": "trg_ticket_attachments_release",
+      "origin": "TicketAttachments",
+      "table": "ticket_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_bump_version\" AFTER UPDATE ON \"ticket\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"ticket\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END",
+      "name": "trg_ticket_bump_version",
+      "origin": "Ticket",
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_comments_conversations_bump_version\" AFTER UPDATE ON \"ticket_comments_conversations\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"ticket_comments_conversations\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END",
+      "name": "trg_ticket_comments_conversations_bump_version",
+      "origin": "TicketCommentsConversations",
+      "table": "ticket_comments_conversations"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_references_clear\" AFTER DELETE ON \"ticket\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Ticket deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Note', CAST(\"note_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"note_references\" WHERE \"target_table\" = 'Ticket' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"note_references\" WHERE \"target_table\" = 'Ticket' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Ticket', CAST(\"ticket_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"ticket_references\" WHERE \"target_table\" = 'Ticket' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"ticket_references\" WHERE \"target_table\" = 'Ticket' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_ticket_references_clear",
+      "origin": "Ticket",
+      "table": "ticket"
+    }
+  ],
+  "version": 1
+}

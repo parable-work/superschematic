@@ -36,6 +36,9 @@ type tsPackageCase struct {
 	deps     map[string]*ir.Schema
 	registry *registry.Registry
 	extra    map[string]string
+	// sqlite generates the package for a DB service that lists the sqlite
+	// dialect beside postgres: orm-sqlite.ts too (D182).
+	sqlite bool
 }
 
 // buildTSPackages writes each case's TypeScript types package, wired
@@ -71,6 +74,7 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 			Dependencies: tc.deps,
 			Registry:     tc.registry,
 			Clock:        fixedClock,
+			SQLite:       tc.sqlite,
 		})
 		if err != nil {
 			t.Fatalf("generate %s: %v", tc.name, err)
