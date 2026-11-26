@@ -63,8 +63,9 @@ describe('sqliteOrmPool', () => {
         })
       ).rejects.toThrow('undone');
       expect((await pool.query({ text: 'SELECT count(*) AS n FROM t', values: [] })).rows).toEqual([{ n: 0 }]);
-      // A statement made while a transaction runs waits for its end; one
-      // made within it, through the pool, runs in it.
+      // A statement made while a transaction runs waits for its end, through
+      // another pool over the connection too; one made within it, through
+      // the pool, runs in it.
       const order: string[] = [];
       let release!: () => void;
       const held = new Promise<void>(resolve => {
@@ -76,7 +77,7 @@ describe('sqliteOrmPool', () => {
         await held;
         order.push('transaction');
       });
-      const waiting = pool.query({ text: 'SELECT count(*) AS n FROM t', values: [] }).then(result => {
+      const waiting = sqliteOrmPool(db).query({ text: 'SELECT count(*) AS n FROM t', values: [] }).then(result => {
         order.push('statement');
         return result;
       });

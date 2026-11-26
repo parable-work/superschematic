@@ -18,11 +18,12 @@ as its JSON text; a bigint as a number, or its text past 2^53 - 1. A row's
 UUID, time, list and JSON come back as text, which the codec reads (D79).
 
 A SqlDatabase is one connection, which every statement of the process runs
-on, so the pool runs one statement or one transaction at a time, in turn: a
-statement made while a transaction runs waits for its end, and one made
-within it, through the ORM or a repository of its own, runs in it rather
-than waiting on it. On openSqlite's connection, which runs BEGIN and
-SAVEPOINT (beginsTransactions), a transaction is BEGIN IMMEDIATE, which
+on, so the pool runs one statement or one transaction at a time, in turn,
+every pool over the connection with the others: a statement made while a
+transaction runs waits for its end, and one made within it, through the
+ORM or a repository of its own, runs in it rather than waiting on it. On
+openSqlite's connection, which runs BEGIN and SAVEPOINT
+(beginsTransactions), a transaction is BEGIN IMMEDIATE, which
 takes the file's write lock as it begins, so it never fails to upgrade a
 read lock while another process writes, and SQLite's is serializable
 whatever isolation it names; a nested one is a savepoint. D1 runs no
@@ -97,6 +98,9 @@ class Turns {
   }
 }
 
+/** The turns of each connection. */
+const turnsOf = new WeakMap<SqlDatabase, Turns>();
+
 /** Runs a statement on db: its rows, and how many rows it changed, or for a read, read. */
 async function statementOn(db: SqlDatabase, text: string, values: readonly unknown[]): Promise<{ rows: unknown[]; rowCount: number }> {
   const result = await db
@@ -114,7 +118,10 @@ async function statementOn(db: SqlDatabase, text: string, values: readonly unkno
  * it runs as nothing.
  */
 export function sqliteOrmPool(db: SqlDatabase): OrmPool & { transaction<T>(begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T> } {
-  const turns = new Turns();
+  // Every pool over db takes its turns with the others: two ORMs opened
+  // over one connection share it.
+  const turns = turnsOf.get(db) ?? new Turns();
+  turnsOf.set(db, turns);
   const interactive = beginsTransactions(db);
   const control = async (text: string): Promise<{ rows: unknown[]; rowCount: number }> => {
     if (!interactive) return { rows: [], rowCount: 0 };
