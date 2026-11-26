@@ -392,7 +392,7 @@ func TestMCPEndpointCratesBuild(t *testing.T) {
 			// The user model's routes are the identity runtime's: a route's
 			// check runs its controls, and a public route's none.
 			"    router = router.route(\"/api/auth/login\", post(check_request));\n",
-			"        .authorize(Arc::clone(&authenticator), &[])\n        .apply(get(check_request));\n    router = router.route(\"/api/auth/me\", route);\n",
+			"        .authorize(Arc::clone(&authenticator), &[])\n        .operation(\"me\")\n        .apply(get(check_request));\n    router = router.route(\"/api/auth/me\", route);\n",
 		}},
 		{"fixture-webhooks-api", "getEvent", nil, []string{
 			"        webhook_verified(\n            post(check_webhook_receive_stripe_event),\n            Arc::clone(&state.implementations.webhook_verifiers[\"stripe\"]),\n        ),",
