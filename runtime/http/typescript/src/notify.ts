@@ -119,7 +119,9 @@ export type RecipientSpec =
   | { readonly path: string }
   | { readonly principal: string; readonly kind?: 'user' | 'agent' }
   | { readonly role: string }
-  | { readonly party: { readonly table: string; readonly key: string } };
+  | { readonly party: { readonly table: string; readonly key: string } }
+  /** An agent (D158), by name: the route puts a run request on the agent dispatcher's queue, about the event's record, in place of a notice. */
+  | { readonly agent: string; readonly task?: string };
 
 /** One step of a route's escalation: after the seconds since the step before, the channels it adds and the recipients it adds. */
 export interface EscalationStep {
@@ -206,6 +208,13 @@ export interface NotifierOptions {
   readonly render?: (notice: NoticeRow, channel: string) => RenderedNotice;
   /** The permissions a user holds; read from the UserRoleGrant and UserRole tables unless set. */
   readonly permissionsOf?: (recipient: RecipientRef) => Promise<readonly string[]>;
+  /**
+   * The agent dispatcher (D158) a route's { agent } recipient reaches: its
+   * request puts a run request on the dispatcher's queue in the routing
+   * transaction (createAgents's notifierAgents). A route that names an
+   * agent with none is logged and reaches no one.
+   */
+  readonly agents?: { request(tx: any, input: Readonly<Record<string, unknown>> & { readonly agent: string }): Promise<void> };
   /** The core's expansion of a recurrence rule (RulesCore.expand, D152), which digests and briefs are dated by. */
   readonly expand?: (input: Record<string, unknown>) => { readonly occurrences: readonly { readonly dueAt: number }[] };
   readonly deliveryTimeoutSeconds?: number;
@@ -775,6 +784,23 @@ export function createNotifier(options: NotifierOptions): Notifier {
           if (!match) continue;
         }
         const urgency = ((row.urgency as Urgency | null) ?? event.urgency ?? declared?.urgency ?? 'normal') as Urgency;
+        // A route that names an agent starts its run about the record (D158).
+        for (const spec of (row.recipients as RecipientSpec[]) ?? []) {
+          if (!('agent' in spec)) continue;
+          if (!options.agents) {
+            log.warn('a route names an agent, and the notifier has no agent dispatcher', { route: String(row.id), agent: spec.agent });
+            continue;
+          }
+          await options.agents.request(tx, {
+            trigger: 'route',
+            agent: spec.agent,
+            subjectTable: event.table ?? null,
+            subjectKey: event.key ?? null,
+            event: { id: event.id, kind: event.kind, payload: event.payload },
+            requestedBy: { kind: 'route', subject: String(row.id) },
+            ...(spec.task ? { input: { task: spec.task } } : {}),
+          });
+        }
         const recipients = await recipientsOf(tx, event, (row.recipients as RecipientSpec[]) ?? []);
         for (const recipient of recipients) {
           if (!(await reads(tx, recipient, event))) continue;

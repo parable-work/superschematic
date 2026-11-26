@@ -33,6 +33,7 @@ export type {
   WebhookRequest,
 } from './channel.js';
 export type { SandboxCost, SandboxInstance, SandboxProvider, SandboxSpec, SandboxState, SandboxStatus } from './sandbox.js';
+export { runAgentInstance, type AgentInstanceOptions, type AgentInstanceResult, type SandboxToolContext, type SandboxToolHandler } from './agent-runner.js';
 export type { ModelCompletion, ModelEmbedding, ModelEmbedRequest, ModelMessage, ModelProvider, ModelTool, ModelToolCall, ModelTurn, ModelUsage } from './model.js';
 export { readsMediaType, type ExtractedText, type FileInput, type FileProcessor, type Preview, type PreviewOptions } from './files.js';
 export {
