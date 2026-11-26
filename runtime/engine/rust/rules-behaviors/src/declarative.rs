@@ -2532,16 +2532,20 @@ mod tests {
         env.holds(&condition, &|name: &str| (read(name), types(name)))
     }
 
-    /// A condition reads as the ORM's filter: each field's tests ANDed,
-    /// allOf's every one and anyOf's one, an empty list filtering nothing,
-    /// ne holding for a field with no value, and the caller compared with a
-    /// field that holds a subject in either of a UUID's forms.
-    #[test]
-    fn a_condition_reads_as_the_orms_filter() {
-        let row = json!({
+    // row is the row the condition tests read.
+    fn row() -> Value {
+        json!({
             "count": 3, "label": "Big Box", "name": "bo",
             "owner": "0f5c4a3e-2b7d-4c1a-9e8f-6a5b4c3d2e1f", "none": null
-        });
+        })
+    }
+
+    /// A condition reads as the ORM's filter: each field's tests ANDed,
+    /// allOf's every one and anyOf's one, an empty list filtering nothing,
+    /// and ne holding for a field with no value.
+    #[test]
+    fn a_condition_reads_as_the_orms_filter() {
+        let row = row();
         let at = |condition: Value| holds(condition, &row, "alice");
         assert!(at(json!({"count": {"gte": 3, "lt": 4}})));
         assert!(!at(json!({"count": {"gt": 3}})));
@@ -2575,7 +2579,15 @@ mod tests {
             !at(json!({"label": {"gt": 3}})),
             "a string and a number do not order"
         );
-        // The caller against a UUID field, hyphenated in either case.
+    }
+
+    /// The caller operand (D104) compares with a field that holds a subject
+    /// as Workflow's by does: a UUID field in either case of its hyphenated
+    /// form, a string field by its text, and a field with no value naming no
+    /// one.
+    #[test]
+    fn the_caller_is_compared_with_a_field_that_holds_a_subject() {
+        let row = row();
         let owner = |caller: &str| holds(json!({"owner": {"eq": {"caller": true}}}), &row, caller);
         assert!(owner("0f5c4a3e-2b7d-4c1a-9e8f-6a5b4c3d2e1f"));
         assert!(owner("0F5C4A3E-2B7D-4C1A-9E8F-6A5B4C3D2E1F"));
