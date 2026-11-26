@@ -892,22 +892,14 @@ func ownColumnsOf(schema *ir.Schema, model *sqlutil.TableModel) ([]Column, []*Re
 // ones, in column order. A config that names a field is held to them, by
 // the core at a command (the spec's fields) and by the loader's checks
 // before it (a Timers field start), so both list the same names. It is nil
-// when schema's tables cannot be modelled, which the build reports
+// when td cannot be modelled ([Unmodelled]), which the build reports
 // elsewhere.
 func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
-	if schema == nil || td == nil {
+	model := modelOf(schema, td)
+	if model == nil {
 		return nil
 	}
-	tables, err := sqlutil.TablesOf(schema, nil)
-	if err != nil {
-		return nil
-	}
-	for i := range tables {
-		if tables[i].Type == td.Name {
-			return ownColumns(schema, &tables[i])
-		}
-	}
-	return nil
+	return ownColumns(schema, model)
 }
 
 // SpecFields are the fields of td, a table of schema, the core's spec of
@@ -915,7 +907,7 @@ func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 // layout's audit, createdBy when a use reads it. A refusal of a config that
 // names a field the type lacks names them as the core's does ("its fields:
 // ..."), so the loader's checks that word it as the core does list these.
-// It is nil when schema's tables cannot be modelled, which the build
+// It is nil when td cannot be modelled ([Unmodelled]), which the build
 // reports elsewhere.
 func SpecFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 	model := modelOf(schema, td)
@@ -1027,7 +1019,7 @@ func readsCreatedBy(ref ir.BehaviorRef) bool {
 // column, which the layout's audit names when a use reads it. A by is held to
 // them beside [OwnFields], by the core at a command (the spec's fields) and
 // by the loader's checks before it, so both list the same names. It is nil
-// for a table without one, and when schema's tables cannot be modelled,
+// for a table without one, and when td cannot be modelled ([Unmodelled]),
 // which the build reports elsewhere.
 func AuditFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 	model := modelOf(schema, td)
@@ -1132,8 +1124,8 @@ func fieldSpecs(own []Column, relations []*RelationSpec) []FieldSpec {
 // ImageColumns are the columns of td's rows that its change trigger writes
 // as a write's image (D103), unquoted: the layout's own columns and each
 // use's owned columns, in the layout's order, a binary, vector or
-// geometric column left out. It is nil when schema's tables cannot be
-// modelled.
+// geometric column left out. It is nil when td cannot be modelled
+// ([Unmodelled]).
 func ImageColumns(schema *ir.Schema, td *ir.TypeDef) []string {
 	model := modelOf(schema, td)
 	if model == nil {
@@ -1171,7 +1163,7 @@ func ImageColumns(schema *ir.Schema, td *ir.TypeDef) []string {
 
 // LiveColumn is the column a soft delete of td's rows stamps, deleted_at,
 // unquoted, as the layout's live condition names it, or "" for a table
-// that is not soft-deletable or when schema's tables cannot be modelled.
+// that is not soft-deletable or when td cannot be modelled ([Unmodelled]).
 // The change trigger hears a write that moves it alone (D103): a soft
 // delete, or a restore.
 func LiveColumn(schema *ir.Schema, td *ir.TypeDef) string {
@@ -1186,21 +1178,31 @@ func LiveColumn(schema *ir.Schema, td *ir.TypeDef) string {
 }
 
 // modelOf is the table model of td, a table of schema, or nil when it is
-// none or schema's tables cannot be modelled.
+// none or it cannot be modelled (Unmodelled). Another table that cannot be
+// modelled leaves td's model as it is, but for a relation to that table.
 func modelOf(schema *ir.Schema, td *ir.TypeDef) *sqlutil.TableModel {
 	if schema == nil || td == nil {
 		return nil
 	}
-	tables, err := sqlutil.TablesOf(schema, nil)
-	if err != nil {
-		return nil
-	}
+	tables, _ := sqlutil.TablesModelled(schema, nil)
 	for i := range tables {
 		if tables[i].Type == td.Name {
 			return &tables[i]
 		}
 	}
 	return nil
+}
+
+// Unmodelled is why td, a table of schema, has no table model, so that
+// [OwnFields], [SpecFields] and [AuditFields] are nil: the build's refusal
+// of the table (an index or unique key that names no column of it), or nil
+// when td has a model.
+func Unmodelled(schema *ir.Schema, td *ir.TypeDef) error {
+	if schema == nil || td == nil {
+		return nil
+	}
+	_, refused := sqlutil.TablesModelled(schema, nil)
+	return refused[td.Name]
 }
 
 // subTableOf is the layout of the sub-table declared for the use ref on
