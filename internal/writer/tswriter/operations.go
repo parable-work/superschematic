@@ -268,6 +268,14 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	if op.MCP != nil {
 		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.use("mcp"), operationMCPLiteral(op.MCP))
 	}
+	if op.Autonomy != nil {
+		// What the operation is to an agent run's autonomy policy (D158).
+		args := quote(op.Autonomy.Class)
+		if op.Autonomy.Mode != "" {
+			args += ", " + quote(op.Autonomy.Mode)
+		}
+		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.use("autonomy"), args)
+	}
 
 	if op.HTTPMethod != "" {
 		member, ok := httpMethodMembers[op.HTTPMethod]
@@ -436,6 +444,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.Comment = ""
 	rest.Docs = nil
 	rest.MCP = nil
+	rest.Autonomy = nil
 	rest.Icon = ""
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
