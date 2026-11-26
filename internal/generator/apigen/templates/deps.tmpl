@@ -57,6 +57,9 @@ import (
 {{- if .Engine }}
 	engine "{{ $.Naming.EngineGoModule }}"
 {{- end }}
+{{- if .Deps.Providers }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/providers"
+{{- end }}
 	"go.uber.org/zap"
 )
 
@@ -113,6 +116,13 @@ type Deps struct {
 	// and Engine.Engine() at once, or why it is not open. Its types'
 	// instances are the engine's, in namespace {{ .Engine.Namespace }}.
 	Engine *engine.Background
+{{ end }}
+{{- if .Deps.Providers }}
+	// Providers are the runtime providers the environment's config names
+	// in the API's provider slots (D159, D184), which ProvidersOf reads:
+	// Providers.Channel(ctx, "SMS") is the channel adapter of slot SMS.
+	// Each call into one runs as the provider's own principal.
+	Providers *providers.Providers
 {{ end }}
 	// Logger is the API's logger.
 	Logger *zap.Logger

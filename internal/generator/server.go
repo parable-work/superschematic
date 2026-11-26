@@ -1733,6 +1733,13 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 		// the rules module, which links the behaviors' core (D103).
 		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, false))
 	}
+	if o.Deps.Providers != nil {
+		// The API package imports each runtime provider's Go module, which
+		// the server replaces with its directory (D159, D184).
+		for _, m := range o.Deps.Providers.Modules {
+			modules = append(modules, servergen.Module{Path: m.Module, Dir: m.Dir})
+		}
+	}
 	return modules
 }
 

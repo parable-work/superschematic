@@ -56,6 +56,11 @@ require (
 {{- range .IndirectModules }}
 	{{ . }} v0.0.0-00010101000000-000000000000 // indirect
 {{- end }}
+{{- if .Deps.Providers }}
+{{- range .Deps.Providers.Modules }}
+	{{ .Module }} v0.0.0-00010101000000-000000000000
+{{- end }}
+{{- end }}
 )
 
 // Local module paths for development.
@@ -96,6 +101,11 @@ replace {{ $.Naming.EngineGoModule }} => {{ .EngineReplacePath }}
 {{- end }}
 {{- if .RulesReplacePath }}
 replace {{ $.Naming.RulesGoModule }} => {{ .RulesReplacePath }}
+{{- end }}
+{{- if .Deps.Providers }}
+{{- range .Deps.Providers.Modules }}
+replace {{ .Module }} => {{ .ReplacePath }}
+{{- end }}
 {{- end }}
 {{- if .Pins }}
 
