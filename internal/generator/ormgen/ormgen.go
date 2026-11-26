@@ -222,6 +222,12 @@ type ORMOutput struct {
 	// relative to the output directory; empty omits the directive. It is only
 	// written when Rules is set.
 	RulesReplacePath string
+
+	// SQLite is a database whose DB service lists the sqlite dialect
+	// (Options.SQLite): sqlite.go then holds the SQLite database, and each
+	// repository has a table on SQLite (Repository.SQLite) whose
+	// repository sqlite_<table>.go writes (D116).
+	SQLite bool
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -443,6 +449,12 @@ type Repository struct {
 	// claimed message and runs the project's handler in one transaction;
 	// "" for any other table.
 	EventQueue string
+
+	// SQLite is the table on SQLite, for a database whose DB service lists
+	// the sqlite dialect (D116); nil for any other. targetKeys are the
+	// members of each table's key, by type, which a relation's column holds.
+	SQLite     *SQLiteTable
+	targetKeys map[string]string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -1263,6 +1275,22 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Projections:              projections,
 		Queries:                  queries,
 		Rules:                    rules,
+		SQLite:                   opts.SQLite,
+	}
+	if opts.SQLite {
+		// Each table's repository on SQLite (D116), whose relations name
+		// their targets' keys by the members of their rows.
+		keys := make(map[string]string, len(output.Repositories))
+		for _, repo := range output.Repositories {
+			keys[repo.TypeName] = repo.PrimaryKeyField
+		}
+		for i := range output.Repositories {
+			repo := &output.Repositories[i]
+			repo.targetKeys = keys
+			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return output, nil
