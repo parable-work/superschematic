@@ -22,6 +22,9 @@ type AccountRepository struct {
 	db   *Database // Set when using Database directly
 	tx   pgx.Tx    // Set when using Transaction
 	txDB *Database // Parent database for transaction (enables accessing other repos)
+	// txCommit is the after-commit work of tx's Tx (D166), which RunEvent
+	// gives the Tx it hands its handler. Nil outside a transaction.
+	txCommit *txCommit
 }
 
 // AccountCreate is what a create of a row of Account sets: every field of
@@ -755,12 +758,12 @@ func (r *AccountRepository) RunDeadline(ctx context.Context, deadline types.Acco
 // WithBehaviorCaller names, a behavior worker's. Without a claim nothing is
 // spent.
 func (r *AccountRepository) RunEvent(ctx context.Context, event types.AccountEvent, claim *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error) {
-	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*rules.EventRun, error) {
+	return inHookedTransaction(ctx, r.database(), r.tx, r.txCommit, func(tx pgx.Tx, commit *txCommit) (*rules.EventRun, error) {
 		run, err := rules.SpendEvent(ctx, rulesHost(tx), "Account", claim)
 		if err != nil || !run.Ran {
 			return run, err
 		}
-		if err := handle(ctx, r.database().txOf(tx, 0)); err != nil {
+		if err := handle(ctx, r.database().txOf(tx, 0, commit)); err != nil {
 			return nil, err
 		}
 		return run, nil

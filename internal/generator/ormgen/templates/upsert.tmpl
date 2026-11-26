@@ -254,9 +254,20 @@ func upsertCellValues(row []batchInsertCell, columns []string) ([]any, bool) {
 // inTransaction runs fn in tx, or, when tx is nil, in a transaction of its
 // own on db's pool, which fn's success commits and its error rolls back.
 func inTransaction[T any](ctx context.Context, db *Database, tx pgx.Tx, fn func(pgx.Tx) (T, error)) (T, error) {
+	return inHookedTransaction(ctx, db, tx, nil, func(tx pgx.Tx, _ *txCommit) (T, error) {
+		return fn(tx)
+	})
+}
+
+// inHookedTransaction is inTransaction for an fn that hands the
+// transaction to the caller's code as a Tx (D166). fn takes the txCommit
+// that Tx adds to: commit, the one of tx's own Tx, when it runs in tx, or a
+// new one when it runs in a transaction of its own, whose functions run
+// after that transaction commits.
+func inHookedTransaction[T any](ctx context.Context, db *Database, tx pgx.Tx, commit *txCommit, fn func(pgx.Tx, *txCommit) (T, error)) (T, error) {
 	var zero T
 	if tx != nil {
-		return fn(tx)
+		return fn(tx, commit)
 	}
 	own, err := db.pool.Begin(ctx)
 	if err != nil {
@@ -268,15 +279,16 @@ func inTransaction[T any](ctx context.Context, db *Database, tx pgx.Tx, fn func(
 			panic(p)
 		}
 	}()
-	out, err := fn(own)
+	ownCommit := &txCommit{}
+	out, err := fn(own, ownCommit)
 	if err != nil {
 		if rbErr := own.Rollback(ctx); rbErr != nil {
 			return zero, fmt.Errorf("failed to rollback transaction: %w (original error: %v)", rbErr, err)
 		}
 		return zero, err
 	}
-	if err := own.Commit(ctx); err != nil {
-		return zero, fmt.Errorf("failed to commit transaction: %w", err)
+	if err := commitTx(ctx, own, ownCommit); err != nil {
+		return zero, err
 	}
 	return out, nil
 }

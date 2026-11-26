@@ -71,6 +71,8 @@ type ReadOnlyNoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields NoteFields) ([]*types.Note, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
 	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
@@ -83,6 +85,8 @@ type NoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields NoteFields) ([]*types.Note, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
 	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
@@ -459,6 +463,14 @@ func (r *NoOpNoteRepository) GetManyByIDs(_ context.Context, _ []types.IdentityU
 
 func (r *NoOpNoteRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Note, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpNoteRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error) {
+	return make([]*types.Note, len(keys)), nil
+}
+
+func (r *NoOpNoteRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ NoteFields) ([]*types.Note, error) {
+	return make([]*types.Note, len(keys)), nil
 }
 
 func (r *NoOpNoteRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error) {
