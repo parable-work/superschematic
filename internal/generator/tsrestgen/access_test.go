@@ -101,6 +101,7 @@ var accessCases = []string{
 	"an agent run sees what whom it acts for sees, and writes no read-only row",
 	"a row rule follows a path through the table's relations",
 	"a party with a grant reaches only the rows its role's paths allow",
+	"a role whose path is * reaches every row of the table, the grant's target among them",
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
 }
