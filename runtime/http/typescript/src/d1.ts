@@ -76,6 +76,7 @@ export {
   spendEvent,
   sqliteRulesStore,
   VETOED_RETRY_SECONDS,
+  withRulesCore,
 } from './rules.js';
 export type {
   ArmedDeadline,

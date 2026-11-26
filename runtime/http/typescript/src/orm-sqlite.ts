@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { SqlDatabase, SqlValue } from './d1.js';
-import { ormOfRuntime, type Orm, type OrmDefinition, type OrmOptions, type OrmPool, type OrmQueryable, type OrmRuntime } from './orm.js';
+import type { SqlDatabase, SqlPreparedStatement, SqlValue } from './d1.js';
+import { ormOfRuntime, type Orm, type OrmDefinition, type OrmOptions, type OrmPool, type OrmQueryable, type OrmRuntime, type OrmSqlite } from './orm.js';
 
 /*
 The generated repositories on SQLite and D1 (D182): sqliteOrm runs a types
@@ -32,7 +32,29 @@ committed as it runs, and a throw rolls none of them back. A write the
 repositories make in one statement (a create, an update, a delete of a row,
 a trigger's work with it) is atomic on D1 as anywhere; one of several is
 not, and an implementation that needs it so writes a batch.
+
+The pool also gives the repositories a batch in its turn (OrmSqlite), which
+runs statements as one unit, a savepoint of a transaction open on a file and
+D1's one atomic unit, so a write of several statements all known before the
+first runs commits whole on either: createMany's inserts, an upsert's read
+of its key with the upsert, an upsert of many rows. The behaviors' core runs
+a table's commands over the same database (sqliteRulesStore, D103), whose
+change set is one fenced batch. A write whose later statement needs an
+earlier one's answer is refused on D1 by name: an upsert that seals an
+Encrypted<T> field of the row it updates, and runEvent.
 */
+
+/**
+ * The most parameters a statement binds on a SQLite file and on D1
+ * (sqlutil.SQLiteMaxParameters and D1MaxParameters): an upsert of many rows
+ * writes a batch of as many rows as bind that many (D89).
+ */
+export const SQLITE_MAX_PARAMETERS = 32766;
+export const D1_MAX_PARAMETERS = 100;
+
+/** Why D1 runs a write of dependent statements as no unit, which the repositories refuse one with (D182). */
+export const D1_NO_TRANSACTIONS =
+  "D1 runs no interactive transaction: a transaction's statements each commit as they run, so a write whose later statement needs an earlier one's answer would commit half; write it as one batch on the binding";
 
 /** A SqlDatabase that runs BEGIN and SAVEPOINT, as openSqlite's connection does: the pool runs an ORM's transactions on it. */
 export interface TransactionalSqlDatabase extends SqlDatabase {
@@ -98,6 +120,29 @@ class Turns {
   }
 }
 
+/**
+ * db, whose statements bind each value as the pool's bind it (bindable):
+ * the database the behaviors' core runs on (sqliteRulesStore, D103), whose
+ * change sets carry the repositories' values in their codec, a time as a
+ * Date and a list as an array.
+ */
+function bindingDatabase(db: SqlDatabase): SqlDatabase {
+  return {
+    prepare(sql: string): SqlPreparedStatement {
+      const statement = db.prepare(sql);
+      return {
+        bind: (...values: SqlValue[]) => statement.bind(...values.map(bindable)),
+        first: ((column?: string) => (column === undefined ? statement.first() : statement.first(column))) as SqlPreparedStatement['first'],
+        all: () => statement.all(),
+        run: () => statement.run(),
+        raw: ((options?: { readonly columnNames?: boolean }) => statement.raw(options as { readonly columnNames: true })) as SqlPreparedStatement['raw'],
+      } as SqlPreparedStatement;
+    },
+    batch: statements => db.batch(statements),
+    exec: sql => db.exec(sql),
+  };
+}
+
 /** The turns of each connection. */
 const turnsOf = new WeakMap<SqlDatabase, Turns>();
 
@@ -138,7 +183,7 @@ async function statementOn(db: SqlDatabase, text: string, values: readonly unkno
  * openSqlite's does, BEGIN as BEGIN IMMEDIATE; on D1, which runs none,
  * it runs as nothing.
  */
-export function sqliteOrmPool(db: SqlDatabase): OrmPool & { transaction<T>(begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T> } {
+export function sqliteOrmPool(db: SqlDatabase): OrmPool & { transaction<T>(begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T>; readonly sqlite: OrmSqlite } {
   // Every pool over db takes its turns with the others: two ORMs opened
   // over one connection share it.
   const turns = turnsFor(db);
@@ -154,7 +199,20 @@ export function sqliteOrmPool(db: SqlDatabase): OrmPool & { transaction<T>(begin
       return statementOn(db, config.text, config.values ?? []);
     },
   };
+  const sqlite: OrmSqlite = {
+    db: bindingDatabase(db),
+    maxParameters: interactive ? SQLITE_MAX_PARAMETERS : D1_MAX_PARAMETERS,
+    ...(interactive ? {} : { noTransactions: D1_NO_TRANSACTIONS }),
+    // In a transaction open on a file the batch is a savepoint of it
+    // (./sqlite-database); on D1 it is the one atomic unit.
+    batch: statements =>
+      turns.run(async () => {
+        const results = await db.batch(statements.map(statement => db.prepare(statement.text).bind(...statement.values.map(bindable))));
+        return results.map(result => ({ rows: result.results as Record<string, unknown>[], rowCount: Math.max(Number(result.meta?.changes ?? 0), result.results.length) }));
+      }),
+  };
   return {
+    sqlite,
     query: config => turns.run(() => client.query(config)),
     // The pool is one connection, taken in turn.
     async connect() {
