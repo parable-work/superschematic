@@ -275,11 +275,13 @@ type extraRows struct {
 }
 
 // resolvedAudiences checks the audience a plan's backfill resolved (D182):
-// every customer, private by default, is its own alone.
+// every customer, private by default, is its own alone once the plan's
+// contract created the update's trigger, which backfills; after the expand
+// steps alone the columns are there and nothing is resolved yet.
 var resolvedAudiences = extraRows{
 	checks: []seedCheck{
 		{Name: "each customer is its own alone",
-			SQL: `SELECT count(*) > 0 AND count(*) = sum("audience" = 'private' AND "effective_audience" = json_array("id") AND "effective_agents" = 'followRole') FROM "customer"`},
+			SQL: `SELECT count(*) > 0 AND count(*) = sum("audience" = 'private' AND "effective_agents" = 'followRole' AND ("effective_audience" = json_array("id") OR NOT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = 'trg_customer_audience_update'))) FROM "customer"`},
 	},
 }
 
