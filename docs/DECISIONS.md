@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D165 is the highest so far.
+  the highest number any branch has used. D199 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -1875,8 +1875,8 @@ Left:
   through the auth-provider hook `callerPrincipal`, which answers the id
   alone so far), the audience filter, path row
   rules, grants, reveal and the access log. Python's ORM.
-- An audience on SQLite and D1, and a GIN index on `effective_audience`
-  the build writes.
+- A GIN index on `effective_audience` the build writes. (An audience on
+  SQLite and D1, in TypeScript: D182.)
 - An audience in a declared query (`@query`), which reads every row.
 - A parent with very many children: the cascade updates them in the
   writer's transaction; the change queue is the way to move it after the
@@ -2028,7 +2028,8 @@ Left:
 - Generated routes, MCP tools and SDK methods for references and
   attachments; an app writes its routes over `orm.references` and
   `orm.attachments` now (`examples/references-files/server`).
-- The Go and Rust repositories, and Python's.
+- The Go and Rust repositories, on Postgres and on SQLite, and Python's.
+  (References and attachments on SQLite and D1, in TypeScript: D182.)
 - The file processor (section 9) and its wiring: `pending` and
   `processed` are its seam. Search (section 5) indexes `extractedText`.
 - D142's content-addressed objects once PR 512 merges, and a multipart
@@ -2523,3 +2524,88 @@ Left:
   grant's; today the run's scope is the grant's target, the party's row
   and the message's, and the agent's role's paths from them.
 - The schema writer writing `@agents` and `@autonomy` back.
+
+## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
+
+D156 and D154 were Postgres alone: the loader refused `@audience`,
+`@references` and `@attachments` on the sqlite dialect, and the TypeScript
+repositories ran on a pg Pool alone (D79), so a database that listed
+sqlite first had no repositories in TypeScript at all. This entry builds
+both on SQLite and D1, for TypeScript, as the first of the SQLite
+workstreams; the calendar, search, the notifier's queues, parties and
+agents follow on what it settles, and so do the Go and Rust ports to
+SQLite.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript repositories run on SQLite. A types package of a DB service that lists sqlite carries `orm-sqlite.ts`, its `./orm/sqlite` entry: each table's definition again, its statements in SQLite's words as sqlutil writes them for the Rust repositories (`SQLiteTableStatementsOf`, `SQLiteClauses`, a key's `SQLite()` reads, D116), its JSON columns read as text, and `createOrm(db)` over a `SqlDatabase`, which the runtime's `sqliteOrm` runs. One runtime (`orm.ts`) runs both dialects from the definitions; `OrmDefinition.dialect` says which. A service that lists sqlite and not postgres gets an `orm.ts` of types alone. A table `SQLiteTableRefusal` refuses is left out of the entry, with why, as Rust leaves it out. | A second runtime for SQLite, which would drift from Postgres's. The access features over raw SQL beside no repositories, which would repeat every read's audience and grants by hand and miss a hand-written implementation's reads. |
+| The runtime imports neither pg nor `node:crypto`: pg's type parsers come with `ormOf` (`orm-postgres.ts`), the pure text forms with `pgtext.ts`, the field error with `fieldcrypt-error.ts`, and a key secret is read by the entry that has `node:crypto` (`OrmRuntime.parseFieldKeys`). `./d1` exports `sqliteOrm`, and `./sqlite` it and `parseFieldKeys`. | A D1 build of its own of the runtime. Encrypted fields on D1 through WebCrypto now: its API is asynchronous and the repositories seal synchronously (left). |
+| `sqliteOrmPool` binds a `Date` as its RFC 3339 text to the millisecond, as the SQLite DDL's defaults write a time (`strftime('%Y-%m-%dT%H:%M:%fZ')`), so times compare in order as text; a list and an object as JSON text; a bigint as a number. The codec reads a list's JSON text, as SQLite holds a `UUID[]` (sqlmigrate's `sqliteType`). | A time as epoch milliseconds, which the DDL's defaults and the Rust repositories do not write. |
+| A `SqlDatabase` is one connection, so the pool takes it in turn: one statement or one transaction at a time, a statement within the running one joining it (an `AsyncLocalStorage` of the turn), one from elsewhere waiting. On `openSqlite`'s connection (`beginsTransactions`) a transaction is `BEGIN IMMEDIATE` and a nested one a savepoint. D1 runs no interactive transaction: there a transaction's statements run in turn, each committed as it runs, and a throw rolls none back. | Refusing `orm.transaction` on D1, which `references.add`, `attachments.begin` and every table operation run in. A batch, which takes no read between its statements. |
+| An audience on SQLite is a JSON array of ids in `effective_audience TEXT`, null for everyone, and a read keeps to `(effective IS NULL OR EXISTS (SELECT 1 FROM json_each(effective) WHERE json_each.value IN (?n, ...)))` (`sqlutil.SQLiteAudienceContains`, in the definition as `audience.contains` and `placeholder`). | A side table of (row, principal), which every read joins and every resolution rewrites, the alternative D156 turned down on Postgres too. |
+| SQLite has no trigger functions, cannot set `NEW`, and does not fire a trigger already running (`recursive_triggers` is off unless a connection turns it on, which a migration on D1 cannot), so no trigger counts on another to finish its work. Each `@audience` table has `trg_<table>_audience_insert` and `_update`, after the write, which refuse an unknown audience or agent access (`RAISE(ABORT)`) and set the resolved columns from the row as the table holds it; the update's fires only when they are not what the audience resolves to, which stops it whether or not recursion is on. A parent table's `trg_<table>_audience_cascade` sets each inheriting child's directly; a table that inherits from itself sets every inheriting row below the parent through a recursive CTE, each the parent's audience and the least open agent access on its way down, then the other child tables' rows below any of them. | A cascade that updates the children's `audience` to itself, as Postgres's does, which on SQLite would not fire the child's trigger again when the child is of the same table or its trigger is running. `PRAGMA recursive_triggers`, which a D1 migration cannot set. |
+| References and files are row triggers of the Postgres triggers' names: a target's delete enqueues a cleared message per reference to the row and deletes them; a file's delete enqueues its object's release unless another file of the sub-table still names it, so a statement that deletes the files of one object releases it once. Of a statement that deletes a holder and a row it points at, a cleared message may name a holder the same statement deleted. | A statement trigger, which SQLite has none of. |
+| The members of `orm.references` and `orm.attachments` run in the host's dialect (`rowfeatures.ts`, `sqlOf`): a parameter `?n`, `CAST(... AS TEXT)`, the database's clock, a ref block found through `json_each`, a time read back from its text, and no advisory lock, since a transaction on SQLite holds its one write lock and D1 runs each statement alone. | |
+| On SQLite the repositories read a table that composes behaviors and refuse its writes, and refuse upserts and `mergeInto`, each naming why. | Serving the behaviors' core in the ORM's transaction over `sqliteRulesStore`, whose batch cannot nest in one (left). |
+| The loader serves the three on sqlite, and refuses a service that lists sqlite and enables Go's or Rust's types, naming the language, since their repositories on SQLite would read the rows without them (`verify/sqlite_features.go`, `Input.TypesLanguages`). | Refusing sqlite until every language serves them. |
+| D1 is proved under the pinned workerd by the fixture `d1-orm`, which runs a database's generated `orm-sqlite.ts` and `sqlite/create.sql` (kept current by `TestTheWorkerdD1FixtureIsCurrent`) over a stand-in of D1 on a Durable Object's SQLite storage, workerd's own SQLite, which runs no BEGIN, as D1 runs none. | Miniflare, which the repository does not pin. A stand-in that answers fixed statements, which proves no trigger. |
+
+### The SQLite shapes later workstreams take
+
+- A `UUID[]` column is TEXT holding a JSON array of hyphenated lowercase
+  ids; a containment is `EXISTS (SELECT 1 FROM json_each(col) WHERE
+  json_each.value IN (...))`.
+- A time is TEXT, RFC 3339 in UTC to the millisecond
+  (`2026-11-26T10:00:00.123Z`); the database's clock is
+  `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`.
+- A trigger is a row trigger named as the Postgres trigger, with the
+  write's event after it when it needs one per event (`_insert`,
+  `_update`); it refuses with `RAISE(ABORT, '<literal>')` (`Refuses`),
+  reads the row it changes by its key rather than through `NEW`, guards its
+  own update with a `WHEN` that is false once the row holds what it writes,
+  and does every step itself rather than through another trigger; a walk
+  of a tree is a recursive CTE in a subquery, which SQLite takes in a
+  trigger.
+- A queue's message a trigger enqueues is a plain `INSERT` of its fields,
+  the queue's defaults filling the rest.
+- A key compared across tables is `CAST(key AS TEXT)`.
+- A repository's statement is sqlutil's SQLite form; a count or an
+  `EXISTS` is read by its first column, which SQLite names after its
+  expression.
+
+Built: the SQLite triggers and their model, with the backfill of an
+audience (`internal/generator/sqlgen/audience_sqlite.go`,
+`rowrefs_sqlite.go`, `internal/sqlmigrate/sqlite_model.go`); the audience
+predicate (`sqlutil/audience_sqlite.go`); `orm-sqlite.ts` and the types-only
+`orm.ts` (`internal/generator/tsgen/orm_sqlite.go`,
+`templates/orm_sqlite.tmpl`); the runtime's `orm-sqlite.ts`,
+`orm-postgres.ts`, `pgtext.ts`, `fieldcrypt-error.ts` and the dialect of
+`orm.ts`, `rowfeatures.ts` and `pgcodec.ts`; the loader's refusal
+(`verify/sqlite_features.go`); the guides' "On SQLite and D1" sections.
+`fixture-access-db` and `fixture-references-db` list sqlite. The tests:
+`TestAudienceTriggersOnSQLite`,
+`TestAudienceCascadeOfATableThatInheritsFromItself`,
+`TestRowFeaturesTriggersOnSQLite` (sqlgen); the SQLite model goldens, the
+round trip and convergence of both fixtures (sqlmigrate);
+`TestRowFeaturesOnSQLite` and the audience refusals (loader);
+`TestTheSQLiteDefinitionOfATableIsPostgres`; `orm-sqlite.test.ts`;
+`TestGeneratedAccessEndToEndOnSQLite`, which runs every case of D156's
+"done when" over the generated router on bun:sqlite, the calendar feed's
+among them; `TestReferencesTablesEndToEndOnSQLite`, D154's on bun:sqlite,
+the thread's message written by hand; and the workerd fixture `d1-orm`.
+
+Left:
+
+- Go and Rust on SQLite: their repositories' audience, grants, references
+  and attachments over these shapes, which lifts the loader's refusal.
+- The generated TypeScript server over a database that lists sqlite first:
+  `Deps.orm` built from `createOrm(db)` of `./orm/sqlite`, which lifts
+  tsrestgen's refusal of a table operation there (D106); an app passes
+  `orm` in the router's options now.
+- The behaviors' core, upserts and merges in the SQLite repositories.
+- `Encrypted<T>` fields on D1, which need a cipher a Worker has.
+- An atomic write of several statements on D1, through its batch.
+- A cleared message that names a holder the same delete statement
+  deleted, which a row trigger cannot tell.
+- The calendar, search, the notifier's queues, parties and agents on
+  SQLite and D1 (D186, D189), on these shapes.

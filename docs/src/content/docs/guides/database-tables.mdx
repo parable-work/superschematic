@@ -1125,8 +1125,18 @@ statement it deletes the references to the rows it removed, from every
 references sub-table that may hold one, and enqueues a cleared message for
 each, so the row that held it hears of it through the queue's worker. A
 soft delete is an update and clears nothing: a read leaves a deleted row
-out on its own, and a row restored keeps its references. Both declarations
-are Postgres alone.
+out on its own, and a row restored keeps its references.
+
+On SQLite and D1 (D182) each trigger is a row trigger of the same name,
+since SQLite has no statement triggers: a target's delete clears the
+references to the row and enqueues their cleared messages as each row
+goes, and a file's delete enqueues its object's release unless another
+file of the sub-table still names it, so a statement that deletes the
+files of one object releases it once. Of a statement that deletes a
+holder and a row it points at, a cleared message may name the holder
+the same statement deleted, which its worker finds gone. Go's and Rust's
+repositories on SQLite read neither sub-table yet, so a service that lists
+`sqlite` and declares either takes TypeScript's types alone.
 
 ### References and backlinks
 
@@ -2087,7 +2097,42 @@ text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
 reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
-ORM does. SQLite repositories are not built.
+ORM does.
+
+### On SQLite and D1
+
+A DB service whose `outputs.sql.dialects` lists `sqlite` gets the same
+repositories on SQLite too (D182), in its types package's `./orm/sqlite`
+entry (`@acme/shop-db-types/orm/sqlite`): each table's statements in
+SQLite's words, the ones the Rust repositories run there, and `createOrm(db)`
+over a `SqlDatabase`, a D1 binding in a Worker or `openSqlite`'s file under
+Bun. The rows, filters and repository types are the `./orm` entry's, and a
+service that lists `sqlite` and not `postgres` gets an `./orm` of types
+alone. The entry imports the HTTP runtime's `./d1`, which imports neither
+pg nor `node:crypto`, so a Worker bundles it.
+
+```ts
+import { openSqlite, parseFieldKeys } from "@superschematic/http-runtime/sqlite";
+import { createOrm } from "@acme/shop-db-types/orm/sqlite";
+
+const orm = createOrm(openSqlite("shop.sqlite"), { fieldKeys: parseFieldKeys(secret) });
+```
+
+A row holds each value as on Postgres. A statement binds a time as its RFC
+3339 text to the millisecond, as the SQLite DDL's defaults write one, so
+times compare in order as text, and a list as its JSON array. A read keeps
+to the caller's audience and grants, and `orm.references` and
+`orm.attachments` serve references and files, as on Postgres.
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| a transaction on `openSqlite`'s file is `BEGIN IMMEDIATE`, a nested one a savepoint | it takes the file's write lock as it begins, so it never fails to upgrade a read lock while another process writes; SQLite's transaction is serializable whatever isolation it names |
+| the ORM takes its one connection in turn: a statement made while a transaction runs waits for it, and one made within it runs in it | a `SqlDatabase` is one connection, which every request of the process shares |
+| on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
+| no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
+| `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
+| a table that composes behaviors is read, and a write of it is refused, as are upserts and `mergeInto` | the behaviors' core, an upsert's inserted flag and a merge's plan run on Postgres alone so far |
+| a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
 
 ### Relations in a read
 
