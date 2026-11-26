@@ -393,7 +393,7 @@ export interface CoreSubRowWrite {
   readonly change: { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'update'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'delete' };
 }
 
-/** One write of a row of a use's shared table (D103's step 4): an insert of a key the table does not hold, or an update held to the version the host read it at. */
+/** One write of a row of a use's shared table (D103's step 4): an insert of a key the table does not hold, or an update or a delete (D147) held to the version the host read it at. */
 export interface CoreSharedRowWrite {
   readonly type: string;
   readonly useId: string;
@@ -401,7 +401,8 @@ export interface CoreSharedRowWrite {
   readonly key: string;
   readonly change:
     | { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> }
-    | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> };
+    | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> }
+    | { readonly kind: 'delete'; readonly expectedVersion: number };
 }
 
 /** An event a behavior emits about a row (Cx::emit, D104), which the adapter writes to the event queue of the row's table in the change set's unit. */
@@ -1810,6 +1811,13 @@ function sharedRowStatement(table: RulesTable, shared: RulesSharedTable, dialect
         expect: 1,
       };
     }
+    case 'delete':
+      // Held to its version (D147): a row a writer moved or deleted first deletes nothing, and the unit runs the command again.
+      return {
+        text: `DELETE FROM ${quote(shared.table)} WHERE ${quote(shared.key.column)} = ${p(1)} AND ${quote(shared.version)} = ${p(2)}`,
+        values: [write.key, change.expectedVersion],
+        expect: 1,
+      };
     default:
       throw internal(`the adapter takes no shared-table row change of this kind: ${JSON.stringify(change)}`);
   }

@@ -121,6 +121,9 @@ var transcriptFiles = []transcriptFile{
 	// other row, and the hand-written cases.
 	{"../../engine/testdata/rules/core-refunds.transcript.json", 52},
 	{"../../engine/testdata/rules/core-payments.transcript.json", 73},
+	// Aliased (D147): names unique across rows in a shared table, a
+	// removed alias's and a deleted row's rows deleted.
+	{"../../engine/testdata/rules/core-aliased.transcript.json", 46},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

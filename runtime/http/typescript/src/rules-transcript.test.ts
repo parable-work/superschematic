@@ -156,6 +156,9 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // row, and the hand-written cases.
   { file: 'core-refunds', floor: 52 },
   { file: 'core-payments', floor: 73 },
+  // Aliased (D147): names unique across rows in a shared table, a removed
+  // alias's and a deleted row's rows deleted.
+  { file: 'core-aliased', floor: 46 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
