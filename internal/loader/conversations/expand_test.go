@@ -136,6 +136,46 @@ func TestPartiesRefusals(t *testing.T) {
 	}
 }
 
+// TestPartiesExampleLoads: examples/parties's schemas load (D157):
+// jobs-db's contacts are parties, its messages keep references and files,
+// and jobs-api runs the notifier and the run requests on workers of their
+// queues, and needs a channel adapter in every environment.
+func TestPartiesExampleLoads(t *testing.T) {
+	services := filepath.Join("..", "..", "..", "examples", "parties", "schemas", "services")
+	reg := registry.New(naming.Default())
+	db, err := loader.LoadService(filepath.Join(services, "jobs-db"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load jobs-db: %v", err)
+	}
+	if parties := db.PartyTables(); len(parties) != 1 || parties[0].Name != "Contact" {
+		t.Fatalf("jobs-db's parties are %+v", parties)
+	}
+	if message := db.ConversationsTable(ir.MessagesPart); message == nil || message.Attachments == nil || message.RowReferences == nil {
+		t.Fatalf("jobs-db's messages are %+v", message)
+	}
+	if db.RunRequestsQueue() == nil {
+		t.Fatal("jobs-db has no run requests queue")
+	}
+	api, err := loader.LoadService(filepath.Join(services, "jobs-api"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load jobs-api: %v", err)
+	}
+	workers := map[string]*ir.Worker{}
+	for _, w := range api.Workers {
+		workers[w.Name] = w
+	}
+	if w := workers["Runs"]; w == nil || w.Queue != "RunRequest" {
+		t.Errorf("Runs is %+v", w)
+	}
+	if w := workers["Notify"]; w == nil || w.Queue != "NoticeWork" {
+		t.Errorf("Notify is %+v", w)
+	}
+	used := reg.RuntimeFeaturesUsed(registry.RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{db.Name: db}})
+	if len(used) != 1 || used[0].Interface != ir.RuntimeChannel {
+		t.Errorf("jobs-api uses %v", used)
+	}
+}
+
 func copyDir(t *testing.T, from, to string) {
 	t.Helper()
 	err := filepath.Walk(from, func(path string, info os.FileInfo, err error) error {

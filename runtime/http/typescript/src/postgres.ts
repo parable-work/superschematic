@@ -485,6 +485,25 @@ export {
   type Urgency,
 } from './notify.js';
 export type { EventDefinition } from './orm.js';
+// Outside parties and inbound messages (D157): the principal a party is,
+// the one path every inbound message takes, conversations whose messages
+// are rows, and sending to a party as a permission.
+export {
+  InboundError,
+  createInbound,
+  emailAuthenticated,
+  type Inbound,
+  type InboundDisposition,
+  type InboundOptions,
+  type InboundOutcome,
+  type MessageRow,
+  type ReceivedMessage,
+  type RunRequest,
+  type SendDecision,
+  type SendInput,
+  type SendOutcome,
+} from './inbound.js';
+export { identityLapsed, partyPrincipal, partyTablesOf, type IdentityStanding, type PartyPrincipalOptions, type PartyRef } from './parties.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

@@ -1,6 +1,7 @@
 import type { GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
 import { activeGrants, reachesOf } from './access.js';
+import { identityLapsed, type IdentityStanding } from './parties.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
 import type { EventDefinition } from './orm.js';
@@ -250,6 +251,10 @@ export interface ChannelIdentityRow {
   readonly principalTable?: string | null;
   readonly principal: string;
   readonly trust: string;
+  readonly verifiedAt?: Date | null;
+  readonly createdAt?: Date | null;
+  /** When the address opted out (D157); nothing is sent to it while set. */
+  readonly optedOutAt?: Date | null;
 }
 
 /** What addIdentity takes. */
@@ -799,13 +804,19 @@ export function createNotifier(options: NotifierOptions): Notifier {
   const addressOf = async (db: any, recipient: RecipientRef, channel: string): Promise<string | undefined> => {
     if (!parts.identities) return undefined;
     const identities = repo(sys(db), parts.identities);
-    const row = await identities.findOne({
-      principal: { eq: recipient.id },
-      kind: { eq: addressKindOf(channel) },
-      trust: { in: ['verified', 'entered'] },
-      revokedAt: { isNull: true },
-    });
-    return row ? String(row.address) : undefined;
+    // An address that opted out is sent nothing, and a party's identity
+    // whose grants have all ended since it was verified may be someone
+    // else's now (D157).
+    const rows = (
+      await identities.findMany(
+        { principal: { eq: recipient.id }, kind: { eq: addressKindOf(channel) }, trust: { in: ['verified', 'entered'] }, revokedAt: { isNull: true }, optedOutAt: { isNull: true } },
+        { limit: 10, count: false }
+      )
+    ).rows;
+    for (const row of rows) {
+      if (!(await identityLapsed(orm, row as unknown as IdentityStanding, now()))) return String(row.address);
+    }
+    return undefined;
   };
 
   const ended = (state: string): boolean => state === 'failed' || state === 'acknowledged' || state === 'read';
@@ -1107,8 +1118,9 @@ export function createNotifier(options: NotifierOptions): Notifier {
       await identities.updateOne(identity.id, attempts >= CODE_ATTEMPTS ? { codeHash: null, codePurpose: null, codeExpiresAt: null, codeAttempts: attempts } : { codeAttempts: attempts });
       return false;
     }
-    const verified = identity.trust === 'verified';
-    await identities.updateOne(identity.id, { codeHash: null, codePurpose: null, codeExpiresAt: null, codeAttempts: 0, ...(verified ? {} : { trust: 'verified', verifiedAt: now() }) });
+    // A code answered verifies the address now, an identity that lapsed
+    // (D157) among them, whose grants ended before this.
+    await identities.updateOne(identity.id, { codeHash: null, codePurpose: null, codeExpiresAt: null, codeAttempts: 0, trust: 'verified', verifiedAt: now() });
     return true;
   };
 
