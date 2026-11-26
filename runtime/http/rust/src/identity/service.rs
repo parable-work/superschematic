@@ -180,11 +180,18 @@ impl IdentityPrincipal {
             .map(|role| json!({"id": role.id, "name": role.name, "permissions": role.permissions}))
             .collect();
         claims.insert("roles".to_owned(), Value::Array(roles));
-        Principal {
-            subject: self.id.clone(),
-            permissions: self.permissions.clone(),
-            claims,
+        // A user, and the key it called with, which the access log records
+        // (D114, D156).
+        let mut principal = Principal::new(self.id.clone(), self.permissions.clone())
+            .of_kind(crate::auth::PrincipalKind::User);
+        principal.claims = claims;
+        if !self.api_key_id.is_empty() {
+            principal = principal.with_credential(crate::auth::Credential {
+                kind: crate::auth::CredentialKind::ApiKey,
+                id: self.api_key_id.clone(),
+            });
         }
+        principal
     }
 
     /// The caller a [`Principal`] the identity runtime made carries, or

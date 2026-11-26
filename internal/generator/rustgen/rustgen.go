@@ -24,6 +24,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -351,6 +352,11 @@ type Options struct {
 
 // Generate generates Rust types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// A table feature of D152 to D159 the Rust types do not carry yet is
+	// refused, not dropped (D181).
+	if err := verify.RefuseRustTypes(schema); err != nil {
+		return nil, fmt.Errorf("rustgen: %w", err)
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}

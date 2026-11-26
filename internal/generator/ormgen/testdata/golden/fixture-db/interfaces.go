@@ -16,6 +16,8 @@ type ReadOnlyTenantRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantGetOptions) (*types.Tenant, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tenant, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tenant, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tenant, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TenantFields) ([]*types.Tenant, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantHistoryOptions) ([]types.HistoryRecord[*types.Tenant], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tenant, error)
 	FindOne(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) (*types.Tenant, error)
@@ -28,6 +30,8 @@ type TenantRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantGetOptions) (*types.Tenant, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tenant, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tenant, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tenant, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TenantFields) ([]*types.Tenant, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantHistoryOptions) ([]types.HistoryRecord[*types.Tenant], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tenant, error)
 	FindOne(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) (*types.Tenant, error)
@@ -51,6 +55,8 @@ type ReadOnlyTenantUserRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantUserGetOptions) (*types.TenantUser, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.TenantUser, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.TenantUser, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.TenantUser, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TenantUserFields) ([]*types.TenantUser, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.TenantUser, error)
 	ListAsOfByTenantID(ctx context.Context, tenantID types.IdentityUUID, ts time.Time, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
@@ -64,6 +70,8 @@ type TenantUserRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TenantUserGetOptions) (*types.TenantUser, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.TenantUser, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.TenantUser, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.TenantUser, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TenantUserFields) ([]*types.TenantUser, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.TenantUser, error)
 	ListAsOfByTenantID(ctx context.Context, tenantID types.IdentityUUID, ts time.Time, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
@@ -266,6 +274,14 @@ func (r *NoOpTenantRepository) GetVersion(_ context.Context, _ types.IdentityUUI
 	return nil, ErrNotFound
 }
 
+func (r *NoOpTenantRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tenant, error) {
+	return make([]*types.Tenant, len(keys)), nil
+}
+
+func (r *NoOpTenantRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ TenantFields) ([]*types.Tenant, error) {
+	return make([]*types.Tenant, len(keys)), nil
+}
+
 func (r *NoOpTenantRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *TenantHistoryOptions) ([]types.HistoryRecord[*types.Tenant], error) {
 	return []types.HistoryRecord[*types.Tenant]{}, nil
 }
@@ -366,6 +382,14 @@ func (r *NoOpTenantUserRepository) GetManyByIDs(_ context.Context, _ []types.Ide
 
 func (r *NoOpTenantUserRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.TenantUser, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpTenantUserRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.TenantUser, error) {
+	return make([]*types.TenantUser, len(keys)), nil
+}
+
+func (r *NoOpTenantUserRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ TenantUserFields) ([]*types.TenantUser, error) {
+	return make([]*types.TenantUser, len(keys)), nil
 }
 
 func (r *NoOpTenantUserRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error) {

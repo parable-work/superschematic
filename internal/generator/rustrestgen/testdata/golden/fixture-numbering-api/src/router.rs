@@ -58,14 +58,17 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("numberAssignNumber")
         .apply(post(handle_invoice_number_assign_number));
     router = router.route("/api/invoice/{id}/number/assign-number", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("numberAssignNumber")
         .apply(post(handle_ticket_number_assign_number));
     router = router.route("/api/ticket/{id}/number/assign-number", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("referenceAssignNumber")
         .apply(post(handle_ticket_reference_assign_number));
     router = router.route("/api/ticket/{id}/reference/assign-number", route);
     router
