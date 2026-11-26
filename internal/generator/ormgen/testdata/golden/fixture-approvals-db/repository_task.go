@@ -70,6 +70,11 @@ const (
 type TaskApprovalsSignOffParams struct {
 	// Note is why, for the others.
 	Note *string `json:"note,omitempty"`
+	// Read is the value of each field the gate pins (pinOn) as the signer read
+	// it, by field. Needed on a gate that pins fields; one that is not the
+	// field's value is vetoed stale before anything else is checked. A table's
+	// alone: an engine type refuses it.
+	Read json.RawMessage `json:"read,omitempty"`
 	// State is the gated state to sign off for.
 	State TaskApprovalsGate `json:"state"`
 	// Version is the row's version the signer read, the version a write through
@@ -83,9 +88,14 @@ type TaskApprovalsSignOffParams struct {
 type TaskApprovalsSignOffResult struct {
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
-	// Count is how many the gate needs.
-	Count int64   `json:"count"`
-	Note  *string `json:"note,omitempty"`
+	// Count is how many the gate needs: its count, or for a gate that reads its
+	// requirements from rows, the count of the first requirement the sign-off
+	// counts toward.
+	Count int64 `json:"count"`
+	// CountsToward is for a gate that reads its requirements from rows, the name
+	// of each requirement the sign-off counts toward now.
+	CountsToward []string `json:"countsToward,omitempty"`
+	Note         *string  `json:"note,omitempty"`
 	// SignedBy is every subject whose sign-off for the state is not yet
 	// consumed, in the order they signed.
 	SignedBy []string `json:"signedBy"`
@@ -105,6 +115,10 @@ type TaskApprovalsWithdrawSignOffParams struct {
 // TaskApprovalsWithdrawSignOffResult is what approvals's withdrawSignOff
 // returns.
 type TaskApprovalsWithdrawSignOffResult struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when it was signed, in epoch milliseconds.
 	At   int64   `json:"at"`
 	Note *string `json:"note,omitempty"`
@@ -135,6 +149,10 @@ type TaskApprovalsListSignOffsResult struct {
 // TaskApprovalsListSignOffsResultItemsItem types an item of
 // TaskApprovalsListSignOffsResultItems.
 type TaskApprovalsListSignOffsResultItemsItem struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
 	// ConsumedAt is when a change of the own fields, entering the state or a new
@@ -152,9 +170,11 @@ type TaskApprovalsListSignOffsResultItemsItem struct {
 // it takes, in a transaction.
 type TaskApprovalsOperations interface {
 	// SignOff signs off on the instance for a gated state, as the caller. Needs
-	// the gate's permission; refused for the instance's creator unless the gate
-	// allows it, while the instance is in the state, and for a caller whose
-	// sign-off for the state is not yet consumed.
+	// the permission of one of the gate's requirements, and is refused unless it
+	// counts toward one of them now: for the instance's creator unless the
+	// requirement allows it, for a caller the requirement does not count,
+	// excludes or whose proof falls short, while the instance is in the state,
+	// and for a caller whose sign-off for the state is not yet consumed.
 	SignOff(ctx context.Context, id types.IdentityUUID, params TaskApprovalsSignOffParams) (*TaskApprovalsSignOffResult, error)
 	// WithdrawSignOff withdraws the caller's sign-off for a gated state, one not
 	// yet consumed.

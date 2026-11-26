@@ -291,6 +291,55 @@
                   "type": "string"
                 },
                 {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "actingFor",
+                  "field": "actingFor",
+                  "column": "acting_for",
+                  "type": "string"
+                },
+                {
+                  "name": "actingForKind",
+                  "field": "actingForKind",
+                  "column": "acting_for_kind",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "field": "agent",
+                  "column": "agent",
+                  "type": "string"
+                },
+                {
+                  "name": "signedInAt",
+                  "field": "signedInAt",
+                  "column": "signed_in_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "userVerified",
+                  "field": "userVerified",
+                  "column": "user_verified",
+                  "type": "boolean"
+                },
+                {
+                  "name": "held",
+                  "field": "held",
+                  "column": "held",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "values",
+                  "field": "values",
+                  "column": "values",
+                  "type": "Generic.JSON"
+                },
+                {
                   "name": "note",
                   "field": "note",
                   "column": "note",
