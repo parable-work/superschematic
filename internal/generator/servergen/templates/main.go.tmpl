@@ -171,7 +171,7 @@ func run(logger *zap.Logger) error {
 {{- end }}
 {{- if .Idempotent }}
 		// Its @idempotent routes keep their keys in {{ .Database.Service }} (D140).
-		IdempotencyStore: idempotency.NewSQLStore({{ .Database.Var }}SQL, idempotency.Postgres, {{ .Package }}.IdempotencyTable),
+		IdempotencyStore: idempotency.NewSQLStore({{ .Database.Var }}SQL, idempotency.{{ if .Database.SQLite }}SQLite{{ else }}Postgres{{ end }}, {{ .Package }}.IdempotencyTable),
 {{- end }}
 		Logger:          {{ .Var }}Logger,
 		Implementations: {{ .Var }}Implementations,

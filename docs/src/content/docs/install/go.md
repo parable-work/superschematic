@@ -427,6 +427,22 @@ A stack's build fails on an implementation that declares no
 `NewManualRoutes` while its API declares a manual route, and says what to
 add.
 
+### On a SQLite file
+
+An API's `Deps.DB` is an `orm.DatabaseInterface`, the ORM of its
+database's first dialect (D116). When the database's DB service lists
+`sqlite` first, a stack's Go server and job open the database's SQLite
+file, which `stack dev` keeps under the environment's state directory and
+names as `<FIELD>_URL=sqlite:<path>`, with the HTTP runtime's
+`sqlitefile.Open`, and `Deps.DB` is the ORM's `SQLiteDatabase` over it.
+The identity store and the `@idempotent` keys run on the same file.
+Written against the interfaces, one implementation runs on either
+dialect: a transaction's `ExecContext` and `QueryContext` run raw SQL on
+SQLite, where `Exec` and `Query`, which answer pgx's types, are
+Postgres's ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)).
+Resolution refuses a Go worker on a SQLite file, which claims its queue
+on Postgres alone, and the build refuses an engine database there.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes

@@ -222,6 +222,12 @@ type ORMOutput struct {
 	// relative to the output directory; empty omits the directive. It is only
 	// written when Rules is set.
 	RulesReplacePath string
+
+	// SQLite is a database whose DB service lists the sqlite dialect
+	// (Options.SQLite): sqlite.go then holds the SQLite database, and each
+	// repository has a table on SQLite (Repository.SQLite) whose
+	// repository sqlite_<table>.go writes (D116).
+	SQLite bool
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -443,6 +449,12 @@ type Repository struct {
 	// claimed message and runs the project's handler in one transaction;
 	// "" for any other table.
 	EventQueue string
+
+	// SQLite is the table on SQLite, for a database whose DB service lists
+	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
+	// tables of the database by type, whose keys a relation's column holds.
+	SQLite        *SQLiteTable
+	sqliteTargets map[string]sqliteTarget
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -1263,6 +1275,23 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Projections:              projections,
 		Queries:                  queries,
 		Rules:                    rules,
+		SQLite:                   opts.SQLite,
+	}
+	if opts.SQLite {
+		// Each table's repository on SQLite (D116), whose relations name
+		// their targets' keys by the members of their rows, and read
+		// whether a target row holds a key.
+		targets := make(map[string]sqliteTarget, len(output.Repositories))
+		for _, repo := range output.Repositories {
+			targets[repo.TypeName] = sqliteTarget{member: repo.PrimaryKeyField, table: repo.TableName, quoted: repo.QuotedTableName, key: repo.QuotedPrimaryKey}
+		}
+		for i := range output.Repositories {
+			repo := &output.Repositories[i]
+			repo.sqliteTargets = targets
+			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return output, nil

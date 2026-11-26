@@ -1358,6 +1358,17 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
 		deps.Rules = apigen.DeclaresTableBehaviors(schema)
 		deps.Queues = len(schema.Queues()) > 0
+		// A Go API's Deps.DB is the ORM of its database's first dialect
+		// (D116): over a pool, or over the SQLite file.
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(db); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, nil, fmt.Errorf("generator: schema config for %s: %w", db, err)
+				}
+				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
+			}
+		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
