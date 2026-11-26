@@ -232,9 +232,9 @@ path for when the store is unavailable.
 - **A sqlite-first database has repositories too.** A TypeScript API on
   a DB service that lists `sqlite` first gets `Deps.orm` over its SQLite
   file under `stack dev` and over its D1 binding on Workers: use it rather
-  than SQL by hand. D1 has no interactive transaction, so
-  `orm.transaction(fn)` is refused there; write what must commit together
-  as one `deps.db.batch([...])`.
+  than SQL by hand. D1 has no interactive transaction, so there
+  `orm.transaction(fn)` commits each statement as it runs; write what must
+  commit together as one `deps.db.batch([...])`.
 - **Two rows that are one are merged, not rewritten by hand.** Put
   `implements Mergeable` on a table of things people type (labels,
   customers, tags) and call `orm.label.mergeInto({ from, into })`
