@@ -135,6 +135,53 @@ fn an_encrypted_column_holds_its_envelope() {
     let after = stored(&connection, "access_token", &hyphenated).expect("an envelope");
     assert_eq!(old.open(cell, &after).unwrap(), "access-sandbox-3");
 
+    // An upsert of many rows seals each insert under the key it gives the
+    // row, and sets the encrypted member of each row it finds by a second
+    // statement, sealed under that row's key; the same token again is
+    // left as it was (D89).
+    let sync = |token: &str| {
+        vec![
+            values(json!({"itemId": "item-1", "institution": "First Bank", "accessToken": token})),
+            values(json!({"itemId": "item-9", "institution": "Ninth Bank", "accessToken": "access-sandbox-9"})),
+        ]
+    };
+    let many = items
+        .upsert_many(&sync("access-sandbox-6"), &["itemId"], &["accessToken"], UpsertManyOptions::default())
+        .expect("upsert the items");
+    assert_eq!(many[0].status, UpsertStatus::Updated);
+    assert_eq!(many[0].row["id"], id);
+    assert_eq!(many[0].row["accessToken"], "access-sandbox-6");
+    assert_eq!(many[1].status, UpsertStatus::Inserted);
+    assert_eq!(many[1].row["accessToken"], "access-sandbox-9");
+    let six = stored(&connection, "access_token", &hyphenated).expect("an envelope");
+    assert_eq!(old.open(cell, &six).unwrap(), "access-sandbox-6");
+    assert_eq!(
+        items.get_one(&many[1].row["id"]).unwrap()["accessToken"],
+        "access-sandbox-9"
+    );
+    let again = items
+        .upsert_many(
+            &sync("access-sandbox-6"),
+            &["itemId"],
+            &["accessToken"],
+            UpsertManyOptions {
+                only_if_changed: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(again[0].status, UpsertStatus::Unchanged);
+    assert_eq!(again[1].status, UpsertStatus::Unchanged);
+    assert_eq!(stored(&connection, "access_token", &hyphenated).as_deref(), Some(six.as_str()));
+    items
+        .upsert_one(
+            &values(json!({"itemId": "item-1", "institution": "First Bank", "accessToken": "x"})),
+            &["itemId"],
+            &values(json!({"accessToken": "access-sandbox-3"})),
+            UpsertOptions::default(),
+        )
+        .unwrap();
+
     // A rotation puts the new key first and keeps the old one: the row
     // opens, and a write seals under the new key.
     let rotated = FieldKeyring::parse(&format!("{NEW},{OLD}")).expect("the keyring");

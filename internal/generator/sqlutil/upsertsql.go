@@ -17,6 +17,17 @@ const UpsertInserted = "_inserted"
 // its protocol counts them in 16 bits.
 const MaxParameters = 65535
 
+// SQLiteMaxParameters is the most parameters SQLite binds in one
+// statement, its SQLITE_MAX_VARIABLE_NUMBER since 3.32, which rusqlite's
+// bundled SQLite, modernc.org/sqlite and bun:sqlite keep. D1MaxParameters
+// is D1's, which a Worker's statement on D1 binds at most (Cloudflare's D1
+// limits). An upsert of many rows on SQLite batches its rows by them
+// (TableModel.BatchRowsOf).
+const (
+	SQLiteMaxParameters = 32766
+	D1MaxParameters     = 100
+)
+
 // UpsertStamps is the most parameters an upsert's update stamps beside its
 // rows: updatedAt and updatedBy.
 const UpsertStamps = 2
@@ -74,9 +85,16 @@ func (t *TableModel) InsertColumns() []ColumnModel {
 // in each row and UpsertStamps beside them. UpsertMany writes a larger
 // batch in statements of this many rows, in one transaction.
 func (t *TableModel) BatchRows() int {
+	return t.BatchRowsOf(MaxParameters)
+}
+
+// BatchRowsOf is BatchRows on a database that binds at most limit
+// parameters a statement: MaxParameters on Postgres, SQLiteMaxParameters
+// on a SQLite file and D1MaxParameters on D1. It is one or more.
+func (t *TableModel) BatchRowsOf(limit int) int {
 	columns := len(t.InsertColumns())
 	if columns == 0 {
-		return MaxParameters
+		return limit
 	}
-	return (MaxParameters - UpsertStamps) / columns
+	return max(1, (limit-UpsertStamps)/columns)
 }
