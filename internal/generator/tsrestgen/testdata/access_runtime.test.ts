@@ -355,10 +355,12 @@ describe('the access of fixture-access-api', () => {
     const ACCESS_ADMIN = `${ADMIN_ID}:access.admin`;
     expect(await status('GET', '/api/access/grants', OWNER)).toBe(403);
     expect(await status('GET', '/api/access/log', OWNER)).toBe(403);
-    // Every grant, the ended and the revoked among them, without its
-    // token's hash, which GrantView leaves out.
+    // Every grant the table holds, the ended and the revoked among them,
+    // without its token's hash, which GrantView leaves out.
     const grants = await items('/api/access/grants', ACCESS_ADMIN);
-    expect(grants.map(grant => grant.holder).sort()).toEqual([uuid(0xc1), uuid(0xc2), uuid(0xc3), uuid(0xc4)].sort());
+    const stored = (await orm.asSystem().grant.findMany({}, { count: false, limit: 1000 })).rows;
+    expect(grants.map(grant => grant.id).sort()).toEqual(stored.map(grant => grant.id).sort());
+    expect(grants.map(grant => grant.holder)).toEqual(expect.arrayContaining([uuid(0xc1), uuid(0xc2), uuid(0xc3), uuid(0xc4)]));
     expect(grants.filter(grant => 'tokenHash' in grant)).toEqual([]);
     expect(grants.find(grant => grant.holder === uuid(0xc2))).toMatchObject({ holderKind: 'party', role: 'tenant', targetType: 'Contract', targetId: contractA.id });
     expect(grants.find(grant => grant.holder === uuid(0xc2)).revokedAt).not.toBeNull();
