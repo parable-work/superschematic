@@ -1208,6 +1208,21 @@ Extraction and previews are a file processor's (D159), which is not built
 yet: `complete` asks a file's extraction and `download` its preview, and
 `pending` and `processed` are what a processor reads and records.
 
+In Rust, the generated repositories open the same operations,
+`references()` and `attachments()`, over the same tables and statements,
+on Postgres (D185). A write that takes a lock, `add`, `begin`, `file` and
+`release`, runs in the caller's transaction, and a refusal is the
+`Error::Refused` of its code, with status 422:
+
+```rust
+let mut client = pool.get().await?;
+let tx = client.transaction().await?;
+let orm = Repositories::new(&tx)?.acting(Some(user)).with_access(AccessCaller::of(Some(&principal)));
+let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None).await?;
+let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).await?;
+tx.commit().await?;
+```
+
 ## State machines
 
 An enum column's `CHECK` says which values the column holds. It does not
