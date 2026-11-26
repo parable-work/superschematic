@@ -136,6 +136,12 @@ func planGraphs(output *APIOutput, endpoints []EndpointInfo) (*GraphsInfo, map[*
 	if output.IsPublic && output.ORMModule != output.Deps.ORMModule {
 		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, and its Config.DB is the ORM of %s, its auth schema: the Go server reads a graph's roots through the ORM of the graph's database, so serve the graph from an API whose auth schema it is (D138)", output.SchemaName, dbName, output.UpstreamSchema)
 	}
+	// The graph's facade reads and writes the graph's tables with no caller,
+	// and graphReading reads as the system for a caller whose subject is no
+	// UUID, so neither keeps to an audience or a grant's reach (D180).
+	if output.Deps.AccessHeld {
+		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, whose rows keep to an audience or a grant's reach (@audience, @accessGrants), and the Go server's graph operations do not keep to them yet: the graph's facade reads the graph's tables with no caller, so keep the graph in a database that holds no per-record access (D138, D180)", output.SchemaName, dbName)
+	}
 	alias := output.Deps.DatabaseTypesAlias
 	if alias == "" || output.Deps.DatabaseTypes == "" {
 		return nil, nil, fmt.Errorf("apigen: %s serves the operations of a version graph of %s, and its Deps name no Go types module of it (D138)", output.SchemaName, dbName)

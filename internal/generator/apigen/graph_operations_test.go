@@ -143,6 +143,19 @@ func TestOpenAPIGraphOperations(t *testing.T) {
 	}
 }
 
+// TestGraphOperationsRefusedOverHeldRows: a Go server's graph operations
+// over a database whose rows keep to an audience or a grant's reach
+// (D156, D180) are refused, since the graph's facade reads the graph's
+// tables with no caller (D138).
+func TestGraphOperationsRefusedOverHeldRows(t *testing.T) {
+	output, _ := generateGraphAPI(t)
+	output.Deps.Access, output.Deps.AccessHeld = true, true
+	_, err := apigen.ImplementedOutput(output)
+	if err == nil || !strings.Contains(err.Error(), "apigen: fixture-graph-api serves the operations of a version graph of fixture-version-graph-db, whose rows keep to an audience or a grant's reach (@audience, @accessGrants), and the Go server's graph operations do not keep to them yet") {
+		t.Fatalf("ImplementedOutput = %v, want the graph operations refused over held rows", err)
+	}
+}
+
 // TestGraphOperationsOnAGoServer: the Go server serves the graph
 // operations (D138), so the implementation's interface has getRecipe
 // alone, and graphs.go serves each operation of the Recipe graph through
