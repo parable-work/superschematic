@@ -104,6 +104,17 @@ type RuntimeProvider struct {
 	// relative to the service's directory, in slash form.
 	Path string `json:"path"`
 
+	// Module is the Go module the directory holds, as its go.mod names it
+	// (D184): the module a Go server imports, whose root package exports
+	// Definition() (runtime/http/go/providers). Empty for a provider of no
+	// Go module, which a Go server cannot link.
+	Module string `json:"module,omitempty"`
+
+	// Dir is the directory, absolute, the loader read the provider from,
+	// which a Go server's go.mod replaces Module with. It is the loader's
+	// and is not written.
+	Dir string `json:"-"`
+
 	// Operations are the operations the provider implements: every one its
 	// interface requires, and the optional ones it has. The manifest may
 	// leave out the required ones.

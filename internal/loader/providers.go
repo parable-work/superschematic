@@ -47,11 +47,14 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 	if cfg != nil && len(cfg.Providers) > 0 {
 		names := map[string]string{}
 		for _, dir := range cfg.Providers {
-			p, err := ReadRuntimeProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
+			p, err := readProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
 			if err != nil {
 				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
 			}
 			p.Path = dir
+			if abs, err := filepath.Abs(filepath.Join(servicePath, filepath.FromSlash(dir))); err == nil {
+				p.Dir = abs
+			}
 			if other, dup := names[p.Name]; dup {
 				return fmt.Errorf("%s: providers %s and %s are both named %s; an environment names a provider by its name, so each is named once (D159)", schema.Name, other, dir, p.Name)
 			}
