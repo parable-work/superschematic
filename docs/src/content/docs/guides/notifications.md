@@ -9,7 +9,7 @@ A record changes, and someone should hear of it: an assigned ticket, a
 duty missed, a file that went away. The notifier is the core's answer. A
 table declares its events. Routes, stored as rows, say who hears of each.
 Each recipient's preference rows say how. Channel adapters
-([runtime providers](../runtime-providers/)) send, and a reply runs as the
+([runtime providers](/superschematic/guides/runtime-providers/)) send, and a reply runs as the
 person who sent it.
 
 | Built | Not built yet |
@@ -130,7 +130,7 @@ await orm.asSystem().noticeRoute.createOne({
 | `{ principal: id }` | one user |
 | `{ role: "oncall" }` | the users holding the role |
 | `{ party: { table, key } }` | a party row, through its grants |
-| `{ agent: name }` | an agent (D158): the route puts a run request about the record on the dispatcher's queue, in place of a notice ([agent runs](../agent-runs/)) |
+| `{ agent: name }` | an agent (D158): the route puts a run request about the record on the dispatcher's queue, in place of a notice ([agent runs](/superschematic/guides/agent-runs/)) |
 
 Expose the route table through table operations behind a permission, so
 editing routes is one.
@@ -173,7 +173,7 @@ A relay's `@webhook` route hands its request to the notifier, or an
 inbound pipeline calls `reply` with the sender normalised. An app whose
 senders include parties hands it to the inbound path instead, which gives
 a user's reply to the notifier
-([outside parties and inbound messages](../parties/)):
+([outside parties and inbound messages](/superschematic/guides/parties/)):
 
 ```ts
 app.post("/webhooks/sms/inbound", async c =>

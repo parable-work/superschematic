@@ -8,9 +8,9 @@ sidebar:
 Not everyone an app deals with signs in. A contractor texts a photo of a
 finished job; a supplier answers an email. A party is a row of an app's
 own table that is also a principal: it acts only through the grants it
-holds ([per-record access](../api-routes/#per-record-access)), and it is
+holds ([per-record access](/superschematic/guides/api-routes/#per-record-access)), and it is
 recognised by the channel identities that resolve to it
-([events and notifications](../notifications/)). Every inbound message
+([events and notifications](/superschematic/guides/notifications/)). Every inbound message
 takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
