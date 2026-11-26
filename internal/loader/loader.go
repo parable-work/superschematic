@@ -274,6 +274,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				verified, err = o.runVerify(schema, vin)
 				return err
 			})
+			if err == nil {
+				err = loadProviders(servicePath, verified, cfg)
+			}
 			return verified, cfg, err
 		}
 	} else {
@@ -383,6 +386,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		verified, err = o.runVerify(schema, vin)
 		return err
 	})
+	if err == nil {
+		err = loadProviders(servicePath, verified, cfg)
+	}
 	return verified, cfg, err
 }
 

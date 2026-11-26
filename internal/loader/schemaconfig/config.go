@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -99,6 +100,12 @@ type SchemaConfig struct {
 	// API config only, and the API uses the store whether or not
 	// MemoryStores lists it.
 	RateLimitStore *ServiceDependency `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
+
+	// Providers lists the runtime provider packages an API may use (D159):
+	// each a directory relative to the service's directory, in slash form,
+	// whose package.json declares the provider. The loader reads each into
+	// ir.Schema.Providers. It is valid on an API config only.
+	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
 
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
@@ -237,6 +244,9 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	if err := validateMemoryStores(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateProviders(cfg); err != nil {
+		return nil, err
+	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
 	}
@@ -348,6 +358,26 @@ func validateMemoryStores(cfg *SchemaConfig) error {
 		case store.Kind != ir.SchemaKindMemoryStore:
 			return fmt.Errorf("schema config for %s names %s its rateLimitStore, a handle of kind %q; rateLimitStore names a %s service", cfg.Name, store.Name, store.Kind, ir.SchemaKindMemoryStore)
 		}
+	}
+	return nil
+}
+
+// validateProviders checks providers (D159): an API config's list of
+// runtime provider package directories, each a clean relative path in
+// slash form, listed once.
+func validateProviders(cfg *SchemaConfig) error {
+	if len(cfg.Providers) > 0 && cfg.Kind != ir.SchemaKindAPI {
+		return fmt.Errorf("schema config for %s sets providers, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	}
+	seen := make(map[string]bool, len(cfg.Providers))
+	for _, dir := range cfg.Providers {
+		switch {
+		case dir == "" || path.IsAbs(dir) || strings.Contains(dir, `\`) || path.Clean(dir) != dir:
+			return fmt.Errorf("schema config for %s lists provider %q; a provider is its package's directory, a clean relative path in slash form from the service's directory", cfg.Name, dir)
+		case seen[dir]:
+			return fmt.Errorf("schema config for %s lists provider %s more than once", cfg.Name, dir)
+		}
+		seen[dir] = true
 	}
 	return nil
 }

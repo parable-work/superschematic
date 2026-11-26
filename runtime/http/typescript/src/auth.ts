@@ -27,8 +27,9 @@ export interface Principal {
   readonly claims?: Readonly<Record<string, unknown>>;
   /**
    * What the principal is (D156): a user, signed in by a session or an API
-   * key; a party, a row of an app table that holds a grant; or an agent
-   * run. Absent reads as user, every authenticator's before D156.
+   * key; a party, a row of an app table that holds a grant; an agent run;
+   * or a runtime provider calling as itself (D159). Absent reads as user,
+   * every authenticator's before D156.
    */
   readonly kind?: PrincipalKind;
   /**
@@ -49,8 +50,12 @@ export interface Principal {
   readonly credential?: { readonly kind: 'apiKey' | 'grant'; readonly id: string };
 }
 
-/** The kinds of principal (D156). */
-export type PrincipalKind = 'user' | 'party' | 'agent';
+/**
+ * The kinds of principal (D156): a user, a party, an agent run, or a
+ * runtime provider (D159), which acts as itself with the narrow role its
+ * package declares (extensionPrincipal in ./providers).
+ */
+export type PrincipalKind = 'user' | 'party' | 'agent' | 'extension';
 
 /** Whom a principal acts for (D156): its kind and its subject. */
 export interface ActingFor {

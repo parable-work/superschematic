@@ -54,11 +54,18 @@ type (
 	RateLimitKey = apigen.RateLimitKey
 	// PackageDir is an extension generator's output directory that holds
 	// one package per service, which build-all's dependency graph reads.
-	PackageDir   = registry.PackageDir
-	ToolSet      = apigen.ToolSet
-	Tool         = apigen.Tool
-	ToolKeys     = apigen.ToolKeys
-	ToolKeyValue = apigen.ToolKeyValue
+	PackageDir = registry.PackageDir
+	// RuntimeFeature is a feature that needs a runtime provider (D159):
+	// RegisterRuntimeFeature registers it with the interface it needs, and
+	// the stack refuses an environment that runs an API using it with no
+	// provider of that interface. RuntimeFeatureInput is what its Uses
+	// reads.
+	RuntimeFeature      = registry.RuntimeFeature
+	RuntimeFeatureInput = registry.RuntimeFeatureInput
+	ToolSet             = apigen.ToolSet
+	Tool                = apigen.Tool
+	ToolKeys            = apigen.ToolKeys
+	ToolKeyValue        = apigen.ToolKeyValue
 	// ToolInvocationPolicy is the key, values and default of a visible
 	// MCP tool's invocation policy; RegisterToolInvocationPolicy replaces
 	// the core's.

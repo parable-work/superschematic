@@ -1,6 +1,6 @@
 // The Workers check (D64, section 18.5 of docs/stack-model.md): bundles each
 // entry of this package a Worker imports, ., ./hono, ./openapi, ./mcp,
-// ./workers, ./d1, ./r2 and ./workers-telemetry, as a Worker's bundle.ts
+// ./workers, ./d1, ./r2, ./workers-telemetry and ./providers, as a Worker's bundle.ts
 // bundles it, with
 // `bun build --target=browser --conditions=workerd`, every .wasm module and
 // node:async_hooks kept external, and fails on what workerd cannot run
@@ -22,7 +22,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ENTRIES = ['index', 'hono', 'openapi', 'mcp', 'workers', 'd1', 'r2', 'workers-telemetry'];
+const ENTRIES = ['index', 'hono', 'openapi', 'mcp', 'workers', 'd1', 'r2', 'workers-telemetry', 'providers/index'];
 /** The one node: module a Worker imports, under nodejs_als. */
 const ASYNC_HOOKS = 'node:async_hooks';
 const SUPERSCALAR_WASM = 'superscalar_wasm_bg.wasm';

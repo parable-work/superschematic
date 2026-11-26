@@ -868,6 +868,7 @@ export interface TypeDef {
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
+  providerSlots?: { [key: string]: string };
   query?: QueryDef;
   queue?: QueueDef;
   rawHeritage?: RawHeritage;

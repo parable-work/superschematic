@@ -31,7 +31,10 @@ import (
 //   - an API's derivers, each a deployable of the stack, and a DB's
 //     engine types that compose Derived, which a deriver fills (D74);
 //   - an API's apps, each a deployable of the stack, with the extensions
-//     its build needs (D78).
+//     its build needs (D78);
+//   - an API's provider slots and the runtime provider packages its
+//     config lists (D159). The runtime features it uses need the registry
+//     and its databases, and RuntimeFeaturesOf reads them.
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -57,6 +60,10 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 			return stack.Service{}, err
 		}
 		svc.Config = config
+		if svc.ProviderSlots, err = schema.ProviderSlotsOf(); err != nil {
+			return stack.Service{}, err
+		}
+		svc.Providers = schema.Providers
 		svc.Operations = stack.OperationsOf(schema)
 		for _, job := range schema.Jobs {
 			if job != nil {
