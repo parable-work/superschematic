@@ -85,6 +85,7 @@ fn refusal(err: &Error) -> Value {
         Error::Encryption(_) => json!("encryption"),
         Error::Definition(message) => json!({"definition": message}),
         Error::Database(message) => json!({"database": message}),
+        Error::AccessRefused(_) => json!("access refused"),
     }
 }
 
