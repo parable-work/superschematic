@@ -34,6 +34,7 @@ type NamespaceInfo struct {
 	HasFilteredEndpoints bool           // Whether an endpoint takes a filter (FilterBy, D106); the namespace then imports withFilter
 	HasFileUpload        bool           // Whether namespace has a file upload endpoint, whose methods name RequestOptions
 	HasFileDownload      bool           // Whether namespace has a FileDownload endpoint (D81), whose methods resolve to DownloadedFile
+	HasBinaryStream      bool           // Whether namespace has an @httpBinaryStream endpoint (D167), whose methods resolve to BinaryStreamResponse
 	ScopeParamName       string         // Name of the hoisted scope parameter if IsScopedNS
 	Imports              []string       // Unique list of types to import from types package
 	// HasMapArgs gates the validateMapArgument helper, for a map argument
@@ -138,6 +139,10 @@ type EndpointInfo struct {
 	// every other: the method resolves to a DownloadedFile, the bytes and
 	// the filename the server offered.
 	FileDownload *ir.FileDownloadDef
+	// BinaryStream is the endpoint's @httpBinaryStream (D167), nil for
+	// every other: the method resolves to a BinaryStreamResponse, the
+	// success body unread, not to OutputType.
+	BinaryStream *ir.HTTPBinaryStreamDef
 	// Idempotent marks an @idempotent operation (D140): the method sends
 	// an Idempotency-Key, its options' idempotencyKey or a UUID it makes.
 	Idempotent bool
@@ -464,6 +469,9 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if sdkEndpoint.FileDownload != nil {
 			namespaceMap[ns].HasFileDownload = true
 		}
+		if sdkEndpoint.BinaryStream != nil {
+			namespaceMap[ns].HasBinaryStream = true
+		}
 		if sdkEndpoint.Page != nil {
 			namespaceMap[ns].HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
@@ -589,7 +597,8 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 
 	httpMethod := ep.Method
 
-	hasOutputParser := ep.OutputType != "" &&
+	// A stream (D167) is returned unread: there is no value to parse.
+	hasOutputParser := ep.OutputType != "" && ep.BinaryStream == nil &&
 		!codegen.IsLanguagePrimitive(ep.OutputType) &&
 		parseableTypes[ep.OutputType]
 
@@ -635,6 +644,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
 		FileDownload:     ep.FileDownload,
+		BinaryStream:     ep.BinaryStream,
 		Idempotent:       ep.Idempotent != nil,
 		HasOutputParser:  hasOutputParser,
 
@@ -782,6 +792,9 @@ func (e EndpointInfo) OutputArrayDepth() int {
 func (e EndpointInfo) TSOutputType() string {
 	if e.FileDownload != nil {
 		return "DownloadedFile"
+	}
+	if e.BinaryStream != nil {
+		return "BinaryStreamResponse"
 	}
 	if e.Page != nil {
 		pageType := e.PageType

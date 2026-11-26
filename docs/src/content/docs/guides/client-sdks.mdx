@@ -264,6 +264,7 @@ cancellation and closing the stream bound.
 
 | Language | The method returns | Read, then close |
 | --- | --- | --- |
+| TypeScript | `Promise<BinaryStreamResponse>`: `{ contentType, body, status, headers }`, `body` a `ReadableStream<Uint8Array>` and `headers` keyed in lower case | read `stream.body` to its end, or cancel it; `stream.headers["x-export-id"]`; another media type is a `NetworkError` |
 | Go | `(*runtime.BinaryStream, error)`: `ContentType`, `Header http.Header`, `Body io.ReadCloser` | `defer stream.Close()`, read `stream.Body`, `stream.Header.Get("X-Export-Id")`; another media type is `ErrStreamContentType` |
 
 ## Errors
