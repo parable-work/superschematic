@@ -229,6 +229,16 @@ impl<'a> Plan<'a> {
         self.conditions_for(table, filter, args, false)
     }
 
+    /// The caller's access to `table`'s rows alone, of a read: what a read
+    /// across tables holds each table's rows to (D188).
+    pub(crate) fn read_conditions(
+        &self,
+        table: &Table,
+        args: &mut Vec<Bound>,
+    ) -> Result<Vec<String>, Error> {
+        self.access_conditions(table, args, false)
+    }
+
     /// The filter's conditions, then the caller's access, of a read, or
     /// with `write` of a write.
     fn conditions_for(
