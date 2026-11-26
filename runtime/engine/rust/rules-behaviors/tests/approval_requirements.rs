@@ -36,7 +36,10 @@ fn flow() -> Value {
 // the rules whose requirements it reads, and who created it and for whom.
 fn change(gate: Value) -> TypeSpec {
     TypeSpec::new("Change")
-        .with(UseSpec::on_type("Approvals", json!({ "gates": { "ready": gate } })))
+        .with(UseSpec::on_type(
+            "Approvals",
+            json!({ "gates": { "ready": gate } }),
+        ))
         .with(UseSpec::on_field("status", "Workflow", flow()))
         .with_field(FieldSpec::new("title", "string"))
         .with_field(FieldSpec::new("head", "string"))
@@ -53,8 +56,12 @@ fn change(gate: Value) -> TypeSpec {
 
 // The type whose rows are a change's requirements: each points at a rule.
 fn requirement_type() -> TypeSpec {
-    let mut spec = TypeSpec::new("Requirement")
-        .with_field(FieldSpec::relation("ruleId", "Identity.UUID", "rule", "Rule"));
+    let mut spec = TypeSpec::new("Requirement").with_field(FieldSpec::relation(
+        "ruleId",
+        "Identity.UUID",
+        "rule",
+        "Rule",
+    ));
     for name in [
         "name",
         "count",
@@ -135,11 +142,23 @@ fn sign(host: &mut Host, who: &Caller, params: Value) -> Outcome {
 }
 
 fn ready(host: &mut Host) -> Outcome {
-    host.invoke(&caller("alice", &[]), "c1", "status", "transition", json!({"to": "ready"}))
+    host.invoke(
+        &caller("alice", &[]),
+        "c1",
+        "status",
+        "transition",
+        json!({"to": "ready"}),
+    )
 }
 
 fn reopen(host: &mut Host) {
-    changed(host.invoke(&caller("alice", &[]), "c1", "status", "transition", json!({"to": "open"})));
+    changed(host.invoke(
+        &caller("alice", &[]),
+        "c1",
+        "status",
+        "transition",
+        json!({"to": "open"}),
+    ));
 }
 
 fn set(host: &mut Host, patch: Value) {
@@ -167,11 +186,22 @@ fn a_requirement_counts_each_caller_as_whom_it_stands_for() {
         json!({"count": 2, "permission": "changes.approve", "callers": ["acting-for-person", "agent"], "resetOn": []}),
         json!({}),
     );
-    changed(sign(&mut host, &run("r1", "reviewer", Some("ann")), json!({"state": "ready"})));
-    changed(sign(&mut host, &run("r2", "reviewer", Some("ann")), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &run("r1", "reviewer", Some("ann")),
+        json!({"state": "ready"}),
+    ));
+    changed(sign(
+        &mut host,
+        &run("r2", "reviewer", Some("ann")),
+        json!({"state": "ready"}),
+    ));
     assert_eq!(
         veto_of(ready(&mut host)),
-        ("approvals_missing".to_owned(), json!({"state": "ready", "required": 2, "count": 1}))
+        (
+            "approvals_missing".to_owned(),
+            json!({"state": "ready", "required": 2, "count": 1})
+        )
     );
     assert_eq!(
         veto_of(sign(&mut host, &ben(), json!({"state": "ready"}))),
@@ -181,7 +211,11 @@ fn a_requirement_counts_each_caller_as_whom_it_stands_for() {
         )
     );
     assert_eq!(sign_off_values(&host).len(), 2);
-    changed(sign(&mut host, &run("r3", "linter", None), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &run("r3", "linter", None),
+        json!({"state": "ready"}),
+    ));
     changed(ready(&mut host));
 }
 
@@ -192,10 +226,22 @@ fn a_requirement_of_agents_counts_each_agent_once() {
         json!({"count": 2, "permission": "changes.approve", "callers": ["agent"], "excludeCreator": false}),
         json!({}),
     );
-    changed(sign(&mut host, &run("r1", "reviewer", Some("ann")), json!({"state": "ready"})));
-    changed(sign(&mut host, &run("r2", "reviewer", None), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &run("r1", "reviewer", Some("ann")),
+        json!({"state": "ready"}),
+    ));
+    changed(sign(
+        &mut host,
+        &run("r2", "reviewer", None),
+        json!({"state": "ready"}),
+    ));
     assert_eq!(veto_of(ready(&mut host)).1["count"], 1);
-    changed(sign(&mut host, &run("r3", "linter", None), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &run("r3", "linter", None),
+        json!({"state": "ready"}),
+    ));
     changed(ready(&mut host));
 }
 
@@ -233,10 +279,19 @@ fn a_requirement_asks_for_user_verification_or_a_recent_sign_in() {
         })
     };
     assert_eq!(
-        veto_of(sign(&mut host, &signed_in(START - 120_000), json!({"state": "ready"}))).0,
+        veto_of(sign(
+            &mut host,
+            &signed_in(START - 120_000),
+            json!({"state": "ready"})
+        ))
+        .0,
         "not_counted"
     );
-    changed(sign(&mut host, &signed_in(START - 30_000), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &signed_in(START - 30_000),
+        json!({"state": "ready"}),
+    ));
     assert_eq!(sign_off_values(&host)[0]["signedInAt"], START - 30_000);
     changed(ready(&mut host));
 }
@@ -255,7 +310,12 @@ fn exclusions_match_the_subject_the_person_and_the_agent() {
     );
     let reason = |outcome: Outcome| veto_of(outcome).1["requirements"][0]["reason"].clone();
     assert_eq!(
-        veto_of(sign(&mut host, &run("r0", "coder", Some("dana")), json!({"state": "ready"}))).0,
+        veto_of(sign(
+            &mut host,
+            &run("r0", "coder", Some("dana")),
+            json!({"state": "ready"})
+        ))
+        .0,
         "creator_cannot_sign"
     );
     let dana = caller("dana", &["changes.approve"]);
@@ -264,7 +324,11 @@ fn exclusions_match_the_subject_the_person_and_the_agent() {
         "it excludes the person the creator acted for"
     );
     assert_eq!(
-        reason(sign(&mut host, &run("r1", "helper", Some("dana")), json!({"state": "ready"}))),
+        reason(sign(
+            &mut host,
+            &run("r1", "helper", Some("dana")),
+            json!({"state": "ready"})
+        )),
         "it excludes the person the creator acted for"
     );
     assert_eq!(
@@ -272,7 +336,11 @@ fn exclusions_match_the_subject_the_person_and_the_agent() {
         "a field it excludes by lists the caller"
     );
     assert_eq!(
-        reason(sign(&mut host, &run("r2", "coder", Some("ann")), json!({"state": "ready"}))),
+        reason(sign(
+            &mut host,
+            &run("r2", "coder", Some("ann")),
+            json!({"state": "ready"})
+        )),
         "a field it excludes by lists the caller"
     );
     changed(sign(&mut host, &ann(), json!({"state": "ready"})));
@@ -305,7 +373,11 @@ fn a_requirement_reads_each_signers_permission_again() {
         json!({"count": 1, "permission": "changes.approve", "callers": ["acting-for-person"], "recheckPermission": true, "excludeCreator": false}),
         json!({}),
     );
-    changed(sign(&mut host, &run("r1", "reviewer", Some("ann")), json!({"state": "ready"})));
+    changed(sign(
+        &mut host,
+        &run("r1", "reviewer", Some("ann")),
+        json!({"state": "ready"}),
+    ));
     assert_eq!(veto_of(ready(&mut host)).1["count"], 0);
     host.memory
         .permissions
@@ -324,9 +396,7 @@ fn a_requirement_reads_each_signers_permission_again() {
 /// negated or not, so a fact not yet written never exempts.
 #[test]
 fn conditions_decide_whether_a_requirement_applies() {
-    let lead = |when: Value| {
-        json!({"count": 1, "permission": "changes.lead", "excludeCreator": false, "resetOn": [], "when": when})
-    };
+    let lead = |when: Value| json!({"count": 1, "permission": "changes.lead", "excludeCreator": false, "resetOn": [], "when": when});
     // contains: the lead's flag.
     let mut host = hosting(
         lead(json!([{"field": "flags", "test": "contains", "values": ["needs-lead"]}])),
@@ -341,7 +411,9 @@ fn conditions_decide_whether_a_requirement_applies() {
 
     // every-matches, negated: a change of tests alone needs no lead.
     let mut host = hosting(
-        lead(json!([{"field": "paths", "test": "every-matches", "values": ["**/*_test.go", "testdata/**"], "negate": true}])),
+        lead(
+            json!([{"field": "paths", "test": "every-matches", "values": ["**/*_test.go", "testdata/**"], "negate": true}]),
+        ),
         json!({"paths": ["pkg/a_test.go", "testdata/golden/x.json"]}),
     );
     changed(ready(&mut host));
@@ -386,12 +458,15 @@ fn define_refuses_what_a_gate_cannot_hold() {
         refused_rule(json!({"count": 1, "resetOn": [], "requirementsFrom": rows})),
         "gate \"ready\" reads its requirements from Requirement's rows, so it names no count: each row holds its own"
     );
-    assert!(refused_rule(json!({"requirementsFrom": rows}))
-        .starts_with("gate \"ready\" reads its requirements from Requirement's rows and names no resetOn"));
+    assert!(refused_rule(json!({"requirementsFrom": rows})).starts_with(
+        "gate \"ready\" reads its requirements from Requirement's rows and names no resetOn"
+    ));
     assert!(refused_rule(json!({"resetOn": [], "requirementsFrom": {"schema": "Requirement", "link": "rule", "in": "ruleList"}}))
         .starts_with("gate \"ready\": requirementsFrom names in \"ruleList\", which is not a field of Change"));
-    assert!(refused_rule(json!({"resetOn": [], "pinOn": ["sha"], "requirementsFrom": rows}))
-        .starts_with("gate \"ready\": pinOn names \"sha\", which is not a field of Change"));
+    assert!(
+        refused_rule(json!({"resetOn": [], "pinOn": ["sha"], "requirementsFrom": rows}))
+            .starts_with("gate \"ready\": pinOn names \"sha\", which is not a field of Change")
+    );
     let gate = |extra: Value| {
         let mut gate = json!({"count": 1, "permission": "p", "excludeCreator": false});
         for (key, value) in extra.as_object().expect("members") {
@@ -399,14 +474,23 @@ fn define_refuses_what_a_gate_cannot_hold() {
         }
         gate
     };
-    assert!(refused_rule(gate(json!({"when": [{"field": "size", "test": "at-most", "values": ["1"]}]})))
-        .starts_with("gate \"ready\": when condition 0 names \"size\", which is not a field of Change"));
+    assert!(refused_rule(gate(
+        json!({"when": [{"field": "size", "test": "at-most", "values": ["1"]}]})
+    ))
+    .starts_with(
+        "gate \"ready\": when condition 0 names \"size\", which is not a field of Change"
+    ));
     assert_eq!(
-        refused_rule(gate(json!({"when": [{"field": "lines", "test": "at-most", "values": ["many"]}]}))),
+        refused_rule(gate(
+            json!({"when": [{"field": "lines", "test": "at-most", "values": ["many"]}]})
+        )),
         "gate \"ready\": when condition 0: at-most takes one number"
     );
-    assert!(refused_rule(gate(json!({"excludeSubjectsIn": ["reviewers"]})))
-        .starts_with("gate \"ready\": excludeSubjectsIn names \"reviewers\", which is not a field of Change"));
+    assert!(
+        refused_rule(gate(json!({"excludeSubjectsIn": ["reviewers"]}))).starts_with(
+            "gate \"ready\": excludeSubjectsIn names \"reviewers\", which is not a field of Change"
+        )
+    );
     assert_eq!(
         refused_rule(gate(json!({"proof": "recent-sign-in"}))),
         "gate \"ready\": proof recent-sign-in needs proofWithinMs, how recent a sign-in counts"
@@ -434,7 +518,11 @@ fn define_refuses_what_a_gate_cannot_hold() {
         ]
     );
     // A gate that reads rows needs no count or permission.
-    assert!(define(&core(), &change(json!({"resetOn": [], "pinOn": ["head"], "requirementsFrom": rows}))).is_ok());
+    assert!(define(
+        &core(),
+        &change(json!({"resetOn": [], "pinOn": ["head"], "requirementsFrom": rows}))
+    )
+    .is_ok());
 }
 
 // ---- requirements from rows ----
@@ -485,9 +573,18 @@ fn a_gate_reads_its_requirements_from_rows() {
         result(sign(&mut host, &ann(), read_head("h1")))["countsToward"],
         json!(["review", "lead"])
     );
-    assert_eq!(sign_off_values(&host)[1]["held"], json!(["changes.approve", "changes.lead"]));
-    assert_eq!(sign_off_values(&host)[0]["held"], json!(["changes.approve"]));
-    assert_eq!(sign_off_values(&host)[1]["values"], json!({"head": "h1", "patch": "p1"}));
+    assert_eq!(
+        sign_off_values(&host)[1]["held"],
+        json!(["changes.approve", "changes.lead"])
+    );
+    assert_eq!(
+        sign_off_values(&host)[0]["held"],
+        json!(["changes.approve"])
+    );
+    assert_eq!(
+        sign_off_values(&host)[1]["values"],
+        json!({"head": "h1", "patch": "p1"})
+    );
     changed(ready(&mut host));
 }
 
@@ -516,7 +613,10 @@ fn a_requirement_row_that_changes_at_run_time_applies_at_the_next_guard() {
         "q2",
         json!({"ruleId": "R1", "name": "security", "count": 1, "permission": "changes.security"}),
     );
-    assert_eq!(veto_of(ready(&mut host)).1["missing"][0]["name"], "security");
+    assert_eq!(
+        veto_of(ready(&mut host)).1["missing"][0]["name"],
+        "security"
+    );
     edit(&mut host, "q2", json!({"archivedAt": START}));
     changed(ready(&mut host));
 }
@@ -565,15 +665,41 @@ fn pin_on_refuses_a_sign_off_on_a_head_the_signer_did_not_read() {
         json!([{"path": "/read", "message": "is required: the gate on ready pins head, so a sign-off names the value its signer read of each"}])
     );
     assert_eq!(
-        refused(sign(&mut host, &ann(), json!({"state": "ready", "read": {"head": "h1", "title": "Fix"}})))["details"]["issues"],
+        refused(sign(
+            &mut host,
+            &ann(),
+            json!({"state": "ready", "read": {"head": "h1", "title": "Fix"}})
+        ))["details"]["issues"],
         json!([{"path": "/read", "message": "names title, which the gate on ready does not pin"}])
     );
     assert_eq!(
         veto_of(sign(&mut host, &caller("eve", &[]), read_head("h0"))),
-        ("stale".to_owned(), json!({"field": "head", "read": "h0", "current": "h1"}))
+        (
+            "stale".to_owned(),
+            json!({"field": "head", "read": "h0", "current": "h1"})
+        )
     );
     set(&mut host, json!({"findings": ["lint"], "lines": 3}));
     changed(sign(&mut host, &ann(), read_head("h1")));
+}
+
+/// The keys a list holds reach the core as the column holds them: a list
+/// of UUIDs hyphenated, where a relation's key comes in base62, its wire
+/// form. A key in either form finds its rows, so the gate never reads no
+/// requirement because of the form a key came in.
+#[test]
+fn a_listed_key_in_either_form_finds_its_rows() {
+    const RULE: &str = "TMXp8QPR6yGvKuV2GZQ10";
+    const RULE_HYPHENATED: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    let mut host = hosting(rows_gate(), json!({"rules": [RULE_HYPHENATED]}));
+    requirement(
+        &mut host,
+        "q1",
+        json!({"ruleId": RULE, "name": "review", "permission": "changes.approve"}),
+    );
+    assert_eq!(veto_of(ready(&mut host)).1["missing"][0]["name"], "review");
+    changed(sign(&mut host, &ben(), read_head("h1")));
+    changed(ready(&mut host));
 }
 
 /// A row whose members do not parse is broken: it applies, is never met,
@@ -616,7 +742,10 @@ fn a_broken_row_and_unknown_requirements_fail_closed() {
         veto_of(ready(&mut host)).1,
         json!({"state": "ready", "reason": "its rules holds no keys yet, so its requirements are not known"})
     );
-    assert_eq!(veto_of(sign(&mut host, &ann(), read_head("h1"))).0, "not_counted");
+    assert_eq!(
+        veto_of(sign(&mut host, &ann(), read_head("h1"))).0,
+        "not_counted"
+    );
     set(&mut host, json!({"rules": []}));
     changed(ready(&mut host));
 }

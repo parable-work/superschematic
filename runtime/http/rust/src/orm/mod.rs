@@ -1661,7 +1661,8 @@ mod tests {
                 signed_in_at: Some(1_000),
                 user_verified: true,
             });
-        run.claims.insert("agent".to_owned(), Value::from("reviewer"));
+        run.claims
+            .insert("agent".to_owned(), Value::from("reviewer"));
         let caller = Caller::of(Some(&run));
         assert_eq!(caller.permissions, ["changes.approve"]);
         assert_eq!(caller.kind.as_deref(), Some("agent"));
@@ -1678,7 +1679,10 @@ mod tests {
         let mut user = Principal::new("kim", Vec::<String>::new());
         user.claims.insert("agent".to_owned(), Value::from("x"));
         let caller = Caller::of(Some(&user));
-        assert_eq!((caller.kind, caller.agent, caller.acting_for), (None, None, None));
+        assert_eq!(
+            (caller.kind, caller.agent, caller.acting_for),
+            (None, None, None)
+        );
     }
 
     #[test]
