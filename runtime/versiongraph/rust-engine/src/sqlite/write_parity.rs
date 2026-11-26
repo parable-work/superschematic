@@ -16,7 +16,10 @@ use std::sync::{Arc, Mutex};
 use rusqlite::types::ValueRef;
 use serde_json::Value;
 
-use super::{default_table_name, layout, Adapter, Clock, Options, Rusqlite, TABLES};
+use super::{
+    default_table_name, layout, released_layout, Adapter, Clock, Options, Rusqlite, RELEASED_TABLE,
+    TABLES,
+};
 use crate::fixed::IdBits;
 use crate::{CommitOptions, Edits, Engine, KindEdits, MergeResult};
 
@@ -161,7 +164,10 @@ const SECOND_TASTING: &str = concat!(
 /// and a draft that saves and is discarded. In graph menu, first under a
 /// descriptor whose utensil lacks its name, a primary line, a change set, a
 /// tagged merge and a release; then under the fixture's, a second change set
-/// and a second tagged merge.
+/// and a second tagged merge, and, last, a part, whose order is a string
+/// key and whose kind keeps its released rows, committed, merged as a third
+/// tagged commit, which the release moves to, writing the part's released
+/// row.
 async fn write_database(client: &Arc<Rusqlite>) {
     let descriptor = testdata("fixture/recipe.json");
     let mut d: Value = serde_json::from_str(&descriptor).expect("the descriptor");
@@ -212,7 +218,8 @@ async fn write_database(client: &Arc<Rusqlite>) {
         .expect("merge"),
     );
     lunch = served.ref_;
-    h.release(COOK, BREAD, &served.commit.expect("a commit").id, 0)
+    let served_release = h
+        .release(COOK, BREAD, &served.commit.expect("a commit").id, 0)
         .await
         .expect("release");
 
@@ -236,7 +243,7 @@ async fn write_database(client: &Arc<Rusqlite>) {
         .await
         .expect("commit")
         .ref_;
-    merged(
+    lunch = merged(
         i.merge(
             ANN,
             &dinner.id,
@@ -247,7 +254,44 @@ async fn write_database(client: &Arc<Rusqlite>) {
         )
         .await
         .expect("merge"),
+    )
+    .ref_;
+    // A kind ordered by a string key, which keeps its released rows: the
+    // release that moves to its commit writes the part's released row.
+    let intro = edits(vec![(
+        "part",
+        upsert(&[r#"{"entity_key":"Intro","rank":"V","heading":"Before you start"}"#]),
+    )]);
+    dinner = i
+        .save(ANN, &dinner.id, dinner.version, &intro)
+        .await
+        .expect("save")
+        .ref_;
+    dinner = i
+        .commit(ANN, &dinner.id, dinner.version, &message("intro", false))
+        .await
+        .expect("commit")
+        .ref_;
+    let introduced = merged(
+        i.merge(
+            ANN,
+            &dinner.id,
+            &lunch.id,
+            lunch.version,
+            &[],
+            &message("intro", true),
+        )
+        .await
+        .expect("merge"),
     );
+    i.release(
+        ANN,
+        BREAD,
+        &introduced.commit.expect("a commit").id,
+        served_release.version,
+    )
+    .await
+    .expect("move the release");
 }
 
 /// Recipe's primary line, and its first change set: a row of every kind,
@@ -461,16 +505,18 @@ fn literal(value: ValueRef<'_>, place: &str) -> String {
     }
 }
 
-/// The database as `dumpDatabase` writes it: the layout's statements, then
-/// one INSERT per row, the tables in the layout's order and each table's
-/// rows by primary key in byte order, one statement per line.
+/// The database as `dumpDatabase` writes it: the layout's statements and
+/// then the released table's, then one INSERT per row, the tables in the
+/// layout's order with the released table last, and each table's rows by
+/// primary key in byte order, one statement per line.
 fn dump(connection: &rusqlite::Connection) -> String {
     let mut lines: Vec<String> = layout(&default_table_name)
         .expect("the layout")
         .into_iter()
+        .chain(released_layout(&default_table_name).expect("the released layout"))
         .map(|statement| statement + ";")
         .collect();
-    for local in TABLES {
+    for local in TABLES.into_iter().chain([RELEASED_TABLE]) {
         let name = default_table_name(local);
         let columns: Vec<String> = connection
             .prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
@@ -479,7 +525,9 @@ fn dump(connection: &rusqlite::Connection) -> String {
             .expect("columns")
             .collect::<Result<_, _>>()
             .expect("columns");
-        let key = if local.ends_with("_history") {
+        let key = if local == RELEASED_TABLE {
+            "graph, kind, root_id, entity_key"
+        } else if local.ends_with("_history") {
             "history_id"
         } else {
             "id"

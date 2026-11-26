@@ -26,7 +26,40 @@
         "answer": true,
         "headers": {
           "Access-Control-Allow-Credentials": "true",
-          "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type",
+          "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version",
+          "Access-Control-Allow-Methods": "GET, POST",
+          "Access-Control-Allow-Origin": "https://shop-web.acme.dev",
+          "Access-Control-Max-Age": "600",
+          "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
+        }
+      }
+    },
+    {
+      "name": "a preflight that asks for an idempotency key and a client version",
+      "policy": {
+        "origins": [
+          "http://127.0.0.1:20441",
+          "https://shop-web.acme.dev"
+        ],
+        "methods": [
+          "GET",
+          "POST"
+        ]
+      },
+      "request": {
+        "method": "OPTIONS",
+        "headers": {
+          "Access-Control-Request-Headers": "content-type, idempotency-key, x-client-version",
+          "Access-Control-Request-Method": "POST",
+          "Origin": "https://shop-web.acme.dev"
+        }
+      },
+      "want": {
+        "preflight": true,
+        "answer": true,
+        "headers": {
+          "Access-Control-Allow-Credentials": "true",
+          "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version",
           "Access-Control-Allow-Methods": "GET, POST",
           "Access-Control-Allow-Origin": "https://shop-web.acme.dev",
           "Access-Control-Max-Age": "600",
@@ -58,7 +91,7 @@
         "answer": true,
         "headers": {
           "Access-Control-Allow-Credentials": "true",
-          "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type",
+          "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type, Idempotency-Key, X-Client-Version",
           "Access-Control-Allow-Methods": "GET, POST",
           "Access-Control-Allow-Origin": "http://127.0.0.1:20441",
           "Access-Control-Max-Age": "600",
@@ -168,6 +201,7 @@
         "headers": {
           "Access-Control-Allow-Credentials": "true",
           "Access-Control-Allow-Origin": "https://shop-web.acme.dev",
+          "Access-Control-Expose-Headers": "Idempotent-Replay, Retry-After",
           "Vary": "Origin"
         }
       }
@@ -246,6 +280,7 @@
         "headers": {
           "Access-Control-Allow-Credentials": "true",
           "Access-Control-Allow-Origin": "https://shop-web.acme.dev",
+          "Access-Control-Expose-Headers": "Idempotent-Replay, Retry-After",
           "Vary": "Origin"
         }
       }

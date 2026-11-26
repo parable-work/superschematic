@@ -1,0 +1,18 @@
+# fixture-graph-api in TypeScript on the local target: its default server
+# serves the operations of fixture-version-graph-db's Recipe graph (D138),
+# which its router runs through the graph's generated facade.
+kind: Stack
+types:
+  Recipes:
+    name: Recipes
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-graph-api, kind: API }
+      expose:
+        - service: { name: fixture-graph-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

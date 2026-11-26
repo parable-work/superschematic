@@ -42,7 +42,11 @@ type AuthProvider interface {
 	Funcs() template.FuncMap
 
 	// Files lists provider-owned whole files, rendered from Templates into
-	// the module directory next to the core files.
+	// the module directory next to the core files. A file whose condition
+	// holds and whose name is a core file's, context.go or middleware.go
+	// say, replaces that file: the core does not write it. A provider with
+	// a request context or a middleware model of its own renders the whole
+	// file this way, where the snippets do not reach.
 	Files(output *APIOutput) []codegen.ConditionalFile
 
 	// OpenAPIParameters lists header parameters the provider adds to every
@@ -130,18 +134,25 @@ var AuthSnippets = []string{
 	"middlewareAuthz",      // the RequireAuth / RequirePermissions var block
 	"middlewareStores",     // ORM store adapters, cache constructors and their wiring
 	// routes.tmpl
-	"routesImports",             // imports the per-route permission middleware calls need
-	"routesConfigStores",        // Config fields after DB (public APIs)
-	"routesConfigMiddlewares",   // Config fields after AuthMiddleware (APIs with one: public, or over the user model, Auth.Identity)
-	"routesConfigValidate",      // Validate checks for those fields (the same APIs), after the AuthMiddleware or Identity check
-	"routesConfigExample",       // doc-comment lines after AuthMiddleware, or Identity, in the RegisterRoutes example
-	"routesSetupPre",            // RegisterRoutes setup before LoggerMiddleware (public APIs)
-	"routesSetup",               // RegisterRoutes setup after DatabaseMiddleware (public APIs)
-	"routesProtectedMiddleware", // middlewares after cfg.AuthMiddleware on the protected group, and in the end-user step of a route with a service clause (D37)
-	"routePermissions",          // per-endpoint permission middleware, after the rate and body limits and the service step and before the decryptor and timeout; data is the EndpointInfo
+	"routesImports",                // imports the per-route permission middleware calls need
+	"routesConfigStores",           // Config fields after DB (public APIs)
+	"routesConfigMiddlewares",      // Config fields after AuthMiddleware (APIs with one: public, or over the user model, Auth.Identity)
+	"routesConfigFields",           // Config fields of every API, public or not, before Implementations: the fields the provider's route middlewares read
+	"routesConfigValidate",         // Validate checks for those fields (the same APIs), after the AuthMiddleware or Identity check
+	"routesConfigExample",          // doc-comment lines after AuthMiddleware, or Identity, in the RegisterRoutes example
+	"routesSetupPre",               // RegisterRoutes setup before LoggerMiddleware (public APIs)
+	"routesSetup",                  // RegisterRoutes setup after DatabaseMiddleware (public APIs)
+	"routesProtectedMiddleware",    // middlewares after cfg.AuthMiddleware on the protected group, and in the end-user step of a route with a service clause (D37)
+	"routeMiddlewaresFirst",        // per-endpoint middlewares that run first on a mounted route, before the webhook signature, rate limit and body limit; data is the EndpointInfo. A route with no other middleware gets a list when it is not empty
+	"routePermissions",             // per-endpoint permission middleware, after the rate and body limits and the service step and before the decryptor and timeout; data is the EndpointInfo
+	"routesDeclarations",           // top-level declarations of routes.go the provider's route snippets call, after the handler factories: helpers, types and per-endpoint values
+	"routeMiddlewaresAfterDecrypt", // per-endpoint middlewares after the payload decryptor and before the timeout, which read the request the handler reads; data is the EndpointInfo. A route with no other middleware gets a list when it is not empty
 	// module.tmpl
 	"moduleRequires", // extra require lines
 	"moduleReplaces", // extra replace lines
+	// caller.tmpl (an API with a Deps database, D87)
+	"callerImports",   // imports the callerPrincipal expression needs, beside the orm import
+	"callerPrincipal", // the Go expression, of type string, of the ID of the principal the auth step put on ctx; "" binds no caller
 }
 
 // HasTable reports whether upstream declares a DB table named name carrying

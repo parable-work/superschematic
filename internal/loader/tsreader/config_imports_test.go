@@ -170,3 +170,52 @@ export default defineConfig({ name: "probe-web", kind: SchemaKind.Site, site: `+
 		})
 	}
 }
+
+// TestReadClientVersions: an API config's clientVersions (D143) is read
+// from the TypeScript form, true alone turning it on.
+func TestReadClientVersions(t *testing.T) {
+	for value, want := range map[string]bool{"true": true, "false": false} {
+		dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.API, clientVersions: `+value+`, outputs: {} });
+`)
+		cfg, err := ReadServiceConfig(dir, nil)
+		if err != nil {
+			t.Fatalf("ReadServiceConfig: %v", err)
+		}
+		if cfg.ClientVersions != want || cfg.NewSchema().ClientVersions != want {
+			t.Errorf("clientVersions: %s reads as %t", value, cfg.ClientVersions)
+		}
+	}
+	dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.API, outputs: {} });
+`)
+	if cfg, err := ReadServiceConfig(dir, nil); err != nil || cfg.ClientVersions {
+		t.Errorf("a config without clientVersions: %+v, %v", cfg, err)
+	}
+}
+
+// TestReadContentAddressedBucket: a Bucket config's contentAddressed and
+// maxBytes (D142) are read from the TypeScript form, and a maxBytes that
+// is no whole number of bytes above 0 is refused there.
+func TestReadContentAddressedBucket(t *testing.T) {
+	config := func(members string) string {
+		return `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.Bucket, ` + members + ` outputs: {} });
+`
+	}
+	cfg, err := ReadServiceConfig(configService(t, config("contentAddressed: true, maxBytes: 1048576,")), nil)
+	if err != nil {
+		t.Fatalf("ReadServiceConfig: %v", err)
+	}
+	if !cfg.ContentAddressed || cfg.MaxBytes != 1<<20 {
+		t.Errorf("config = %+v", cfg)
+	}
+	if cfg, err := ReadServiceConfig(configService(t, config("")), nil); err != nil || cfg.ContentAddressed || cfg.MaxBytes != 0 {
+		t.Errorf("a plain bucket: %+v, %v", cfg, err)
+	}
+	for _, bad := range []string{"0", "1.5", "-4"} {
+		if _, err := ReadServiceConfig(configService(t, config("contentAddressed: true, maxBytes: "+bad+",")), nil); err == nil || !strings.Contains(err.Error(), "maxBytes must be a whole number of bytes above 0") {
+			t.Errorf("maxBytes %s: %v", bad, err)
+		}
+	}
+}

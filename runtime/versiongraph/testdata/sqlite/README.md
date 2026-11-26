@@ -8,16 +8,18 @@ under Node).
 
 | File | What it holds |
 |---|---|
-| `layout.json` | The layout's statements under the default names. |
+| `layout.json` | The layout's statements, and the released table's, under the default names. |
 | `typescript.sql` | A database the TypeScript adapter wrote, as SQL text. |
 | `typescript.json` | What `typescript.sql` reads back as. |
 
 ## layout.json
 
-`{"statements": [...]}`: exactly the statements `sqliteLayout()` returns
-with the default names (`graph_` and the local name, as `graph_ref` and
-`graph_ref_live_name`), in order. An adapter's list of its layout under the
-default names equals it, string for string.
+`{"statements": [...], "released": [...]}`. `statements` are exactly the
+statements `sqliteLayout()` returns with the default names (`graph_` and
+the local name, as `graph_ref` and `graph_ref_live_name`), in order, and
+`released` exactly the ones `sqliteReleasedLayout()` returns, which create
+the table of released rows (D139) for a graph with a kind that keeps them.
+An adapter's lists under the default names equal them, string for string.
 
 ## typescript.sql
 
@@ -26,15 +28,18 @@ last line too. No literal holds a line break of any kind (no control
 character, NEL, U+2028 or U+2029), so splitting the file on `\n` gives its
 statements. It holds only:
 
-- the layout's statements, exactly `layout.json`'s, in order, each followed
-  by `;`;
+- the layout's statements and then the released table's, exactly
+  `layout.json`'s `statements` and `released`, in order, each followed by
+  `;`;
 - one `INSERT INTO "<table>" (<columns>) VALUES (<literals>);` per row,
   with every column in the table's declaration order (as
   `PRAGMA table_info` lists them) and the columns, like the literals,
   separated by `, `; the tables in the layout's order (`ref`,
   `ref_history`, `commit`, `patch`, `snapshot_entry`, `release`,
-  `release_history`, `member`, `member_history`), and each table's rows by
-  primary key (`id`, or `history_id` in a history table), in byte order.
+  `release_history`, `member`, `member_history`, then `released`), and
+  each table's rows by primary key (`id`, or `history_id` in a history
+  table, or `graph`, `kind`, `root_id` and `entity_key` in `released`), in
+  byte order.
 
 A literal is text in single quotes with each `'` doubled and nothing else
 escaped, an integer in decimal, or `NULL`; the layout holds nothing else.
@@ -86,7 +91,11 @@ root is `Bread`.
   and a utensil, `Knife`, and commits, and a tagged merge, `lunch`, which
   its release points at. The rest runs over the fixture's own descriptor:
   a change set, `dinner`, names `Knife` and adds `Board`, commits, and
-  merges as tagged commit 2, `supper`; the release stays at `lunch`.
+  merges as tagged commit 2, `supper`; the release stays at `lunch`. It
+  then saves a part, `Intro`, whose order is a string key and whose kind
+  keeps its released rows, commits it, merges it as tagged commit 3,
+  `intro`, and moves the release to it, which writes the part's released
+  row.
 
 Two of the script's writes are partial rows that only SQLite takes for
 this fixture (D32, amended: on an insert the SQLite adapter stores null
@@ -116,8 +125,9 @@ without a `DEFAULT`:
   hashes the same however it is read, under either descriptor:
   `compose` of `today` and `materialize` of its head give one hash. A
   commit recorded before the gain keeps the hash it was recorded with,
-  which `readCommit` returns, and `materialize` of `lunch`, and
-  `released`, give that hash too.
+  which `readCommit` returns, and `materialize` of `lunch` gives that
+  hash too. `released` reads `intro`, which the release moved to, and
+  gives the hash `intro` recorded.
 
 ## Stored forms
 
@@ -168,7 +178,7 @@ each read after it returns 1250005 more. An adapter reads it once per
 transaction it begins, right after `BEGIN IMMEDIATE`, and a transaction
 begun inside another (a savepoint) reads nothing. `createTables` is one
 transaction and takes the first read, and each engine operation is one
-transaction, so the script's 28 operations take the 28 reads after it, in
+transaction, so the script's 32 operations take the 32 reads after it, in
 order.
 
 **The ids.** For its whole run the script replaces the system's random
@@ -206,6 +216,7 @@ draws, for each storage call:
 | `insertSnapshot` | one per entry, in the order given |
 | `writeRelease` at version 0 | the pointer's id, then its history image's |
 | `writeRelease` at another version | the history image's |
+| `writeReleased` | none: a released row is named by its graph, kind, root and entity key |
 
 No other call draws an id. The storage calls an operation makes, their
 order and the order of a call's patches and entries are the engine's (a
@@ -265,6 +276,16 @@ On an adapter of graph `menu` over the fixture's descriptor:
 26. `save(Ann, dinner)`: utensil upsert `{"entity_key":"Knife","name":"Bread knife"}` and `{"entity_key":"Board","name":"Bread board"}`.
 27. `commit(Ann, dinner, message "dinner")`.
 28. `merge(Ann, dinner into main, message "supper", tagged)`.
+29. `save(Ann, dinner)`: part upsert `{"entity_key":"Intro","rank":"V","heading":"Before you start"}`.
+30. `commit(Ann, dinner, message "intro")`.
+31. `merge(Ann, dinner into main, message "intro", tagged)`: commit `intro`.
+32. `release(Ann, Bread, intro, version 1)`, which writes `Intro`'s
+    released row.
+
+Both descriptors name `part`'s `releasedTable`, so each release also reads
+the pointer before it moves, and releases 6 and 24, the roots' first, call
+`writeReleased` for `part` with nothing to write. Neither draws an id or
+reads the clock.
 
 ## typescript.json
 

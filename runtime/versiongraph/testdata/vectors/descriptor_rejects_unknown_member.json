@@ -143,7 +143,7 @@
   "expect": {
     "error": {
       "code": "invalid_descriptor",
-      "message": "descriptor: unknown field `cascade`, expected one of `kind`, `table`, `historyTable`, `key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`, `parent`, `order`, `singleton`, `units`, `excluded`, `history`, `columns`"
+      "message": "descriptor: unknown field `cascade`, expected one of `kind`, `table`, `historyTable`, `releasedTable`, `key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`, `parent`, `order`, `singleton`, `units`, `excluded`, `history`, `columns`"
     }
   }
 }

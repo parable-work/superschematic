@@ -127,7 +127,64 @@ export function makeNote(overrides?: Partial<Note>): Note {
 }
 
 /**
- * Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
+ * Part - A part of the recipe's write-up, nested under another part. Its rank is
+ * a string order key, so Arrange places it among its siblings, and the
+ * parts a recipe has released are kept in a table of their own, with the
+ * index a reader of them uses.
+ */
+export interface Part {
+  id?: IdentityUUID | null;
+  recipe: Recipe;
+  parentKey?: IdentityUUID | null;
+  rank: string;
+  heading: string;
+  /** The entity's logical identity, shared by its rows on every ref. */
+  entityKey?: IdentityUUID | null;
+  /** The ref this row overrides the entity on. */
+  ref: RecipeRef;
+  /** True when the row deletes the entity on its ref. */
+  deletedOnRef: boolean;
+  _version: number;
+}
+
+/**
+ * PartDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<Part> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const PartDefaults: Partial<Part> = {
+  deletedOnRef: false,
+};
+
+/**
+ * makePart returns a Part initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makePart(overrides?: Partial<Part>): Part {
+  return { ...PartDefaults, ...(overrides || {}) } as Part;
+}
+
+/**
+ * PartReleased - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+ */
+export interface PartReleased {
+  id?: IdentityUUID | null;
+  /** The root whose released tree holds the row. */
+  recipe: Recipe;
+  /** The entity's logical identity, as its rows on every ref hold it. */
+  entityKey: IdentityUUID;
+  parentKey?: IdentityUUID | null;
+  rank: string;
+  heading: string;
+  /** The released commit that last wrote the row. */
+  commit: RecipeCommit;
+  /** That commit's sequence: the published version whose release last wrote the row. */
+  sequence: GenericInt64;
+}
+
+/**
+ * Recipe - A recipe: the stable identity its steps and ingredients are versioned
+ * under. Its commits and its releases each enqueue a message.
  */
 export interface Recipe {
   id?: IdentityUUID | null;
@@ -153,6 +210,17 @@ export interface RecipeCommit {
 }
 
 /**
+ * RecipeCommitted - Sent for each commit of a recipe's graph, in the transaction that wrote
+ * it: a worker handles one recipe's commits at a time.
+ */
+export interface RecipeCommitted {
+  root: IdentityUUID;
+  ref?: IdentityUUID | null;
+  commit: IdentityUUID;
+  sequence?: GenericInt64 | null;
+}
+
+/**
  * RecipePatch - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
  */
 export interface RecipePatch {
@@ -163,6 +231,14 @@ export interface RecipePatch {
   entityId: IdentityUUID;
   entityVersion: GenericInt64;
   operation: RecipePatchOperation;
+}
+
+/**
+ * RecipePublished - Sent when a recipe's release moves to another commit.
+ */
+export interface RecipePublished {
+  root: IdentityUUID;
+  commit: IdentityUUID;
 }
 
 /**

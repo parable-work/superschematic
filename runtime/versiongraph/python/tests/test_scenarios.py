@@ -24,6 +24,7 @@ from support import DESCRIPTOR, TESTDATA, create_scratch, drop_scratch, hyphenat
 from superschematic_versiongraph.engine import (
     CommitOptions,
     Engine,
+    EntityChange,
     KindEdits,
     Resolution,
     SweepOptions,
@@ -87,6 +88,9 @@ MEMBERS = {
         "snapshotEvery",
         "sweep",
         "kind",
+        "parent",
+        "keys",
+        "key",
         "statement",
         "args",
         "expect",
@@ -107,6 +111,7 @@ MEMBERS = {
         "conflicts",
         "changes",
         "commits",
+        "entityHistory",
         "rows",
         "patches",
         "snapshot",
@@ -116,6 +121,7 @@ MEMBERS = {
     "refExpect": {"version", "sealed", "name", "parent", "base", "head"},
     "commitExpect": {"ref", "parent", "message", "sequence", "schemaEpoch", "contentHash", "contentHashOf"},
     "releaseExpect": {"commit", "version"},
+    "entityChangeExpect": {"commit", "operation"},
 }
 
 # The engine's snake_case names of the members a scenario names in camelCase.
@@ -809,6 +815,7 @@ class Runner:
         conflicts: List[Any] = []
         changes: List[Any] = []
         history: List[Commit] = []
+        entity_history: Optional[List[EntityChange]] = None
         rows: List[str] = []
         patches: List[Any] = []
         entries: List[Any] = []
@@ -827,6 +834,17 @@ class Runner:
             elif op == "save":
                 name = text(step.get("ref"))
                 result = engine.save(actor, self.ref_id(name), self.version(step, name), self.edits(step))
+                ref, saved = result.ref, result.saved
+            elif op == "arrange":
+                name = text(step.get("ref"))
+                result = engine.arrange(
+                    actor,
+                    self.ref_id(name),
+                    self.version(step, name),
+                    text(step.get("kind")),
+                    text(step.get("parent")) or None,
+                    [text(key) for key in step.get("keys") or []],
+                )
                 ref, saved = result.ref, result.saved
             elif op in ("commit", "seal", "revert"):
                 name = text(step.get("ref"))
@@ -882,6 +900,10 @@ class Runner:
                 changes = engine.diff(self.commit_id(text(step.get("from"))), self.commit_id(text(step.get("to"))))
             elif op == "history":
                 history = engine.history(self.ref_id(text(step.get("ref"))))
+            elif op == "entityHistory":
+                entity_history = engine.entity_history(
+                    text(step.get("root")), text(step.get("kind")), text(step.get("key"))
+                )
             elif op == "discard":
                 name = text(step.get("ref"))
                 engine.discard(actor, self.ref_id(name), self.version(step, name))
@@ -951,6 +973,18 @@ class Runner:
             want = [text(v) for v in x["commits"]]
             if got != want:
                 raise self.fail(f"history {got}, want {want}")
+        if x.get("entityHistory") is not None:
+            if entity_history is None:
+                raise self.fail(f"expects an entity's history, and {op} returns none")
+            if not isinstance(x["entityHistory"], list):
+                raise self.fail("entityHistory expectation is a JSON array")
+            got_changes = [(self.commit_name(change.commit.id), change.operation) for change in entity_history]
+            want_changes = []
+            for value in x["entityHistory"]:
+                w = obj(value, "entityChangeExpect", self.where)
+                want_changes.append((text(w.get("commit")), text(w.get("operation"))))
+            if got_changes != want_changes:
+                raise self.fail(f"entity history {got_changes}, want {want_changes}")
         if x.get("rows") is not None:
             parsed = [loads(row) for row in rows]
             if op != "sql":

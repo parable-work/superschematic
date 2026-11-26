@@ -78,6 +78,10 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/returns", post(handle_order_open_return));
     let routes = router
         .with_state(Arc::clone(&state))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::new(options.min_client_versions.clone()),
+            superschematic_http_runtime::client_version::require_client_version,
+        ))
         .layer(axum::middleware::from_fn(request_ids));
     // The MCP endpoint: a route of the router, whose calls are requests to
     // the routes above.

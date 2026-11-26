@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyReviewRepositoryInterface is the reads of ReviewRepositoryInterface (D150).
+type ReadOnlyReviewRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ReviewGetOptions) (*types.Review, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Review, error)
+	FindOne(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) (*types.Review, error)
+	FindMany(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) ([]*types.Review, int, error)
+	FindPage(ctx context.Context, filter *ReviewFilter, opts *ReviewPageOptions) (*ReviewPage, error)
+}
+
 // ReviewRepositoryInterface defines the contract for Review data access.
 type ReviewRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ReviewGetOptions) (*types.Review, error)
@@ -24,6 +33,15 @@ type ReviewRepositoryInterface interface {
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *ReviewFilter) (int, error)
 	Comments() ReviewCommentsOperations
+}
+
+// ReadOnlyTicketRepositoryInterface is the reads of TicketRepositoryInterface (D150).
+type ReadOnlyTicketRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TicketGetOptions) (*types.Ticket, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error)
+	FindOne(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) (*types.Ticket, error)
+	FindMany(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) ([]*types.Ticket, int, error)
+	FindPage(ctx context.Context, filter *TicketFilter, opts *TicketPageOptions) (*TicketPage, error)
 }
 
 // TicketRepositoryInterface defines the contract for Ticket data access.
@@ -42,14 +60,40 @@ type TicketRepositoryInterface interface {
 	Comments() TicketCommentsOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetReviewRepository() ReviewRepositoryInterface
+	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -58,7 +102,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetReviewRepository() ReviewRepositoryInterface
+	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -96,9 +142,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -108,6 +175,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -129,11 +206,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetReviewRepository() ReviewRepositoryInterface {
 	return db.Review
 }
 
+func (db *NoOpDatabase) GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface {
+	return db.Review
+}
+
 func (tx *NoOpTx) GetReviewRepository() ReviewRepositoryInterface {
+	return tx.Review
+}
+
+func (tx *NoOpTx) GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface {
 	return tx.Review
 }
 
@@ -276,7 +366,15 @@ func (db *NoOpDatabase) GetTicketRepository() TicketRepositoryInterface {
 	return db.Ticket
 }
 
+func (db *NoOpDatabase) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return db.Ticket
+}
+
 func (tx *NoOpTx) GetTicketRepository() TicketRepositoryInterface {
+	return tx.Ticket
+}
+
+func (tx *NoOpTx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
 	return tx.Ticket
 }
 
@@ -416,12 +514,20 @@ func (noOpTicketCommentsOperations) ListPinned(_ context.Context, _ types.Identi
 }
 
 var (
-	_ DatabaseInterface         = (*Database)(nil)
-	_ DatabaseInterface         = (*NoOpDatabase)(nil)
-	_ TxInterface               = (*Tx)(nil)
-	_ TxInterface               = (*NoOpTx)(nil)
-	_ ReviewRepositoryInterface = (*ReviewRepository)(nil)
-	_ ReviewRepositoryInterface = (*NoOpReviewRepository)(nil)
-	_ TicketRepositoryInterface = (*TicketRepository)(nil)
-	_ TicketRepositoryInterface = (*NoOpTicketRepository)(nil)
+	_ DatabaseInterface                 = (*Database)(nil)
+	_ DatabaseInterface                 = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface         = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface         = (*NoOpDatabase)(nil)
+	_ TxInterface                       = (*Tx)(nil)
+	_ TxInterface                       = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface               = (*Tx)(nil)
+	_ ReadOnlyTxInterface               = (*NoOpTx)(nil)
+	_ ReviewRepositoryInterface         = (*ReviewRepository)(nil)
+	_ ReviewRepositoryInterface         = (*NoOpReviewRepository)(nil)
+	_ ReadOnlyReviewRepositoryInterface = (*ReviewRepository)(nil)
+	_ ReadOnlyReviewRepositoryInterface = (*NoOpReviewRepository)(nil)
+	_ TicketRepositoryInterface         = (*TicketRepository)(nil)
+	_ TicketRepositoryInterface         = (*NoOpTicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface = (*TicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface = (*NoOpTicketRepository)(nil)
 )

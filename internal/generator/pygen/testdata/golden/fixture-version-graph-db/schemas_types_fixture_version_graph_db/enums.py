@@ -21,6 +21,8 @@ class RecipeEntityKind(str, Enum):
 
     Note = "note"
 
+    Part = "part"
+
     Step = "step"
 
     Tasting = "tasting"

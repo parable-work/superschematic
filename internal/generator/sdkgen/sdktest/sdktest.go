@@ -11,9 +11,40 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// IdempotentService is the name of the schema LoadIdempotentService loads.
+const IdempotentService = "fixture-idempotent-api"
+
+// LoadIdempotentService loads fixture-idempotent-api from the loader's
+// fixtures, and the table fixture-idempotent-db, its database, declares
+// for the keys of its @idempotent operations (D140), which apigen's
+// Options.IdempotencyTable takes: orders.placeOrder, a POST whose key is
+// optional, orders.cancelOrder, a DELETE that requires one, and
+// orders.listOrders, a GET that takes none.
+func LoadIdempotentService() (*ir.Schema, *ir.IdempotencyTable, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, nil, fmt.Errorf("locate package sdktest")
+	}
+	services := filepath.Join(filepath.Dir(file), "..", "..", "..", "loader", "tsreader", "testdata", "services")
+	schema, err := loader.LoadService(filepath.Join(services, IdempotentService))
+	if err != nil {
+		return nil, nil, err
+	}
+	database, err := loader.LoadService(filepath.Join(services, "fixture-idempotent-db"))
+	if err != nil {
+		return nil, nil, err
+	}
+	table, err := sqlutil.IdempotencyTableOf(database)
+	if err != nil {
+		return nil, nil, err
+	}
+	return schema, table, nil
+}
 
 // QueryListsService is the name of the schema LoadQueryListsService loads.
 const QueryListsService = "query-lists-api"

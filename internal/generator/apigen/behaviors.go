@@ -145,7 +145,8 @@ func (e EndpointInfo) BehaviorResultGoType() string {
 // catalogPermissions are the permissions the permission catalog lists
 // under the endpoint: those its route requires, then those the config of
 // its behavior names, which the core checks (D103), then the one that
-// lifts its table operation's row rule (D108), each once.
+// lifts its table operation's row rule (D108) or its graph operation's
+// (D138), each once.
 func (e EndpointInfo) catalogPermissions() []string {
 	var more []string
 	if bo := e.BehaviorOperation(); bo != nil {
@@ -153,6 +154,9 @@ func (e EndpointInfo) catalogPermissions() []string {
 	}
 	if to := e.TableOperation(); to != nil && to.OverridePermission != "" {
 		more = append(more, to.OverridePermission)
+	}
+	if graph := e.GraphOperation(); graph != nil && graph.OverridePermission != "" {
+		more = append(more, graph.OverridePermission)
 	}
 	if len(more) == 0 {
 		return e.RequiredPerms

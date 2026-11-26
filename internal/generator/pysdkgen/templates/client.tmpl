@@ -22,7 +22,7 @@ try:
 except ModuleNotFoundError:
     hashes = serialization = padding = rsa = AESGCM = None
 
-from .errors import APIError, AuthenticationError, AuthorizationError, NetworkError, RateLimitError, SDKError{{if .HasFilteredEndpoints}}, ValidationError{{end}}
+from .errors import APIError, AuthenticationError, AuthorizationError, ClientTooOldError, NetworkError, RateLimitError, SDKError{{if .HasFilteredEndpoints}}, ValidationError{{end}}
 
 # Upper bound for Retry-After and fallback sleeps so a hostile or misconfigured server cannot stall a thread indefinitely.
 _MAX_RATE_LIMIT_SLEEP_SECONDS = 300
@@ -330,6 +330,43 @@ class ServiceCredential:
 
 
 @dataclass(slots=True)
+class ClientIdentity:
+    """The application an SDK runs in, as it names itself to the API (D143).
+
+    name is letters, digits, '.', '_' and '-', starting with a letter or a
+    digit, 64 characters at most. version is the application's own version,
+    a semantic version such as 0.5.0 for the API to compare it; any other
+    version is sent and never refused.
+    """
+
+    name: str
+    version: str
+
+
+_CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_CLIENT_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}")
+
+
+def client_version_header(client: ClientIdentity | None) -> str | None:
+    """The X-Client-Version header of a client (D143), <name>/<version>, or
+    None for none. A name or a version the header cannot carry raises, so a
+    typo is found where the SDK is built."""
+    if client is None:
+        return None
+    if not isinstance(client.name, str) or _CLIENT_NAME.fullmatch(client.name) is None:
+        raise SDKError(
+            f"client.name {client.name!r} must start with a letter or a digit and hold letters, "
+            "digits, '.', '_' and '-', 64 characters at most"
+        )
+    if not isinstance(client.version, str) or _CLIENT_VERSION.fullmatch(client.version) is None:
+        raise SDKError(
+            f"client.version {client.version!r} must start with a letter or a digit and hold letters, "
+            "digits, '.', '+', '_' and '-', 128 characters at most"
+        )
+    return f"{client.name}/{client.version}"
+
+
+@dataclass(slots=True)
 class ClientConfig:
     base_url: str
     timeout_seconds: float = 30.0
@@ -345,6 +382,10 @@ class ClientConfig:
     max_rate_limit_retries: int = 3
     max_network_retries: int = 3
     service_credential: ServiceCredential | None = None
+    # The client this SDK runs in (D143): every call then sends
+    # X-Client-Version: <name>/<version>, and an API that lists the client
+    # answers a version under its minimum with a ClientTooOldError.
+    client: ClientIdentity | None = None
 
 
 class SyncHTTPClient:
@@ -355,6 +396,7 @@ class SyncHTTPClient:
         self._auth_token_provider = config.auth_token_provider
         self._auth_token_refresher = config.auth_token_refresher
         self._service_credential = config.service_credential
+        self._client_version = client_version_header(config.client)
         self._default_public_encryption_key = config.public_encryption_key
         self._default_headers = dict(config.default_headers or {})
         self._request_interceptor = config.request_interceptor
@@ -725,6 +767,8 @@ class SyncHTTPClient:
         headers = dict(self._default_headers)
         if extra_headers:
             headers.update(extra_headers)
+        if self._client_version is not None:
+            headers["X-Client-Version"] = self._client_version
 
         token = self._resolve_auth_token()
         if token:
@@ -829,6 +873,10 @@ class SyncHTTPClient:
                 retry_after = self._parse_retry_after_header(retry_after_header)
                 raise RateLimitError(
                     message, retry_after=retry_after, payload=payload, code=code, request_id=request_id
+                ) from err
+            if err.code == 426 and code == "client_too_old":
+                raise ClientTooOldError(
+                    message, details=payload.get("details") if isinstance(payload, dict) else None, payload=payload, request_id=request_id
                 ) from err
             raise APIError(message, err.code, payload, code=code, request_id=request_id) from err
         except error.URLError as err:

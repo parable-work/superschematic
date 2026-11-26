@@ -6,6 +6,7 @@ __version__ = "1.0.0"
 
 from .client import (
     ClientConfig,
+    ClientIdentity,
     DownloadedFile,
     EncryptedRequestOptions,
     FilePart,
@@ -16,6 +17,7 @@ from .errors import (
     APIError,
     AuthenticationError,
     AuthorizationError,
+    ClientTooOldError,
     NetworkError,
     RateLimitError,
     SDKError,
@@ -27,6 +29,7 @@ __all__ = [
     "__version__",
     "FixtureWebhooksApiSDK",
     "ClientConfig",
+    "ClientIdentity",
     "PublicEncryptionKey",
     "ServiceCredential",
     "EncryptedRequestOptions",
@@ -37,6 +40,7 @@ __all__ = [
     "AuthenticationError",
     "AuthorizationError",
     "RateLimitError",
+    "ClientTooOldError",
     "ValidationError",
     "NetworkError",
 ]

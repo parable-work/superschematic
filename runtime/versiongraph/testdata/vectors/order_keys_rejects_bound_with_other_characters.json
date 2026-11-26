@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_rejects_bound_with_other_characters",
+  "op": "order_keys",
+  "input": {
+    "before": "a_b",
+    "count": 1
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: before must be an order key, one or more characters of 0-9A-Za-z"
+    }
+  }
+}

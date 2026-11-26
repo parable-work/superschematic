@@ -20,10 +20,19 @@ VersionConflictError when the ref has moved on.
 A primary line (a ref with no parent) takes writes only from merge: work
 happens on a change set, which rebase catches up with its parent's head and
 merge brings back. A root's release pointer names one tagged commit, which
-release moves and released reads. A commit is snapshotted, its full pin set
-stored, when it is tagged, released, or snapshot_every commits past the
-nearest snapshot on its chain, and materialize stops at the nearest
-snapshot. sweep and run_sweeper are the graph's maintenance.
+release moves and released reads. For a kind whose descriptor names a
+releasedTable (D139), release also rewrites the root's rows in that table,
+in its transaction, from the diff between the tree released before and the
+new one. A commit is snapshotted, its full pin set stored, when it is tagged,
+released, or snapshot_every commits past the nearest snapshot on its chain,
+and materialize stops at the nearest snapshot. entity_history lists the
+commits of a root's primary line that changed one entity (D138). sweep and
+run_sweeper are the graph's maintenance.
+
+A kind whose order is a string key (D137) is put in order by arrange, which
+keeps the longest run of a parent's children already in order and writes new
+keys for the rest. order_keys, a function of this module, makes the keys a
+save places a row with.
 """
 
 import json
@@ -64,6 +73,7 @@ from .storage import (
     RefUpdate,
     Release,
     ReleaseWrite,
+    ReleasedWrite,
     RowWrite,
     SnapshotEntry,
     Storage,
@@ -87,9 +97,11 @@ __all__ = [
     "TreeResult",
     "ReleasedResult",
     "Change",
+    "EntityChange",
     "SweepOptions",
     "SweepReport",
     "Engine",
+    "order_keys",
 ]
 
 DEFAULT_WALK_CEILING = 4096
@@ -226,6 +238,15 @@ class Change:
 
 
 @dataclass(frozen=True)
+class EntityChange:
+    """One commit that changed an entity, and what it did to it: operation
+    is ADD, UPDATE or DELETE."""
+
+    commit: Commit
+    operation: str
+
+
+@dataclass(frozen=True)
 class SweepOptions:
     """Configure a maintenance pass. actor is who the pass writes as: the
     discards it makes and the deletes of discarded refs' rows record it.
@@ -269,6 +290,9 @@ class _KindRoles:
     id: str
     tombstone: str
     version: str
+    #: Set for a kind that keeps the released tree's rows in a table of its
+    #: own (D139), which release rewrites; "" for a kind that keeps none.
+    released_table: str = ""
 
 
 @dataclass(frozen=True)
@@ -327,8 +351,11 @@ class Engine:
         parsed = json.loads(text)
         self._descriptor = text
         self._kinds = [
-            _KindRoles(k["kind"], k["key"], k["id"], k["tombstone"], k["version"]) for k in parsed["kinds"]
+            _KindRoles(k["kind"], k["key"], k["id"], k["tombstone"], k["version"], k.get("releasedTable") or "")
+            for k in parsed["kinds"]
         ]
+        # Whether any kind keeps a released table.
+        self._keeps_released = any(k.released_table for k in self._kinds)
         self._by_name = {k.name: k for k in self._kinds}
         self._storage = storage
         self._schema_epoch = schema_epoch
@@ -401,6 +428,7 @@ class Engine:
                 for row in kind_edits.upsert:
                     saved.setdefault(k.name, []).append(self._write_row(tx, k.name, r, row, False, actor))
                 deletes = deletes or len(kind_edits.delete) > 0
+            self._check_saved(saved)
             if deletes:
                 by_key = self._index(self._compose(tx, r)[0])
                 for k in self._kinds:
@@ -415,6 +443,49 @@ class Engine:
                         raise EntityNotFoundError(
                             f"entity not found on the ref: no {k.name} override of {entity_key}"
                         )
+            moved = tx.update_ref(RefUpdate(r.id, r.version, None, None, False, actor))
+            return SaveResult(moved, saved)
+
+        return self._storage.transact(run)
+
+    def arrange(
+        self, actor: str, ref: str, version: int, kind: str, parent: Optional[str], keys: Sequence[str]
+    ) -> SaveResult:
+        """Puts one parent's children of kind in the order keys gives, on a
+        change set at version (D137). keys are the entity keys of every live
+        child of parent in the ref's tree, in the order wanted; a parent of
+        None, or an empty one, is none: the rows of the kind that have no
+        parent. The longest run of children already in order keeps its order
+        keys, and each other child takes a new one between its neighbors',
+        written as the ref's row of it. It returns the ref at its new
+        version and the rows written, in the order wanted. The kind's order
+        is a string key: the core refuses another with order_not_a_key, and
+        a list that is not exactly the parent's live children with
+        invalid_arrangement. It refuses a sealed ref, and a primary line
+        with PrimaryMergeOnlyError."""
+        actor = _actor_id(actor)
+        ref = _id("id", ref)
+        self._kind(kind)
+        if parent:
+            parent = _id("id", parent)
+        wanted = [_id("entity key", key) for key in keys]
+
+        def run(tx: Tx) -> SaveResult:
+            saved: Tree = {}
+            r = self._read_draft(tx, ref, version)
+            request = (
+                '{"descriptor":'
+                + self._descriptor
+                + ',"tree":'
+                + _tree_json(self._compose(tx, r)[0])
+                + ',"kind":'
+                + write_string(kind)
+            )
+            if parent:
+                request += ',"parent":' + write_string(parent)
+            request += ',"keys":[' + ",".join(write_string(key) for key in wanted) + "]}"
+            for row in self._run("arrange", request)["rows"]:
+                saved.setdefault(kind, []).append(self._write_row(tx, kind, r, dumps(row), False, actor))
             moved = tx.update_ref(RefUpdate(r.id, r.version, None, None, False, actor))
             return SaveResult(moved, saved)
 
@@ -547,7 +618,15 @@ class Engine:
         the commit and writes no member rows, so a rollback is a release to
         an earlier tagged commit, and the pointer's history is the release
         log. An untagged commit is NotTaggedError; another root's is
-        RootMismatchError."""
+        RootMismatchError.
+
+        For each kind that keeps a released table (D139) it rewrites the
+        root's rows there in the same transaction, from the diff between the
+        tree of the commit released before and this one's: an added or
+        changed entity is written with this commit and its sequence, and a
+        deleted one removed. A root's first release writes the whole tree,
+        and so does a release of the commit already released, which rebuilds
+        the root's rows."""
         actor = _actor_id(actor)
         root = _id("id", root)
         commit = _id("id", commit)
@@ -559,9 +638,51 @@ class Engine:
             if c.sequence is None:
                 raise NotTaggedError()
             self._ensure_snapshot(tx, c.id, c.snapshot)
-            return tx.write_release(ReleaseWrite(root, c.id, version, actor))
+            before = self._released_before(tx, root)
+            release = tx.write_release(ReleaseWrite(root, c.id, version, actor))
+            self._write_released(tx, before, c)
+            return release
 
         return self._storage.transact(run)
+
+    def _released_before(self, tx: Tx, root: str) -> Optional[str]:
+        """Reads the commit root's release names before a release moves it,
+        None for a root never released, when a kind keeps a released table;
+        the engine reads nothing otherwise."""
+        if not self._keeps_released:
+            return None
+        try:
+            return tx.read_release(root).commit
+        except NotFoundError:
+            return None
+
+    def _write_released(self, tx: Tx, before: Optional[str], commit: Commit) -> None:
+        """Rewrites the released tables' rows of a commit's root for a
+        release that moved the root's pointer from before to commit."""
+        if not self._keeps_released:
+            return
+        assert commit.sequence is not None
+        # A first release, and a release of the commit already released,
+        # write the whole tree over whatever the tables hold of the root.
+        replace = before is None or before == commit.id
+        from_tree: Tree = {} if replace else self._materialize(tx, before)
+        changes = self._diff(from_tree, self._materialize(tx, commit.id))
+        for k in self._kinds:
+            if not k.released_table:
+                continue
+            upsert: List[str] = []
+            delete: List[str] = []
+            for change in changes:
+                if change.kind != k.name:
+                    continue
+                if change.operation == "DELETE":
+                    delete.append(change.entity_key)
+                else:
+                    assert change.row is not None
+                    upsert.append(change.row)
+            if not replace and not delete and not upsert:
+                continue
+            tx.write_released(k.name, ReleasedWrite(commit.root, commit.id, commit.sequence, replace, upsert, delete))
 
     def released(self, root: str) -> ReleasedResult:
         """Reads root's release pointer and the tree of the commit it names.
@@ -613,6 +734,30 @@ class Engine:
             if r.head is None:
                 return []
             return tx.ref_commits(r.id, r.head, self._walk_ceiling)
+
+        return self._storage.transact(run)
+
+    def entity_history(self, root: str, kind: str, key: str) -> List[EntityChange]:
+        """Lists the commits of root's primary line that changed the entity
+        key of kind, newest first, each with what it did to the entity
+        (D138). It reads the line's commits and the entity's patches among
+        them, and no tree. A root with several primary lines lists each
+        line's in the order the lines were created; one with none, or an
+        entity no commit changed, lists nothing. It walks at most the
+        engine's ceiling of commits a line."""
+        root = _id("id", root)
+        self._kind(kind)
+        key = _id("entity key", key)
+
+        def run(tx: Tx) -> List[EntityChange]:
+            changes: List[EntityChange] = []
+            for line in tx.primary_refs(root):
+                if line.head is None:
+                    continue
+                commits = tx.ref_commits(line.id, line.head, self._walk_ceiling)
+                operations = {p.commit: p.operation for p in tx.entity_patches([c.id for c in commits], kind, key)}
+                changes.extend(EntityChange(c, operations[c.id]) for c in commits if c.id in operations)
+            return changes
 
         return self._storage.transact(run)
 
@@ -883,6 +1028,16 @@ class Engine:
             '{"descriptor":' + self._descriptor + ',"base":' + _tree_json(base) + ',"overlay":' + _tree_json(own) + "}",
         )
         return _decode_tree(output["tree"]), _decode_findings(output["findings"]), own
+
+    def _check_saved(self, saved: Tree) -> None:
+        """Holds the rows a save wrote to the core's rules for a row, as a
+        compose of the ref would later: an order key that is not one is the
+        core's invalid_row now, and the save writes nothing, rather than a
+        row that makes every later compose, arrange and commit of the ref
+        fail. An entity saved twice is checked as its last row."""
+        if not saved:
+            return
+        self._order({kind: list(rows.values()) for kind, rows in self._index(saved).items()})
 
     def _order(self, tree: Tree) -> Tree:
         """tree in the core's order: rows by their order column, then by
@@ -1160,6 +1315,22 @@ class Engine:
                     d = 0
                 distance[n.id] = d
         return written
+
+
+def order_keys(before: Optional[str], after: Optional[str], count: int) -> List[str]:
+    """Makes count order keys that sort strictly between before and after,
+    the start and the end when None or empty: evenly spread, each as short
+    as it can be (D137). A row saved with one of them as its order reads
+    between the rows that hold the bounds. The core makes them, so every
+    language makes the same keys, and refuses bounds no key lies between
+    with no_order_key."""
+    request: Dict[str, Any] = {"count": count}
+    if before:
+        request["before"] = before
+    if after:
+        request["after"] = after
+    keys: List[str] = json.loads(_core_run("order_keys", json.dumps(request)))["keys"]
+    return keys
 
 
 def _apply_patches(pins: _PinSet, patches: Mapping[_Entity, Patch]) -> None:

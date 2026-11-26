@@ -543,6 +543,20 @@ export interface VersionGraphOptions {
    * snapshotted, so reading its tree stops there. Positive; defaults to 64.
    */
   readonly snapshotEvery?: number;
+  /**
+   * A `@queue` class of the schema. Each commit written to the graph
+   * enqueues its message in the transaction that wrote it: its `root` and
+   * `commit` fields take the commit's root and id, and its `ref` and
+   * `sequence` fields, when it declares them, the commit's ref and its
+   * sequence, null on a commit that is not tagged.
+   */
+  readonly enqueueOnCommit?: SchemaClass;
+  /**
+   * A `@queue` class of the schema. A root's release written or moved to
+   * another commit enqueues its message in the transaction that moved it:
+   * its `root` and `commit` fields take the pointer's.
+   */
+  readonly enqueueOnRelease?: SchemaClass;
 }
 
 /**
@@ -558,10 +572,16 @@ export interface GraphMemberOptions {
   /** The graph's root: the @versionGraph type. */
   readonly graph: SchemaClass;
   readonly parent?: GraphParent;
-  /** An Int64 field that orders siblings. */
+  /** The field that orders siblings: a Generic.Int64, or a string that holds an order key. */
   readonly order?: string;
   /** At most one live row of the kind per ref. */
   readonly singleton?: boolean;
+  /**
+   * Keeps the rows of each root's released tree of the kind in a table of
+   * their own, `<Member>Released`, which the graph's release rewrites. The
+   * ORM reads it and writes nothing to it.
+   */
+  readonly released?: boolean;
 }
 
 /**

@@ -13,7 +13,7 @@ type astNodeList = tsast.NodeList
 // written, for their errors (D81).
 const (
 	fileUploadUsage   = `FileUpload<C> takes a type literal of its constraints, each optional: FileUpload<{ maxBytes: 5242880; contentTypes: ["text/csv"]; extensions: [".csv"] }>`
-	fileDownloadUsage = `FileDownload<C> takes a type literal naming the media type and, optionally, the filename: FileDownload<{ contentType: "text/csv"; filename: "orders.csv" }>`
+	fileDownloadUsage = `FileDownload<C> takes a type literal naming the media type and, optionally, the filename, contentTypes, disposition, cacheControl and sandbox: FileDownload<{ contentType: "text/csv"; filename: "orders.csv" }>`
 )
 
 // fileUploadFromTypeArgs reads FileUpload<C> (D81): a string field that is
@@ -67,8 +67,9 @@ func (w *walker) fileUploadFromTypeArgs(node *astNode, args *astNodeList) (*type
 
 // fileDownloadFromTypeArgs reads FileDownload<C> (D81): an operation's
 // result that is a file of the media type C names, with the filename
-// Content-Disposition offers when the implementation names none. It names
-// no JSON type.
+// Content-Disposition offers when the implementation names none, and what
+// D141 adds: the media types the implementation may name in its place, the
+// disposition, the Cache-Control and the sandbox. It names no JSON type.
 func (w *walker) fileDownloadFromTypeArgs(node *astNode, args *astNodeList) (*typeInfo, *SchemaError) {
 	if args == nil || len(args.Nodes) != 1 {
 		return nil, errorAtNode(node, "%s", fileDownloadUsage)
@@ -86,13 +87,37 @@ func (w *walker) fileDownloadFromTypeArgs(node *astNode, args *astNodeList) (*ty
 				return nil, errorAtNode(member.node, "FileDownload contentType must be a string literal: \"text/csv\"")
 			}
 			download.ContentType = text
+		case "contentTypes":
+			values, serr := stringTuple(member, "FileDownload contentTypes is a tuple of media types: [\"image/png\", \"image/jpeg\"]")
+			if serr != nil {
+				return nil, serr
+			}
+			download.ContentTypes = values
 		case "filename":
 			if !ok || text == "" {
 				return nil, errorAtNode(member.node, "FileDownload filename must be a non-empty string literal: \"orders.csv\"")
 			}
 			download.Filename = text
+		case "disposition":
+			if !ok || (text != ir.FileDispositionAttachment && text != ir.FileDispositionInline) {
+				return nil, errorAtNode(member.node, "FileDownload disposition must be \"attachment\" or \"inline\"")
+			}
+			if text == ir.FileDispositionInline {
+				download.Disposition = text
+			}
+		case "cacheControl":
+			if !ok || text == "" {
+				return nil, errorAtNode(member.node, "FileDownload cacheControl must be a non-empty string literal: \"private, max-age=60\"")
+			}
+			download.CacheControl = text
+		case "sandbox":
+			sandbox, serr := fileDownloadSandbox(member)
+			if serr != nil {
+				return nil, serr
+			}
+			download.Sandbox = sandbox
 		default:
-			return nil, errorAtNode(member.node, "FileDownload has no member %q; it takes contentType and filename", member.key)
+			return nil, errorAtNode(member.node, "FileDownload has no member %q; it takes contentType, contentTypes, filename, disposition, cacheControl and sandbox", member.key)
 		}
 	}
 	if download.ContentType == "" {
@@ -102,6 +127,27 @@ func (w *walker) fileDownloadFromTypeArgs(node *astNode, args *astNodeList) (*ty
 		return nil, errorAtNode(args.Nodes[0], "%v", err)
 	}
 	return &typeInfo{fileDownload: download}, nil
+}
+
+// fileDownloadSandbox reads FileDownload's sandbox (D141): `true`, or a
+// tuple of the policy's tokens. `false` is no sandbox, as leaving it out
+// is.
+func fileDownloadSandbox(member fileConfigMember) (*ir.FileDownloadSandbox, *SchemaError) {
+	const usage = "FileDownload sandbox is true, or a tuple of sandbox tokens: [\"allow-scripts\"]"
+	if member.value.Kind == kindLiteralType {
+		switch member.value.AsLiteralTypeNode().Literal.Kind {
+		case kindTrueKeyword:
+			return &ir.FileDownloadSandbox{}, nil
+		case kindFalseKeyword:
+			return nil, nil
+		}
+		return nil, errorAtNode(member.node, "%s", usage)
+	}
+	tokens, serr := stringTuple(member, usage)
+	if serr != nil {
+		return nil, serr
+	}
+	return &ir.FileDownloadSandbox{Allow: tokens}, nil
 }
 
 // fileConfigMember is one property of a file wrapper's config literal.

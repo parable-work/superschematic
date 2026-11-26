@@ -177,6 +177,13 @@ type TypeDef struct {
 	// Nil for every other type. See [GraphMemberConfig].
 	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
 
+	// ReleasedOf names the graph member whose released rows this table
+	// holds (D139): the table the loader adds for a member with
+	// @graphMember({ released: true }). The graph's Release owns its rows,
+	// so the ORMs read it and write nothing to it. Empty for every other
+	// type. It is not part of the data forms: the expansion adds it.
+	ReleasedOf string `json:"releasedOf,omitempty" yaml:"releasedOf,omitempty" jsonschema:"-"`
+
 	// User marks the DB table whose rows are the project's users, the core
 	// User trait (D50). Nil for every other type. See [UserTrait].
 	User *UserTrait `json:"user,omitempty" yaml:"user,omitempty"`
@@ -184,6 +191,13 @@ type TypeDef struct {
 	// UserRole marks the DB table whose rows are roles, the core UserRole
 	// trait (D50). Nil for every other type. See [UserRoleTrait].
 	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
+
+	// IdempotencyKeys marks the DB table that keeps the keys of the
+	// @idempotent operations of the APIs over the database (D140): the one
+	// reserved class, `implements IdempotencyKeys`, whose key and fields
+	// the loader adds. Nil for every other type. See
+	// [IdempotencyKeysTrait].
+	IdempotencyKeys *IdempotencyKeysTrait `json:"idempotencyKeys,omitempty" yaml:"idempotencyKeys,omitempty"`
 
 	// SeedRoles are the roles a UserRole table's @seedRoles declares (D88),
 	// which create.sql inserts and a migration plan keeps in step. Empty
@@ -649,6 +663,13 @@ type FieldDef struct {
 	// [BehaviorOperation].
 	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
 
+	// GraphOperation marks an operation the loader added for a
+	// @graphOperations set (D138): a server whose generator writes graph
+	// handlers routes it to one that runs it through the graph's facade.
+	// Nil for every authored operation. The data forms have no key for
+	// it. See [GraphOperation].
+	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
+
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
 	// writes and no implementation method. Nil for every other operation.
@@ -691,6 +712,12 @@ type FieldDef struct {
 	// Middleware holds field-level middleware overrides (nil means inherit
 	// from the OperationSet).
 	Middleware *MiddlewareConfig `json:"middleware,omitempty" yaml:"middleware,omitempty"`
+
+	// Idempotent is an operation's @idempotent (D140): a call that sends
+	// an Idempotency-Key runs once per key, and a repeat is answered what
+	// the first one was. Nil for every other operation and for data
+	// fields.
+	Idempotent *IdempotentConfig `json:"idempotent,omitempty" yaml:"idempotent,omitempty"`
 
 	// ConflictUnit is the merge unit of a graph member's field
 	// (@conflictUnit): one of the ConflictUnit* strategies. Empty means

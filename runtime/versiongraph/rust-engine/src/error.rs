@@ -44,8 +44,8 @@ pub enum Error {
     RootMismatch,
     /// A merge whose source is its target.
     MergeIntoItself,
-    /// A save, commit, seal or revert on a primary line, which takes writes
-    /// only from a merge.
+    /// A save, arrange, commit, seal or revert on a primary line, which takes
+    /// writes only from a merge.
     PrimaryMergeOnly,
     /// A release of a commit that is not tagged.
     NotTagged,

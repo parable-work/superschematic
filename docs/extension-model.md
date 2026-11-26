@@ -1805,13 +1805,23 @@ The `api` generator takes the provider `auth_provider` selects
   and the required permissions; the provider sets `IsScopedEndpoint` and
   `ScopeParamName` (the SDK generators read them) and its own `Auth` data;
 - renders the core templates, which call the provider at fixed hook points
-  through `authSnippet`. `apigen.AuthSnippets` lists the eighteen snippets
+  through `authSnippet`. `apigen.AuthSnippets` lists the twenty-four snippets
   (imports, context shims, store adapters, config fields, route setup, the
-  per-route permission middleware, `go.mod` lines). A provider defines every
+  per-route permission middleware, `go.mod` lines, and the principal
+  `caller.go` binds as the ORM's caller, D87). A provider defines every
   one, empty when it adds nothing. The per-route permission middleware runs
   after the route's rate and body limits and its service step (D37), and
   before its payload decryptor and timeout, so it reads the caller from the
-  request context, never from the body. A route with a service clause runs
+  request context, never from the body. `routeMiddlewaresFirst` comes
+  before every other middleware of a route, the webhook signature, rate
+  limit and body limit among them, for a step that must refuse a request
+  before any other step counts it. A route with no other middleware gets a
+  list when the snippet is not empty. `routeMiddlewaresAfterDecrypt` comes
+  after the payload decryptor and before the timeout, so a step there reads
+  the request the handler reads. `routesConfigFields` adds `Config`
+  fields to every API, public or not, for the values those middlewares
+  read, and `routesDeclarations` adds the top-level declarations of
+  `routes.go` they call. A route with a service clause runs
   `AuthMiddleware` and `routesProtectedMiddleware` in its own chain, just
   before the permission middleware, instead of on the protected group. The
   generator checks the set when it
@@ -1823,9 +1833,14 @@ The `api` generator takes the provider `auth_provider` selects
   runtime's handlers, `identity.go`'s `NewIdentity` and route table, and
   the CORS middleware; the auth-middleware snippets render beside it;
 - renders the provider's whole files (`Files`) next to the core files and
-  adds `OpenAPIParameters` to every operation of the OpenAPI document.
+  adds `OpenAPIParameters` to every operation of the OpenAPI document. A
+  whole file whose condition holds and whose name is a core file's, such
+  as `context.go` or `middleware.go`, replaces that file: the core does
+  not write it. A provider whose request context or middleware has a
+  shape of its own renders the whole file so.
 
-The snippet hooks are the only way a provider changes a core template.
+The snippet hooks and a replacing whole file are the only ways a provider
+changes a core file.
 
 ### 8.2 The core session provider
 

@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyAccountRepositoryInterface is the reads of AccountRepositoryInterface (D150).
+type ReadOnlyAccountRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *AccountGetOptions) (*types.Account, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Account, error)
+	FindOne(ctx context.Context, filter *AccountFilter, opts *AccountFindOptions) (*types.Account, error)
+	FindMany(ctx context.Context, filter *AccountFilter, opts *AccountFindOptions) ([]*types.Account, int, error)
+	FindPage(ctx context.Context, filter *AccountFilter, opts *AccountPageOptions) (*AccountPage, error)
+}
+
 // AccountRepositoryInterface defines the contract for Account data access.
 type AccountRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *AccountGetOptions) (*types.Account, error)
@@ -26,6 +35,15 @@ type AccountRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *AccountFilter, update *AccountUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *AccountFilter) (int, error)
+}
+
+// ReadOnlyEntryRepositoryInterface is the reads of EntryRepositoryInterface (D150).
+type ReadOnlyEntryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *EntryGetOptions) (*types.Entry, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Entry, error)
+	FindOne(ctx context.Context, filter *EntryFilter, opts *EntryFindOptions) (*types.Entry, error)
+	FindMany(ctx context.Context, filter *EntryFilter, opts *EntryFindOptions) ([]*types.Entry, int, error)
+	FindPage(ctx context.Context, filter *EntryFilter, opts *EntryPageOptions) (*EntryPage, error)
 }
 
 // EntryRepositoryInterface defines the contract for Entry data access.
@@ -47,14 +65,40 @@ type EntryRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface
+	GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface
+	GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetAccountRepository() AccountRepositoryInterface
+	GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface
 	GetEntryRepository() EntryRepositoryInterface
+	GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -63,7 +107,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetAccountRepository() AccountRepositoryInterface
+	GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface
 	GetEntryRepository() EntryRepositoryInterface
+	GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -101,9 +147,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -113,6 +180,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -134,11 +211,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetAccountRepository() AccountRepositoryInterface {
 	return db.Account
 }
 
+func (db *NoOpDatabase) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
+	return db.Account
+}
+
 func (tx *NoOpTx) GetAccountRepository() AccountRepositoryInterface {
+	return tx.Account
+}
+
+func (tx *NoOpTx) GetAccountReadOnlyRepository() ReadOnlyAccountRepositoryInterface {
 	return tx.Account
 }
 
@@ -212,7 +302,15 @@ func (db *NoOpDatabase) GetEntryRepository() EntryRepositoryInterface {
 	return db.Entry
 }
 
+func (db *NoOpDatabase) GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface {
+	return db.Entry
+}
+
 func (tx *NoOpTx) GetEntryRepository() EntryRepositoryInterface {
+	return tx.Entry
+}
+
+func (tx *NoOpTx) GetEntryReadOnlyRepository() ReadOnlyEntryRepositoryInterface {
 	return tx.Entry
 }
 
@@ -287,12 +385,20 @@ func (r *NoOpEntryRepository) HardDeleteOne(_ context.Context, _ types.IdentityU
 }
 
 var (
-	_ DatabaseInterface          = (*Database)(nil)
-	_ DatabaseInterface          = (*NoOpDatabase)(nil)
-	_ TxInterface                = (*Tx)(nil)
-	_ TxInterface                = (*NoOpTx)(nil)
-	_ AccountRepositoryInterface = (*AccountRepository)(nil)
-	_ AccountRepositoryInterface = (*NoOpAccountRepository)(nil)
-	_ EntryRepositoryInterface   = (*EntryRepository)(nil)
-	_ EntryRepositoryInterface   = (*NoOpEntryRepository)(nil)
+	_ DatabaseInterface                  = (*Database)(nil)
+	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface          = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface          = (*NoOpDatabase)(nil)
+	_ TxInterface                        = (*Tx)(nil)
+	_ TxInterface                        = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                = (*Tx)(nil)
+	_ ReadOnlyTxInterface                = (*NoOpTx)(nil)
+	_ AccountRepositoryInterface         = (*AccountRepository)(nil)
+	_ AccountRepositoryInterface         = (*NoOpAccountRepository)(nil)
+	_ ReadOnlyAccountRepositoryInterface = (*AccountRepository)(nil)
+	_ ReadOnlyAccountRepositoryInterface = (*NoOpAccountRepository)(nil)
+	_ EntryRepositoryInterface           = (*EntryRepository)(nil)
+	_ EntryRepositoryInterface           = (*NoOpEntryRepository)(nil)
+	_ ReadOnlyEntryRepositoryInterface   = (*EntryRepository)(nil)
+	_ ReadOnlyEntryRepositoryInterface   = (*NoOpEntryRepository)(nil)
 )

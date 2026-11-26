@@ -46,6 +46,19 @@ type VersionGraphConfig struct {
 	// value is positive. Verification enforces that, not the data form's
 	// JSON Schema, whose subset has no numeric bounds.
 	SnapshotEvery *int64 `json:"snapshotEvery,omitempty" yaml:"snapshotEvery,omitempty"`
+
+	// EnqueueOnCommit names a `@queue` class of the schema: a commit
+	// written to the graph's commit table enqueues its message, by a
+	// trigger, in the transaction that wrote it (D138). The message's
+	// root and commit fields take the commit's root and id, and its ref
+	// and sequence fields, when it declares them, the commit's.
+	EnqueueOnCommit string `json:"enqueueOnCommit,omitempty" yaml:"enqueueOnCommit,omitempty"`
+
+	// EnqueueOnRelease names a `@queue` class of the schema: a root's
+	// release pointer written or moved to another commit enqueues its
+	// message, by a trigger, in the transaction that moved it (D138). The
+	// message's root and commit fields take the pointer's.
+	EnqueueOnRelease string `json:"enqueueOnRelease,omitempty" yaml:"enqueueOnRelease,omitempty"`
 }
 
 // DefaultSnapshotEvery is a version graph's snapshot interval when
@@ -71,12 +84,18 @@ type GraphMemberConfig struct {
 	// row's entityKey. Nil means the kind has no parent.
 	Parent *GraphParent `json:"parent,omitempty" yaml:"parent,omitempty"`
 
-	// Order names the Int64 field that orders siblings. Empty means the
-	// kind is unordered.
+	// Order names the field that orders siblings: a Generic.Int64, or a
+	// string that holds an order key (D137). Empty means the kind is
+	// unordered.
 	Order string `json:"order,omitempty" yaml:"order,omitempty"`
 
 	// Singleton allows at most one live row of the kind per ref.
 	Singleton bool `json:"singleton,omitempty" yaml:"singleton,omitempty"`
+
+	// Released keeps the rows of each root's released tree of the kind in
+	// a table of their own, <Member>Released, which a release rewrites
+	// (D139). The loader adds the table; see [TypeDef.ReleasedOf].
+	Released bool `json:"released,omitempty" yaml:"released,omitempty"`
 }
 
 // GraphParent is the containment edge of a graph member: the field Key

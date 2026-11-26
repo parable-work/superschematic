@@ -541,6 +541,12 @@ type RustAPI struct {
 	// its MCP endpoint signs confirmations with, which its router options
 	// carry (D93, D116); empty for an API whose endpoint confirms no tool.
 	MCPConfirmationKey string
+
+	// MinClientVersions is the expression of its config that holds the
+	// oldest version of each client it serves, which its router options
+	// carry (D143); empty for an API whose config does not say
+	// clientVersions.
+	MinClientVersions string
 }
 
 // MountsEngine reports whether the API's server mounts the routes of its
@@ -616,7 +622,8 @@ func (m *RustMemoryStore) OpenLet() string {
 // RouterOptionsLet is main.rs's statement that builds the router options
 // of an API with a rateLimitStore, a registry whose limiters count in the
 // store (D75), and of one whose MCP endpoint confirms a tool, the key it
-// signs its confirmations with (D93, D116).
+// signs its confirmations with (D93, D116), and of one whose config says
+// clientVersions, the minimums its config read (D143).
 func (a *RustAPI) RouterOptionsLet() string {
 	const indent = "    "
 	var fields []string
@@ -635,6 +642,9 @@ func (a *RustAPI) RouterOptionsLet() string {
 			field = indent + indent + "mcp: " + root + "\n" + indent + indent + indent + call
 		}
 		fields = append(fields, field)
+	}
+	if a.MinClientVersions != "" {
+		fields = append(fields, indent+indent+"min_client_versions: "+a.MinClientVersions+".clone(),")
 	}
 	return indent + "let " + a.RouterOptions + " = " + a.Alias + "::RouterOptions {\n" + strings.Join(fields, "\n") + "\n" + indent + indent + ".." + a.Alias + "::RouterOptions::default()\n" + indent + "};"
 }
@@ -1096,6 +1106,14 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, whose MCP endpoint runs %s only once the person confirms the call, and whose config holds no confirmation key; set outputs.api.mcpConfirmationKey (D93)", in.Stack, in.Server, o.SchemaName, tools)
 			}
 			api.MCPConfirmationKey = api.Config + "." + envgen.RustFieldName(o.MCP.ConfirmationKey)
+			if api.RouterOptions == "" {
+				api.RouterOptions = taken.take(stem + "_router_options")
+			}
+		}
+		if a.Config != nil && a.Config.ClientVersions && api.Config != "" && !background && s.App == nil {
+			// A job or a worker serves no request, so it turns no client
+			// away, and an app's program builds its router itself (D143).
+			api.MinClientVersions = api.Config + "." + envgen.RustFieldName(ir.MinClientVersionsSetting)
 			if api.RouterOptions == "" {
 				api.RouterOptions = taken.take(stem + "_router_options")
 			}

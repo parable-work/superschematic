@@ -75,6 +75,9 @@ type kindRoles struct {
 	ID        string `json:"id"`
 	Tombstone string `json:"tombstone"`
 	Version   string `json:"version"`
+	// ReleasedTable is set for a kind that keeps the released tree's rows
+	// in a table of its own (D139), which Release rewrites.
+	ReleasedTable string `json:"releasedTable"`
 }
 
 // New returns the engine of the graph descriptor describes (version 3),
@@ -336,6 +339,9 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 			}
 			deletes = deletes || len(edits[k.Name].Delete) > 0
 		}
+		if err := e.checkSaved(result.Saved); err != nil {
+			return err
+		}
 		if deletes {
 			composed, _, _, err := e.compose(ctx, tx, r)
 			if err != nil {
@@ -377,6 +383,88 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 		return nil, err
 	}
 	return result, nil
+}
+
+// Arrange puts one parent's children of kind in the order keys gives, on a
+// change set at version (D137). keys are the entity keys of every live
+// child of parent in the ref's tree, in the order wanted; an empty parent
+// is none, the rows of the kind that have no parent. The longest run of
+// children already in order keeps its order keys, and each other child
+// takes a new one between its neighbors', written as the ref's row of it.
+// It returns the ref at its new version and the rows written, in the order
+// wanted. The kind's order is a string key: the core refuses another with
+// order_not_a_key, and a list that is not exactly the parent's live
+// children with invalid_arrangement. It refuses a sealed ref, and a primary
+// line with ErrPrimaryMergeOnly.
+func (e *Engine) Arrange(ctx context.Context, actor, ref string, version int64, kind, parent string, keys []string) (*SaveResult, error) {
+	actor, err := actorID(actor)
+	if err != nil {
+		return nil, err
+	}
+	if err := ids(&ref); err != nil {
+		return nil, err
+	}
+	if _, err := e.kind(kind); err != nil {
+		return nil, err
+	}
+	if parent != "" {
+		if err := ids(&parent); err != nil {
+			return nil, err
+		}
+	}
+	wanted := make([]string, len(keys))
+	for i, key := range keys {
+		if wanted[i], err = id("entity key", key); err != nil {
+			return nil, err
+		}
+	}
+	result := &SaveResult{Saved: Tree{}}
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		r, err := e.readDraft(ctx, tx, ref, version)
+		if err != nil {
+			return err
+		}
+		composed, _, _, err := e.compose(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		composedJSON, err := composed.json()
+		if err != nil {
+			return err
+		}
+		arranged, err := versiongraph.Arrange(versiongraph.ArrangeRequest{
+			Descriptor: e.descriptor, Tree: composedJSON, Kind: kind, Parent: parent, Keys: wanted,
+		})
+		if err != nil {
+			return err
+		}
+		for _, row := range arranged.Rows {
+			stored, err := e.writeRow(ctx, tx, kind, r, row, false, actor)
+			if err != nil {
+				return err
+			}
+			result.Saved.add(kind, stored)
+		}
+		result.Ref, err = tx.UpdateRef(ctx, storage.RefUpdate{ID: r.ID, Version: r.Version, Actor: actor})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OrderKeys makes count order keys that sort strictly between before and
+// after, the start and the end when empty: evenly spread, each as short as
+// it can be (D137). A row saved with one of them as its order reads between
+// the rows that hold the bounds. The core makes them, so every language
+// makes the same keys.
+func OrderKeys(before, after string, count int) ([]string, error) {
+	result, err := versiongraph.OrderKeys(versiongraph.OrderKeysRequest{Before: before, After: after, Count: count})
+	if err != nil {
+		return nil, err
+	}
+	return result.Keys, nil
 }
 
 // Commit composes a change set at version, diffs it against its last
@@ -591,6 +679,13 @@ func (e *Engine) Revert(ctx context.Context, actor, ref string, version int64, t
 // the commit and writes no member rows, so a rollback is a Release to an
 // earlier tagged commit, and the pointer's history is the release log. An
 // untagged commit is ErrNotTagged; another root's is ErrRootMismatch.
+//
+// For each kind that keeps a released table (D139) it rewrites the root's
+// rows there in the same transaction, from the diff between the tree of the
+// commit released before and this one's: an added or changed entity is
+// written with this commit and its sequence, and a deleted one removed. A
+// root's first release writes the whole tree, and so does a release of the
+// commit already released, which rebuilds the root's rows.
 func (e *Engine) Release(ctx context.Context, actor, root, commit string, version int64) (storage.Release, error) {
 	actor, err := actorID(actor)
 	if err != nil {
@@ -614,10 +709,91 @@ func (e *Engine) Release(ctx context.Context, actor, root, commit string, versio
 		if _, err := e.ensureSnapshot(ctx, tx, c); err != nil {
 			return err
 		}
-		release, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: root, Commit: c.ID, Version: version, Actor: actor})
-		return err
+		before, err := e.releasedBefore(ctx, tx, root)
+		if err != nil {
+			return err
+		}
+		if release, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: root, Commit: c.ID, Version: version, Actor: actor}); err != nil {
+			return err
+		}
+		return e.writeReleased(ctx, tx, before, c)
 	})
 	return release, err
+}
+
+// keepsReleased reports whether any kind keeps a released table.
+func (e *Engine) keepsReleased() bool {
+	for _, k := range e.kinds {
+		if k.ReleasedTable != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// releasedBefore reads the commit root's release names before a release
+// moves it, "" for a root never released, when a kind keeps a released
+// table; the engine reads nothing otherwise.
+func (e *Engine) releasedBefore(ctx context.Context, tx storage.Tx, root string) (string, error) {
+	if !e.keepsReleased() {
+		return "", nil
+	}
+	held, err := tx.ReadRelease(ctx, root)
+	switch {
+	case err == nil:
+		return held.Commit, nil
+	case errors.Is(err, ErrNotFound):
+		return "", nil
+	}
+	return "", err
+}
+
+// writeReleased rewrites the released tables' rows of a commit's root
+// for a release that moved the root's pointer from before to commit.
+func (e *Engine) writeReleased(ctx context.Context, tx storage.Tx, before string, commit storage.Commit) error {
+	if !e.keepsReleased() {
+		return nil
+	}
+	// A first release, and a release of the commit already released,
+	// write the whole tree over whatever the tables hold of the root.
+	replace := before == "" || before == commit.ID
+	from := Tree{}
+	if !replace {
+		var err error
+		if from, err = e.materialize(ctx, tx, before); err != nil {
+			return err
+		}
+	}
+	to, err := e.materialize(ctx, tx, commit.ID)
+	if err != nil {
+		return err
+	}
+	changes, err := e.diff(from, to)
+	if err != nil {
+		return err
+	}
+	for _, k := range e.kinds {
+		if k.ReleasedTable == "" {
+			continue
+		}
+		write := storage.ReleasedWrite{Root: commit.Root, Commit: commit.ID, Sequence: *commit.Sequence, Replace: replace}
+		for _, change := range changes {
+			switch {
+			case change.Kind != k.Name:
+			case change.Operation == "DELETE":
+				write.Delete = append(write.Delete, change.EntityKey)
+			default:
+				write.Upsert = append(write.Upsert, change.Row)
+			}
+		}
+		if !replace && len(write.Delete) == 0 && len(write.Upsert) == 0 {
+			continue
+		}
+		if err := tx.WriteReleased(ctx, k.Name, write); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Released reads root's release pointer and the tree of the commit it
@@ -731,6 +907,68 @@ func (e *Engine) History(ctx context.Context, ref string) ([]storage.Commit, err
 		return err
 	})
 	return commits, err
+}
+
+// EntityChange is one commit that changed an entity, and what it did to
+// it: Operation is ADD, UPDATE or DELETE.
+type EntityChange struct {
+	Commit    storage.Commit
+	Operation string
+}
+
+// EntityHistory lists the commits of root's primary line that changed the
+// entity key of kind, newest first, each with what it did to the entity
+// (D138). It reads the line's commits and the entity's patches among them,
+// and no tree. A root with several primary lines lists each line's in the
+// order the lines were created; one with none, or an entity no commit
+// changed, lists nothing. It walks at most the engine's ceiling of commits
+// a line.
+func (e *Engine) EntityHistory(ctx context.Context, root, kind, key string) ([]EntityChange, error) {
+	if err := ids(&root); err != nil {
+		return nil, err
+	}
+	if _, err := e.kind(kind); err != nil {
+		return nil, err
+	}
+	key, err := id("entity key", key)
+	if err != nil {
+		return nil, err
+	}
+	var changes []EntityChange
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		lines, err := tx.PrimaryRefs(ctx, root)
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			if line.Head == "" {
+				continue
+			}
+			commits, err := tx.RefCommits(ctx, line.ID, line.Head, e.walkCeiling)
+			if err != nil {
+				return err
+			}
+			commitIDs := make([]string, len(commits))
+			for i, c := range commits {
+				commitIDs[i] = c.ID
+			}
+			patches, err := tx.EntityPatches(ctx, commitIDs, kind, key)
+			if err != nil {
+				return err
+			}
+			operations := make(map[string]string, len(patches))
+			for _, p := range patches {
+				operations[p.Commit] = p.Operation
+			}
+			for _, c := range commits {
+				if operation, ok := operations[c.ID]; ok {
+					changes = append(changes, EntityChange{Commit: c, Operation: operation})
+				}
+			}
+		}
+		return nil
+	})
+	return changes, err
 }
 
 // Discard soft-deletes a ref at version, which frees its name.
@@ -1044,6 +1282,29 @@ func (e *Engine) compose(ctx context.Context, tx storage.Tx, ref storage.Ref) (T
 		return nil, nil, nil, err
 	}
 	return tree, result.Findings, own, nil
+}
+
+// checkSaved holds the rows a save wrote to the core's rules for a row, as
+// a compose of the ref would later: an order key that is not one is the
+// core's invalid_row now, and the save writes nothing, rather than a row
+// that makes every later compose, arrange and commit of the ref fail. An
+// entity saved twice is checked as its last row.
+func (e *Engine) checkSaved(saved Tree) error {
+	if len(saved) == 0 {
+		return nil
+	}
+	byKey, err := e.index(saved)
+	if err != nil {
+		return err
+	}
+	tree := Tree{}
+	for kind, rows := range byKey {
+		for _, row := range rows {
+			tree.add(kind, row)
+		}
+	}
+	_, err = e.order(tree)
+	return err
 }
 
 // order returns tree in the core's order: rows by their order column, then

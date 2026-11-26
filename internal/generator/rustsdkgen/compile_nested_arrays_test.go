@@ -24,8 +24,10 @@ import (
 // rule is refused before the request; with pathParamsSDKTest: each path
 // value is sent as one segment, encoded once; with problemDetailsSDKTest:
 // an error response's problem, request id and Retry-After reach
-// SDKError::Api; and with serviceCredentialSDKTest: the service credential,
-// its 401 rule and the forwarded end user (D37). The types crate resolves
+// SDKError::Api; with serviceCredentialSDKTest: the service credential,
+// its 401 rule and the forwarded end user (D37); and with
+// clientVersionSDKTest: the client's X-Client-Version and the 426 that
+// turns an old one away (D143). The types crate resolves
 // superscalar from the checkout scripts/superscalar-dep.sh stands up.
 // CARGO_TARGET_DIR is honored when set.
 func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
@@ -64,6 +66,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 	writeFile(t, filepath.Join(sdkDir, "tests", "path_params.rs"), strings.ReplaceAll(pathParamsSDKTest, "SDK_CRATE", crate))
 	writeFile(t, filepath.Join(sdkDir, "tests", "problem_details.rs"), strings.ReplaceAll(problemDetailsSDKTest, "SDK_CRATE", crate))
 	writeFile(t, filepath.Join(sdkDir, "tests", "service_credential.rs"), strings.ReplaceAll(serviceCredentialSDKTest, "SDK_CRATE", crate))
+	writeFile(t, filepath.Join(sdkDir, "tests", "client_version.rs"), strings.ReplaceAll(clientVersionSDKTest, "SDK_CRATE", crate))
 
 	cargoClippyAndTest(t, cargoPath, sdkDir)
 }

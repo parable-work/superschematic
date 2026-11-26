@@ -34,7 +34,8 @@ import { openAPIJSON } from './openapi';
 export type OperationName =
   | 'importStatement'
   | 'exportStatement'
-  | 'originalStatement';
+  | 'originalStatement'
+  | 'previewStatement';
 
 /** The operation table: what the schema declares about each route. */
 export const operationSpecs = {
@@ -73,6 +74,18 @@ export const operationSpecs = {
     queryParams: [],
     bodyParams: [],
     download: { contentType: 'application/octet-stream' },
+    auth: { public: false, required: false, permissions: [] },
+    manual: false,
+  },
+  previewStatement: {
+    name: 'previewStatement',
+    namespace: 'statements',
+    method: 'GET',
+    path: '/api/statements/{accountId}/preview',
+    pathParams: [{ name: 'accountId', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    download: { contentType: 'text/plain; charset=utf-8', contentTypes: ['text/html; charset=utf-8'], filename: 'statement.txt', disposition: 'inline', cacheControl: 'private, no-cache', sandbox: ['allow-popups'] },
     auth: { public: false, required: false, permissions: [] },
     manual: false,
   },
@@ -143,6 +156,23 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: options.bodyLimits?.originalStatement,
       rateLimitPerMinute: options.rateLimits?.originalStatement,
       timeoutSeconds: options.timeouts?.originalStatement,
+    }
+  );
+  mountOperation(
+    router,
+    operationSpecs.previewStatement,
+    (ctx, request) =>
+      implementations.statements.previewStatement(
+        {
+          accountId: request.path['accountId'] as IdentityUUID,
+        },
+        ctx
+      ),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.previewStatement,
+      rateLimitPerMinute: options.rateLimits?.previewStatement,
+      timeoutSeconds: options.timeouts?.previewStatement,
     }
   );
   return router;

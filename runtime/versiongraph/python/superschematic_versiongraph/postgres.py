@@ -13,6 +13,9 @@ entity_id, entity_version and operation; a snapshot entry's commit_id,
 entity_kind, entity_key, entity_id and entity_version; and a release
 pointer's root_id, commit_id, audit columns and _version. A history table
 keys its images on the kind's id and version columns and holds each in data.
+A kind's released table (D139) has the kind's root and entity key columns,
+its content columns under their names, commit_id and sequence, with a unique
+index on the root and the entity key.
 
 The adapter reaches Postgres through ``Client``, which returns every column
 as the text Postgres writes for it, so no driver's type adaptation touches a
@@ -26,7 +29,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, TypeVar, Union
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, Tuple, TypeVar, Union
 
 from .canonical import canonical_of, canonical_row, postgres_input, uuid_canonical, uuid_hyphenated
 from .errors import NameTakenError, NotFoundError, VersionConflictError
@@ -42,6 +45,7 @@ from .storage import (
     RefUpdate,
     Release,
     ReleaseWrite,
+    ReleasedWrite,
     RowWrite,
     SnapshotEntry,
     Storage,
@@ -70,6 +74,13 @@ _CREATED_AT = "created_at"
 _CREATED_BY = "created_by"
 _UPDATED_AT = "updated_at"
 _UPDATED_BY = "updated_by"
+
+# The columns of a released table beside the kind's own (D139): the commit
+# and the sequence of the release that wrote the row. Its other columns are
+# the kind's root and entity key columns and its content columns, under the
+# names the kind's table gives them.
+_RELEASED_COMMIT = "commit_id"
+_RELEASED_SEQUENCE = "sequence"
 
 # The most columns a Postgres table can have. No row the adapter writes has
 # more members.
@@ -126,6 +137,12 @@ class _Kind:
     tombstone: str
     version: str
     columns: Mapping[str, str]
+    #: The table that holds the released tree's rows of the kind (D139), ""
+    #: for a kind that keeps none.
+    released_table: str = ""
+    #: The kind's content columns, sorted: what a released row holds beside
+    #: its root, its entity key and its release's commit and sequence.
+    content: Tuple[str, ...] = ()
 
 
 def _quote(name: str) -> str:
@@ -166,7 +183,8 @@ class PostgresAdapter:
     ) -> None:
         """Reads a graph's descriptor (JSON text or a mapping). The core
         checks the rest of it; the adapter needs its tables, each kind's role
-        columns, the root column among them, and each kind's columns.
+        columns, the root column among them, each kind's columns, and the
+        releasedTable of a kind that keeps its released rows.
         history_actor_setting is the setting the history triggers read a
         hard delete's actor from: the schema's history_actor_setting naming
         key ("" is DEFAULT_HISTORY_ACTOR_SETTING)."""
@@ -208,6 +226,13 @@ class PostgresAdapter:
                         f"postgres: kind {write_string(str(k.get('kind')))} {role} column "
                         f"{write_string(column)} is not in its columns"
                     )
+            # The content columns, as the core reads them: every column that
+            # is not a role column, the author among them, and is not
+            # excluded.
+            not_content = {k[role] for role in ("key", "id", "ref", "root", "tombstone", "version")}
+            if k.get("author"):
+                not_content.add(k["author"])
+            not_content.update(k.get("excluded") or [])
             self.kinds[k["kind"]] = _Kind(
                 k["kind"],
                 k["table"],
@@ -219,6 +244,8 @@ class PostgresAdapter:
                 k["tombstone"],
                 k["version"],
                 dict(columns),
+                k.get("releasedTable") or "",
+                tuple(sorted(column for column in columns if column not in not_content)),
             )
 
     def storage(self, client: Client) -> Storage:
@@ -302,6 +329,16 @@ def _scan_commit(row: List[Optional[str]]) -> Commit:
         created_at=created_at,
         created_by=_required_id(row[9]),
         snapshot=_bool(row[10]),
+    )
+
+
+# A patch's columns, as text.
+_PATCH_COLUMNS = "commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation"
+
+
+def _scan_patch(row: List[Optional[str]]) -> Patch:
+    return Patch(
+        _required_id(row[0]), _text(row[1]), _required_id(row[2]), _required_id(row[3]), _int(row[4]), _text(row[5])
     )
 
 
@@ -624,18 +661,29 @@ class _PostgresTx:
     def patches(self, commits: Sequence[str]) -> List[Patch]:
         if not commits:
             return []
-        sql = (
-            "SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation "
-            f"FROM {self._a.patch_table} WHERE commit_id = ANY($1::text[]::uuid[])"
-        )
+        sql = f"SELECT {_PATCH_COLUMNS} FROM {self._a.patch_table} WHERE commit_id = ANY($1::text[]::uuid[])"
         with _context("read patches"):
             result = self._conn.query(sql, [[uuid_hyphenated(c) for c in commits]])
-            return [
-                Patch(
-                    _required_id(row[0]), _text(row[1]), _required_id(row[2]), _required_id(row[3]), _int(row[4]), _text(row[5])
-                )
-                for row in result.rows
-            ]
+            return [_scan_patch(row) for row in result.rows]
+
+    def primary_refs(self, root: str) -> List[Ref]:
+        return self._refs(
+            f"SELECT {_REF_COLUMNS} FROM {self._a.ref_table} "
+            "WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            [_uuid_arg(root)],
+        )
+
+    def entity_patches(self, commits: Sequence[str], kind: str, entity_key: str) -> List[Patch]:
+        if not commits:
+            return []
+        k = self._kind(kind)
+        sql = (
+            f"SELECT {_PATCH_COLUMNS} FROM {self._a.patch_table} "
+            "WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid"
+        )
+        with _context("read an entity's patches"):
+            result = self._conn.query(sql, [[uuid_hyphenated(c) for c in commits], k.name, _uuid_arg(entity_key)])
+            return [_scan_patch(row) for row in result.rows]
 
     def next_sequence(self, root: str) -> int:
         arg = _uuid_arg(root)
@@ -752,6 +800,61 @@ class _PostgresTx:
         if not result.rows:
             raise VersionConflictError()
         return _scan_release(result.rows[0])
+
+    def write_released(self, kind: str, write: ReleasedWrite) -> None:
+        k = self._kind(kind)
+        if not k.released_table:
+            raise ValueError(f"postgres: kind {write_string(k.name)} keeps no released table")
+        root_arg, commit_arg = _uuid_arg(write.root), _uuid_arg(write.commit)
+        table, root, key = _quote(k.released_table), _quote(k.root), _quote(k.key)
+        if write.replace:
+            with _context(f"clear {k.released_table}"):
+                self._conn.query(f"DELETE FROM {table} WHERE {root} = $1::uuid", [root_arg])
+        if write.delete:
+            with _context(f"delete from {k.released_table}"):
+                self._conn.query(
+                    f"DELETE FROM {table} WHERE {root} = $1::uuid AND {key} = ANY($2::text[]::uuid[])",
+                    [root_arg, [uuid_hyphenated(entity_key) for entity_key in write.delete]],
+                )
+        if not write.upsert:
+            return
+        # One statement writes every row: each column from the row's member
+        # as the kind's table takes it, the root, the commit and the sequence
+        # from the release.
+        commit, sequence = _quote(_RELEASED_COMMIT), _quote(_RELEASED_SEQUENCE)
+        names = [root, key, commit, sequence]
+        values = ["$2::uuid", "r." + key, "$3::uuid", "$4::bigint"]
+        updates = [f"{commit} = EXCLUDED.{commit}", f"{sequence} = EXCLUDED.{sequence}"]
+        for column in k.content:
+            q = _quote(column)
+            names.append(q)
+            value_class = k.columns[column]
+            if value_class == "json" or value_class.endswith("[][]"):
+                # A JSONB column takes the member itself, as upsert_row gives
+                # it.
+                values.append(f"(e.value -> {_literal(column)})")
+            else:
+                values.append("r." + q)
+            updates.append(f"{q} = EXCLUDED.{q}")
+        inputs: List[str] = []
+        for row in write.upsert:
+            members = loads(row)
+            if not isinstance(members, dict):
+                raise ValueError(f"postgres: a released {k.name} row is a JSON object")
+            values_in: Dict[str, str] = {}
+            for column in (k.key,) + k.content:
+                # A column the row lacks is null.
+                with _context(f"released {k.name} column {column}"):
+                    values_in[column] = postgres_input(k.columns[column], members.get(column))
+            inputs.append("{" + ",".join(write_string(c) + ":" + values_in[c] for c in sorted(values_in)) + "}")
+        sql = (
+            f"INSERT INTO {table} ({', '.join(names)}) "
+            f"SELECT {', '.join(values)} FROM jsonb_array_elements($1::jsonb) AS e(value), "
+            f"jsonb_populate_record(NULL::{table}, e.value) AS r "
+            f"ON CONFLICT ({root}, {key}) DO UPDATE SET {', '.join(updates)}"
+        )
+        with _context(f"write {k.released_table}"):
+            self._conn.query(sql, ["[" + ",".join(inputs) + "]", root_arg, commit_arg, write.sequence])
 
     def discarded_refs(self, grace: timedelta) -> List[Ref]:
         return self._refs(

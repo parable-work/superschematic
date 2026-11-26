@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyBookingRepositoryInterface is the reads of BookingRepositoryInterface (D150).
+type ReadOnlyBookingRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BookingGetOptions) (*types.Booking, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Booking, error)
+	FindOne(ctx context.Context, filter *BookingFilter, opts *BookingFindOptions) (*types.Booking, error)
+	FindMany(ctx context.Context, filter *BookingFilter, opts *BookingFindOptions) ([]*types.Booking, int, error)
+	FindPage(ctx context.Context, filter *BookingFilter, opts *BookingPageOptions) (*BookingPage, error)
+}
+
 // BookingRepositoryInterface defines the contract for Booking data access.
 type BookingRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *BookingGetOptions) (*types.Booking, error)
@@ -26,6 +35,15 @@ type BookingRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *BookingFilter) (int, error)
 	Holds() BookingHoldsOperations
 	Status() BookingStatusOperations
+}
+
+// ReadOnlyDeskRepositoryInterface is the reads of DeskRepositoryInterface (D150).
+type ReadOnlyDeskRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *DeskGetOptions) (*types.Desk, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Desk, error)
+	FindOne(ctx context.Context, filter *DeskFilter, opts *DeskFindOptions) (*types.Desk, error)
+	FindMany(ctx context.Context, filter *DeskFilter, opts *DeskFindOptions) ([]*types.Desk, int, error)
+	FindPage(ctx context.Context, filter *DeskFilter, opts *DeskPageOptions) (*DeskPage, error)
 }
 
 // DeskRepositoryInterface defines the contract for Desk data access.
@@ -44,14 +62,40 @@ type DeskRepositoryInterface interface {
 	Calendar() DeskCalendarOperations
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface
+	GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface
+	GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetBookingRepository() BookingRepositoryInterface
+	GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface
 	GetDeskRepository() DeskRepositoryInterface
+	GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -60,7 +104,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetBookingRepository() BookingRepositoryInterface
+	GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface
 	GetDeskRepository() DeskRepositoryInterface
+	GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -98,9 +144,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -110,6 +177,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -131,11 +208,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetBookingRepository() BookingRepositoryInterface {
 	return db.Booking
 }
 
+func (db *NoOpDatabase) GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface {
+	return db.Booking
+}
+
 func (tx *NoOpTx) GetBookingRepository() BookingRepositoryInterface {
+	return tx.Booking
+}
+
+func (tx *NoOpTx) GetBookingReadOnlyRepository() ReadOnlyBookingRepositoryInterface {
 	return tx.Booking
 }
 
@@ -227,7 +317,15 @@ func (db *NoOpDatabase) GetDeskRepository() DeskRepositoryInterface {
 	return db.Desk
 }
 
+func (db *NoOpDatabase) GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface {
+	return db.Desk
+}
+
 func (tx *NoOpTx) GetDeskRepository() DeskRepositoryInterface {
+	return tx.Desk
+}
+
+func (tx *NoOpTx) GetDeskReadOnlyRepository() ReadOnlyDeskRepositoryInterface {
 	return tx.Desk
 }
 
@@ -337,12 +435,20 @@ func (noOpDeskCalendarOperations) FindAvailability(_ context.Context, _ DeskCale
 }
 
 var (
-	_ DatabaseInterface          = (*Database)(nil)
-	_ DatabaseInterface          = (*NoOpDatabase)(nil)
-	_ TxInterface                = (*Tx)(nil)
-	_ TxInterface                = (*NoOpTx)(nil)
-	_ BookingRepositoryInterface = (*BookingRepository)(nil)
-	_ BookingRepositoryInterface = (*NoOpBookingRepository)(nil)
-	_ DeskRepositoryInterface    = (*DeskRepository)(nil)
-	_ DeskRepositoryInterface    = (*NoOpDeskRepository)(nil)
+	_ DatabaseInterface                  = (*Database)(nil)
+	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface          = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface          = (*NoOpDatabase)(nil)
+	_ TxInterface                        = (*Tx)(nil)
+	_ TxInterface                        = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                = (*Tx)(nil)
+	_ ReadOnlyTxInterface                = (*NoOpTx)(nil)
+	_ BookingRepositoryInterface         = (*BookingRepository)(nil)
+	_ BookingRepositoryInterface         = (*NoOpBookingRepository)(nil)
+	_ ReadOnlyBookingRepositoryInterface = (*BookingRepository)(nil)
+	_ ReadOnlyBookingRepositoryInterface = (*NoOpBookingRepository)(nil)
+	_ DeskRepositoryInterface            = (*DeskRepository)(nil)
+	_ DeskRepositoryInterface            = (*NoOpDeskRepository)(nil)
+	_ ReadOnlyDeskRepositoryInterface    = (*DeskRepository)(nil)
+	_ ReadOnlyDeskRepositoryInterface    = (*NoOpDeskRepository)(nil)
 )

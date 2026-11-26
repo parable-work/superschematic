@@ -10,16 +10,19 @@
             "root": "Bread",
             "parent": null,
             "base": null,
-            "head": "1zUIqKKs0kvxDz9nGvbbEz",
+            "head": "3NEqPxV8eRN0rpWjBcMhQM",
             "name": "main",
             "sealed": false,
             "discarded": false,
-            "version": 3
+            "version": 4
           },
           "rows": {
             "cover": [],
             "ingredient": [],
             "note": [],
+            "part": [
+              {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"2ZwmjfwmFcQa094pye6NzT","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+            ],
             "step": [
               {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","scratch":null,"timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
             ],
@@ -31,6 +34,9 @@
           },
           "compose": {
             "tree": {
+              "part": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"2ZwmjfwmFcQa094pye6NzT","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+              ],
               "step": [
                 {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","scratch":null,"timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
               ],
@@ -39,10 +45,23 @@
                 {"_version":2,"deleted_on_ref":false,"entity_key":"Knife","id":"35BLhbllpn6LsUN780fimp","name":"Bread knife","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
               ]
             },
-            "contentHash": "5e31fc9b1560ff3d0ad084271dfd58d3a997779b213864b4748ed4550faa87e8",
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
             "findings": []
           },
           "history": [
+            {
+              "id": "3NEqPxV8eRN0rpWjBcMhQM",
+              "root": "Bread",
+              "ref": "1C0HYIYICIGRZ9UzIStFZ4",
+              "parent": "1zUIqKKs0kvxDz9nGvbbEz",
+              "message": "intro",
+              "schemaEpoch": 1,
+              "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+              "sequence": 3,
+              "createdAt": "2026-10-05T09:00:38.750155Z",
+              "createdBy": "Ann",
+              "snapshot": true
+            },
             {
               "id": "1zUIqKKs0kvxDz9nGvbbEz",
               "root": "Bread",
@@ -88,6 +107,7 @@
             "cover": [],
             "ingredient": [],
             "note": [],
+            "part": [],
             "step": [
               {"_version":1,"created_at":"2026-10-05T09:00:26.250105Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"3FnoqLjzsbZMv8xTllefFJ","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"2pzdG7uTUFFYTjaOHThT2j","scratch":null,"timings":{},"updated_at":"2026-10-05T09:00:26.250105Z","updated_by":"Cook"}
             ],
@@ -131,16 +151,19 @@
             "root": "Bread",
             "parent": "1C0HYIYICIGRZ9UzIStFZ4",
             "base": "JI7jBFbGSkAEQpWlRQFmq",
-            "head": "78K6hSlrfVc2FJN3tFFFQe",
+            "head": "18V5pqTv5ZTgp80gEMJMP3",
             "name": "dinner",
             "sealed": false,
             "discarded": false,
-            "version": 3
+            "version": 5
           },
           "rows": {
             "cover": [],
             "ingredient": [],
             "note": [],
+            "part": [
+              {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"29KwBKdSCiJkGfXBMffxnt","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
+            ],
             "step": [],
             "tasting": [],
             "utensil": [
@@ -150,6 +173,9 @@
           },
           "compose": {
             "tree": {
+              "part": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"29KwBKdSCiJkGfXBMffxnt","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
+              ],
               "step": [
                 {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
               ],
@@ -158,10 +184,23 @@
                 {"_version":1,"deleted_on_ref":false,"entity_key":"Knife","id":"5dPtiEcrZuHETp93G0PKIA","name":"Bread knife","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
               ]
             },
-            "contentHash": "5e31fc9b1560ff3d0ad084271dfd58d3a997779b213864b4748ed4550faa87e8",
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
             "findings": []
           },
           "history": [
+            {
+              "id": "18V5pqTv5ZTgp80gEMJMP3",
+              "root": "Bread",
+              "ref": "3qiCSqQWJOxDYnpqcqZXVt",
+              "parent": "78K6hSlrfVc2FJN3tFFFQe",
+              "message": "intro",
+              "schemaEpoch": 1,
+              "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+              "sequence": null,
+              "createdAt": "2026-10-05T09:00:37.50015Z",
+              "createdBy": "Ann",
+              "snapshot": false
+            },
             {
               "id": "78K6hSlrfVc2FJN3tFFFQe",
               "root": "Bread",
@@ -179,6 +218,49 @@
         }
       ],
       "commits": [
+        {
+          "id": "18V5pqTv5ZTgp80gEMJMP3",
+          "readCommit": {
+            "id": "18V5pqTv5ZTgp80gEMJMP3",
+            "root": "Bread",
+            "ref": "3qiCSqQWJOxDYnpqcqZXVt",
+            "parent": "78K6hSlrfVc2FJN3tFFFQe",
+            "message": "intro",
+            "schemaEpoch": 1,
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+            "sequence": null,
+            "createdAt": "2026-10-05T09:00:37.50015Z",
+            "createdBy": "Ann",
+            "snapshot": false
+          },
+          "materialize": {
+            "tree": {
+              "part": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"29KwBKdSCiJkGfXBMffxnt","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
+              ],
+              "step": [
+                {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
+              ],
+              "utensil": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Board","id":"7Dwx2cN4UCjVwy4DnvAZLB","name":"Bread board","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"},
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Knife","id":"5dPtiEcrZuHETp93G0PKIA","name":"Bread knife","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
+              ]
+            },
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+            "findings": []
+          },
+          "patches": [
+            {
+              "commit": "18V5pqTv5ZTgp80gEMJMP3",
+              "kind": "part",
+              "entityKey": "Intro",
+              "entityId": "29KwBKdSCiJkGfXBMffxnt",
+              "entityVersion": 1,
+              "operation": "ADD"
+            }
+          ],
+          "snapshot": []
+        },
         {
           "id": "1zUIqKKs0kvxDz9nGvbbEz",
           "readCommit": {
@@ -226,6 +308,74 @@
             }
           ],
           "snapshot": [
+            {
+              "kind": "step",
+              "entityKey": "Knead",
+              "entityId": "UbQ31RGjodtEcDWM2HWh",
+              "entityVersion": 1
+            },
+            {
+              "kind": "utensil",
+              "entityKey": "Board",
+              "entityId": "1kBznDGV1R9hB92Des0rz5",
+              "entityVersion": 1
+            },
+            {
+              "kind": "utensil",
+              "entityKey": "Knife",
+              "entityId": "35BLhbllpn6LsUN780fimp",
+              "entityVersion": 2
+            }
+          ]
+        },
+        {
+          "id": "3NEqPxV8eRN0rpWjBcMhQM",
+          "readCommit": {
+            "id": "3NEqPxV8eRN0rpWjBcMhQM",
+            "root": "Bread",
+            "ref": "1C0HYIYICIGRZ9UzIStFZ4",
+            "parent": "1zUIqKKs0kvxDz9nGvbbEz",
+            "message": "intro",
+            "schemaEpoch": 1,
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+            "sequence": 3,
+            "createdAt": "2026-10-05T09:00:38.750155Z",
+            "createdBy": "Ann",
+            "snapshot": true
+          },
+          "materialize": {
+            "tree": {
+              "part": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"2ZwmjfwmFcQa094pye6NzT","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+              ],
+              "step": [
+                {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
+              ],
+              "utensil": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Board","id":"1kBznDGV1R9hB92Des0rz5","name":"Bread board","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"},
+                {"_version":2,"deleted_on_ref":false,"entity_key":"Knife","id":"35BLhbllpn6LsUN780fimp","name":"Bread knife","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+              ]
+            },
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
+            "findings": []
+          },
+          "patches": [
+            {
+              "commit": "3NEqPxV8eRN0rpWjBcMhQM",
+              "kind": "part",
+              "entityKey": "Intro",
+              "entityId": "2ZwmjfwmFcQa094pye6NzT",
+              "entityVersion": 1,
+              "operation": "ADD"
+            }
+          ],
+          "snapshot": [
+            {
+              "kind": "part",
+              "entityKey": "Intro",
+              "entityId": "2ZwmjfwmFcQa094pye6NzT",
+              "entityVersion": 1
+            },
             {
               "kind": "step",
               "entityKey": "Knead",
@@ -409,23 +559,39 @@
             "release": {
               "id": "7NStrCAk08YYYkK1qZ8bBX",
               "root": "Bread",
-              "commit": "JI7jBFbGSkAEQpWlRQFmq",
-              "version": 1
+              "commit": "3NEqPxV8eRN0rpWjBcMhQM",
+              "version": 2
             },
             "tree": {
+              "part": [
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"2ZwmjfwmFcQa094pye6NzT","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+              ],
               "step": [
                 {"_version":1,"created_at":"2026-10-05T09:00:28.750115Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"UbQ31RGjodtEcDWM2HWh","instruction":"Slice","position":1,"recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4","timings":{},"updated_at":"2026-10-05T09:00:28.750115Z","updated_by":"Cook"}
               ],
               "utensil": [
-                {"_version":1,"deleted_on_ref":false,"entity_key":"Knife","id":"35BLhbllpn6LsUN780fimp","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+                {"_version":1,"deleted_on_ref":false,"entity_key":"Board","id":"1kBznDGV1R9hB92Des0rz5","name":"Bread board","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"},
+                {"_version":2,"deleted_on_ref":false,"entity_key":"Knife","id":"35BLhbllpn6LsUN780fimp","name":"Bread knife","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
               ]
             },
-            "contentHash": "e8cf76bbc442309222b7bf2963688f6968f95ea55182019f0e56fef4c7835e37",
+            "contentHash": "3851ce2a6ea6f09bccf93d2870697aba5cb1db8870a299889c492fdd52d9fa21",
             "findings": []
           }
         }
       ],
       "images": [
+        {
+          "kind": "part",
+          "id": "29KwBKdSCiJkGfXBMffxnt",
+          "version": 1,
+          "image": {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"29KwBKdSCiJkGfXBMffxnt","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"3qiCSqQWJOxDYnpqcqZXVt"}
+        },
+        {
+          "kind": "part",
+          "id": "2ZwmjfwmFcQa094pye6NzT",
+          "version": 1,
+          "image": {"_version":1,"deleted_on_ref":false,"entity_key":"Intro","heading":"Before you start","id":"2ZwmjfwmFcQa094pye6NzT","parent_key":null,"rank":"V","recipe_id":"Bread","ref_id":"1C0HYIYICIGRZ9UzIStFZ4"}
+        },
         {
           "kind": "step",
           "id": "3FnoqLjzsbZMv8xTllefFJ",
@@ -504,6 +670,7 @@
               {"_version":1,"body":"Proof overnight\tif there's time","deleted_on_ref":false,"entity_key":"Note","id":"5K2EkOGrhxAHeU2rUpRQ5S","recipe_id":"Bread","ref_id":"22T1h0AtgGb8eIEMumeEtc","reply_to":null},
               {"_version":1,"body":"Agreed","deleted_on_ref":false,"entity_key":"Reply","id":"2OSSBRp9Z8tPs3GEv3tEI","recipe_id":"Bread","ref_id":"22T1h0AtgGb8eIEMumeEtc","reply_to":"Note"}
             ],
+            "part": [],
             "step": [
               {"_version":1,"created_at":"2026-10-05T09:00:06.250025Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Bake","id":"29IBPVmVTlTU6Yp0jvrd36","instruction":"Bake at 230 C","position":2,"recipe_id":"Bread","ref_id":"22T1h0AtgGb8eIEMumeEtc","scratch":null,"timings":{"bake":"35m","preheat":"30m"},"updated_at":"2026-10-05T09:00:06.250025Z","updated_by":"Cook"},
               {"_version":2,"created_at":"2026-10-05T09:00:06.250025Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"DnwrYrKg0TtgjyYTOXW6u","instruction":"Knead until smooth","position":1,"recipe_id":"Bread","ref_id":"22T1h0AtgGb8eIEMumeEtc","scratch":null,"timings":{"knead":"12m","rest":"5m"},"updated_at":"2026-10-05T09:00:16.250065Z","updated_by":"Ann"}
@@ -591,6 +758,7 @@
               {"_version":1,"deleted_on_ref":true,"entity_key":"Salt","id":"5WMRFDSdeKi6rVZ3bhYY6i","quantity":"10 g","recipe_id":"Bread","ref_id":"4xLOVQhXSAyVZAxZ87B2YV","step_key":"Knead","substitutes":null}
             ],
             "note": [],
+            "part": [],
             "step": [
               {"_version":2,"created_at":"2026-10-05T09:00:11.250045Z","created_by":"Ann","deleted_on_ref":false,"entity_key":"Knead","id":"5zpmcOh0C8M9m0mD4cHPpe","instruction":"Knead until smooth","position":1,"recipe_id":"Bread","ref_id":"4xLOVQhXSAyVZAxZ87B2YV","scratch":"sticky","timings":{"knead":"12m","rest":"5m"},"updated_at":"2026-10-05T09:00:13.750055Z","updated_by":"Cook"}
             ],
@@ -680,6 +848,7 @@
               {"_version":1,"body":"Proof overnight\tif there's time","deleted_on_ref":false,"entity_key":"Note","id":"33V9WU7a8iB8HhDMeVdaBV","recipe_id":"Bread","ref_id":"5m1LHycDtc70YHsLfYbDOn","reply_to":null},
               {"_version":1,"body":"Agreed","deleted_on_ref":false,"entity_key":"Reply","id":"6pxA0h0NcdDWtNZpjNDZm6","recipe_id":"Bread","ref_id":"5m1LHycDtc70YHsLfYbDOn","reply_to":"Note"}
             ],
+            "part": [],
             "step": [
               {"_version":1,"created_at":"2026-10-05T09:00:03.750015Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Bake","id":"4LVJZ7mjMQkaIN8CqYasiY","instruction":"Bake at 230 C","position":2,"recipe_id":"Bread","ref_id":"5m1LHycDtc70YHsLfYbDOn","scratch":null,"timings":{"bake":"35m","preheat":"30m"},"updated_at":"2026-10-05T09:00:03.750015Z","updated_by":"Cook"},
               {"_version":1,"created_at":"2026-10-05T09:00:03.750015Z","created_by":"Cook","deleted_on_ref":false,"entity_key":"Knead","id":"3yGeoRjOuKmAF5kj5FmoDa","instruction":"Knead for ten minutes","position":1,"recipe_id":"Bread","ref_id":"5m1LHycDtc70YHsLfYbDOn","scratch":"floury","timings":{"knead":"10m"},"updated_at":"2026-10-05T09:00:03.750015Z","updated_by":"Cook"}
@@ -755,6 +924,7 @@
             ],
             "ingredient": [],
             "note": [],
+            "part": [],
             "step": [],
             "tasting": [],
             "utensil": [

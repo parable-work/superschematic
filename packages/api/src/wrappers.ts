@@ -80,8 +80,27 @@ export type FileUpload<C extends FileUploadConfig = {}> = string & { readonly __
 export type FileDownloadConfig = {
   /** The body's media type, as Content-Type carries it: "text/csv" or "text/csv; charset=utf-8". */
   readonly contentType: string;
+  /**
+   * The media types the implementation may answer in place of contentType
+   * (D141): ["image/png", "image/jpeg"]. One it names outside the list is
+   * a 500.
+   */
+  readonly contentTypes?: readonly string[];
   /** The filename Content-Disposition offers when the implementation names none: "orders.csv". */
   readonly filename?: string;
+  /**
+   * "attachment" (the default), a file a browser saves, or "inline", one a
+   * page shows (D141).
+   */
+  readonly disposition?: 'attachment' | 'inline';
+  /** The answer's Cache-Control, sent as written (D141); no-store when absent. */
+  readonly cacheControl?: string;
+  /**
+   * true answers the file with Content-Security-Policy: sandbox and
+   * Cross-Origin-Resource-Policy: same-origin (D141); a list adds its
+   * tokens to the policy: ["allow-scripts"].
+   */
+  readonly sandbox?: boolean | readonly string[];
 };
 
 /**

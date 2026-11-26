@@ -189,6 +189,8 @@ OPERATIONS: Dict[str, Tuple[Any, Any, str]] = {
     "diff": (contract.DiffInput, contract.DiffOutput, "diff"),
     "content_hash": (contract.TreeInput, contract.ContentHashOutput, "content_hash"),
     "validate": (contract.TreeInput, contract.ValidateOutput, "validate"),
+    "order_keys": (contract.OrderKeysInput, contract.OrderKeysOutput, "order_keys"),
+    "arrange": (contract.ArrangeInput, contract.ArrangeOutput, "arrange"),
 }
 
 EXACT = vg.VersionGraph(loads=exact_loads, dumps=exact_dumps)

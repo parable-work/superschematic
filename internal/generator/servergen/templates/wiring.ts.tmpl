@@ -21,7 +21,11 @@ APIs.
     {{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range .Buckets }}
+{{- if .ContentAddressed }}
+    {{ .Field }}: contentBucket({{ .Bucket.Var }}, { maxBytes: {{ .MaxBytes }} }),
+{{- else }}
     {{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
 {{- end }}
 {{- range .MemoryStores }}
     {{ .Field }}: {{ .Store.Var }},
@@ -38,6 +42,14 @@ APIs.
 {{- if .ORM }}
 import { createOrm as {{ .ORM }} } from '{{ .ORMModule }}';
 {{- end }}
+{{- end }}
+{{- range .Databases }}
+{{- range .Graphs }}
+import { {{ .Facade }}{{ if ne .Facade .Class }} as {{ .Class }}{{ end }} } from '{{ .Module }}';
+{{- end }}
+{{- end }}
+{{- if .VersionGraphPool }}
+import { pgPool as {{ .VersionGraphPool }} } from '{{ .Naming.VersionGraphNpmPackage }}/postgres';
 {{- end }}
 {{- end }}
 

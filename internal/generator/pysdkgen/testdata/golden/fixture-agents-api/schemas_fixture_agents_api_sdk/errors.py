@@ -46,6 +46,29 @@ class AuthorizationError(APIError):
     """Raised when the API denies access for the request."""
 
 
+class ClientTooOldError(APIError):
+    """Raised when the API serves this client from a newer version on (426
+    client_too_old, D143): the application should tell its user to upgrade.
+
+    client and version are what the SDK sent, and minimum is the oldest
+    version of the client the API serves.
+    """
+
+    def __init__(
+        self,
+        message: str = "This client is too old for the API",
+        *,
+        details: Any | None = None,
+        payload: Any | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message, 426, payload, code="client_too_old", request_id=request_id)
+        found = details if isinstance(details, dict) else {}
+        self.client: str = found.get("client") if isinstance(found.get("client"), str) else ""
+        self.version: str = found.get("version") if isinstance(found.get("version"), str) else ""
+        self.minimum: str = found.get("minimum") if isinstance(found.get("minimum"), str) else ""
+
+
 class RateLimitError(APIError):
     """Raised when the API rejects a request due to rate limiting."""
 

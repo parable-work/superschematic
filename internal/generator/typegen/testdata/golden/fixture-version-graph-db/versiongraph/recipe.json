@@ -106,6 +106,40 @@
       }
     },
     {
+      "kind": "part",
+      "table": "part",
+      "historyTable": "part_history",
+      "releasedTable": "part_released",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "root": "recipe_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "parent_key",
+        "kind": "part"
+      },
+      "order": "rank",
+      "excluded": [
+        "recipe_id"
+      ],
+      "history": {
+        "exclude": []
+      },
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "heading": "string",
+        "id": "uuid",
+        "parent_key": "uuid",
+        "rank": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
+    },
+    {
       "kind": "step",
       "table": "step",
       "historyTable": "step_history",

@@ -13,7 +13,10 @@
 //! `commit_id`, `entity_kind`, `entity_key`, `entity_id` and
 //! `entity_version`; and a release pointer's `root_id`, `commit_id`, audit
 //! columns and `_version`. A history table keys its images on the kind's id
-//! and version columns and holds each in `data`.
+//! and version columns and holds each in `data`. A kind's released table
+//! (D139), when its descriptor names one, holds the kind's root and entity
+//! key columns and its content columns under their names, `commit_id` and
+//! `sequence`, with a unique index on the root and the entity key.
 //!
 //! The adapter reaches Postgres through [`Client`]; [`TokioPostgres`] binds
 //! tokio-postgres. Every row it reads is `to_jsonb` of the row, or the
@@ -34,7 +37,7 @@ use serde_json::{Map, Value};
 use crate::canonical;
 use crate::storage::{
     Commit, CommitNode, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite,
-    RowWrite, SnapshotEntry, Storage, Tx,
+    ReleasedWrite, RowWrite, SnapshotEntry, Storage, Tx,
 };
 use crate::Error;
 #[cfg(feature = "tokio-postgres")]
@@ -52,6 +55,13 @@ const CREATED_AT: &str = "created_at";
 const CREATED_BY: &str = "created_by";
 const UPDATED_AT: &str = "updated_at";
 const UPDATED_BY: &str = "updated_by";
+
+// The columns of a released table beside the kind's own (D139): the commit
+// and the sequence of the release that wrote the row. Its other columns are
+// the kind's root and entity key columns and its content columns, under the
+// names the kind's table gives them.
+const RELEASED_COMMIT: &str = "commit_id";
+const RELEASED_SEQUENCE: &str = "sequence";
 
 /// Configures an [`Adapter`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -90,6 +100,13 @@ struct Kind {
     tombstone: String,
     version: String,
     columns: BTreeMap<String, String>,
+    /// The table that holds the released tree's rows of the kind (D139),
+    /// `None` for a kind that keeps none.
+    released_table: Option<String>,
+    /// The kind's content columns, in name order: what a released row holds
+    /// beside its root, its entity key and its release's commit and
+    /// sequence.
+    content: Vec<String>,
 }
 
 /// What the adapter reads of a graph descriptor.
@@ -140,6 +157,12 @@ struct DescriptorKind {
     tombstone: String,
     #[serde(default)]
     version: String,
+    #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    excluded: Option<Vec<String>>,
+    #[serde(default, rename = "releasedTable")]
+    released_table: Option<String>,
     #[serde(default)]
     columns: BTreeMap<String, String>,
 }
@@ -211,6 +234,28 @@ impl Adapter {
                     )));
                 }
             }
+            // The content columns, as the core reads them: every column
+            // that is not a role column, the author among them, and is not
+            // excluded.
+            let excluded = k.excluded.unwrap_or_default();
+            let roles = [
+                &k.key,
+                &k.id,
+                &k.ref_column,
+                &k.root,
+                &k.tombstone,
+                &k.version,
+            ];
+            let content = k
+                .columns
+                .keys()
+                .filter(|column| {
+                    !roles.contains(column)
+                        && k.author.as_ref() != Some(*column)
+                        && !excluded.contains(*column)
+                })
+                .cloned()
+                .collect();
             kinds.insert(
                 k.kind.clone(),
                 Kind {
@@ -224,6 +269,8 @@ impl Adapter {
                     tombstone: k.tombstone,
                     version: k.version,
                     columns: k.columns,
+                    released_table: k.released_table.filter(|table| !table.is_empty()),
+                    content,
                 },
             );
         }
@@ -400,6 +447,20 @@ fn scan_commit(row: &[SqlValue]) -> Result<Commit, Error> {
         created_at,
         created_by,
         snapshot,
+    })
+}
+
+/// A patch as a read selects it: its commit, kind, entity key, entity id,
+/// entity version and operation, its ids canonical.
+fn scan_patch(row: &[SqlValue]) -> Result<Patch, Error> {
+    let mut c = Cells::new(row);
+    Ok(Patch {
+        commit: canonical_uuid(&c.text()?)?,
+        kind: c.text()?,
+        entity_key: canonical_uuid(&c.text()?)?,
+        entity_id: canonical_uuid(&c.text()?)?,
+        entity_version: c.int()?,
+        operation: c.text()?,
     })
 }
 
@@ -912,19 +973,44 @@ impl Tx for PgTx<'_> {
         let rows = self
             .query("read patches", &sql, &[SqlValue::TextList(ids)])
             .await?;
-        rows.iter()
-            .map(|row| {
-                let mut c = Cells::new(row);
-                Ok(Patch {
-                    commit: canonical_uuid(&c.text()?)?,
-                    kind: c.text()?,
-                    entity_key: canonical_uuid(&c.text()?)?,
-                    entity_id: canonical_uuid(&c.text()?)?,
-                    entity_version: c.int()?,
-                    operation: c.text()?,
-                })
-            })
-            .collect()
+        rows.iter().map(|row| scan_patch(row)).collect()
+    }
+
+    async fn primary_refs(&mut self, root: &str) -> Result<Vec<Ref>, Error> {
+        let sql = format!(
+            "SELECT {REF_COLUMNS} FROM {} \
+             WHERE root_id = $1::uuid AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            self.a.ref_table
+        );
+        self.scan_refs(&sql, &[uuid_text(root)?.into()]).await
+    }
+
+    async fn entity_patches(
+        &mut self,
+        commits: &[String],
+        kind: &str,
+        entity_key: &str,
+    ) -> Result<Vec<Patch>, Error> {
+        if commits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let k = self.a.kind(kind)?;
+        let ids = commits
+            .iter()
+            .map(|id| uuid_text(id))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sql = format!(
+            "SELECT commit_id::text, entity_kind, entity_key::text, entity_id::text, entity_version, operation \
+             FROM {} WHERE commit_id = ANY($1::text[]::uuid[]) AND entity_kind = $2 AND entity_key = $3::uuid",
+            self.a.patch_table
+        );
+        let args = [
+            SqlValue::TextList(ids),
+            k.name.as_str().into(),
+            uuid_text(entity_key)?.into(),
+        ];
+        let rows = self.query("read an entity's patches", &sql, &args).await?;
+        rows.iter().map(|row| scan_patch(row)).collect()
     }
 
     async fn next_sequence(&mut self, root: &str) -> Result<i64, Error> {
@@ -1063,6 +1149,115 @@ impl Tx for PgTx<'_> {
         self.scan_one_release("write the release", &sql, &args)
             .await?
             .ok_or(Error::VersionConflict)
+    }
+
+    async fn write_released(&mut self, kind: &str, write: ReleasedWrite) -> Result<(), Error> {
+        let k = self.a.kind(kind)?;
+        let Some(released) = &k.released_table else {
+            return Err(Error::Invalid(format!(
+                "postgres: kind {:?} keeps no released table",
+                k.name
+            )));
+        };
+        let (root_id, commit_id) = (uuid_text(&write.root)?, uuid_text(&write.commit)?);
+        let (table, root, key) = (quote(released), quote(&k.root), quote(&k.key));
+        if write.replace {
+            let sql = format!("DELETE FROM {table} WHERE {root} = $1::uuid");
+            self.execute(
+                &format!("clear {released}"),
+                &sql,
+                &[root_id.as_str().into()],
+            )
+            .await?;
+        }
+        if !write.delete.is_empty() {
+            let keys = write
+                .delete
+                .iter()
+                .map(|key| uuid_text(key))
+                .collect::<Result<Vec<_>, _>>()?;
+            let sql = format!(
+                "DELETE FROM {table} WHERE {root} = $1::uuid AND {key} = ANY($2::text[]::uuid[])"
+            );
+            self.execute(
+                &format!("delete from {released}"),
+                &sql,
+                &[root_id.as_str().into(), SqlValue::TextList(keys)],
+            )
+            .await?;
+        }
+        if write.upsert.is_empty() {
+            return Ok(());
+        }
+        // One statement writes every row: each column from the row's member
+        // as the kind's table takes it, the root, the commit and the
+        // sequence from the release.
+        let (commit, sequence) = (quote(RELEASED_COMMIT), quote(RELEASED_SEQUENCE));
+        let mut names = vec![root.clone(), key.clone(), commit.clone(), sequence.clone()];
+        let mut values = vec![
+            "$2::uuid".to_owned(),
+            format!("r.{key}"),
+            "$3::uuid".to_owned(),
+            "$4".to_owned(),
+        ];
+        let mut updates = vec![
+            format!("{commit} = EXCLUDED.{commit}"),
+            format!("{sequence} = EXCLUDED.{sequence}"),
+        ];
+        for column in &k.content {
+            let q = quote(column);
+            let class = k.columns[column].as_str();
+            if class == canonical::JSON || class.ends_with("[][]") {
+                // A JSONB column takes the member itself, as upsert_row
+                // gives it.
+                values.push(format!("(e.value -> {})", literal(column)));
+            } else {
+                values.push(format!("r.{q}"));
+            }
+            updates.push(format!("{q} = EXCLUDED.{q}"));
+            names.push(q);
+        }
+        let mut inputs = Vec::with_capacity(write.upsert.len());
+        for row in &write.upsert {
+            let Value::Object(members) = row else {
+                return Err(Error::Invalid(format!(
+                    "postgres: a released {} row is a JSON object",
+                    k.name
+                )));
+            };
+            let mut input = Map::new();
+            for column in std::iter::once(&k.key).chain(&k.content) {
+                let value = members.get(column).unwrap_or(&Value::Null);
+                let value = input_value(&k.columns[column], value).map_err(|e| {
+                    Error::Invalid(format!(
+                        "postgres: released {} column {column}: {e}",
+                        k.name
+                    ))
+                })?;
+                input.insert(column.clone(), value);
+            }
+            inputs.push(Value::Object(input));
+        }
+        let rows = serde_json::to_string(&Value::Array(inputs)).map_err(|e| {
+            Error::Invalid(format!("postgres: encode released {} rows: {e}", k.name))
+        })?;
+        let sql = format!(
+            "INSERT INTO {table} ({}) SELECT {} FROM jsonb_array_elements($1::jsonb) AS e(value), \
+             jsonb_populate_record(NULL::{table}, e.value) AS r \
+             ON CONFLICT ({root}, {key}) DO UPDATE SET {}",
+            names.join(", "),
+            values.join(", "),
+            updates.join(", ")
+        );
+        let args = [
+            rows.into(),
+            root_id.into(),
+            commit_id.into(),
+            write.sequence.into(),
+        ];
+        self.execute(&format!("write {released}"), &sql, &args)
+            .await?;
+        Ok(())
     }
 
     async fn prune(

@@ -1,0 +1,13 @@
+{
+  "name": "order_keys_rejects_count_beyond_the_most",
+  "op": "order_keys",
+  "input": {
+    "count": 1000001
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: count must be an integer from 0 to 1000000"
+    }
+  }
+}

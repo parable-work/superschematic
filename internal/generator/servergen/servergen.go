@@ -525,6 +525,17 @@ type API struct {
 	MemoryStores   []MemoryStoreUse
 	RateLimitStore *MemoryStore
 
+	// ClientVersions is true for an API whose config says clientVersions
+	// (D143): its routes take the minimums its EnvConfig read from
+	// MIN_CLIENT_VERSIONS.
+	ClientVersions bool
+
+	// Idempotent is true for an API with an @idempotent operation, whose
+	// Config takes the store of their keys: the entrypoint builds it over
+	// the pool of the API's database, on the table the API package names
+	// (D140).
+	Idempotent bool
+
 	// Engine is the engine Deps holds, of the API's engine database (D58),
 	// nil without one; MountsEngine is true for the API whose router
 	// mounts its routes, the first on the database, on a server.
@@ -542,6 +553,11 @@ type Call struct {
 type BucketUse struct {
 	Field  string
 	Bucket *Bucket
+
+	// ContentAddressed is true for a bucket Deps holds as a content
+	// bucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // Bucket is a bucket the server opens once, for every API that lists it
@@ -591,6 +607,12 @@ type Database struct {
 	Identity    bool
 	Types       string
 	TypesModule string
+
+	// Idempotency is true when an API on the database keeps the keys of
+	// its @idempotent operations in it (D140): the entrypoint opens the
+	// database/sql handle over the pool that each one's store reads
+	// through, as the identity store does.
+	Idempotency bool
 
 	// Engine is the engine the entrypoint opens on the database, an
 	// engine database (D58); nil for every other.
@@ -712,9 +734,9 @@ var reserved = []string{
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
-	"identity", "identityConfig", "stdlib", "method", "requested",
+	"identity", "identityConfig", "stdlib", "method", "requested", "idempotency",
 	"jobs", "started",
-	"openBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
+	"openBucket", "contentBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
 	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
 	"x509", "pem", "strings", "sync", "url",
 	"workers", "worker", "queue", "concurrency",
@@ -850,6 +872,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
 			apis[i].Identity = o.Auth.Identity
+			apis[i].Idempotent = o.HasIdempotent()
 			apis[i].ManualRoutes = o.HasManualRoutes()
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			apis[i].Tables = o.HasTableEndpoints()
@@ -921,6 +944,12 @@ func Plan(in Input) (*Server, error) {
 				return nil, err
 			}
 		}
+		if api.Idempotent {
+			if api.Database == nil {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, whose @idempotent operations keep their keys in its database (D140), and it has no database", in.Stack, in.Server, o.SchemaName)
+			}
+			api.Database.Idempotency = true
+		}
 		if api.Identity {
 			d := api.Database
 			if d == nil {
@@ -975,7 +1004,7 @@ func Plan(in Input) (*Server, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			h := stores[m.Service]
@@ -998,6 +1027,8 @@ func Plan(in Input) (*Server, error) {
 				api.RateLimitStore = h
 			}
 		}
+		// A job or a worker serves no request, so it turns no client away.
+		api.ClientVersions = o.HasEnvConfig() && o.EnvConfig.ClientVersions && !s.Background()
 	}
 	if err := s.planEngines(in, apis, taken); err != nil {
 		return nil, err
@@ -1509,6 +1540,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyIdentity": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
+		},
+		"anyIdempotent": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.Idempotent })
 		},
 		"anyQueues": func(databases []*Database) bool {
 			return slices.ContainsFunc(databases, func(d *Database) bool { return d.Queues })

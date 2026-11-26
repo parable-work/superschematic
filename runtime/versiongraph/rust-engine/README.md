@@ -11,9 +11,10 @@ canonical rows, the engine's rules and error codes, and the scenario
 format.
 
 ```
-src/engine.rs      Engine: create_primary, branch, save, commit, seal, merge, rebase,
-                   revert, release, released, materialize, compose, diff, history, discard;
-                   EngineOn, the same over a storage it borrows; Engine::run_on and ready
+src/engine.rs      Engine: create_primary, branch, save, arrange, commit, seal, merge,
+                   rebase, revert, release, released, materialize, compose, diff, history,
+                   entity_history, discard; EngineOn, the same over a storage it borrows;
+                   Engine::run_on and ready
 src/sweep.rs       Engine::sweep and Engine::run_sweeper
 src/storage.rs     the Storage and Tx traits an adapter implements
 src/postgres/      the Postgres adapter, its Client seam and the tokio-postgres binding
@@ -22,7 +23,7 @@ src/fixed/         the fixed layout in either dialect (FixedLayout, Dialect), it
 src/sqlite/        the SQLite adapter: the fixed layout on SQLite under its names, the version
                    check, SQLite's result codes and the rusqlite binding
 src/canonical/     the canonical row rules for what Postgres returns
-src/core.rs        the core's operations over trees of canonical rows
+src/core.rs        the core's operations over trees of canonical rows, and order_keys
 src/error.rs       Error and its stable codes
 ```
 
@@ -54,6 +55,31 @@ write through a ref the ref's expected version. The engine's errors are
 (`version_conflict`, `primary_merge_only`, ...), or the core's code for an
 input it refused.
 
+A kind whose order column is a string holds order keys (D137).
+`engine.arrange(actor, &draft.id, version, "part", Some(parent), &keys)`
+puts one parent's live children in the order `keys` gives, their entity
+keys, and writes new order keys for the fewest rows it can, as the change
+set's own rows; `None` for the parent is the rows that have none. It
+returns what `save` does. `order_keys(before, after, count)` makes `count`
+keys strictly between two others, the start and the end when `None`, for a
+row a save places itself; it takes no engine.
+
+A kind whose descriptor names a `releasedTable` keeps the rows of each
+root's released tree in that table (D139, `../README.md`, "Released
+rows"). `engine.release` rewrites them in its transaction: it diffs the
+tree of the commit released before against the new one's and hands each
+such kind's part to the adapter (`Tx::write_released`), the rows added or
+changed and the keys deleted. A root's first release, and a release of the
+commit already released, write the whole tree over the root's rows. For a
+graph with no such kind a release reads and writes what it did before.
+
+`engine.entity_history(root, kind, key)` lists the commits of the root's
+primary line that changed one entity, newest first, each an `EntityChange`:
+the commit and what it did, `ADD`, `UPDATE` or `DELETE` (D138). It reads
+the line's commits and the entity's patches among them
+(`Tx::primary_refs`, `Tx::entity_patches`) and no tree, takes no actor, and
+walks at most the engine's ceiling of commits a line.
+
 `engine.on(&storage)` runs the same operations over a storage the caller
 lends, which need not be `'static`: it may borrow a transaction the
 caller holds. `engine.run_on(&storage, |e| e.save(...))` runs one of them
@@ -84,6 +110,13 @@ it holds, implements `Client` over its own pool or transaction.
 Each row is read as `to_jsonb` text and turned into its canonical row by
 `canonical::postgres_row`, the rules the Go module's package `canonical`
 implements.
+
+A kind's released table (D139) is a table of the schema, as the sql
+generator writes it: the kind's root and entity key columns, its content
+columns under their names (its `columns` less its role columns and
+`excluded`), `commit_id` and `sequence`, with a unique index on the root
+and the entity key. The adapter writes a release's rows of a kind in one
+statement, each value as it writes a member row's.
 
 ## The SQLite adapter
 
@@ -136,10 +169,23 @@ foreign keys on and refuses one where they stay off. A time, from the clock
 when a transaction begins or stored and read back, and every integer read
 back, must lie within 2^53 - 1 either side of zero, as the TypeScript
 adapter holds them, so a file one adapter writes the other reads. Its tests
-hold it to the SQLite vectors (`../testdata/sqlite`): its layout under the
-default names is `layout.json`, and the database the TypeScript adapter
-wrote, `typescript.sql`, reads back through it and the engine as
+hold it to the SQLite vectors (`../testdata/sqlite`): its layout and its
+released layout under the default names are `layout.json`'s `statements`
+and `released`, and the database the TypeScript adapter wrote,
+`typescript.sql`, reads back through it and the engine as
 `typescript.json`.
+
+Released rows (D139) live in one more table, `released`
+(`sqlite::RELEASED_TABLE`), which is not among the layout's nine: `graph`,
+`kind`, `root_id`, `entity_key`, `commit_id`, `sequence` and `data`, the
+canonical JSON object of the kind's content columns, keyed by graph, kind,
+root and entity key. `sqlite::released_layout(name)` gives the one
+statement that creates it, `adapter.released_layout()` the adapter's own,
+which is empty for a graph with no kind that names a `releasedTable`, and
+`create_tables` runs it for a graph with one. `sqlite::layout` is as it
+was, so a caller whose migrations hold the nine tables, as D58's Branches
+does, adds the released table in a migration of its own when a graph of
+its needs it; the name function is asked for `released` only then.
 
 ## The fixed layout on Postgres
 
@@ -147,7 +193,8 @@ wrote, `typescript.sql`, reads back through it and the engine as
 options)` keeps a graph in the same nine tables on Postgres, writing
 history itself, so it needs no trigger, which a D16 behavior may not
 create (D58). `fixed::layout(Dialect::Postgres, name)` gives the
-statements that create them. The statements are SQLite's but where the
+statements that create them, and `fixed::released_layout(Dialect::Postgres,
+name)` the released table's. The statements are SQLite's but where the
 two databases word them differently:
 
 | What | SQLite | Postgres |
@@ -238,7 +285,7 @@ which runs each step in a transaction of the host's and each operation in
 a savepoint, and each operation runs through `Engine::run_on` with no
 executor. The `postgres` client blocks on a runtime of its own, so those
 tests run on none. On Postgres each scenario runs in a schema of its own
-that holds the fixed layout. The runner runs the steps for `sqlite`, the
+that holds the fixed layout and its released table. The runner runs the steps for `sqlite`, the
 fixed layout's backend, and an sql step's `sqlite` statement, on Postgres
 with its placeholders numbered `$1` and SQLite's `json_extract` and
 `CASE ... WHEN 1 THEN 'true'` in Postgres's words. The Postgres test host

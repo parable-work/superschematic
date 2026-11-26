@@ -1,0 +1,13 @@
+{
+  "name": "order_keys_rejects_missing_count",
+  "op": "order_keys",
+  "input": {
+    "before": "F"
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: missing member \"count\""
+    }
+  }
+}

@@ -421,6 +421,7 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	}
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
+{{- if not .Released }}
 
 // {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne and
 // UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
@@ -432,6 +433,7 @@ const (
 	{{ .Const }} {{ $typeName }}UniqueKey = "{{ .Name }}"
 	{{- end }}
 )
+{{- end }}
 
 // {{ $typeName }}PageKey is the position of a {{ $typeName }} row in a FindPage order: the
 // row's {{ $pk.Name }}, as a cursor holds it, {"{{ $pk.Name }}": ...}. FindPage reads the row's
@@ -575,6 +577,7 @@ type {{ .TypeName }}Filter struct {
 	// does an empty AnyOf.
 	AnyOf []{{ .TypeName }}Filter
 }
+{{- if not .Released }}
 
 // {{ .TypeName }}Update provides fields that can be updated
 type {{ .TypeName }}Update struct {
@@ -718,6 +721,7 @@ func (u *{{ .TypeName }}Update) ApplyTo(row *types.{{ .TypeName }}) {
 	{{- end }}
 	{{- end }}
 }
+{{- end }}
 
 // {{ .TypeName }}FilterConditions are the filter's conditions for a query of
 // the caller's own, each column qualified by its table: each value is

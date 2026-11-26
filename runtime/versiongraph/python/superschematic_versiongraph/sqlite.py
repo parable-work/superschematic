@@ -8,7 +8,9 @@ counterpart, over the tables sqlgen generates per graph.
 The layout is nine STRICT tables: ref, ref_history, commit, patch,
 snapshot_entry, release, release_history, member and member_history, each
 named by a function the caller gives (``default_table_name`` puts graph_
-before each), as is every index. Every row carries its graph's name, so one
+before each), as is every index. A graph with a kind that keeps its released
+rows (D139) has a tenth, released, which ``released_layout`` creates and a
+release rewrites. Every row carries its graph's name, so one
 file holds several graphs, and every statement is scoped to the adapter's
 graph. An id is TEXT holding a UUID in its canonical form (base62); a
 version, a sequence and a tombstone are INTEGER; the times of refs, commits,
@@ -48,7 +50,7 @@ import threading
 import time as _time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, Tuple, TypeVar, Union
 
@@ -66,6 +68,7 @@ from .storage import (
     RefUpdate,
     Release,
     ReleaseWrite,
+    ReleasedWrite,
     RowWrite,
     SnapshotEntry,
     Storage,
@@ -77,6 +80,7 @@ __all__ = [
     "SQLITE_BUSY",
     "SQLITE_CONSTRAINT_UNIQUE",
     "SQLITE_TABLES",
+    "RELEASED_TABLE",
     "Value",
     "Row",
     "QueryResult",
@@ -85,6 +89,7 @@ __all__ = [
     "TableName",
     "default_table_name",
     "sqlite_layout",
+    "released_layout",
     "SqliteAdapter",
     "micros_to_date_time",
     "is_unique_violation",
@@ -135,6 +140,13 @@ SQLITE_TABLES: Tuple[str, ...] = (
 )
 """The local names of the layout's tables, in the order the layout creates
 them."""
+
+RELEASED_TABLE = "released"
+"""The local name of the table that holds released rows (D139). It is not
+among SQLITE_TABLES: ``released_layout`` creates it, for a graph with a kind
+that keeps its released rows. A name function is asked for it only by
+``released_layout`` and by an adapter of such a graph, so one that names the
+layout's nine tables alone serves every other graph."""
 
 
 @dataclass
@@ -190,6 +202,10 @@ class _Kind:
     exclude: frozenset
     actor: Optional[str]
     retention_days: Optional[int]
+    #: True for a kind that keeps its released rows (D139).
+    released: bool = False
+    #: The kind's content columns, sorted: what a released row's data holds.
+    content: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -205,6 +221,9 @@ class _Tables:
     release_history: str
     member: str
     member_history: str
+    #: The released table, named only for a graph that keeps released rows
+    #: and by released_layout: None otherwise.
+    released: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +275,29 @@ def _tables_of(table_name: TableName) -> _Tables:
         member=_name_of(table_name, "member"),
         member_history=_name_of(table_name, "member_history"),
     )
+
+
+def released_layout(table_name: Optional[TableName] = None) -> List[str]:
+    """The statement that creates the released table (D139), under the name
+    table_name gives it (default_table_name when None). It is apart from
+    sqlite_layout, whose nine tables every graph has: a graph needs this one
+    only when a kind of its descriptor names a releasedTable, and
+    ``SqliteAdapter.create_tables`` creates it then. A released row holds its
+    kind's content columns as one canonical JSON object, data, with the
+    commit and the sequence of the release that wrote it, one row per entity
+    of a kind of a root."""
+    name_function = table_name if table_name is not None else default_table_name
+    t = _tables_of(name_function)
+    # The name function is asked for the released table only here and by an
+    # adapter of a graph that keeps released rows.
+    released = _name_of(name_function, RELEASED_TABLE)
+    return [
+        f"CREATE TABLE IF NOT EXISTS {released} ("
+        "graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, entity_key TEXT NOT NULL, "
+        f"commit_id TEXT NOT NULL REFERENCES {t.commit} (id), sequence INTEGER NOT NULL, data TEXT NOT NULL, "
+        "PRIMARY KEY (graph, kind, root_id, entity_key)"
+        ") STRICT"
+    ]
 
 
 def sqlite_layout(table_name: TableName = default_table_name) -> List[str]:
@@ -363,12 +405,14 @@ class SqliteAdapter:
     ) -> None:
         """Reads a graph's descriptor (version 3, as JSON text or a
         mapping). The adapter reads only its kinds: each kind's role columns
-        (the root among them), its columns' value classes and its history;
-        the tables the descriptor names are the Postgres adapter's.
+        (the root among them), its columns' value classes, its history, and
+        whether it names a releasedTable; the tables the descriptor names
+        are the Postgres adapter's.
 
         graph is the graph's name, which every row of the graph carries;
         table_name names each table and index (default_table_name when
-        None); clock gives the time a transaction writes, in whole
+        None), and is asked for the released table only when a kind names a
+        releasedTable; clock gives the time a transaction writes, in whole
         microseconds since the Unix epoch, and a transaction reads it once,
         when it begins (the system clock when None)."""
         d = json.loads(descriptor) if isinstance(descriptor, str) else descriptor
@@ -395,6 +439,13 @@ class SqliteAdapter:
             if not isinstance(history, Mapping) or not isinstance(history.get("exclude"), list):
                 raise ValueError(f"sqlite: kind {kind} has no history")
             role_columns = {column for _, column in roles}
+            data = tuple(sorted(column for column in columns if column not in role_columns))
+            # The content columns, as the core reads them: every column that
+            # is not a role column, the author among them, and is not
+            # excluded.
+            not_content = set(k.get("excluded") or [])
+            if k.get("author"):
+                not_content.add(k["author"])
             kinds[k["kind"]] = _Kind(
                 name=k["kind"],
                 key=k["key"],
@@ -404,25 +455,33 @@ class SqliteAdapter:
                 tombstone=k["tombstone"],
                 version=k["version"],
                 columns=columns,
-                data=tuple(sorted(column for column in columns if column not in role_columns)),
+                data=data,
                 exclude=frozenset(history["exclude"]),
                 actor=history.get("actor"),
                 retention_days=history.get("retentionDays"),
+                released=bool(k.get("releasedTable")),
+                content=tuple(column for column in data if column not in not_content),
             )
+        tables = _tables_of(name_function)
+        if any(k.released for k in kinds.values()):
+            tables = replace(tables, released=_name_of(name_function, RELEASED_TABLE))
         self._config = _Config(
             graph=graph,
             table_name=name_function,
-            tables=_tables_of(name_function),
+            tables=tables,
             clock=clock if clock is not None else _system_clock,
             kinds=kinds,
         )
 
     def create_tables(self, client: Client) -> None:
         """Creates the layout's tables and indexes where they are missing
-        (sqlite_layout), in one transaction of the client. Like every
-        transaction, it reads the clock once, as the TypeScript adapter's
-        createTables does, though it stores no time."""
+        (sqlite_layout), and the released table (released_layout) when a
+        kind of the graph keeps its released rows, in one transaction of the
+        client. Like every transaction, it reads the clock once, as the
+        TypeScript adapter's createTables does, though it stores no time."""
         statements = sqlite_layout(self._config.table_name)
+        if any(k.released for k in self._config.kinds.values()):
+            statements += released_layout(self._config.table_name)
 
         def run(conn: Conn, now: int) -> None:
             for statement in statements:
@@ -697,6 +756,21 @@ def _scan_commit(row: Row) -> Commit:
         created_at=micros_to_date_time(_int(row["created_at"], "created_at")),
         created_by=_text(row["created_by"], "created_by"),
         snapshot=_int(row["snapshot"], "snapshot") == 1,
+    )
+
+
+# A patch's columns, in the layout's names.
+_PATCH_COLUMNS = "commit_id, entity_kind, entity_key, entity_id, entity_version, operation"
+
+
+def _scan_patch(row: Row) -> Patch:
+    return Patch(
+        commit=_text(row["commit_id"], "commit_id"),
+        kind=_text(row["entity_kind"], "entity_kind"),
+        entity_key=_text(row["entity_key"], "entity_key"),
+        entity_id=_text(row["entity_id"], "entity_id"),
+        entity_version=_int(row["entity_version"], "entity_version"),
+        operation=_text(row["operation"], "operation"),
     )
 
 
@@ -1207,18 +1281,33 @@ class _SqliteTx:
             return []
         with _context("read patches"):
             return [
-                Patch(
-                    commit=_text(row["commit_id"], "commit_id"),
-                    kind=_text(row["entity_kind"], "entity_kind"),
-                    entity_key=_text(row["entity_key"], "entity_key"),
-                    entity_id=_text(row["entity_id"], "entity_id"),
-                    entity_version=_int(row["entity_version"], "entity_version"),
-                    operation=_text(row["operation"], "operation"),
-                )
+                _scan_patch(row)
                 for row in self._all(
-                    "SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation "
-                    f"FROM {self._a.tables.patch} WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))",
+                    f"SELECT {_PATCH_COLUMNS} FROM {self._a.tables.patch} "
+                    "WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))",
                     [self._a.graph, "[" + ",".join(write_string(c) for c in commits) + "]"],
+                )
+            ]
+
+    def primary_refs(self, root: str) -> List[Ref]:
+        return self._refs(
+            f"SELECT {_REF_COLUMNS} FROM {self._a.tables.ref} "
+            "WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id",
+            [self._a.graph, root],
+        )
+
+    def entity_patches(self, commits: Sequence[str], kind: str, entity_key: str) -> List[Patch]:
+        if not commits:
+            return []
+        k = self._kind(kind)
+        with _context("read an entity's patches"):
+            return [
+                _scan_patch(row)
+                for row in self._all(
+                    f"SELECT {_PATCH_COLUMNS} FROM {self._a.tables.patch} "
+                    "WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2)) "
+                    "AND entity_kind = ?3 AND entity_key = ?4",
+                    [self._a.graph, "[" + ",".join(write_string(c) for c in commits) + "]", k.name, entity_key],
                 )
             ]
 
@@ -1351,6 +1440,50 @@ class _SqliteTx:
                 _release_image(row),
             )
             return release
+
+    def write_released(self, kind: str, write: ReleasedWrite) -> None:
+        k = self._kind(kind)
+        with _context(f"write the released {k.name} rows"):
+            self._write_released(k, write)
+
+    def _write_released(self, k: _Kind, write: ReleasedWrite) -> None:
+        if not k.released:
+            raise ValueError(f"kind {write_string(k.name)} keeps no released table")
+        self._require_commit(write.commit, write.root, "the release's commit")
+        # Named when the adapter was built, since a kind keeps released rows.
+        released = self._a.tables.released
+        assert released is not None
+        if write.replace:
+            self._run(
+                f"DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3",
+                [self._a.graph, k.name, write.root],
+            )
+        for entity_key in write.delete:
+            self._run(
+                f"DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4",
+                [self._a.graph, k.name, write.root, entity_key],
+            )
+        for row in write.upsert:
+            parsed = loads(row)
+            if not isinstance(parsed, dict):
+                raise ValueError(f"a released {k.name} row is a JSON object")
+            with _context(f"column {k.key}"):
+                key = loads(canonical_of(k.columns[k.key], parsed.get(k.key)))
+            if not isinstance(key, str) or key == "":
+                raise ValueError(f"the released {k.name} row's entity key is a string")
+            # Every content column, canonical; one the row lacks is null.
+            data: Dict[str, str] = {}
+            for column in k.content:
+                data[column] = "null"
+                if column in parsed:
+                    with _context(f"column {column}"):
+                        data[column] = canonical_of(k.columns[column], parsed[column])
+            self._run(
+                f"INSERT INTO {released} (graph, kind, root_id, entity_key, commit_id, sequence, data) "
+                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET "
+                "commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data",
+                [self._a.graph, k.name, write.root, key, write.commit, write.sequence, _write_object(data)],
+            )
 
     def discarded_refs(self, grace: timedelta) -> List[Ref]:
         return self._refs(

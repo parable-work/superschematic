@@ -196,6 +196,14 @@ type ORMTable struct {
 	View     bool
 	Relation string
 
+	// ReadOnly is the table of a graph member's released rows (D139),
+	// ir.TypeDef.ReleasedOf, and ReleasedOf that member: the graph's
+	// release owns the rows, so the table's repository is a read-only one,
+	// a table's reads and none of its writes, and orm.ts declares no
+	// create, update or unique key type for it.
+	ReadOnly   bool
+	ReleasedOf string
+
 	// Uses are the table's behaviors (D103), each one it implements and
 	// each field that is one, each one's operations a member of its
 	// repository under its member; none for a table with none.
@@ -510,6 +518,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		}
 		if td := schema.Types[t.Type]; td != nil {
 			table.Doc = codegen.DocText(td.Description, td.Comment)
+			table.ReadOnly, table.ReleasedOf = td.ReleasedOf != "", td.ReleasedOf
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -936,11 +945,15 @@ func (o *ORMInfo) RuntimeTypes() []string {
 			used["Related"] = true
 		}
 		if t.Encrypted {
-			used["EncryptedRepository"] = true
+			// reencrypt reseals rows, a write a read-only repository has
+			// not (D139); its rows hold a SecretValue all the same.
+			if !t.ReadOnly {
+				used["EncryptedRepository"] = true
+			}
 			used["SecretValue"] = true
 		}
 		switch {
-		case t.View:
+		case t.View, t.ReadOnly:
 			used["ReadRepository"] = true
 		case t.SoftDelete:
 			used["SoftDeleteRepository"] = true
@@ -995,6 +1008,22 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		out = append(out, name)
 	}
 	slices.Sort(out)
+	return out
+}
+
+// ReadOnlyTables are the tables of orm.ts whose repositories only read:
+// those of graph members' released rows (D139), which orm.ts's comment and
+// the README then describe.
+func (o *ORMInfo) ReadOnlyTables() []ORMTable {
+	if o == nil {
+		return nil
+	}
+	var out []ORMTable
+	for _, t := range o.Tables {
+		if t.ReadOnly {
+			out = append(out, t)
+		}
+	}
 	return out
 }
 

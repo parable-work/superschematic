@@ -1,0 +1,15 @@
+{
+  "name": "order_keys_rejects_equal_bounds",
+  "op": "order_keys",
+  "input": {
+    "after": "V",
+    "before": "V",
+    "count": 1
+  },
+  "expect": {
+    "error": {
+      "code": "no_order_key",
+      "message": "order_keys: no key is made between \"V\" and \"V\": the second must be above the first by more than trailing zeros"
+    }
+  }
+}

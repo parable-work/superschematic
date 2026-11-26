@@ -4,8 +4,7 @@ package {{ toPackageName .SchemaName }}
 
 import (
 	"context"
-
-	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- authSnippet "callerImports" . }}
 	orm "{{ .Deps.ORMModule }}"
 )
 
@@ -17,5 +16,5 @@ import (
 // on the context acts as another user; a route with no caller, and a job,
 // a worker or a manual route's handler, acts as no one.
 func callerContext(ctx context.Context) context.Context {
-	return orm.WithCaller(ctx, runtimesession.GetPrincipalID(ctx))
+	return orm.WithCaller(ctx, {{ authSnippet "callerPrincipal" . }})
 }

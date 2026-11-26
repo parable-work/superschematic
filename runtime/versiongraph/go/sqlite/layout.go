@@ -31,11 +31,17 @@ func Tables() []string {
 	return append([]string(nil), tableNames...)
 }
 
+// ReleasedTable is the local name of the table that holds released rows
+// (D139). It is not among Tables: ReleasedLayout creates it, for a graph
+// with a kind that keeps its released rows.
+const ReleasedTable = "released"
+
 // tables are the layout's tables, each quoted, under one name function.
 type tables struct {
 	ref, refHistory, commit, patch, snapshot string
 	release, releaseHistory                  string
 	member, memberHistory                    string
+	released                                 string
 }
 
 // quote quotes an identifier.
@@ -70,6 +76,37 @@ func tablesOf(tableName func(string) string) (tables, error) {
 		*table.dst = name
 	}
 	return t, nil
+}
+
+// ReleasedLayout returns the statement that creates the released table
+// (D139), under the name tableName gives it (DefaultTableName when nil).
+// It is apart from Layout, whose nine tables every graph has: a graph
+// needs this one only when a kind of its descriptor names a
+// releasedTable, and Adapter.CreateTables creates it then. A released row
+// holds its kind's content columns as one canonical JSON object, data,
+// with the commit and the sequence of the release that wrote it, one row
+// per entity of a kind of a root.
+func ReleasedLayout(tableName func(local string) string) ([]string, error) {
+	if tableName == nil {
+		tableName = DefaultTableName
+	}
+	t, err := tablesOf(tableName)
+	if err != nil {
+		return nil, err
+	}
+	// The name function is asked for the released table only here and by
+	// an adapter of a graph that keeps released rows, so one that names
+	// the layout's nine tables alone serves every other graph.
+	if t.released, err = nameOf(tableName, ReleasedTable); err != nil {
+		return nil, err
+	}
+	return []string{
+		`CREATE TABLE IF NOT EXISTS ` + t.released + ` (` +
+			`graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, entity_key TEXT NOT NULL, ` +
+			`commit_id TEXT NOT NULL REFERENCES ` + t.commit + ` (id), sequence INTEGER NOT NULL, data TEXT NOT NULL, ` +
+			`PRIMARY KEY (graph, kind, root_id, entity_key)` +
+			`) STRICT`,
+	}, nil
 }
 
 // Layout returns the statements that create the layout, each table and

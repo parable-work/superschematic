@@ -225,6 +225,18 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			return nil
 		},
 	})
+	specs = append(specs, DecoratorSpec{
+		Name: "idempotent", Packages: []string{pkgAPI}, Target: TargetOperation,
+		Apply: func(n Node, args []any, _ Site) error {
+			config, err := idempotentConfig(args)
+			if err != nil {
+				return err
+			}
+			n.Field.Idempotent = config
+			return nil
+		},
+		recordsErrors: true,
+	})
 	// Operation sets and operations share the middleware trio.
 	for _, name := range []string{"rateLimit", "bodyLimit", "timeout"} {
 		specs = append(specs, DecoratorSpec{
@@ -281,6 +293,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// class form: the routes run no implementation that could check what
 	// the caller owns.
 	specs = append(specs, behaviorOperationsDecorator(), behaviorWorkerDecorator())
+	// A version graph's operations (D138), on a class with no members
+	// (core_graph_operations.go), which takes the same clause.
+	specs = append(specs, graphOperationsDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{
@@ -695,4 +710,48 @@ func applyRest(args []any, op *ir.FieldDef) error {
 		op.RestPath = path
 	}
 	return nil
+}
+
+// idempotentConfig reads @idempotent({ ttl?, required? }) (D140): no
+// argument, or one config object. ttl is a duration of whole seconds as Go
+// writes one, `24h`, `90m` or `30s`, at most ir.MaxIdempotencyTTLSeconds;
+// absent leaves the default. required is a boolean.
+func idempotentConfig(args []any) (*ir.IdempotentConfig, error) {
+	config := &ir.IdempotentConfig{}
+	if len(args) == 0 {
+		return config, nil
+	}
+	if len(args) != 1 {
+		return nil, fmt.Errorf("@idempotent takes at most one config object")
+	}
+	cfg, ok := args[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("@idempotent config must be an object literal")
+	}
+	for key, value := range cfg {
+		switch key {
+		case "ttl":
+			text, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("@idempotent ttl must be a duration in a string, such as \"24h\"")
+			}
+			seconds, err := TimeoutSeconds(text)
+			if err != nil {
+				return nil, fmt.Errorf("@idempotent ttl %s", err)
+			}
+			if seconds > ir.MaxIdempotencyTTLSeconds {
+				return nil, fmt.Errorf("@idempotent ttl %q is longer than %d days", text, ir.MaxIdempotencyTTLSeconds/86400)
+			}
+			config.TTLSeconds = seconds
+		case "required":
+			required, ok := value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("@idempotent required must be true or false")
+			}
+			config.Required = required
+		default:
+			return nil, fmt.Errorf("@idempotent has no option %q; it takes ttl and required", key)
+		}
+	}
+	return config, nil
 }

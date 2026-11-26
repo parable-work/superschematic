@@ -7,7 +7,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { errorCode, isJsonObject, parseJson, SyncEngine, uuidHyphenated, type JsonValue } from "../dist/engine.js";
 import { initSync } from "../dist/index.js";
-import { defaultTableName, SqliteAdapter, sqliteLayout, type SqliteClient, type SqliteValue } from "../dist/sqlite.js";
+import {
+  defaultTableName,
+  SqliteAdapter,
+  sqliteLayout,
+  sqliteReleasedLayout,
+  sqliteReleasedTable,
+  type SqliteClient,
+  type SqliteValue,
+} from "../dist/sqlite.js";
 import type { Binding } from "./sqlite.ts";
 import {
   descriptor,
@@ -67,6 +75,12 @@ interface Vectors {
   }[];
 }
 
+/** layout.json: the layout's statements, and the released table's. */
+interface Layout {
+  statements: string[];
+  released: string[];
+}
+
 /** A JSON object's member, from a row the file holds. */
 function memberOf(text: string, name: string): JsonValue | undefined {
   const parsed = parseJson(text);
@@ -76,23 +90,26 @@ function memberOf(text: string, name: string): JsonValue | undefined {
 
 export const vectorCases: VectorCase[] = [
   {
-    name: "sqliteLayout() is layout.json",
+    name: "sqliteLayout() and sqliteReleasedLayout() are layout.json",
     run() {
-      const file = JSON.parse(readFileSync(layoutFile, "utf8")) as { statements: string[] };
+      const file = JSON.parse(readFileSync(layoutFile, "utf8")) as Layout;
+      assert.deepEqual(Object.keys(file), ["statements", "released"]);
       assert.deepEqual(sqliteLayout(), file.statements);
+      assert.deepEqual(sqliteReleasedLayout(), file.released);
     },
   },
   {
-    name: "typescript.sql begins with layout.json's statements",
+    name: "typescript.sql begins with layout.json's statements, and then its released ones",
     run() {
-      const file = JSON.parse(readFileSync(layoutFile, "utf8")) as { statements: string[] };
+      const file = JSON.parse(readFileSync(layoutFile, "utf8")) as Layout;
+      const statements = [...file.statements, ...file.released];
       const lines = readFileSync(sqlFile, "utf8").split("\n");
       assert.deepEqual(
-        lines.slice(0, file.statements.length),
-        file.statements.map((statement) => statement + ";"),
+        lines.slice(0, statements.length),
+        statements.map((statement) => statement + ";"),
       );
       assert.ok(
-        lines.slice(file.statements.length).every((line) => line === "" || line.startsWith("INSERT INTO ")),
+        lines.slice(statements.length).every((line) => line === "" || line.startsWith("INSERT INTO ")),
         "every other statement is an INSERT",
       );
     },
@@ -195,6 +212,15 @@ export const vectorCases: VectorCase[] = [
         holds("an integer wider than a double, digit for digit", `SELECT 1 FROM ${t("member")} WHERE instr(data, '"servings":9007199254740993') > 0`);
         holds("a number past 1e21, as 1e+21", `SELECT 1 FROM ${t("member")} WHERE instr(data, '"score":1e+21') > 0`);
         holds("text with an apostrophe", `SELECT 1 FROM ${t("member")} WHERE instr(data, '''') > 0`);
+        // The part a release wrote into the released table: its content
+        // columns alone, the parent it lacks as null, with the commit the
+        // release points at and that commit's sequence.
+        holds(
+          "a released row, of the commit its root's release names",
+          `SELECT 1 FROM ${t(sqliteReleasedTable)} AS r JOIN ${t("release")} AS p ON p.graph = r.graph AND p.root_id = r.root_id AND p.commit_id = r.commit_id ` +
+            `JOIN ${t("commit")} AS c ON c.id = r.commit_id AND c.sequence = r.sequence ` +
+            `WHERE r.kind = 'part' AND r.data = '{"heading":"Before you start","parent_key":null,"rank":"V"}'`,
+        );
         const data = client.all(`SELECT data FROM ${t("member")}`).map((r) => r["data"] as string);
         assert.ok(data.some((d) => /[^\u0000-\u007f]/.test(d)), "typescript.sql holds text outside ASCII");
         assert.ok(data.some((d) => /[\u{10000}-\u{10ffff}]/u.test(d)), "typescript.sql holds text outside the Basic Multilingual Plane");
@@ -222,7 +248,7 @@ export const vectorCases: VectorCase[] = [
         const reads = JSON.parse(readFileSync(readsFile, "utf8")) as {
           graphs: {
             graph: string;
-            commits: { readCommit: { id: string; message: string | null; contentHash: string }; materialize: Read }[];
+            commits: { readCommit: { id: string; message: string | null; contentHash: string; sequence: number | null }; materialize: Read }[];
             roots: { released: Read & { release?: { commit: string } } }[];
           }[];
         };
@@ -241,8 +267,12 @@ export const vectorCases: VectorCase[] = [
           lunch.materialize.tree?.[gained.kind]?.some((r) => !(gained.column in r)),
           `typescript.json holds a commit recorded before the gain, whose ${gained.kind} image lacks ${gained.column}`,
         );
-        const released = menu.roots.map((r) => r.released).find((r) => r.release?.commit === lunch.readCommit.id);
-        assert.equal(released?.contentHash, lunch.readCommit.contentHash, "released, at lunch, gives the hash lunch recorded");
+        // The release has moved on from lunch to the tagged commit that
+        // added the part, and released reads that commit's tree.
+        const intro = menu.commits.find((c) => c.readCommit.message === "intro" && c.readCommit.sequence !== null)!;
+        const released = menu.roots.map((r) => r.released).find((r) => r.release?.commit === intro.readCommit.id);
+        assert.equal(released?.contentHash, intro.readCommit.contentHash, "released, at intro, gives the hash intro recorded");
+        assert.ok(released?.tree?.["part"]?.length === 1, "released, at intro, reads the part");
         const tastings = client.all(`SELECT data FROM ${t("member")} WHERE kind = 'tasting'`).map((r) => r["data"] as string);
         const tasting = kinds.find((k) => k.kind === "tasting")!;
         const roles = new Set([tasting.key, tasting.id, tasting.ref, tasting.root, tasting.tombstone, tasting.version]);

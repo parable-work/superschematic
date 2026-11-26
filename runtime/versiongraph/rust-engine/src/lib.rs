@@ -16,8 +16,21 @@
 //! [`Engine::release`] moves and [`Engine::released`] reads. A commit is
 //! snapshotted, its full pin set stored, when it is tagged, released, or
 //! [`Options::snapshot_every`] commits past the nearest snapshot on its
-//! chain, and a read stops at the nearest snapshot. [`Engine::sweep`] and
+//! chain, and a read stops at the nearest snapshot. [`Engine::history`]
+//! lists the commits a ref wrote, and [`Engine::entity_history`] the
+//! commits of a root's primary line that changed one entity (D138), each
+//! with what it did, from the commits' patches alone. [`Engine::sweep`] and
 //! [`Engine::run_sweeper`] are the graph's maintenance.
+//!
+//! A kind whose descriptor names a `releasedTable` keeps the rows of each
+//! root's released tree in that table (D139): a release rewrites them in
+//! its transaction, from the diff between the tree released before and the
+//! new one ([`storage::Tx::write_released`]).
+//!
+//! A kind whose order column is a string holds order keys (D137).
+//! [`Engine::arrange`] puts one parent's children in the order wanted and
+//! writes new keys for the fewest rows it can, and [`order_keys`] makes
+//! keys between two others, for a row a save places itself.
 //!
 //! The engine's operations are `async`: each runs in one transaction of its
 //! [`Storage`]. [`Engine::on`] runs them over a storage the caller lends
@@ -64,10 +77,11 @@ pub mod sqlite;
 pub mod storage;
 mod sweep;
 
-pub use crate::core::{Change, Conflict, Finding, Resolution, Take, Tree};
+pub use crate::core::{order_keys, Change, Conflict, Finding, Resolution, Take, Tree};
 pub use crate::engine::{
-    ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, KindEdits, MergeResult, Options,
-    ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY, DEFAULT_WALK_CEILING,
+    ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, EntityChange, KindEdits,
+    MergeResult, Options, ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY,
+    DEFAULT_WALK_CEILING,
 };
 pub use crate::error::Error;
 pub use crate::storage::{Commit, Ref, Release, Storage};
