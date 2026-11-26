@@ -80,25 +80,7 @@ func (t TypeInfo) HasLimitConsts() bool {
 // in a field name can give the name of a shorter type's constant, and Go
 // refuses the duplicate declaration.
 func checkLimitConstNames(output *ModuleOutput) error {
-	taken := map[string]string{}
-	for _, typeInfo := range output.Types {
-		taken[typeInfo.Name] = "type " + typeInfo.Name
-	}
-	for _, imported := range output.ImportedTypes {
-		taken[imported.Name] = "type " + imported.Name
-	}
-	for _, union := range output.Unions {
-		taken[union.Name] = "union " + union.Name
-	}
-	for _, imported := range output.ImportedUnions {
-		taken[imported.Name] = "union " + imported.Name
-	}
-	for _, enum := range output.Enums {
-		taken[enum.Name] = "enum " + enum.Name
-	}
-	for _, imported := range output.ImportedEnums {
-		taken[imported.Name] = "enum " + imported.Name
-	}
+	taken := declaredTypeNames(output)
 	claim := func(name, owner string) error {
 		if previous, ok := taken[name]; ok {
 			return fmt.Errorf("typegen: limit constant %s of %s collides with %s; rename one of them", name, owner, previous)
@@ -123,4 +105,29 @@ func checkLimitConstNames(output *ModuleOutput) error {
 		}
 	}
 	return nil
+}
+
+// declaredTypeNames maps each type, union and enum name the module
+// declares, its own or an alias of a dependency's, to what declares it.
+func declaredTypeNames(output *ModuleOutput) map[string]string {
+	taken := map[string]string{}
+	for _, typeInfo := range output.Types {
+		taken[typeInfo.Name] = "type " + typeInfo.Name
+	}
+	for _, imported := range output.ImportedTypes {
+		taken[imported.Name] = "type " + imported.Name
+	}
+	for _, union := range output.Unions {
+		taken[union.Name] = "union " + union.Name
+	}
+	for _, imported := range output.ImportedUnions {
+		taken[imported.Name] = "union " + imported.Name
+	}
+	for _, enum := range output.Enums {
+		taken[enum.Name] = "enum " + enum.Name
+	}
+	for _, imported := range output.ImportedEnums {
+		taken[imported.Name] = "enum " + imported.Name
+	}
+	return taken
 }

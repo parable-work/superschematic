@@ -18,11 +18,12 @@ func goFeatureFindings(schema *ir.Schema, in Input) []string {
 	return out
 }
 
-// TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe: a Go ORM, and a Go
-// server over its database, refuse each feature of D152 to D159 that Go
-// does not serve yet, naming the feature, the table and the decision
-// (D180), and a service with no Go output, or with an audience, which Go
-// serves, holds no finding.
+// TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe: a Go server over a
+// database refuses each feature of D152 to D159 of its tables that Go does
+// not serve yet, naming the feature, the table and the decision (D180).
+// The database itself, whose Go types and Go ORM the build always
+// generates, holds no finding, nor does an API served in TypeScript or an
+// audience, which Go serves.
 func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	table := func(name string, edit func(*ir.TypeDef)) *ir.Schema {
 		schema := ir.NewSchema("app-db", ir.SchemaKindDB)
@@ -53,19 +54,18 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	} {
 		t.Run(tc.feature, func(t *testing.T) {
 			schema := table("Duty", tc.edit)
-			got := goFeatureFindings(schema, Input{GoORM: true})
-			if len(got) != 1 || !strings.Contains(got[0], "the Go ORM of app-db does not serve "+tc.want) {
-				t.Fatalf("the Go ORM: %v, want %q", got, tc.want)
+			// The database's own Go ORM is its plain repositories.
+			if got := goFeatureFindings(schema, Input{GoServer: true}); len(got) != 0 {
+				t.Fatalf("the database: %v", got)
 			}
-			// The Go server of an API over the database refuses it too.
 			api := ir.NewSchema("app-api", ir.SchemaKindAPI)
-			got = goFeatureFindings(api, Input{GoServer: true, Database: schema})
+			got := goFeatureFindings(api, Input{GoServer: true, Database: schema})
 			if len(got) != 1 || !strings.Contains(got[0], "the Go server of app-api, over app-db, does not serve "+tc.want) {
 				t.Fatalf("the Go server: %v, want %q", got, tc.want)
 			}
-			// No Go output: the TypeScript server serves it.
-			if got := goFeatureFindings(schema, Input{}); len(got) != 0 {
-				t.Fatalf("no Go output: %v", got)
+			// An API served in TypeScript serves it.
+			if got := goFeatureFindings(api, Input{Database: schema}); len(got) != 0 {
+				t.Fatalf("a TypeScript server: %v", got)
 			}
 		})
 	}
@@ -74,7 +74,7 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	served := table("Document", func(td *ir.TypeDef) { td.Audience = &ir.AudienceDef{} })
 	served.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 	served.Types["AccessEntry"] = &ir.TypeDef{Name: "AccessEntry", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
-	if got := goFeatureFindings(served, Input{GoORM: true}); len(got) != 0 {
+	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
 		t.Fatalf("an audience, grants and the access log in Go: %v", got)
 	}
 

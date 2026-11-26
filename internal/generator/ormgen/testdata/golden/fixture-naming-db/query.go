@@ -220,6 +220,13 @@ type ArrayStringFilter struct {
 // that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
+// VersionKey names one stored version of a versioned row: its primary key
+// and its _version. GetVersions reads many of them in one query (D166).
+type VersionKey[K comparable] struct {
+	ID      K
+	Version int64
+}
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================

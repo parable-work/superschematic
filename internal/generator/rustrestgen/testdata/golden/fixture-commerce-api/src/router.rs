@@ -67,50 +67,62 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("holdsListHolds")
         .apply(post(handle_checkout_holds_holds_list_holds));
     router = router.route("/api/checkout/{id}/holds/list-holds", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("holdsRetakeHolds")
         .apply(post(handle_checkout_holds_holds_retake_holds));
     router = router.route("/api/checkout/{id}/holds/retake-holds", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_checkout_holds_status_transition));
     router = router.route("/api/checkout/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockAdjustStock")
         .apply(post(handle_inventory_stock_stock_adjust_stock));
     router = router.route("/api/inventory/{id}/stock/adjust-stock", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockCheckHold")
         .apply(post(handle_inventory_stock_stock_check_hold));
     router = router.route("/api/inventory/{id}/stock/check-hold", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockCommitFor")
         .apply(post(handle_inventory_stock_stock_commit_for));
     router = router.route("/api/inventory/{id}/stock/commit-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockCountStock")
         .apply(post(handle_inventory_stock_stock_count_stock));
     router = router.route("/api/inventory/{id}/stock/count-stock", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockHoldFor")
         .apply(post(handle_inventory_stock_stock_hold_for));
     router = router.route("/api/inventory/{id}/stock/hold-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockListStockMovements")
         .apply(post(handle_inventory_stock_stock_list_stock_movements));
     router = router.route("/api/inventory/{id}/stock/list-stock-movements", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockReceiveStock")
         .apply(post(handle_inventory_stock_stock_receive_stock));
     router = router.route("/api/inventory/{id}/stock/receive-stock", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockReleaseFor")
         .apply(post(handle_inventory_stock_stock_release_for));
     router = router.route("/api/inventory/{id}/stock/release-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("stockReturnFor")
         .apply(post(handle_inventory_stock_stock_return_for));
     router = router.route("/api/inventory/{id}/stock/return-for", route);
     router

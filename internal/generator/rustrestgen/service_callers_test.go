@@ -41,10 +41,12 @@ func TestWriteRustAPIServiceAuthGolden(t *testing.T) {
 		"    let route = RouteControls::under(transport)\n" +
 			"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[\"fixture-service-caller-api\"])\n" +
 			"        .authorize(Arc::clone(&state.implementations.authenticator), &[\"stock.reserve\"])\n" +
+			"        .operation(\"reserveStock\")\n" +
 			"        .apply(post(handle_stock_reserve_stock));\n",
 		"    let route = RouteControls::under(transport)\n" +
 			"        .allow_service(Arc::clone(&state.implementations.service_authenticator), &[\"fixture-service-caller-api\"])\n" +
 			"        .authorize(Arc::clone(&state.implementations.authenticator), &[\"stock.write\"])\n" +
+			"        .operation(\"releaseReservation\")\n" +
 			"        .apply(post(handle_stock_release_reservation));\n",
 		"    let route = RouteControls::under(transport)\n" +
 			"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[])\n" +
@@ -141,7 +143,7 @@ func TestTheServiceCallOfAManualRouteIsListed(t *testing.T) {
 	router := string(source)
 	for _, want := range []string{
 		"/// - `POST /api/sync/stock/mine` (sync.syncMyStock): apply its controls,\n" +
-			"///   `RouteControls::new().allow_service(service_authenticator, &[]).authorize(authenticator, &[]).apply(route)`\n",
+			"///   `RouteControls::new().allow_service(service_authenticator, &[]).authorize(authenticator, &[]).operation(\"syncMyStock\").apply(route)`\n",
 		"/// - `GET /api/sync/status` (sync.syncStatus): apply its controls,\n" +
 			"///   `RouteControls::new().identify_service(service_authenticator).apply(route)`\n",
 	} {

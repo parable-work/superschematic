@@ -6,40 +6,44 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// checkGoFeatures refuses, in a service the build generates Go for, each
-// platform feature of D152 to D159 the Go outputs do not serve yet (D180):
-// the Go ORM of a DB service with Go types, and the Go server of an API,
-// whose database's tables it serves. Before this check the Go generators
-// left each of them out with no word: a Go ORM with no calendar source,
-// no Recurrence operations, no events, no notifier or channel identities,
-// no references or attachments, no search index, no parties, no
-// conversations or run requests, and no agents; a Go server with no
-// provider slots and no autonomy. Per-record access itself (D156) is
-// served (D180), and an audience on SQLite is refused for every language
-// (checkAudience).
+// checkGoFeatures refuses, in a Go server, each platform feature of D152
+// to D159 the Go outputs do not serve yet (D180): on the tables of the
+// API's database, which its generated operations and its implementation
+// read through the Go ORM, and on the API's own provider slots and
+// operations. Before this check a Go server left each of them out with no
+// word: no calendar or Recurrence operations, no events or notifier, no
+// references, attachments or search, no parties, conversations, run
+// requests or agents, no provider slots and no autonomy.
+//
+// A DB service's Go types are not refused. The DB kind generates its Go
+// ORM always, and the build needs the Go types for it (outputs.types.go),
+// whatever language its API is served in. The Go ORM of these tables is
+// their plain repositories: the triggers and the core keep what each
+// feature writes, whichever ORM writes the row, and a TypeScript server
+// serves the feature. What would serve it wrongly is a Go server, which is
+// refused. Per-record access itself (D156) is served (D180), and an
+// audience on SQLite is refused for every language (checkAudience).
 //
 // The Rust and SQLite ports refuse their own in files of their own; a
 // later Go workstream that serves one of these removes its line here.
 func checkGoFeatures(schema *ir.Schema, in Input, r *Result) {
-	switch {
-	case in.GoORM && schema.Kind == ir.SchemaKindDB:
-		checkGoTables(schema, "the Go ORM of "+schema.Name, r)
-	case in.GoServer && schema.Kind == ir.SchemaKindAPI:
-		where := "the Go server of " + schema.Name
-		if in.Database != nil {
-			checkGoTables(in.Database, where+", over "+in.Database.Name+",", r)
-		}
-		checkGoOperations(schema, where, r)
+	if !in.GoServer || schema.Kind != ir.SchemaKindAPI {
+		return
 	}
+	where := "the Go server of " + schema.Name
+	if in.Database != nil {
+		checkGoTables(in.Database, where+", over "+in.Database.Name+",", r)
+	}
+	checkGoOperations(schema, where, r)
 }
 
 // goUnserved is the refusal of one feature in a Go output.
 func goUnserved(r *Result, file, where, feature, decision string) {
-	r.errorf(file, "%s does not serve %s yet (%s, D180): the TypeScript server and repositories do; turn the Go output off (outputs.types.go, or outputs.api.language: \"TYPESCRIPT\"), or leave the feature out", where, feature, decision)
+	r.errorf(file, "%s does not serve %s yet (%s, D180): a TypeScript server does; serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\"), or leave the feature out", where, feature, decision)
 }
 
-// checkGoTables refuses the table features of schema, a DB service's,
-// that where, a Go output, does not serve.
+// checkGoTables refuses the table features of schema, a Go server's
+// database, that where, the server, does not serve.
 func checkGoTables(schema *ir.Schema, where string, r *Result) {
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]

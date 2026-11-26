@@ -16,6 +16,8 @@ type ReadOnlyCoverRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CoverGetOptions) (*types.Cover, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Cover, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Cover, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Cover, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields CoverFields) ([]*types.Cover, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Cover, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
@@ -30,6 +32,8 @@ type CoverRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CoverGetOptions) (*types.Cover, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Cover, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Cover, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Cover, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields CoverFields) ([]*types.Cover, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Cover, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
@@ -55,6 +59,8 @@ type ReadOnlyIngredientRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *IngredientGetOptions) (*types.Ingredient, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ingredient, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Ingredient, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Ingredient, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields IngredientFields) ([]*types.Ingredient, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Ingredient, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
@@ -69,6 +75,8 @@ type IngredientRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *IngredientGetOptions) (*types.Ingredient, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ingredient, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Ingredient, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Ingredient, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields IngredientFields) ([]*types.Ingredient, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Ingredient, error)
 	PruneHistory(ctx context.Context, retentionDays, chunkRows int) (int64, error)
@@ -96,6 +104,8 @@ type ReadOnlyNoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields NoteFields) ([]*types.Note, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
@@ -110,6 +120,8 @@ type NoteRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Note, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields NoteFields) ([]*types.Note, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Note, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
@@ -135,6 +147,8 @@ type ReadOnlyPartRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *PartGetOptions) (*types.Part, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Part, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Part, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Part, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields PartFields) ([]*types.Part, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *PartHistoryOptions) ([]types.HistoryRecord[*types.Part], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Part, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *PartHistoryOptions) ([]types.HistoryRecord[*types.Part], error)
@@ -149,6 +163,8 @@ type PartRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *PartGetOptions) (*types.Part, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Part, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Part, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Part, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields PartFields) ([]*types.Part, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *PartHistoryOptions) ([]types.HistoryRecord[*types.Part], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Part, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *PartHistoryOptions) ([]types.HistoryRecord[*types.Part], error)
@@ -275,6 +291,8 @@ type ReadOnlyRecipeRefRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeRefGetOptions) (*types.RecipeRef, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRef, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRef, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRef, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields RecipeRefFields) ([]*types.RecipeRef, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRef, error)
 	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
@@ -291,6 +309,8 @@ type RecipeRefRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeRefGetOptions) (*types.RecipeRef, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRef, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRef, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRef, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields RecipeRefFields) ([]*types.RecipeRef, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRef, error)
 	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
@@ -319,6 +339,8 @@ type ReadOnlyRecipeReleaseRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseGetOptions) (*types.RecipeRelease, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRelease, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRelease, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRelease, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields RecipeReleaseFields) ([]*types.RecipeRelease, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRelease, error)
 	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
@@ -333,6 +355,8 @@ type RecipeReleaseRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseGetOptions) (*types.RecipeRelease, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRelease, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRelease, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRelease, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields RecipeReleaseFields) ([]*types.RecipeRelease, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRelease, error)
 	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
@@ -385,6 +409,8 @@ type ReadOnlyStepRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Step, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Step, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Step, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields StepFields) ([]*types.Step, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Step, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
@@ -399,6 +425,8 @@ type StepRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Step, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Step, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Step, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields StepFields) ([]*types.Step, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Step, error)
 	PruneHistory(ctx context.Context, retentionDays, chunkRows int) (int64, error)
@@ -426,6 +454,8 @@ type ReadOnlyTastingRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TastingGetOptions) (*types.Tasting, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tasting, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tasting, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tasting, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TastingFields) ([]*types.Tasting, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tasting, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
@@ -440,6 +470,8 @@ type TastingRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TastingGetOptions) (*types.Tasting, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tasting, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tasting, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tasting, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TastingFields) ([]*types.Tasting, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tasting, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
@@ -465,6 +497,8 @@ type ReadOnlyUtensilRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UtensilGetOptions) (*types.Utensil, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Utensil, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Utensil, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Utensil, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields UtensilFields) ([]*types.Utensil, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Utensil, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
@@ -479,6 +513,8 @@ type UtensilRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UtensilGetOptions) (*types.Utensil, error)
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Utensil, error)
 	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Utensil, error)
+	GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Utensil, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields UtensilFields) ([]*types.Utensil, error)
 	ListVersions(ctx context.Context, id types.IdentityUUID, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Utensil, error)
 	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
@@ -801,6 +837,14 @@ func (r *NoOpCoverRepository) GetVersion(_ context.Context, _ types.IdentityUUID
 	return nil, ErrNotFound
 }
 
+func (r *NoOpCoverRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Cover, error) {
+	return make([]*types.Cover, len(keys)), nil
+}
+
+func (r *NoOpCoverRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ CoverFields) ([]*types.Cover, error) {
+	return make([]*types.Cover, len(keys)), nil
+}
+
 func (r *NoOpCoverRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error) {
 	return []types.HistoryRecord[*types.Cover]{}, nil
 }
@@ -909,6 +953,14 @@ func (r *NoOpIngredientRepository) GetManyByIDs(_ context.Context, _ []types.Ide
 
 func (r *NoOpIngredientRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Ingredient, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpIngredientRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Ingredient, error) {
+	return make([]*types.Ingredient, len(keys)), nil
+}
+
+func (r *NoOpIngredientRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ IngredientFields) ([]*types.Ingredient, error) {
+	return make([]*types.Ingredient, len(keys)), nil
 }
 
 func (r *NoOpIngredientRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error) {
@@ -1029,6 +1081,14 @@ func (r *NoOpNoteRepository) GetVersion(_ context.Context, _ types.IdentityUUID,
 	return nil, ErrNotFound
 }
 
+func (r *NoOpNoteRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Note, error) {
+	return make([]*types.Note, len(keys)), nil
+}
+
+func (r *NoOpNoteRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ NoteFields) ([]*types.Note, error) {
+	return make([]*types.Note, len(keys)), nil
+}
+
 func (r *NoOpNoteRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error) {
 	return []types.HistoryRecord[*types.Note]{}, nil
 }
@@ -1137,6 +1197,14 @@ func (r *NoOpPartRepository) GetManyByIDs(_ context.Context, _ []types.IdentityU
 
 func (r *NoOpPartRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Part, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpPartRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Part, error) {
+	return make([]*types.Part, len(keys)), nil
+}
+
+func (r *NoOpPartRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ PartFields) ([]*types.Part, error) {
+	return make([]*types.Part, len(keys)), nil
 }
 
 func (r *NoOpPartRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *PartHistoryOptions) ([]types.HistoryRecord[*types.Part], error) {
@@ -1535,6 +1603,14 @@ func (r *NoOpRecipeRefRepository) GetVersion(_ context.Context, _ types.Identity
 	return nil, ErrNotFound
 }
 
+func (r *NoOpRecipeRefRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRef, error) {
+	return make([]*types.RecipeRef, len(keys)), nil
+}
+
+func (r *NoOpRecipeRefRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ RecipeRefFields) ([]*types.RecipeRef, error) {
+	return make([]*types.RecipeRef, len(keys)), nil
+}
+
 func (r *NoOpRecipeRefRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error) {
 	return []types.HistoryRecord[*types.RecipeRef]{}, nil
 }
@@ -1655,6 +1731,14 @@ func (r *NoOpRecipeReleaseRepository) GetManyByIDs(_ context.Context, _ []types.
 
 func (r *NoOpRecipeReleaseRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.RecipeRelease, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.RecipeRelease, error) {
+	return make([]*types.RecipeRelease, len(keys)), nil
+}
+
+func (r *NoOpRecipeReleaseRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ RecipeReleaseFields) ([]*types.RecipeRelease, error) {
+	return make([]*types.RecipeRelease, len(keys)), nil
 }
 
 func (r *NoOpRecipeReleaseRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error) {
@@ -1849,6 +1933,14 @@ func (r *NoOpStepRepository) GetVersion(_ context.Context, _ types.IdentityUUID,
 	return nil, ErrNotFound
 }
 
+func (r *NoOpStepRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Step, error) {
+	return make([]*types.Step, len(keys)), nil
+}
+
+func (r *NoOpStepRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ StepFields) ([]*types.Step, error) {
+	return make([]*types.Step, len(keys)), nil
+}
+
 func (r *NoOpStepRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error) {
 	return []types.HistoryRecord[*types.Step]{}, nil
 }
@@ -1967,6 +2059,14 @@ func (r *NoOpTastingRepository) GetVersion(_ context.Context, _ types.IdentityUU
 	return nil, ErrNotFound
 }
 
+func (r *NoOpTastingRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Tasting, error) {
+	return make([]*types.Tasting, len(keys)), nil
+}
+
+func (r *NoOpTastingRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ TastingFields) ([]*types.Tasting, error) {
+	return make([]*types.Tasting, len(keys)), nil
+}
+
 func (r *NoOpTastingRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error) {
 	return []types.HistoryRecord[*types.Tasting]{}, nil
 }
@@ -2075,6 +2175,14 @@ func (r *NoOpUtensilRepository) GetManyByIDs(_ context.Context, _ []types.Identi
 
 func (r *NoOpUtensilRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Utensil, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) GetVersions(_ context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Utensil, error) {
+	return make([]*types.Utensil, len(keys)), nil
+}
+
+func (r *NoOpUtensilRepository) GetVersionsWithFields(_ context.Context, keys []VersionKey[types.IdentityUUID], _ UtensilFields) ([]*types.Utensil, error) {
+	return make([]*types.Utensil, len(keys)), nil
 }
 
 func (r *NoOpUtensilRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error) {

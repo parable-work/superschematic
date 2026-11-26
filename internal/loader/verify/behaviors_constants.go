@@ -75,9 +75,15 @@ func tableFieldsOf(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.B
 }
 
 // names are the spec's fields, as the core's refusal of a field the type
-// lacks names them: "its fields: a, b", or none.
+// lacks names them: "its fields: a, b", or none. A table the build cannot
+// model has no spec, so its names say why rather than that it has no
+// fields: "none, as the build refuses the table: table Ticket: unique key
+// ...".
 func (f *tableFields) names() string {
 	if len(f.spec) == 0 {
+		if err := behaviorlayout.Unmodelled(f.schema, f.td); err != nil {
+			return "none, as the build refuses the table: " + err.Error()
+		}
 		return "none"
 	}
 	names := make([]string, 0, len(f.spec))

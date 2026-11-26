@@ -262,7 +262,7 @@ func TestMCPEndpointOfAGuardedAPI(t *testing.T) {
 		"        requires_auth: true,\n",
 		"        authenticator: Some(authenticator),\n",
 		"        service_authenticator: Some(Arc::clone(&state.implementations.service_authenticator)),\n",
-		"    let route = RouteControls::under(transport)\n        .body_limit_megabytes(2)\n        .identify_service(Arc::clone(&state.implementations.service_authenticator))\n        .authorize(Arc::clone(&authenticator), &[\"orders.write\"])\n        .timeout_seconds(30)\n        .apply(patch(check_order_update_order));\n",
+		"    let route = RouteControls::under(transport)\n        .body_limit_megabytes(2)\n        .identify_service(Arc::clone(&state.implementations.service_authenticator))\n        .authorize(Arc::clone(&authenticator), &[\"orders.write\"])\n        .operation(\"updateOrder\")\n        .timeout_seconds(30)\n        .apply(patch(check_order_update_order));\n",
 		"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[\"storefront\"])\n        .apply(post(check_order_open_return));\n",
 		"    if manual_routes {\n        let route = RouteControls::under(transport)\n            .identify_service(Arc::clone(&state.implementations.service_authenticator))\n            .apply(get(check_request));\n        router = router.route(\"/api/orders\", route);\n    }\n",
 		"async fn check_request(uri: Uri) -> Response {",

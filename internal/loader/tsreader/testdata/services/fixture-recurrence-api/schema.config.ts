@@ -11,6 +11,7 @@ export default defineConfig({
   dependencies: [FixtureRecurrenceDb],
   outputs: {
     types: {
+      [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true },
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }
@@ -19,6 +20,7 @@ export default defineConfig({
     // calendar source yet (D180).
     api: { enabled: true, language: "TYPESCRIPT" },
     sdk: {
+      [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true },
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }

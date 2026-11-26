@@ -1871,9 +1871,9 @@ writes an access-log row.
 
 Left:
 
-- The Rust server and repositories: the principal's kinds, the audience
-  filter, path row rules, grants, reveal and the access log. Python's ORM.
-  Go serves them (D180).
+- Python's ORM. Go (D180) and Rust (D181) serve the principal's kinds,
+  the audience filter, path row rules, grants, reveal and the access log;
+  Rust's on SQLite is left.
 - An audience on SQLite and D1, and a GIN index on `effective_audience`
   the build writes.
 - An audience in a declared query (`@query`), which reads every row.
@@ -2541,7 +2541,7 @@ left Go's. This entry ports it, and settles what Go's shape asked for.
 | The Go server records each call in the access log itself, in a route of an API whose database has an `@accessLog` table, before the permission check, through `session.AccessLogged`; a log that fails answers 500. | An option the app passes, as the TypeScript router takes (D156's left for TypeScript). |
 | A view's field under `@decrypted({ permission })` is masked, `[secret]`, for a caller without it, and each value opened for one with it is recorded in the operation's transaction. A revealed field holds text, and a database without an `@accessLog` table refuses the build, where TypeScript refuses the reveal when it happens. | A mask of another type's zero, which a reader cannot tell from a value. |
 | A path of `*` lets a grant read every row of the table, and the values the branches before it bound go with them. | Leaving them bound: TypeScript's `accessConditions` does, and a statement then binds more values than it names (left below). |
-| The loader refuses, in a DB service with Go types and in a Go API, each feature of D152 to D159 that Go does not serve yet (`verify/go_features.go`). Before it, the Go ORM left out `@calendarSource`, Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests` and `@agents`, the Go server an API's provider slots and `@autonomy`, and both read an `@audience` table whole and opened a revealed field for every caller. Four services generated such Go (`fixture-recurrence-db` and `-api`, `examples/deploy-smoke`'s and `examples/runtime-providers`' databases), and drop their Go outputs. A Go server is an API whose server is Go and whose Go types are on. | A refusal in each generator, which a service that never reaches it would not hear. |
+| The loader refuses, in a Go server, each feature of D152 to D159 that Go does not serve yet, on the tables of the API's database and on the API's own provider slots and operations (`verify/go_features.go`); a Go server is an API whose server is Go and whose Go types are on, and the loader reads its database for the check. Before it, a Go server left out the calendar and Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests`, `@agents`, provider slots and `@autonomy`, and, for D156, read an `@audience` table whole and opened a revealed field for every caller. `fixture-recurrence-api` was such a server, and is served in TypeScript now. | Refusing a DB service's Go types, as D181 refuses Rust's: the DB kind generates the Go ORM always and the build needs the Go types for it (`refuseORMWithoutGoTypes`), so every database with one of these tables would fail `build-all`, whatever language its API is served in. The Go ORM of these tables is their plain repositories, and the triggers and the core keep what each feature writes, whichever ORM writes the row; what would serve a feature wrongly is the Go server. Relaxing the build's requirement of Go types, which would leave a Go worker or job of the database with no ORM. |
 
 Built: `runtime/schema/go/access` and `session`'s `Caller`,
 `GrantAuthenticator`, `AccessLogged` and `RevealEntry`; `access_parity.json`,
@@ -2550,7 +2550,7 @@ call entries); `ormgen`'s `access.go` and the held repositories
 (`ormgen/access.go`, `templates/access.tmpl`), the one-to-many filter, a
 nullable `createdBy` stamped when a user acts, and a field named `field`
 ordering by `OrderByFieldField`; `apigen`'s caller, path rule, reveal and
-call log; the loader's refusals. `TestGoAccessEndToEnd` serves
+call log; the loader's refusal of a Go server. `TestGoAccessEndToEnd` serves
 `fixture-access-go-api` on Postgres through D156's checks, and
 `TestHeldRepositoriesCompile` builds the held repositories of the history,
 vector, merge, projection and behavior fixtures.
@@ -2567,3 +2567,47 @@ Left:
   a `*` path bound.
 - The Go server's calendar, references, search, notifier, parties and
   agents, which later Go workstreams port (D184 and on).
+
+## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
+
+D156 built per-record access in the TypeScript runtime and left the Go
+and Rust servers. This entry ports it to Rust, on Postgres, with the
+TypeScript tables, columns, statements and refusals. It is the first of
+the Rust parity entries; the later ones port D152 to D159 onto it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime's `Principal` gains `kind` (`PrincipalKind`, `user` unless set), `acting_for`, `grants` (`GrantReach`) and `credential`, as fields with builders, so every authenticator written before still compiles and reads as a user. | A principal enum per kind, which every guard would match on. |
+| Rust has no ambient caller, so the caller travels explicitly: a table operation's repositories are opened `with_access(AccessCaller::of(principal))`, the anonymous caller for a route with none, and a hand-written implementation opens its own the same way. Repositories opened without it, and `as_system()`, read every row. | A task-local caller, which a spawned task would lose and D87's acting user does not use either. |
+| The repositories' definition gains `audience`, `access` and `many` (the one-to-many relations), which rustgen writes from `sqlutil` as tsgen does. The conditions are the TypeScript `accessConditions`: `audience_conditions` (exported, as `audienceConditions` is) and a branch per grant, a role's path written as a nested filter that steps through to-one and one-to-many relations. | Generated per-table SQL, a second compiler beside the filter's. |
+| A grant's end by its target's state is read by counting the target's rows with the state (`Repository::count`), so no value of the row is opened and an encrypted target needs no key. | Reading the row, as the TypeScript runtime does, which in Rust opens every encrypted field and fails without the database's keys. |
+| The access log of a call is an authenticator's: `Authenticator::called` is told each call of an operation that `RouteControls::operation` names, after the caller is established and before the permission check, and `access::Logged` records `call_entry` in an `AccessLog` (`TableAccessLog` over the `@accessLog` table). The generated router names each authorized route's operation. | A field of `RouterOptions`, which derives `Eq` and could not hold the log. |
+| A table operation's literal carries its name, its `@decrypted` members and their reveal permissions; the handler masks a member to a caller without its permission, `[secret]` as TypeScript does, and writes a `reveal` row per value opened, as the system, in the operation's transaction. | A reveal outside the transaction, which a refused operation would still record. |
+| The Rust outputs refuse each D152 to D159 feature they do not serve, at load (`verify/rust_features.go`, from the config's `outputs.types.rust` and `outputs.api.language: rust`) and in rustgen and rustrestgen for IR that did not come through it: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests` and `@agents` on a DB service's Rust types, and on a Rust server `@providers` slots, `@autonomy` and its database's table features. Recurrence is refused on a Rust server alone: the core runs it in every language and the Rust types write it through the core. Before this, the Rust outputs dropped every one of them in silence, and a `@decrypted({ permission })` member and an `@audience` table's rows were served to every caller. | Refusing Recurrence in the Rust types too, which the Rust core runs and fixture-recurrence-db's config lists. |
+
+Built: the runtime's principal and the identity principal's API key
+(`runtime/http/rust/src/auth.rs`, `identity/service.rs`); the
+repositories' audience, grant reach, one-to-many filters, `count` and
+`with_access` (`orm/mod.rs`, `plan.rs`, `run.rs`, `postgres.rs`,
+`sqlite.rs`); path row rules and reveal in the table operations
+(`orm/routes.rs`); grants and the access log (`access.rs`); the
+definition's `audience`, `access` and `many` (`rustgen/orm.go`), the
+generated `with_access`, the table operation's literal and
+`.operation(...)` (`rustrestgen`); the refusals
+(`internal/loader/verify/rust_features.go`, `internal/loader/rust_output.go`).
+`TestRustAccessEndToEnd` runs D156's "done when" through the generated
+Rust router on Postgres: audience reads, writes, searches and counts, a
+named and an inherited audience and the cascade, an agent run, a row
+rule through three relations, a grant that reaches only its paths and
+ends by revocation, date and state, a reveal, and the access log.
+
+Left:
+
+- Grants, the access log and grant reach on the Rust server's SQLite;
+  an audience stays Postgres's in every language.
+- A generated Rust server that wires `GrantAuthenticator` and `Logged`
+  itself; an app wraps the authenticator its `Handlers` take.
+- The typed filters' one-to-many members; a path filter is the
+  untyped repositories' and the table operations' so far.
+- The D152 to D159 features the refusals name, which the later Rust
+  entries port.

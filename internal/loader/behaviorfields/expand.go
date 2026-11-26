@@ -168,11 +168,15 @@ func ExpandExternal(types map[string]*ir.TypeDef, reg *registry.Registry) {
 
 // ExpandFields adds the fields a table's behaviors own to each DB table of
 // schema whose uses allow it, and nothing else of Expand's: no sub-table,
-// no queue. It is for a schema whose behaviors' checks failed, so that the
-// verification pass, which then runs to report them, does not also report
-// each index, uniqueness, projection column or @enqueueOnChange that names
-// a field a sound use owns (status, beside a Timers config the build
-// refuses) as one that names no field. A table one of whose uses cannot be
+// no queue. The loader runs it before the behaviors' checks, which read a
+// table's fields from its table model, so an index or unique key that names
+// an owned field (a Numbering's number) does not leave the table unmodelled
+// and every config that names a field of it refused; Expand then keeps the
+// fields it added. When the checks fail, the verification pass, which then
+// runs to report them, does not also report each index, uniqueness,
+// projection column or @enqueueOnChange that names a field a sound use owns
+// (status, beside a Timers config the build refuses) as one that names no
+// field. A table one of whose uses cannot be
 // expanded (an unregistered behavior, a field the table already declares,
 // a declared field with no type or with one the registry lacks, as a use
 // anchored on a field takes of a behavior a table implements) is left as

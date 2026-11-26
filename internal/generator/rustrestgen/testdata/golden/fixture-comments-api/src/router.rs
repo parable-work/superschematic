@@ -70,62 +70,77 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsDeleteMessage")
         .apply(post(handle_ticket_comments_comments_delete_message));
     router = router.route("/api/ticket/{id}/comments/delete-message", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsEdit")
         .apply(post(handle_ticket_comments_comments_edit));
     router = router.route("/api/ticket/{id}/comments/edit", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsGetMessage")
         .apply(post(handle_ticket_comments_comments_get_message));
     router = router.route("/api/ticket/{id}/comments/get-message", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsListEdits")
         .apply(post(handle_ticket_comments_comments_list_edits));
     router = router.route("/api/ticket/{id}/comments/list-edits", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsListMessages")
         .apply(post(handle_ticket_comments_comments_list_messages));
     router = router.route("/api/ticket/{id}/comments/list-messages", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsListPinned")
         .apply(post(handle_ticket_comments_comments_list_pinned));
     router = router.route("/api/ticket/{id}/comments/list-pinned", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsListReactions")
         .apply(post(handle_ticket_comments_comments_list_reactions));
     router = router.route("/api/ticket/{id}/comments/list-reactions", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsPin")
         .apply(post(handle_ticket_comments_comments_pin));
     router = router.route("/api/ticket/{id}/comments/pin", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsPost")
         .apply(post(handle_ticket_comments_comments_post));
     router = router.route("/api/ticket/{id}/comments/post", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsPurge")
         .apply(post(handle_ticket_comments_comments_purge));
     router = router.route("/api/ticket/{id}/comments/purge", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsReact")
         .apply(post(handle_ticket_comments_comments_react));
     router = router.route("/api/ticket/{id}/comments/react", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsReopen")
         .apply(post(handle_ticket_comments_comments_reopen));
     router = router.route("/api/ticket/{id}/comments/reopen", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsResolve")
         .apply(post(handle_ticket_comments_comments_resolve));
     router = router.route("/api/ticket/{id}/comments/resolve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsUnpin")
         .apply(post(handle_ticket_comments_comments_unpin));
     router = router.route("/api/ticket/{id}/comments/unpin", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsUnreact")
         .apply(post(handle_ticket_comments_comments_unreact));
     router = router.route("/api/ticket/{id}/comments/unreact", route);
     router

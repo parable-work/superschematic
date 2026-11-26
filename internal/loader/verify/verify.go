@@ -125,13 +125,19 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
-	// GoORM is a DB service whose config enables its Go types, which the
-	// build generates the Go ORM of, and GoServer an API whose server is
-	// Go (outputs.api, language GO or unset), which the loader reads from
-	// the config. checkGoFeatures refuses in them each platform feature
-	// the Go outputs do not serve yet (D180).
-	GoORM    bool
+	// GoServer is an API whose server is Go (outputs.api, language GO or
+	// unset, with the Go types on), which the loader reads from the config.
+	// checkGoFeatures refuses in it, and in its Database, each platform
+	// feature the Go server does not serve yet (D180).
 	GoServer bool
+
+	// RustOutput names the output of the service's config that builds Rust
+	// (D181): "outputs.types.rust" for a DB service's Rust types,
+	// "outputs.api.language: rust" for an API's Rust server; empty when it
+	// builds none, or when the loader has no config to read. The features
+	// of D152 to D159 the Rust outputs do not serve yet are refused for it
+	// (checkRustFeatures).
+	RustOutput string
 
 	// Naming supplies the npm scope that marks an import as a schema
 	// service reference. The loader fills it from loader.WithNaming; empty
@@ -294,6 +300,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
 	checkGoFeatures(schema, in, r)
+	checkRustFeatures(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

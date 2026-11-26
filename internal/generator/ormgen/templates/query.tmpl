@@ -248,6 +248,15 @@ type ArrayStringFilter struct {
 // cursor of another sort is refused before the ORM reads it, by the router
 // that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+{{- if .HasVersionedRepositories }}
+
+// VersionKey names one stored version of a versioned row: its primary key
+// and its _version. GetVersions reads many of them in one query (D166).
+type VersionKey[K comparable] struct {
+	ID      K
+	Version int64
+}
+{{- end }}
 
 // ========================================
 // Type-Safe Field Selectors and Options
