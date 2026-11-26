@@ -233,6 +233,12 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
       const made = await tx.task.createOne({ title: `Follow up: ${question}`, state: 'open', details: `asked on ${row.key}`, createdAt: new Date() });
       return { table: 'Task', key: String(made.id) };
     },
+    // Section 7's queue names an inbound message by its row's key; this
+    // stand-in's messages are task notes.
+    inboundMessage: async (tx, { message }) => {
+      const row = await tx.taskNote.findOne({ id: { eq: message } });
+      return row ? { text: String(row.text), row: { table: 'TaskNote', key: String(row.id) } } : null;
+    },
     onReturn: async (tx, { row }) => {
       await tx.task.updateOne(row.key, { state: 'queued', assignee: null });
     },
@@ -640,12 +646,28 @@ describe.skipIf(!dsn)('agent runs', () => {
     // Narrowed by whom it acts for: the party holds tasks.read alone.
     expect(principal).toMatchObject({ kind: 'agent', actingFor: { kind: 'party', subject: customer } });
     expect(principal.permissions).toEqual(['tasks.read']);
+    // A message to the party is held as messageParty: it asks, then runs once approved (section 7's approve hook).
+    const send = { to: customer, body: 'Your pump is booked' };
+    expect(await w.agents.sendPolicy(principal, 'send_message', send)).toBe('ask');
+    const sendApproval = (await w.sys.agentApproval.findMany({ run: { eq: started.id }, operation: { eq: 'send_message' } })).rows[0]!;
+    expect(sendApproval).toMatchObject({ operationClass: 'messageParty', state: 'pending' });
+    await w.agents.approve(w.ann, String(sendApproval.id));
+    expect(await w.agents.sendPolicy(principal, 'send_message', send)).toBe('allow');
+    expect(await w.agents.sendPolicy(w.boss, 'send_message', send)).toBe('allow');
     await exited(w, String(started.id));
     await watch(w);
     const entries = await w.agents.transcript(String(started.id));
     expect(entries[0]).toMatchObject({ kind: 'task', untrusted: true });
     expect(entries.some(e => e.kind === 'call')).toBe(false);
     expect((await w.sys.invoice.findOne({ id: { eq: invoice } }))!.paid).toBe(0);
+    // Section 7's queue's shape as it is: the message by its row's key, which the app reads; its row joins the scope.
+    await w.orm.transaction(tx => w!.agents.request(tx, { trigger: 'inbound', party: { table: 'Customer', key: customer }, message: w!.ids.noteA, grant: String(grant.id) }));
+    await drain(w);
+    const keyed = await runOf(w, 'responder');
+    expect(keyed.targets).toEqual([{ table: 'Task', key: a }, { table: 'TaskNote', key: w.ids.noteA }]);
+    await exited(w, String(keyed.id));
+    await watch(w);
+    expect((await w.agents.transcript(String(keyed.id)))[0]).toMatchObject({ kind: 'task', untrusted: true, content: 'pump seal arrives Monday' });
   });
 
   test('an agent asks in the row\'s thread and makes a follow-up row when nobody answers by the deadline', async () => {

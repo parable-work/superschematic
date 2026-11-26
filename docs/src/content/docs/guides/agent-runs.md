@@ -77,7 +77,7 @@ puts one in the caller's transaction.
 | `assigned` | The app assigns a row and requests a run about it. A paused agent's row goes back to its queue (`onReturn`). |
 | `schedule` | A Schedules run or a Recurrence event, through a route or the app's Workers method. |
 | `principal` | A person asks, naming whom the run acts for. |
-| `inbound` | A party's message (D157): `{ trigger: "inbound", party, message, grant }`. It names no agent; the definition whose `inbound` is set takes it, and its scope is the grant's target. |
+| `inbound` | A party's message (D157): `{ trigger: "inbound", party, message, grant }`, `message` the message row's key. It names no agent; the definition whose `inbound` is set takes it, and its scope is the grant's target and the message's row, which `inboundMessage` reads. |
 
 A run's principal may not request a run: only the dispatcher starts one.
 
@@ -128,6 +128,10 @@ call answers `428 approval_required`, and the sandbox tries it again.
 "approve 12" on any channel, or `agents.approve`, decides it; the same
 call then runs once. A call with any other parameter finds no approval of
 its hash, supersedes the open ones, and asks again.
+
+A message to a party is class `messageParty`, so it asks by default.
+`agents.sendPolicy(principal, operation, params)` answers a send approval
+hook with `allow`, `ask` or `deny` by the same policy.
 
 ## Budgets and stop switches
 

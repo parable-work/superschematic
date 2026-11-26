@@ -2390,8 +2390,14 @@ example and the fixture `AgentRunRequest`, table
 is `{ step?, agent?, trigger?, subjectTable?, subjectKey?, targets?,
 event?, input?, requestedBy?, actingFor?, party?, message?, grant?, run?,
 ask? }`. Section 7's inbound message is `{ trigger: "inbound", party:
-{ table, key }, message, grant }`, `message` its row as `{ table, key }`
-or its text as `{ body }`, and `agents.request(tx, message)` enqueues it.
+{ table, key }, message, grant }`, `message` the message row's key (a
+base62 UUID, as PR 532's queue carries it), its row as `{ table, key }`
+or its text as `{ body }`. `agents.handle(message)` takes it as it is, and
+`agents.request(tx, message)` enqueues it; `inboundMessage` reads a keyed
+message's text, the run's untrusted task, and its row, which joins the
+run's scope. `agents.sendPolicy(principal, operation, params)` answers
+section 7's send approval (`allow`, `ask`, `deny`): a run's message to a
+party is held to its autonomy policy as class `messageParty`.
 
 Built: `ir/agents.go`, `@agents`, `@autonomy` and the agents feature
 (`internal/registry/core_agents.go`), the loader's filling
@@ -2420,9 +2426,16 @@ its Lease; and administration is permissions.
 
 Left:
 
-- Wire section 7's inbound trigger (D157, built in parallel): its inbound
-  path enqueues `{ trigger: "inbound", party, message, grant }` on the
-  requests queue once its PR is on this base.
+- Wire section 7's inbound trigger and send approvals (D157, PR 532, not
+  on this base). Its queue is a class of its own (`@queue() @runRequests()`,
+  `RunRequest`, `run_request_queue`), whose message D158 takes as it is:
+  `inbound.runWorker(pool, message => agents.handle(message))`, or one
+  queue of the two. Its `createInbound({ approve })` takes
+  `req => agents.sendPolicy(req.principal, 'send_message', req)` once its
+  request's shape names the sender; `inbound.release(id)` follows an
+  approval. Its `partyPrincipal` may replace the permissions D158 reads
+  for a party it acts for, and its message trust (`verified`, `entered`)
+  may narrow the run.
 - Go and Rust: the dispatcher, the run's authenticator, autonomy and the
   runner; SQLite and D1.
 - The generated server building the dispatcher into its `Deps`, mounting

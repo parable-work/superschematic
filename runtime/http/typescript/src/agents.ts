@@ -141,7 +141,10 @@ export interface AgentRunRequest {
   readonly actingFor?: PrincipalRef | null;
   /** An inbound message's party, { table, key } (D157). */
   readonly party?: RowRef | null;
-  /** An inbound message: its row as { table, key }, or its text as { body }. */
+  /**
+   * An inbound message: its row's key as section 7's queue carries it (a
+   * base62 UUID), its row as { table, key }, or its text as { body }.
+   */
   readonly message?: unknown;
   /** The party's active grant, whose target is the run's scope. */
   readonly grant?: string | null;
@@ -249,6 +252,12 @@ export interface AgentsOptions {
   readonly thread?: AskThread;
   /** Makes the follow-up row of an ask nobody answered by its deadline. */
   readonly followUp?: (tx: any, input: { readonly run: Readonly<Record<string, unknown>>; readonly row: RowRef; readonly question: string }) => Promise<RowRef | void>;
+  /**
+   * Reads an inbound message (D157) whose request names it by its key, as
+   * section 7's queue does: its text, the run's task, which is marked
+   * untrusted, and its row, which joins the run's scope.
+   */
+  readonly inboundMessage?: (tx: any, input: { readonly party: RowRef; readonly message: string; readonly grant: string }) => Promise<{ readonly text: string; readonly row?: RowRef } | null>;
   /** Returns a row assigned to an agent to its queue when the agent is paused and its run cancelled. */
   readonly onReturn?: (tx: any, input: { readonly run: Readonly<Record<string, unknown>>; readonly row: RowRef }) => Promise<void>;
   /** Plain settings and secrets of the sandbox beside the run's own: a credential provider's slot settings, say. */
@@ -302,6 +311,13 @@ export interface Agents {
    * autonomy policy by its tool's @autonomy; every other caller's runs.
    */
   readonly mcpGate: McpCallGate;
+  /**
+   * Section 7's send approval (D157's createInbound({ approve })): a message
+   * to a party an agent run sends is held to its autonomy policy as class
+   * messageParty, 'allow' when it runs, 'ask' while its approval waits,
+   * 'deny' when it was denied; a principal of any other kind is 'allow'.
+   */
+  sendPolicy(principal: Principal | null | undefined, operation: string, params: Readonly<Record<string, unknown>>): Promise<'allow' | 'deny' | 'ask'>;
   /** Holds a call of operation with args to the run's autonomy policy. */
   gate(principal: Principal, operation: string, args: Readonly<Record<string, unknown>>, options?: { readonly class?: OperationClass; readonly mode?: Autonomy }): Promise<GateOutcome>;
   approve(principal: Principal, approval: string, options?: { readonly tx?: any; readonly via?: string }): Promise<void>;
@@ -678,6 +694,10 @@ export function createAgents(options: AgentsOptions): Agents {
       const grant = (await activeGrants(orm, { holder: request.party.key, now: now() })).find(g => String(g.id) === String(request.grant));
       if (!grant) return 'the party holds no such active grant';
       add({ table: String(grant.targetType), key: String(grant.targetId) });
+      if (typeof request.message === 'string' && options.inboundMessage) {
+        const read = await orm.transaction((tx: any) => options.inboundMessage!(tx, { party: request.party!, message: request.message as string, grant: String(request.grant) }));
+        if (read?.row) add(read.row);
+      }
       return out;
     }
     if (request.subjectTable && request.subjectKey) add({ table: request.subjectTable, key: request.subjectKey });
@@ -717,7 +737,12 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run) {
       const targets = await scopeOf(request);
       if (typeof targets === 'string') return refuseRun(request, definition, 'refused', targets);
-      run = await runs().createOne(runFields(request, definition, targets));
+      const fields = runFields(request, definition, targets);
+      if (request.trigger === 'inbound' && typeof request.message === 'string' && options.inboundMessage) {
+        const read = await orm.transaction((tx: any) => options.inboundMessage!(tx, { party: request.party!, message: request.message as string, grant: String(request.grant) }));
+        if (read) fields.input = { ...(fields.input as Values), inboundText: read.text };
+      }
+      run = await runs().createOne(fields);
       // The run on the timeline of the row that started it (D154): a reference from the run, which the row lists among its backlinks.
       if (run.triggerTable && run.triggerKey && orm.references?.add) {
         try {
@@ -817,7 +842,9 @@ export function createAgents(options: AgentsOptions): Agents {
   const taskOf = (run: Values, definition: Values): string => {
     const input = (run.input as Values | null) ?? {};
     if (typeof input.task === 'string') return input.task;
-    const message = input.message as Values | undefined;
+    const message = input.message as Values | string | undefined;
+    if (typeof input.inboundText === 'string') return input.inboundText;
+    if (typeof message === 'string') return `An inbound message, ${message}`;
     if (message && typeof message.body === 'string') return message.body;
     return String(definition.task ?? definition.purpose ?? `Work on ${run.triggerTable ?? 'the task'} ${run.triggerKey ?? ''}`.trim());
   };
@@ -1408,6 +1435,13 @@ export function createAgents(options: AgentsOptions): Agents {
     return old.length;
   };
 
+  const sendPolicy: Agents['sendPolicy'] = async (principal, operation, params) => {
+    if (!principal || principal.kind !== 'agent' || !principal.claims?.run) return 'allow';
+    const gated = await gate(principal, operation, params, { class: 'messageParty' });
+    if (gated.run) return 'allow';
+    return gated.status === 428 ? 'ask' : 'deny';
+  };
+
   const mcpGate: McpCallGate = async (ctx, tool, args) => {
     const principal = ctx.principal;
     if (!principal || principal.kind !== 'agent' || !principal.claims?.run) return undefined;
@@ -1420,6 +1454,7 @@ export function createAgents(options: AgentsOptions): Agents {
     request,
     handle,
     mcpGate,
+    sendPolicy,
     workerQueue,
     authenticator,
     principalOf,
