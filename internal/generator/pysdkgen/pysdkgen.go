@@ -81,6 +81,9 @@ type NamespaceInfo struct {
 	// HasFilteredEndpoints gates the imports of FilterField and
 	// filter_query_params, for an operation that takes a filter (D106).
 	HasFilteredEndpoints bool
+	// HasBinaryStream gates the BinaryStream import, for an
+	// @httpBinaryStream operation (D167).
+	HasBinaryStream bool
 
 	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper
 	// and HasListOfListsModelOutput the _coerce_list_of_lists_response
@@ -230,6 +233,10 @@ type EndpointInfo struct {
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the client's DownloadedFile, the bytes and the filename.
 	FileDownload bool
+	// BinaryStreamContentType is the media type an @httpBinaryStream
+	// operation streams its success body as (D167), "" for every other:
+	// the method returns the client's BinaryStream, unread.
+	BinaryStreamContentType string
 	// Idempotent marks an @idempotent operation (D140): the method takes
 	// idempotency_key and sends it as Idempotency-Key, or a UUID it makes.
 	Idempotent bool
@@ -533,6 +540,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if converted.Filter != nil {
 			namespace.HasFilteredEndpoints = true
 			output.HasFilteredEndpoints = true
+		}
+		if converted.BinaryStreamContentType != "" {
+			namespace.HasBinaryStream = true
 		}
 		for _, arg := range endpoint.ScalarArgs {
 			if _, isUnion := apiOutput.TypeUnions[arg.Type]; isUnion {
@@ -857,6 +867,10 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	if endpoint.FileDownload != nil {
 		converted.FileDownload = true
 		converted.OutputTypeHint = "DownloadedFile"
+	}
+	if endpoint.BinaryStream != nil {
+		converted.BinaryStreamContentType = endpoint.BinaryStream.ContentType
+		converted.OutputTypeHint = "BinaryStream"
 	}
 	if endpoint.Filter != nil {
 		converted.Filter = endpoint.Filter

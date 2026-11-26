@@ -1,5 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { revealed, type Revealable } from './secret.js';
+import { FieldEncryptionError } from './fieldcrypt-error.js';
+
+export { FieldEncryptionError, type FieldEncryptionReason } from './fieldcrypt-error.js';
 
 /*
 The envelopes of a DB table's Encrypted<T> fields (D85), which the
@@ -27,33 +30,6 @@ export const FIELD_ENVELOPE_VERSION = 'v1';
 const KEY_SIZE = 32;
 const NONCE_SIZE = 12;
 const TAG_SIZE = 16;
-
-/** Why a seal or an open failed, as the Go runtime's errors name it. */
-export type FieldEncryptionReason = 'no-keys' | 'bad-keys' | 'unknown-key' | 'decrypt' | 'malformed';
-
-const REASONS: Record<FieldEncryptionReason, string> = {
-  'no-keys': "no field keys: open the ORM with the DB service's key secret",
-  'bad-keys': 'the field keys are not one or more 32-byte keys in base64, separated by commas',
-  'unknown-key': "no field key has the envelope's key id",
-  decrypt: 'the envelope does not open for its row and column',
-  malformed: 'the value is no field envelope',
-};
-
-/** A seal's or an open's failure: the table type and field, never the value or the key. */
-export class FieldEncryptionError extends Error {
-  readonly reason: FieldEncryptionReason;
-  readonly table: string | undefined;
-  readonly field: string | undefined;
-
-  constructor(reason: FieldEncryptionReason, cell?: { readonly table: string; readonly field: string }, detail?: string) {
-    const what = REASONS[reason] + (detail ? `: ${detail}` : '');
-    super(cell ? `fieldcrypt: ${cell.table}.${cell.field}: ${what}` : `fieldcrypt: ${what}`);
-    this.name = 'FieldEncryptionError';
-    this.reason = reason;
-    this.table = cell?.table;
-    this.field = cell?.field;
-  }
-}
 
 /** What an envelope is bound to: the table type and field, as the schema names them, and the row's key as text. */
 export interface FieldCell {

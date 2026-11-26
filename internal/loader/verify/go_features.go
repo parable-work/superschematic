@@ -21,7 +21,9 @@ import (
 // their plain repositories: the triggers and the core keep what each
 // feature writes, whichever ORM writes the row, and a TypeScript server
 // serves the feature. What would serve it wrongly is a Go server, which is
-// refused. Per-record access itself (D156) is served (D180), and an
+// refused. That holds on Postgres; on SQLite, where the Go ORM keeps no
+// audience and no trigger keeps references and attachments, a database's
+// Go types are refused for them (sqlite_features.go, D182). Per-record access itself (D156) is served (D180), and an
 // audience on SQLite is refused for every language (checkAudience).
 //
 // The Rust and SQLite ports refuse their own in files of their own; a

@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 from urllib import error, parse, request
 
 try:
@@ -82,6 +82,41 @@ class DownloadedFile:
     content: bytes
     filename: str | None
     content_type: str
+
+
+class BinaryStream:
+    """The success body of an @httpBinaryStream operation (D167), unread.
+
+    Read it with read() or by iterating, then close it, or use it as a
+    context manager. Closing it before its end ends the request.
+    content_type is the media type the operation declares, which the client
+    checked, and headers the response's headers.
+    """
+
+    def __init__(self, response: Any, content_type: str) -> None:
+        self._response = response
+        self.content_type = content_type
+        self.status_code: int = response.status
+        self.headers: dict[str, str] = dict(response.headers.items())
+
+    def read(self, size: int | None = None) -> bytes:
+        return self._response.read(size)
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:
+            chunk = self._response.read1(64 * 1024)
+            if not chunk:
+                return
+            yield chunk
+
+    def close(self) -> None:
+        self._response.close()
+
+    def __enter__(self) -> "BinaryStream":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
 
 
 def filename_of(disposition: str | None) -> str | None:
@@ -256,7 +291,17 @@ class SyncHTTPClient:
         timeout_seconds: float | None = None,
         extra_headers: Mapping[str, str] | None = None,
         response_file: bool = False,
+        stream_content_type: str | None = None,
     ) -> Any:
+        """Send a request and return its answer's data.
+
+        With stream_content_type, an @httpBinaryStream operation's (D167),
+        the success body is a stream of that media type, which it returns
+        unread as a BinaryStream; a success of another media type raises
+        SDKError. The timeout then bounds each read, not the whole body.
+        """
+        if stream_content_type is not None:
+            extra_headers = {"Accept": f"{stream_content_type}, application/problem+json", **(extra_headers or {})}
         return self._request_with_retry(
             method=method,
             path=path,
@@ -267,6 +312,7 @@ class SyncHTTPClient:
             extra_headers=extra_headers,
             is_multipart=False,
             response_file=response_file,
+            stream_content_type=stream_content_type,
         )
 
     def request_multipart(
@@ -406,6 +452,7 @@ class SyncHTTPClient:
         extra_headers: Mapping[str, str] | None,
         is_multipart: bool,
         response_file: bool = False,
+        stream_content_type: str | None = None,
         is_retry: bool = False,
         _rate_limit_attempt: int = 0,
         _network_attempt: int = 0,
@@ -446,6 +493,7 @@ class SyncHTTPClient:
                 method=request_context.method,
                 path=request_context.path,
                 response_file=response_file,
+                stream_content_type=stream_content_type,
             )
         except AuthenticationError as err:
             if err.status_code == 401 and self._problem_code(err.payload) == "service_unauthorized":
@@ -465,6 +513,7 @@ class SyncHTTPClient:
                     extra_headers=extra_headers,
                     is_multipart=is_multipart,
                     response_file=response_file,
+                    stream_content_type=stream_content_type,
                     is_retry=is_retry,
                     _rate_limit_attempt=_rate_limit_attempt,
                     _network_attempt=_network_attempt,
@@ -484,6 +533,7 @@ class SyncHTTPClient:
                     extra_headers=extra_headers,
                     is_multipart=is_multipart,
                     response_file=response_file,
+                    stream_content_type=stream_content_type,
                     is_retry=True,
                     _rate_limit_attempt=_rate_limit_attempt,
                     _network_attempt=_network_attempt,
@@ -513,6 +563,7 @@ class SyncHTTPClient:
                 extra_headers=extra_headers,
                 is_multipart=is_multipart,
                 response_file=response_file,
+                stream_content_type=stream_content_type,
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt + 1,
                 _network_attempt=_network_attempt,
@@ -542,6 +593,7 @@ class SyncHTTPClient:
                 extra_headers=extra_headers,
                 is_multipart=is_multipart,
                 response_file=response_file,
+                stream_content_type=stream_content_type,
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt,
                 _network_attempt=_network_attempt + 1,
@@ -632,11 +684,24 @@ class SyncHTTPClient:
         method: str,
         path: str,
         response_file: bool = False,
+        stream_content_type: str | None = None,
     ) -> Any:
         timeout = self._timeout_seconds if timeout_seconds is None else timeout_seconds
         self._log_debug("Sending HTTP request", method=method, url=req.full_url)
 
         try:
+            if stream_content_type is not None:
+                # An @httpBinaryStream result (D167): the body, unread, not
+                # the envelope.
+                response = request.urlopen(req, timeout=timeout)
+                if response.headers.get_content_type() != stream_content_type:
+                    received = response.headers.get("Content-Type") or "no content type"
+                    response.close()
+                    raise SDKError(
+                        f"SDK contract error: expected {stream_content_type} in streamed success response, got {received}",
+                    )
+                self._log_debug("Received HTTP stream", method=method, status_code=response.status, path=path)
+                return BinaryStream(response, stream_content_type)
             with request.urlopen(req, timeout=timeout) as response:
                 raw = response.read()
                 if response_file:

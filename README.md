@@ -40,13 +40,14 @@ beside it, not thousands of lines of plumbing a reviewer has to trust.
 
 | | |
 | --- | --- |
-| **Validation** | 49 scalar types (`Contact.Email`, `Identity.UUID`, `Temporal.DateTime`, ...) and the constraints you declare parse and validate identically in Go, TypeScript, Python and Rust. An SDK refuses the request the server would refuse. |
-| **Security** | Sign-in, sessions and a user model; permissions declared on each operation and checked by the generated server; service-to-service callers admitted per operation; rate, body and time limits; webhook signatures; encrypted payloads. |
-| **Data** | Postgres and SQLite tables with keys, relations, indexes and full-text search; a typed Go ORM; row history, branches and merges; migration plans between two versions of a schema, in expand and contract phases, with each step's hazards. |
+| **Validation** | 54 scalar types (`Contact.Email`, `Identity.UUID`, `Temporal.DateTime`, ...) and the constraints you declare parse and validate identically in Go, TypeScript, Python and Rust. An SDK refuses the request the server would refuse. |
+| **Security** | Sign-in, sessions, API keys and a user model; permissions declared on each operation and checked by the generated server; on the TypeScript server, rows each caller may or may not see, grants for callers outside the user table, and a log of sensitive reads; service-to-service callers admitted per operation; rate, body and time limits; webhook signatures; encrypted payloads. |
+| **Data** | Postgres and SQLite tables with keys, relations, indexes and full-text search; one search across tables, and references and files on any row, in the TypeScript runtime; a typed Go ORM and TypeScript repositories; workflows, deadlines, sign-offs and recurrence on a table's own rows; row history, branches and merges; migration plans between two versions of a schema, in expand and contract phases, with each step's hazards. |
 | **APIs and clients** | A server in Go, Rust or TypeScript, its OpenAPI, SDKs in four languages, and MCP tools, so other agents can call what you built. |
 | **Background work** | Scheduled jobs, and queues whose messages are written in the same transaction as the change that causes them, with workers to drain them. |
+| **People and agents** | Events a row raises, routed to people over the channels each prefers, with replies by text or email; one inbound path for messages from people outside the user table; agents as rows, each run in a fresh sandbox with a token its task bounds, approvals before money moves, and budgets. These run on the TypeScript runtime, over Postgres. |
 | **Scaling** | Servers autoscale on Cloud Run or run on Cloudflare Workers, with instances and concurrency set per environment in the schema; queue workers run the instances and concurrency each environment sets; static sites sit behind a CDN. |
-| **Deployment** | `stack dev` runs every service on your machine, with Postgres in Docker and its migrations applied. `stack deploy` ships an environment to Google Cloud (Cloud Run, Cloud SQL, Cloud Storage) or Cloudflare (Workers, D1, R2) through Pulumi, running migrations between steps. |
+| **Deployment** | `stack dev` runs every service on your machine, with Postgres in Docker and its migrations applied. `stack deploy` ships an environment to Google Cloud (Cloud Run, Cloud SQL, Cloud Storage) or Cloudflare (Workers, D1, R2) through Pulumi, running migrations between steps. `stack build` makes an environment on the embedded target one binary, its databases SQLite files. |
 | **CI** | A generated GitHub Actions workflow that checks, plans, previews and deploys each environment. |
 | **Observability** | Every server, job and worker exports OpenTelemetry traces when an environment names a collector. |
 
@@ -90,10 +91,10 @@ runs, the OpenAPI, and a client in each language that validates before it
 sends. Both snippets are trimmed from
 [`examples/acme-shop`](examples/acme-shop/), a shop with Go, Rust and
 TypeScript servers, jobs, a queue, a static site and a stack, which CI
-builds, runs locally and tests end to end twice a day. Its fourteen
-services are about 1,650 lines of schema and config, comments included;
-a build writes about 144,000 lines of SQL, Go, TypeScript, Python and Rust
-from them.
+builds, runs locally and tests end to end twice a day. Its fifteen
+services are about 2,000 lines of schema and config, comments included;
+a build writes well over 100,000 lines of SQL, Go, TypeScript, Python and
+Rust from them.
 
 ## The loop
 
@@ -137,7 +138,11 @@ handed to it. Rules that span rows or call out to the world live there.
 When the shape of the data is only known at run time, the
 [engine](runtime/engine/README.md) runs a schema with no generated code,
 with workflow, comments, revisions, approvals and search composed in as
-behaviors.
+behaviors. The same schemas also run with nothing generated in
+[development mode](docs/src/content/docs/guides/development-mode.md), whose
+publish takes effect at once, and in
+[runtime mode](docs/src/content/docs/guides/runtime-mode.md), whose publish
+plans and applies a migration while the app runs.
 
 When your organization needs its own conventions, an extension adds
 schema kinds, decorators, generators, auth providers, commands and deploy

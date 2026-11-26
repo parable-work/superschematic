@@ -102,8 +102,10 @@ the field itself (`status`), and its other fields follow the field's name
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
 Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
-Revisions, Comments, Derived and Provenance. Blueprint is not ported yet, so
-`examples/engine-jobs` still runs on the engine. `examples/engine-notes`
+Revisions, Comments, Derived and Provenance, and commerce's Stock, Holds,
+Calendar and Payments
+([Selling and booking](/superschematic/guides/commerce/)). Blueprint is
+not ported yet, so `examples/engine-jobs` still runs on the engine. `examples/engine-notes`
 runs on both: its `test/notes.dev.test.ts` serves the notes schema with
 `superschematic-dev`.
 
@@ -136,8 +138,7 @@ they stand. `describe` lists them under `computed`.
   delivery for each subject it mentions and each follower of its thread.
 - Comments' `inbox` runs across every type that composes Comments and that
   the caller may read (see operations of the namespace below). Claiming and
-  settling deliveries, search, attachments and `moveAnchor` wait for the
-  core.
+  settling deliveries, search and `moveAnchor` wait for the core.
 - Derived's pulls and settles run on the type as a whole. A derived
   field's output, the JSON Schema its value is held to, comes from the
   type's fields: an enum's values and a primitive's type.

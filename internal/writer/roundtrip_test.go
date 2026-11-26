@@ -113,6 +113,8 @@ var corpus = []roundtripFixture{
 	// results (D81), from TypeScript and from YAML.
 	{name: "fixture-files-api", dir: tsFixtures + "/fixture-files-api", native: FormatTS},
 	{name: "fixture-files-api-yaml", dir: dataFixtures + "/fixture-files-api-yaml", native: FormatYAML},
+	// An @httpBinaryStream operation with its response headers (D167).
+	{name: "fixture-stream-api", dir: tsFixtures + "/fixture-stream-api", native: FormatTS},
 	// A relation's key on an @source type, with no @virtual, whose
 	// reference the loader derives and no form writes (D61, amended).
 	{name: "fixture-refs-keys-api", dir: tsFixtures + "/fixture-refs-keys-api", native: FormatTS},

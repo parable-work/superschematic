@@ -20,6 +20,10 @@ services/<name>/schema.config.ts  +  src/*.schema.ts
   -> <schemas-root>/dist
 ```
 
+A build is compiled mode, one of three. The same schemas also run with
+nothing generated, in [development mode](/superschematic/guides/development-mode/)
+and [runtime mode](/superschematic/guides/runtime-mode/).
+
 ## A schemas root holds services
 
 A schemas root is a directory with `superschematic.toml` and a `services/`
@@ -39,20 +43,23 @@ have the kinds below; among the others are `shop-media`, a bucket,
 | `shop-orders` | API | order and review routes, served in Go (and in Rust with `--api-language`), with SDKs in all four languages |
 | `shop-stock` | API | stock routes over `shop-db`, served in Rust, which only `shop-orders`' server reserves through |
 | `shop-storefront` | API | cart routes, served in TypeScript |
-| `shop-stack` | Stack | what runs where: `shop-api` and `shop-orders` on Go servers, `shop-stock` on a Rust one and `shop-storefront` on a TypeScript one, and a `Dev` environment that `stack dev` runs |
+| `shop-stack` | Stack | what runs where: `shop-api` and `shop-orders` on Go servers, `shop-stock` on a Rust one, `shop-cart` and `shop-storefront` on TypeScript ones and the site `shop-web`, and a `Dev` environment that `stack dev` runs |
 
 ## A kind decides what a schema means
 
-The core registers four kinds. The kind decides what a plain abstract
+The core registers seven kinds. The kind decides what a plain abstract
 class becomes, which authoring packages a schema may import, which other
 kinds it may reference, and which generators run, in order.
 
 | Kind | A class is | May import | May reference | Generators |
 | --- | --- | --- | --- | --- |
-| DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
+| DB | a table; one that composes a behavior with `@behavior` is an engine type | `@superschematic/db` | General | `sql`, `orm`, `types`, `enginedoc` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General, API | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
 | Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack`, `server`, `ci` |
+| Bucket | nothing: the schema declares nothing, and the config is all a bucket has | neither | none | none; an API that lists it in `buckets` holds it in its `Deps` |
+| Site | nothing: its code is TypeScript at its implementation path, which imports the SDKs of the APIs it calls | neither | none | `site`, the code's typed browser config |
+| MemoryStore | a channel or a key, `@channel` or `@key` | `@superschematic/memory-store` | General, API, DB | `memorystore` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),
@@ -62,9 +69,9 @@ load error, unless an extension registers the package; the
 key lists them.
 
 A Stack service's build resolves each environment it
-declares to `stack/<stack>/<environment>/environment.json`, and writes a
-Go entrypoint and Dockerfile for each server it runs under
-`server/<stack>/`, and, when its config asks for it, the stack's CI
+declares to `stack/<stack>/<environment>/environment.json`, and writes an
+entrypoint and Dockerfile, in its API's language, for each server, job
+and worker it runs under `server/<stack>/`, and, when its config asks for it, the stack's CI
 workflow under `ci/<stack>/`. [Stacks and deploys](/superschematic/guides/stacks/)
 covers it, with `stack dev` and `stack deploy`.
 
@@ -87,7 +94,8 @@ outputs: {
 ```
 
 A DB schema always gets its SQL and Go ORM; `types` adds types in the
-languages it lists. A generated package that imports the service's types
+languages it lists, and on Postgres a DB's TypeScript types package also
+holds its TypeScript repositories (`<package>/orm`). A generated package that imports the service's types
 needs them in its language: the ORM needs Go, the API server the
 language it is written in, and each SDK its own. A General schema whose
 class carries `@envVars` also gets a loader for those environment
@@ -120,8 +128,10 @@ A service may use another's types:
 - A config's `dependencies` names the services a schema imports types
   from, as `shop-storefront` does for `Price`. The generated packages then
   depend on each other's packages.
-- On an API marked `public: true`, `authDb` names the DB schema whose
-  `User` and `Session` tables the Go server's auth provider reads.
+- On an API, `authDb` names the DB schema whose user model the server
+  authenticates its callers against with the identity runtime, in every
+  server language
+  ([Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)).
 - On an API, `calls` names the other APIs its implementation calls. The
   generated `Deps` holds a client of each, so each callee's SDK builds
   before the caller's server, and two APIs may call each other.
@@ -165,8 +175,8 @@ are validated against.
 
 The CLI is a library: a binary is `cli.New(cli.Config{...}, extensions...)`.
 `bin/superschematic` links the official extensions (the gcp target, the
-Cloudflare DNS platform and target, and the Pulumi provisioner), which add no schema
-kinds or generators. A project
+Cloudflare DNS platform and target, the embedded target, and the Pulumi
+provisioner), which add no schema kinds or generators. A project
 that needs its own kinds, decorators, generators or auth providers builds
 its own binary with an extension, and the rest of this site applies
 unchanged.

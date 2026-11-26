@@ -8,7 +8,8 @@ sidebar:
 A [stack](/superschematic/guides/stacks/) deploys through registrations.
 The core registers one target, `local`, which `stack dev` runs, and one
 CI renderer, `github`; the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner are extensions like any other, so a new cloud, DNS
+target, the `embedded` target and the Pulumi provisioner are extensions
+like any other, so a new cloud, DNS
 provider, infrastructure tool or CI system needs no core edit.
 [A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
 lists the six registrations. This page covers what each function you
@@ -19,10 +20,12 @@ test the result. The design is sections 6, 7 and 11 of
 and D45, D46 and D47 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md).
 
 `extensions/gcp`, `extensions/cloudflare` and `extensions/pulumi` are the
-worked examples, and `stack/stacktest` is the smallest one: a fake target
+worked examples, `extensions/embedded` a target with no provisioner and
+no seams, whose environment `stack build` builds as one binary, and
+`stack/stacktest` the smallest: a fake target
 with every registration and every deploy seam, written against the public
 `registry`, `stack` and `ir` packages only. Put an extension that links a
-cloud's SDK in a Go module of its own, as those three are, so the core
+cloud's SDK in a Go module of its own, as the official ones are, so the core
 never depends on it.
 
 ## Names and purity
@@ -202,6 +205,18 @@ comes from. The queue clients send it after an enqueue, and name no
 provider. A wake is a hint, sent before the enqueue's transaction
 commits and lost without a retry, so a platform that provides one also
 starts the worker on a schedule of its own.
+
+A worker platform that runs its workers at a schedule's firings sets
+`WakesWorkers` (D151), and resolution then gives the enqueuing
+deployables their wakes whatever the worker's mode, so a message due
+before the next firing starts a run. `cloudflare.drainer` sets it: its
+wake names a binding (`ir.QueueWake.Binding`), the Workflow of the
+worker, in place of a URL. The `Worker` of a `@behaviorWorker` lists
+its table's deadline, change and event queues in `Queues`, its `Queue`
+first, and the worker takes a wake per queue. Resolution refuses, as
+`unrealizable`, an environment that runs a database one of whose tables
+keeps such a queue that no worker of the environment, with an instance,
+claims.
 `stack/stacktest`'s `fake.worker` lowers one to a pool with its own
 account, the local target's `local.worker` to a process with no port,
 ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker
@@ -336,7 +351,8 @@ for it, `stack.GenericKeyPackage` at `stack.GenericKeyProviderVersion`.
 ## A target
 
 A `TargetSpec` names a platform for each deployable kind (`server`,
-`database`, `job`, `worker`, `bucket` and `memoryStore`), the JSON Schema of an
+`database`, `job`, `worker`, `site`, `bucket`, `memoryStore`, `runner`,
+`deriver` and `app`), the JSON Schema of an
 environment's values under the target's name, its default DNS platform,
 its provisioner, the schema of every resource type its platforms,
 connectors and default DNS platform emit, and its policy rules. A kind it
@@ -678,6 +694,6 @@ cli.New(cli.Config{Name: "my-schematic"},
 ```
 
 The installed `superschematic` links `gcp.Extension{}`,
-`cloudflare.Extension{}` and the pulumi provisioner pinned to both
-providers and to the generic connector's key provider
-(`stack.GenericKeyProviderVersion`).
+`cloudflare.Extension{}`, `embedded.Extension{}` and the pulumi
+provisioner pinned to both cloud providers and to the generic connector's
+key provider (`stack.GenericKeyProviderVersion`).
