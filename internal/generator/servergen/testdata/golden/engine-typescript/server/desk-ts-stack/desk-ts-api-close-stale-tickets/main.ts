@@ -88,7 +88,8 @@ function main(): void {
   const started = Date.now();
   const end = (code: number): void => {
     for (const engine of engines) engine.close();
-    // The wakes the job's enqueues sent go out before it exits (D145, D151).
+    // The wakes the job's enqueues sent go out before it exits (D145, D151):
+    // only a queue on Postgres sends one.
     void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
   };
   run(stop.signal, pools, engines).then(
