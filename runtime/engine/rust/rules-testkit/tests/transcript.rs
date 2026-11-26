@@ -435,6 +435,16 @@ const BLUEPRINT_FLOOR: usize = 151;
 /// left out are the opens and the reads of rows. An adapter's replay holds
 /// its own count to this one.
 const ALIASED_FLOOR: usize = 46;
+/// The steps `core-bundles.transcript.json` holds, of the hand-written
+/// `core-bundles.json`'s 81 (D103's step 5): the 12 define and publish
+/// checks of each bundle's table, whose uses are the parts the loader
+/// expands the bundle into, and 72 commands, each holding its row's
+/// version after the step, the deadlines the runner's runDues ran and the
+/// changes of the tables Timers hears among them, in its 4 scenarios,
+/// Reservation's, Barrier's, Mailbox's and Assignment's; none is a
+/// repeat. The 13 left out are the opens, the reads of rows and a runDue
+/// that ran nothing. An adapter's replay holds its own count to this one.
+const BUNDLES_FLOOR: usize = 84;
 
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
@@ -531,6 +541,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-calendar", CALENDAR_FLOOR, false),
         ("core-payments", PAYMENTS_FLOOR, false),
         ("core-aliased", ALIASED_FLOOR, true),
+        ("core-bundles", BUNDLES_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

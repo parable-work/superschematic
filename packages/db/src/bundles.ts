@@ -109,8 +109,11 @@ export interface BarrierSettings {
  * barrier once the timeout has passed; and a Workflow on status (waiting,
  * released, cancelled) whose release needs the permission, a person's
  * go-ahead. The gate holds the deadline's and the go-ahead's moves alike:
- * a barrier is released once every row is ready, the deadline vetoed
- * until then coming back every minute.
+ * a barrier is released once every row is ready. The deadline's release,
+ * at the timeout, is vetoed while a row is not, its fire recorded vetoed
+ * and not tried again, and a person's go-ahead then releases the barrier
+ * once every row is ready. The table's behavior worker holds the release
+ * permission.
  */
 export type Barrier<T, S extends BarrierSettings> = Bundle<
   [
