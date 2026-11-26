@@ -55,6 +55,12 @@ type GoConfig struct {
 	// type's columns with each to-one relation an id-only stub, and reads
 	// the target's Own, so a default read is one level deep.
 	ORMDefaultSelection string `toml:"orm_default_selection"`
+
+	// EnumTextMethods is "off" (default) or "on" (D165). "on" gives a Go
+	// enum whose members' comments carry a `title:` or an `action:` line
+	// the methods Title() and Action(), which return the member's line, or
+	// "" for a member without one. The comments keep the lines.
+	EnumTextMethods string `toml:"enum_text_methods"`
 }
 
 // The values of the [go] keys.
@@ -75,6 +81,7 @@ func defaultGoConfig() GoConfig {
 		OptionalZero:        GoOptionalOmit,
 		EnvNumberScalars:    GoEnvParse,
 		ORMDefaultSelection: GoSelectAll,
+		EnumTextMethods:     GoOff,
 	}
 }
 
@@ -84,11 +91,12 @@ func (c *GoConfig) fill(d GoConfig, fill func(dst *string, def string)) {
 	fill(&c.OptionalZero, d.OptionalZero)
 	fill(&c.EnvNumberScalars, d.EnvNumberScalars)
 	fill(&c.ORMDefaultSelection, d.ORMDefaultSelection)
+	fill(&c.EnumTextMethods, d.EnumTextMethods)
 }
 
 // check refuses a value the [go] table does not take.
 func (c GoConfig) check() error {
-	for _, kv := range [][2]string{{"limit_constants", c.LimitConstants}} {
+	for _, kv := range [][2]string{{"limit_constants", c.LimitConstants}, {"enum_text_methods", c.EnumTextMethods}} {
 		if kv[1] != "" && kv[1] != GoOn && kv[1] != GoOff {
 			return fmt.Errorf("go.%s is %q: use %q or %q", kv[0], kv[1], GoOn, GoOff)
 		}
@@ -120,3 +128,6 @@ func (c GoConfig) ParsesEnvNumbersWithStrconv() bool { return c.EnvNumberScalars
 
 // ReadsOwnByDefault reports whether orm_default_selection is "own".
 func (c GoConfig) ReadsOwnByDefault() bool { return c.ORMDefaultSelection == GoSelectOwn }
+
+// WritesEnumTextMethods reports whether enum_text_methods is "on".
+func (c GoConfig) WritesEnumTextMethods() bool { return c.EnumTextMethods == GoOn }
