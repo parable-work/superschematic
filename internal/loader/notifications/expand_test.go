@@ -142,6 +142,53 @@ func TestNotificationsRefusals(t *testing.T) {
 	}
 }
 
+// TestNotificationsExampleLoads: examples/notifications's schemas load
+// (D153): tickets-db's tickets raise their events and its duties declare
+// the urgency of Recurrence's, whose event queue the duty table keeps; and
+// tickets-api runs the notifier on a worker of the dispatch queue, hears a
+// cleared reference, and hands a duty's events to its Workers.
+func TestNotificationsExampleLoads(t *testing.T) {
+	services := filepath.Join("..", "..", "..", "examples", "notifications", "schemas", "services")
+	reg := registry.New(naming.Default())
+	db, err := loader.LoadService(filepath.Join(services, "tickets-db"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load tickets-db: %v", err)
+	}
+	if ticket := db.Types["Ticket"]; ticket == nil || len(ticket.Events) != 4 {
+		t.Fatalf("tickets-db's Ticket raises %+v", ticket)
+	}
+	duty := db.Types["Duty"]
+	if duty == nil || duty.EventOf("recurrence.missed") == nil || duty.EventOf("recurrence.missed").Urgency != ir.UrgencyUrgent {
+		t.Fatalf("tickets-db's Duty declares %+v", duty)
+	}
+	if db.BehaviorQueueOf("Duty", ir.BehaviorQueueEvents) == nil {
+		t.Error("Duty keeps no event queue for Recurrence's events")
+	}
+	for _, part := range ir.NotifierParts {
+		if db.NotifierTable(part) == nil {
+			t.Errorf("tickets-db declares no %s", part)
+		}
+	}
+	api, err := loader.LoadService(filepath.Join(services, "tickets-api"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load tickets-api: %v", err)
+	}
+	workers := map[string]*ir.Worker{}
+	for _, w := range api.Workers {
+		workers[w.Name] = w
+	}
+	if w := workers["Notify"]; w == nil || w.Queue != "NoticeWork" {
+		t.Errorf("Notify is %+v", w)
+	}
+	if w := workers["DutyDeadlines"]; w == nil || len(w.Events) != 3 {
+		t.Errorf("DutyDeadlines hands %+v", w)
+	}
+	used := reg.RuntimeFeaturesUsed(registry.RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{db.Name: db}})
+	if len(used) != 1 || used[0].Feature != "notifications" || used[0].Interface != ir.RuntimeChannel {
+		t.Errorf("tickets-api uses %v", used)
+	}
+}
+
 func copyDir(t *testing.T, from, to string) {
 	t.Helper()
 	err := filepath.Walk(from, func(path string, info os.FileInfo, err error) error {

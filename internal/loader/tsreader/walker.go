@@ -1423,12 +1423,13 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 			uses = append(uses, use.ref)
 		}
 		ext := &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
-		// A table's @audience adds columns a view may read (D156), which
-		// the loader adds to the external type as the table's own load
-		// does.
+		// A table's @audience adds columns a view may read (D156), and a
+		// notifier class or the channel identities their fields (D153),
+		// which the loader adds to the external type as the table's own
+		// load does.
 		w.suppressRecording, w.foreignClass = true, true
 		for _, d := range w.decoratorsOf(id.decl) {
-			if d.id.name == "audience" {
+			if d.id.name == "audience" || d.id.name == "notifier" || d.id.name == "channelIdentities" {
 				if serr := w.applyDecorator(d, registry.TargetType, registry.Node{Type: ext}); serr != nil {
 					w.addErr(serr)
 				}

@@ -383,6 +383,12 @@ describe.skipIf(!dsn)('notifications', () => {
     const record = (await noticesOf(w, w.ann)).find(n => n.eventKind === 'reference.cleared')!;
     expect(record.payload).toMatchObject({ targetTable: 'Ticket', role: '' });
     expect(record.title).toBe('Boiler pressure low');
+    // A behavior's event, as its behavior worker's Workers method hands it.
+    await sys.noticeRoute.createOne({ name: 'Missed', eventKind: 'recurrence.missed', recipients: [{ path: 'owner' }] });
+    await w.orm.transaction(tx => w.notifier.fromBehaviorEvent(tx, 'Ticket', 'recurrence', { kind: 'missed', key: w.ticket, payload: { key: '2027-01-01T09:00' } }));
+    await drain(w.queue);
+    const missed = (await noticesOf(w, w.ann)).find(n => n.eventKind === 'recurrence.missed')!;
+    expect(missed.payload).toEqual({ key: '2027-01-01T09:00' });
   });
 
   test('password reset sends a code through the email adapter and the code sets the password', async () => {
