@@ -125,6 +125,14 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// TypesLanguages are the languages whose types a DB service's config
+	// enables (outputs.types), sorted, which the loader reads from the
+	// config. The features whose SQLite tables only some languages'
+	// repositories read on SQLite are held to them (D182,
+	// sqlite_features.go). Nil when the loader has no config to read them
+	// from, which leaves those rules unchecked.
+	TypesLanguages []string
+
 	// Naming supplies the npm scope that marks an import as a schema
 	// service reference. The loader fills it from loader.WithNaming; empty
 	// fields fall back to naming.Default().

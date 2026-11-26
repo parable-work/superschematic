@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -161,5 +162,70 @@ func TestGeneratedAccessEndToEnd(t *testing.T) {
 	}
 	if testing.Verbose() {
 		t.Logf("access_runtime.test.ts:\n%s", out)
+	}
+}
+
+// TestGeneratedAccessEndToEndOnSQLite serves fixture-access-api's
+// generated router under bun over fixture-access-db's generated
+// repositories on SQLite (D182): the ./orm/sqlite entry's createOrm on
+// openSqlite's connection to a file its sqlite/create.sql made. It runs
+// access_runtime.test.ts with ORM_DIALECT sqlite, every case of
+// accessCases, which needs no database server.
+func TestGeneratedAccessEndToEndOnSQLite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the generated TypeScript server's access on SQLite in -short mode")
+	}
+	fixture := accessFixture(t)
+	fixture.sqlite = true
+	tree := materializeAPI(t, fixture)
+	tree.typeCheck(t)
+
+	model, err := sqlmigrate.BuildModel(fixture.deps[accessDB], sqlgen.Options{SchemaName: accessDB}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatalf("build %s's SQLite model: %v", accessDB, err)
+	}
+	script, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatalf("write %s's SQLite create.sql: %v", accessDB, err)
+	}
+	createSQL := filepath.Join(tree.root, "sql", accessDB, "sqlite", "create.sql")
+	if err := os.MkdirAll(filepath.Dir(createSQL), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createSQL, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	testFile := tree.stage(t, "access_runtime.test.ts")
+	report := filepath.Join(tree.root, "access-sqlite.junit.xml")
+	run := exec.Command(tree.bun, "test", testFile, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
+	run.Dir = tree.apiDir
+	run.Env = append(os.Environ(), "API_DIR="+tree.apiDir, "CREATE_SQL="+createSQL, "ORM_DIALECT=sqlite", "SQLITE_FILE="+filepath.Join(tree.root, "access.sqlite"))
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("access_runtime.test.ts on SQLite failed: %v\n%s", err, out)
+	}
+	junit, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatalf("read bun's report: %v\n%s", err, out)
+	}
+	cases, err := junitTestcases(junit)
+	if err != nil {
+		t.Fatalf("parse bun's report: %v\n%s", err, junit)
+	}
+	for _, name := range accessCases {
+		tc, ok := cases[name]
+		switch {
+		case !ok:
+			t.Errorf("bun did not run %q:\n%s", name, junit)
+		case tc.Failure != nil || tc.Skipped != nil:
+			t.Errorf("%q did not pass on SQLite:\n%s", name, junit)
+		}
+	}
+	if len(cases) != len(accessCases) {
+		t.Errorf("bun ran %d cases, and accessCases names %d:\n%s", len(cases), len(accessCases), junit)
+	}
+	if testing.Verbose() {
+		t.Logf("access_runtime.test.ts on SQLite:\n%s", out)
 	}
 }

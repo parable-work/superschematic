@@ -6,6 +6,12 @@ SUPERSCHEMATIC_RULES_TEST_DATABASE_URL to the database. The generated
 router serves the API over the generated repositories of
 fixture-access-db (createOrm), in a schema of the test's own.
 
+TestGeneratedAccessEndToEndOnSQLite runs the same cases with ORM_DIALECT
+sqlite (D182), CREATE_SQL fixture-access-db's sqlite/create.sql and
+SQLITE_FILE a file of its own: the router serves the API over the
+repositories of the ./orm/sqlite entry, on openSqlite's connection to the
+file.
+
 A request names its caller in its Authorization header: a grant's token
 runs as the grant's holder (grantAuthenticator); `<subject>:<permissions>`
 is a user holding those permissions; and `agent=<subject>/<for>:<permissions>`
@@ -24,8 +30,12 @@ import { parseIdentityUUID } from 'superscalar/scalars';
 
 const apiDir = process.env.API_DIR;
 const createSQL = process.env.CREATE_SQL;
+const dialect = process.env.ORM_DIALECT ?? 'postgres';
 const dsn = process.env.SUPERSCHEMATIC_RULES_TEST_DATABASE_URL;
-if (!apiDir || !createSQL || !dsn) throw new Error('API_DIR, CREATE_SQL and SUPERSCHEMATIC_RULES_TEST_DATABASE_URL are required');
+const sqliteFile = process.env.SQLITE_FILE;
+if (!apiDir || !createSQL || (dialect === 'sqlite' ? !sqliteFile : !dsn)) {
+  throw new Error('API_DIR, CREATE_SQL and SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, or ORM_DIALECT=sqlite and SQLITE_FILE, are required');
+}
 const { buildRouter } = await import(`${apiDir}/router.ts`);
 
 /** A UUID's wire form, which a row and a view hold. */
@@ -65,8 +75,9 @@ const callers = async (ctx: RequestContext): Promise<Principal | null> => {
 
 const schema = `access_ts_${process.hrtime.bigint()}`;
 const FIELD_KEY = Buffer.alloc(32, 7).toString('base64');
-let admin: pg.Client;
-let pool: pg.Pool;
+let admin: pg.Client | undefined;
+let pool: pg.Pool | undefined;
+let sqlite: { close(): void } | undefined;
 let orm: ReturnType<typeof createOrm>;
 let app: Hono;
 
@@ -128,12 +139,26 @@ let requestA: any;
 let requestB: any;
 
 beforeAll(async () => {
-  admin = new pg.Client({ connectionString: dsn });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  pool = new pg.Pool({ connectionString: dsn, options: `-c search_path=${schema},public`, max: 4 });
-  await pool.query(readFileSync(createSQL, 'utf8'));
-  orm = createOrm(pool, { fieldKeys: FIELD_KEY });
+  if (dialect === 'sqlite') {
+    // The file made from the database's SQLite create.sql, then opened as
+    // a server under stack dev opens it.
+    const { Database } = await import('bun:sqlite');
+    const raw = new Database(sqliteFile!, { create: true });
+    raw.exec(readFileSync(createSQL, 'utf8'));
+    raw.close();
+    const { openSqlite, parseFieldKeys } = await import('@superschematic/http-runtime/sqlite');
+    const db = openSqlite(sqliteFile!);
+    sqlite = db;
+    const onSQLite = await import('@schemas/fixture-access-db-types/orm/sqlite');
+    orm = onSQLite.createOrm(db, { fieldKeys: parseFieldKeys(FIELD_KEY) });
+  } else {
+    admin = new pg.Client({ connectionString: dsn });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new pg.Pool({ connectionString: dsn, options: `-c search_path=${schema},public`, max: 4 });
+    await pool.query(readFileSync(createSQL, 'utf8'));
+    orm = createOrm(pool, { fieldKeys: FIELD_KEY });
+  }
   app = new Hono();
   app.route('/', buildRouter({}, { authenticate: grantAuthenticator({ orm, inner: callers }), orm, accessLog: accessLogOf(orm) }));
   app.notFound(notFoundHandler());
@@ -158,6 +183,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  sqlite?.close();
   await pool?.end();
   await admin?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
   await admin?.end();

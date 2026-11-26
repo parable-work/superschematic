@@ -242,6 +242,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.TypesLanguages = typesLanguages(cfg)
 
 		if len(dataFiles) == 0 {
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
