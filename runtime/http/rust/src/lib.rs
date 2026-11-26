@@ -79,6 +79,10 @@ mod response;
 // feature.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod orm;
+// A deriver's loop over tables that implement Derived (D146), over the
+// repositories, with the `postgres` or `sqlite` feature.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod deriver;
 // The words, LIKE patterns and case folding of a SearchQuery (D62).
 pub mod search;
 mod service_auth;
