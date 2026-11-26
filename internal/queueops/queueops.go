@@ -72,13 +72,34 @@ type Request struct {
 	// Backfills are the statements Backfill runs, BackfillStatements's,
 	// one or more.
 	Backfills []string
+
+	// Dialect is the dialect of the queue's database: Postgres, or SQLite,
+	// whose statements the document carries for a database on SQLite or
+	// D1 (D68), with Message, the columns of the queue's message
+	// (MessageColumns), which a listing there names one by one. Empty is
+	// Postgres.
+	Dialect Dialect
+	Message []sqlutil.QueueMessageColumn
 }
+
+// Dialect is the dialect of a queue's database, whose statements a document
+// carries.
+type Dialect string
+
+const (
+	// Postgres's statements: the document names no dialect, as every
+	// document before SQLite's did.
+	Postgres Dialect = "postgres"
+	// SQLite's, which run on a SQLite file and on D1.
+	SQLite Dialect = "sqlite"
+)
 
 // document is the runner's queue document (migrate.QueueDocument).
 type document struct {
 	Version    int        `json:"version"`
 	Service    string     `json:"service"`
 	Queue      string     `json:"queue"`
+	Dialect    Dialect    `json:"dialect,omitempty"`
 	Operation  Operation  `json:"operation"`
 	Limit      int        `json:"limit,omitempty"`
 	IDs        []string   `json:"ids,omitempty"`
@@ -97,7 +118,9 @@ type statements struct {
 }
 
 // Document returns the queue document of req, indented, with the
-// statements of the queue's table on Postgres.
+// statements of the queue's table in its dialect: a document of SQLite's
+// names its dialect, and one of Postgres's names none. A drop's document
+// carries the drop's States (sqlutil.QueueOperatorStatements.DropStates).
 func Document(req Request) ([]byte, error) {
 	if req.Service == "" || req.Queue == "" {
 		return nil, fmt.Errorf("a queue operation names its DB service and its queue")
@@ -136,16 +159,33 @@ func Document(req Request) ([]byte, error) {
 	if table == "" {
 		table = sqlgen.QueueTableName(&ir.TypeDef{Name: req.Queue})
 	}
-	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Keys...)
+	var s sqlutil.QueueOperatorStatements
+	var dialect Dialect
+	switch req.Dialect {
+	case "", Postgres:
+		if len(req.Message) > 0 {
+			return nil, fmt.Errorf("a queue document on Postgres reads the message's columns from its row and takes none")
+		}
+		s = sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Keys...)
+	case SQLite:
+		s, dialect = sqlutil.SQLiteQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Message, req.Keys...), SQLite
+	default:
+		return nil, fmt.Errorf("dialect %q is not postgres or sqlite", req.Dialect)
+	}
+	states := s.States
+	if req.Operation == Drop {
+		states = s.DropStates
+	}
 	doc := document{
 		Version:   Version,
 		Service:   req.Service,
 		Queue:     req.Queue,
+		Dialect:   dialect,
 		Operation: req.Operation,
 		IDs:       req.IDs,
 		All:       req.All,
 		Statements: statements{
-			Dead: s.Dead, States: s.States, Retry: s.Retry, RetryAll: s.RetryAll, Drop: s.Drop, DropAll: s.DropAll,
+			Dead: s.Dead, States: states, Retry: s.Retry, RetryAll: s.RetryAll, Drop: s.Drop, DropAll: s.DropAll,
 			Backfill: req.Backfills,
 		},
 	}

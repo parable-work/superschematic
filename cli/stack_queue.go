@@ -28,13 +28,15 @@ import (
 // queue's dead messages, which it lists, makes ready again or deletes. The
 // migration runner runs each operation on the queue's database, since it
 // holds the drivers (D27), from a document that carries the statements
-// sqlutil writes for the queue's table (internal/queueops). On the local
-// target it runs against the Postgres container stack dev runs; on a cloud
-// target, through the target's queue runner, on the deployed run's
-// database (D68, amended): on gcp an execution of the migration job, which
-// hands the result back through the state bucket; on cloudflare the
-// migration runner on this machine, on the origin of a database on
-// Hyperdrive, as the database's migrations run (D96).
+// sqlutil writes for the queue's table in its database's dialect, Postgres
+// or SQLite (internal/queueops). On the local target it runs against the
+// Postgres container stack dev runs, or the SQLite file of a database on
+// SQLite; on a cloud target, through the target's queue runner, on the
+// deployed run's database (D68, amended): on gcp an execution of the
+// migration job, which hands the result back through the state bucket; on
+// cloudflare the migration runner on this machine, on the origin of a
+// database on Hyperdrive, or on a D1 database through Cloudflare's API, as
+// the database's migrations run (D96).
 
 func init() { registerStackCommands(newStackQueueCmd) }
 
@@ -80,13 +82,15 @@ shop-db.OrderPlaced. Each command resolves the environment from the
 schemas, as stack plan does, without a build, and runs the operation with
 the migration runner, superschematic-migrate, which holds the database
 drivers: on the $SUPERSCHEMATIC_MIGRATE runner, else the one on PATH. The
-operator's statements run on Postgres alone: a queue whose database the
-environment places on SQLite, where workers claim too (D53, amended), is
-refused, since its dead messages are not read there yet.
+operator's statements run on Postgres and on SQLite, a SQLite file or D1:
+on SQLite a retry or a drop of the messages it names is one statement,
+which changes each of them or none.
 
-On the local target the operation runs against the Postgres container
-stack dev runs the environment in, at the URL the environment resolves for
-the queue's database, from another terminal.
+On the local target the operation runs against the database stack dev
+runs the environment on, from another terminal: the Postgres container, at
+the URL the environment resolves for the queue's database, or, for a
+database on SQLite, its file under the environment's state directory,
+which stack dev creates.
 
 On a cloud target it runs on the database of the deployed run, --param
 naming a member of a parameterized environment, through the target's
@@ -105,9 +109,12 @@ Hyperdrive, with the connection string $HYPERDRIVE_ORIGIN_<DB> holds
 (HYPERDRIVE_ORIGIN_SHOP_DB for shop-db), as the deploy's migrations do:
 it first reads the database's Hyperdrive config, with the token in
 $CLOUDFLARE_API_TOKEN, and refuses a connection string whose host, port,
-database or user is not the config's. A target with no queue runner is
-refused, as is a run that was never deployed. --timeout bounds the wait;
-an execution it stops waiting for may still finish.`
+database or user is not the config's. A queue on D1 runs from this
+machine too, on the run's D1 database through Cloudflare's API, with the
+token in $CLOUDFLARE_API_TOKEN, as the deploy's migrations do. A target
+with no queue runner is refused, as is a run that was never deployed.
+--timeout bounds the wait; an execution it stops waiting for may still
+finish.`
 
 func newStackQueueCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
@@ -271,14 +278,25 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	defer c.close()
-	database, err := c.checkQueue(service, queue)
+	database, dialect, err := c.checkQueue(service, queue)
 	if err != nil {
 		return err
 	}
 	req := request(service, queue)
-	req.Keys, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
+	req.Keys, req.Table, req.Dialect = c.queueKey(service, queue), c.queueTable(service, queue), dialect
+	if dialect == queueops.SQLite && req.Operation != queueops.Backfill {
+		// SQLite has no to_jsonb of a row, so a listing names the
+		// message's columns, which the schema says.
+		schema, opts, err := c.queueSchema(service)
+		if err != nil {
+			return err
+		}
+		if req.Message, err = queueops.MessageColumns(schema, opts, queue); err != nil {
+			return err
+		}
+	}
 	if req.Operation == queueops.Backfill {
-		if req.Backfills, err = c.queueBackfills(service, queue); err != nil {
+		if req.Backfills, err = c.queueBackfills(service, queue, dialect); err != nil {
 			return err
 		}
 	}
@@ -320,7 +338,8 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 }
 
 // runLocalQueue runs a queue document with the local provisioner, against
-// the Postgres container stack dev runs.
+// the database stack dev runs: on its Postgres container, or the SQLite
+// file under the environment's state directory.
 func runLocalQueue(ctx context.Context, c *deployContext, service string, doc []byte) ([]byte, error) {
 	spec, ok := c.reg.Provisioner(c.env.Provisioner)
 	if !ok {
@@ -330,14 +349,21 @@ func runLocalQueue(ctx context.Context, c *deployContext, service string, doc []
 	if !ok {
 		return nil, fmt.Errorf("provisioner %s runs no queue operation", c.env.Provisioner)
 	}
-	return runner.Queue(ctx, registry.ProvisionRequest{Environment: c.env, Dir: c.dir, OutputRoot: c.project.outputRoot}, service, doc)
+	return runner.Queue(ctx, registry.ProvisionRequest{
+		Environment: c.env,
+		Dir:         c.dir,
+		OutputRoot:  c.project.outputRoot,
+		Backend:     local.StateBackend(local.StateDir(c.project.schemasRoot, c.env.Stack, c.env.Environment)),
+	}, service, doc)
 }
 
 // checkQueue refuses a queue the environment cannot run the operation on:
-// one no DB service of the stack declares, and one on a database of
-// another dialect than Postgres. It returns the database deployable that
-// hosts the queue's DB service.
-func (c *deployContext) checkQueue(service, queue string) (string, error) {
+// one no DB service of the stack declares, and one on a database of a
+// dialect other than Postgres and SQLite. It returns the database
+// deployable that hosts the queue's DB service, and the dialect of the
+// statements the document carries: SQLite's for a database on SQLite or
+// D1 (D68).
+func (c *deployContext) checkQueue(service, queue string) (string, queueops.Dialect, error) {
 	var refs []string
 	var declared []string
 	found := false
@@ -358,9 +384,9 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 	}
 	switch {
 	case !found:
-		return "", fmt.Errorf("stack %s reaches no DB service %s (its queues: %s)", c.project.stack.Name, service, queues)
+		return "", "", fmt.Errorf("stack %s reaches no DB service %s (its queues: %s)", c.project.stack.Name, service, queues)
 	case !slices.Contains(declared, queue):
-		return "", fmt.Errorf("%s declares no queue %s (the stack's queues: %s)", service, queue, queues)
+		return "", "", fmt.Errorf("%s declares no queue %s (the stack's queues: %s)", service, queue, queues)
 	}
 	var host *ir.ResolvedDeployable
 	for _, d := range c.env.Deployables {
@@ -368,14 +394,17 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 			host = d
 		}
 	}
-	switch {
-	case host == nil:
-		return "", fmt.Errorf("environment %s hosts no database of %s", c.env.Environment, service)
-	case host.Dialect != "" && host.Dialect != registry.SQLDialectPostgres:
-		return "", fmt.Errorf("environment %s places %s on database %s, a %s database; stack queue reads, retries and drops a queue's dead messages on Postgres alone, and on SQLite it is not built (D68)",
-			c.env.Environment, service, host.Name, host.Dialect)
+	if host == nil {
+		return "", "", fmt.Errorf("environment %s hosts no database of %s", c.env.Environment, service)
 	}
-	return host.Name, nil
+	switch host.Dialect {
+	case "", registry.SQLDialectPostgres:
+		return host.Name, queueops.Postgres, nil
+	case registry.SQLDialectSQLite:
+		return host.Name, queueops.SQLite, nil
+	}
+	return "", "", fmt.Errorf("environment %s places %s on database %s, a %s database; stack queue reads, retries and drops a queue's dead messages on Postgres and SQLite",
+		c.env.Environment, service, host.Name, host.Dialect)
 }
 
 // queueKey is the quoted key columns of the queue of the DB service when

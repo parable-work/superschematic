@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack/local"
 )
 
@@ -65,5 +67,48 @@ func TestQueue(t *testing.T) {
 	}
 	if len(f.runner.commands) != n {
 		t.Errorf("a refused operation ran %q", f.runner.lines("")[n:])
+	}
+}
+
+// TestQueueOnASQLiteDatabase runs a queue document on the SQLite file of a
+// database on SQLite (D68): the file under the environment's state
+// directory, at its sqlite: URL, which stack dev created. A file that is
+// not there yet is refused before the runner runs, which would create an
+// empty database, and so is a request with no state directory.
+func TestQueueOnASQLiteDatabase(t *testing.T) {
+	t.Setenv(local.MigrateEnv, "")
+	f := liteFixture(t)
+	file := f.stateFile(t)
+	doc := []byte(`{"version": 1}` + "\n")
+	ctx := context.Background()
+
+	if _, err := f.prov.Queue(ctx, f.req, "notes-db", doc); err == nil ||
+		!strings.Contains(err.Error(), "local: the SQLite database of notes-db, "+file+", is not there") ||
+		!strings.HasSuffix(err.Error(), "run the environment with superschematic stack dev --environment Dev, which creates and migrates it, then run this again") {
+		t.Fatalf("a missing file: %v", err)
+	}
+	if len(f.runner.commands) != 0 {
+		t.Fatalf("a refused operation ran %q", f.runner.lines(""))
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.runner.rules = []rule{{prefix: "/bin/superschematic-migrate queue --queue ", times: 1, out: `{"version": 1, "ids": []}`}}
+	out, err := f.prov.Queue(ctx, f.req, "notes-db", doc)
+	if err != nil || string(out) != `{"version": 1, "ids": []}` {
+		t.Fatalf("Queue: %q, %v", out, err)
+	}
+	cmd := f.runner.commands[len(f.runner.commands)-1]
+	if len(cmd.Args) != 5 || cmd.Args[3] != "--database-url" || cmd.Args[4] != local.SQLiteURL(file) {
+		t.Fatalf("the runner ran %q", cmd.String())
+	}
+
+	req := f.req
+	req.Backend = registry.StateBackend{}
+	if _, err := f.prov.Queue(ctx, req, "notes-db", doc); err == nil || err.Error() != "local: environment Dev hosts no database of notes-db" {
+		t.Fatalf("no state directory: %v", err)
 	}
 }
