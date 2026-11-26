@@ -2,10 +2,8 @@ package verify
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -14,10 +12,11 @@ import (
 // queues they name and the service, once the expansion added the
 // sub-tables and filled the queues.
 //
-// Each is on a plain table of a DB service built for Postgres alone, with
-// one key field: a target's delete clears its references through a
-// trigger function, and referencedBy and a release read across tables,
-// which only the Postgres repositories do so far. The tables a
+// Each is on a plain table of a DB service, with one key field: a target's
+// delete clears its references through a trigger, and referencedBy and a
+// release read across tables. On SQLite only the TypeScript repositories
+// do so far, so a service that lists sqlite takes no other language's
+// types (D182, refuseSQLiteReaders). The tables a
 // @references lists are plain tables of the database with one key each.
 // The queues each names are @queue classes of the schema that declare no
 // fields, which the expansion fills. And no authored type takes the name
@@ -97,9 +96,7 @@ func checkRowFeatureTable(schema *ir.Schema, in Input, td *ir.TypeDef, decorator
 		fail("%s's key is not one field, and the sub-table's rows name their row by one key", td.Name)
 		return false
 	}
-	if slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
-		fail("%s lists the sqlite dialect, and a target's delete clears its references, and a file's delete enqueues its release, through trigger functions only Postgres has so far; build %s for postgres alone (outputs.sql.dialects: [\"postgres\"])", schema.Name, schema.Name)
-	}
+	refuseSQLiteReaders(schema, in, td, decorator, r)
 	if sub := schema.Types[subName]; sub == nil || sub.Origin != origin {
 		fail("the type %s is the sub-table it adds beside %s; rename the schema's own %s", subName, td.Name, subName)
 		return false

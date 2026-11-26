@@ -28,9 +28,9 @@ import (
 //     inherits, so its own Audience trigger resolves it again from the
 //     parent's new columns, and a grandchild's in turn.
 //
-// Both are in the Postgres dialect alone: the loader refuses @audience in a
-// service that lists sqlite. A cycle of parents is the database's to
-// refuse, by the depth of the triggers' recursion.
+// On Postgres each is a trigger function and the trigger that runs it. A
+// cycle of parents is the database's to refuse, by the depth of the
+// triggers' recursion. SQLite's forms (D182) are in audience_sqlite.go.
 
 // audienceSuffix ends the name of an @audience table's function, after its
 // table, and cascadeSuffix that of its cascade's; each trigger's is that
@@ -46,6 +46,9 @@ type AudienceTrigger struct {
 	Origin string
 
 	Table, QuotedTable string
+	// Key is the table's key's quoted column, which the SQLite triggers
+	// find the row they resolve by.
+	Key string
 
 	FunctionName string
 	TriggerName  string
@@ -76,8 +79,9 @@ type AudienceCascade struct {
 }
 
 // AudienceChild is a table that inherits from a cascade's table: its
-// quoted name, its audience column and its foreign key to the parent.
+// name, quoted name, its audience column and its foreign key to the parent.
 type AudienceChild struct {
+	Table                               string
 	QuotedTable, Audience, ParentColumn string
 }
 
@@ -114,6 +118,7 @@ func buildAudience(tableTypes []*ir.TypeDef, tables []Table) ([]AudienceTrigger,
 			Origin:       td.Name,
 			Table:        table.Name,
 			QuotedTable:  table.QuotedName,
+			Key:          table.PrimaryKey,
 			FunctionName: table.Name + audienceSuffix,
 			TriggerName:  "trg_" + table.Name + audienceSuffix,
 		}
@@ -159,7 +164,7 @@ func buildAudience(tableTypes []*ir.TypeDef, tables []Table) ([]AudienceTrigger,
 				}
 				cascades[parent.Name] = cascade
 			}
-			cascade.Children = append(cascade.Children, AudienceChild{QuotedTable: t.QuotedTable, Audience: t.Audience, ParentColumn: t.ParentColumn})
+			cascade.Children = append(cascade.Children, AudienceChild{Table: t.Table, QuotedTable: t.QuotedTable, Audience: t.Audience, ParentColumn: t.ParentColumn})
 		}
 		for _, name := range []string{t.TriggerName, "trg_" + table.Name + cascadeSuffix} {
 			if len(name) > sqlutil.PostgresIdentifierLimit {

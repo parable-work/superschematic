@@ -242,6 +242,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.TypesLanguages = typesLanguages(cfg)
 		vin.RustOutput = rustOutput(cfg)
 
 		if len(dataFiles) == 0 {

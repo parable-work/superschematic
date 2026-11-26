@@ -42,15 +42,19 @@ the caller is.
 
 - `api: { enabled: true }` generates the Go server, the default language.
   The server decodes requests into the Go types, so `types` lists Go.
-- `public: true` marks an API whose callers the Go server authenticates. It
-  turns on the auth provider's middleware and stores in the Go server.
-  Without it, a `@requirePermission` route answers 401 unless the
-  service's own middleware puts the caller on the context. The SDKs send
-  a token either way, since those routes need a caller.
-- `authDb` names the DB schema the auth provider reads its stores from,
-  by `shop-db`'s handle, `ShopDb`, imported from `@acme/shop-db`.
-  The core provider, `session`, finds `shop-db`'s `Session` and `User`
-  tables and generates stores over the ORM for them.
+- `public: true` matters only to the Go server: its routes' `Config`
+  takes the ORM of the `authDb`, which the auth middleware reads. The SDKs
+  send a token either way, since the `@requirePermission` routes need a
+  caller.
+- `authDb` names the DB schema whose user model the server authenticates
+  its callers against, by `shop-db`'s handle, `ShopDb`, imported from
+  `@acme/shop-db`. `shop-db` has a `User` table, so the core provider,
+  `session`, wires in the identity runtime, which signs users in and
+  resolves their sessions and roles from `shop-db`'s tables, public or
+  not ([Say who the caller is](#say-who-the-caller-is)). A Go API with
+  neither has no auth middleware, and its `@requirePermission` routes
+  answer 401 unless a middleware of your own puts the caller on the
+  context.
 - `sdk` lists the SDK languages. Any API can have an SDK in Go, TypeScript,
   Python or Rust, whatever language serves it. An SDK decodes and validates
   with the types package of its own language, so `types` lists every SDK
@@ -184,9 +188,11 @@ dependencies, then:
   to its schema;
 - builds each server and starts it, waiting until it answers `/readyz`,
   then prints where each one is reached;
-- builds each worker, `shop-orders`' `FulfilOrders` and `shop-stock`'s
-  `ReorderStock`, in Rust, and starts it as a process
-  ([Queues and workers](/superschematic/guides/queues/));
+- builds each worker, `shop-orders`' `FulfilOrders` in Go and
+  `shop-stock`'s `ReorderStock` in Rust, and starts it as a process
+  ([Queues and workers](/superschematic/guides/queues/)), and
+  `shop-cart`'s deriver `TriageTickets` on Bun
+  ([Derivers](/superschematic/guides/stacks/#derivers));
 - builds `shop-orders`' jobs `ShipOrders` and `SettlePayments` and runs
   them every minute, as `Dev`'s settings say, and `shop-stock`'s Rust job
   `OrderRestocks`, which `Dev` runs only when `superschematic stack run`

@@ -91,7 +91,12 @@ use's guard holds the write to.
 */
 
 {{- with .ORM}}
-{{- if .Rules}}
+{{- if not .Postgres}}
+
+// The database lists sqlite and not postgres: this file holds the
+// repositories' types alone, and orm-sqlite.ts, the ./orm/sqlite entry,
+// their definitions and createOrm over a SqlDatabase (D182).
+{{- else if .Rules}}
 import { initSync } from '{{$.Naming.RulesNpmPackage}}';
 import { ormOf, withRulesCore } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
 {{- else}}
@@ -253,6 +258,7 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
   VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Merge}} & MergeableRepository<{{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
 {{- end}}
+{{- if $.ORM.Postgres}}
 
 /** The {{.Table}} table, as the runtime reads{{if not .ReadOnly}} and writes{{end}} it. */
 export const {{.Const}}: TableDefinition = {
@@ -381,6 +387,7 @@ export const {{.Const}}: TableDefinition = {
 {{- end}}
 };
 {{- end}}
+{{- end}}
 
 {{- range .Views}}
 
@@ -474,6 +481,8 @@ export interface {{.Name}}Queries {
 {{- end}}
 }
 
+{{- if .Postgres}}
+
 /** The declared queries of {{$.SchemaName}} as the runtime runs them: each statement, its parameters and its row as the codec reads them. */
 export const {{.QueriesConst}}: Readonly<Record<string, QueryDefinition>> = {
 {{- range .Queries}}
@@ -516,6 +525,7 @@ export const {{.QueriesConst}}: Readonly<Record<string, QueryDefinition>> = {
 {{- end}}
 };
 {{- end}}
+{{- end}}
 
 /** The repositories of {{$.SchemaName}}, by table{{if .Views}}, and of its projections, by projection{{end}}{{if .Queries}}, and its declared queries{{end}}. */
 export interface {{.Name}}Repositories {
@@ -536,6 +546,7 @@ export type {{.Name}}Orm = Orm<{{.Name}}Repositories>{{if .References}} & Refere
 
 /** The repositories of {{$.SchemaName}} in a transaction, with its raw SQL. */
 export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories>{{if .References}} & ReferencesMembers{{end}}{{if .Attachments}} & AttachmentsMembers{{end}};
+{{- if .Postgres}}
 
 {{- if .Rules}}
 
@@ -613,4 +624,5 @@ export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): 
   return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, options){{if or .References .Attachments}} as {{.Name}}Orm{{end}};
 {{- end}}
 }
+{{- end}}
 {{- end}}

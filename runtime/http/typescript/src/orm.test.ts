@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { fenceBumps, ormOf, READ_METHODS, type Clauses, type FenceDefinition, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx, type TableDefinition, type TableStatements } from './orm';
+import { ormOf } from './orm-postgres';
+import { fenceBumps, READ_METHODS, type Clauses, type FenceDefinition, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx, type TableDefinition, type TableStatements } from './orm';
 import type { RowField } from './pgcodec';
 
 // The statements an ORM's transaction runs around its function (D89),

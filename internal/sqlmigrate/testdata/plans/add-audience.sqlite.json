@@ -1,0 +1,91 @@
+{
+  "dialect": "sqlite",
+  "expanded": "c044e2bec0de234c065d9b3b8dcb33fbe171ede0c93aa9fd1ac0040b356b0ecf",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "f72f9cd0bc7cdcb4999e88dfbf33e2320baa7d7dc66547c1bf5afcf8d1dbdcd2",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"agent_access\" TEXT DEFAULT 'followRole' NOT NULL"
+      ],
+      "subject": "table/customer/column/agent_access",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"audience\" TEXT DEFAULT 'private' NOT NULL"
+      ],
+      "subject": "table/customer/column/audience",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"audience_named\" TEXT"
+      ],
+      "subject": "table/customer/column/audience_named",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"effective_agents\" TEXT DEFAULT 'followRole' NOT NULL"
+      ],
+      "subject": "table/customer/column/effective_agents",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"effective_audience\" TEXT"
+      ],
+      "subject": "table/customer/column/effective_audience",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_customer_audience_insert\" AFTER INSERT ON \"customer\" FOR EACH ROW\nBEGIN\n  -- The @audience of Customer (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'customer.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'customer.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"customer\" SET \"effective_audience\" = CASE \"customer\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"customer\".\"id\" IS NULL THEN '[]' ELSE json_array(\"customer\".\"id\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"customer\".\"id\" AS value WHERE \"customer\".\"id\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"customer\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"customer\".\"id\" IS NULL THEN '[]' ELSE json_array(\"customer\".\"id\") END END,\n    \"effective_agents\" = \"customer\".\"agent_access\"\n    WHERE \"customer\".\"id\" = NEW.\"id\";\nEND"
+      ],
+      "subject": "trigger/customer/trg_customer_audience_insert",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:trigger/customer/trg_customer_audience_update",
+          "reason": "Backfilling trg_customer_audience_update resolves the audience of every row of customer.",
+          "subject": "trigger/customer/trg_customer_audience_update"
+        }
+      ],
+      "index": 7,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_customer_audience_update\" AFTER UPDATE ON \"customer\" FOR EACH ROW\nWHEN NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named')\n  OR NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none')\n  OR NEW.\"effective_audience\" IS NOT CASE NEW.\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN NEW.\"id\" IS NULL THEN '[]' ELSE json_array(NEW.\"id\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT NEW.\"id\" AS value WHERE NEW.\"id\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(NEW.\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN NEW.\"id\" IS NULL THEN '[]' ELSE json_array(NEW.\"id\") END END\n  OR NEW.\"effective_agents\" IS NOT NEW.\"agent_access\"\nBEGIN\n  -- The @audience of Customer (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'customer.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'customer.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"customer\" SET \"effective_audience\" = CASE \"customer\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"customer\".\"id\" IS NULL THEN '[]' ELSE json_array(\"customer\".\"id\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"customer\".\"id\" AS value WHERE \"customer\".\"id\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"customer\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"customer\".\"id\" IS NULL THEN '[]' ELSE json_array(\"customer\".\"id\") END END,\n    \"effective_agents\" = \"customer\".\"agent_access\"\n    WHERE \"customer\".\"id\" = NEW.\"id\";\nEND",
+        "UPDATE \"customer\" SET \"audience\" = \"audience\""
+      ],
+      "subject": "trigger/customer/trg_customer_audience_update",
+      "transactional": true
+    }
+  ],
+  "to": "550856554b8b16bf5739ecd47a8c635d538a469f8a585880f2e5eb85df33bd9c",
+  "toModel": null,
+  "version": 1
+}

@@ -328,7 +328,8 @@ Docker, and writes no lock.
 
 ## Not yet
 
-SQLite queries, whose SQL a dialect of its own would verify; the field
+SQLite queries, whose SQL a dialect of its own would verify; a query run
+by the Rust repositories, which have no typed function for one; the field
 kinds above that no codec reads; a `@rawSql` function or view a query
 reads, whose change the lock does not see (a projection's view it sees);
 a nullability rule finer than the outer join's table, such as a `LEFT

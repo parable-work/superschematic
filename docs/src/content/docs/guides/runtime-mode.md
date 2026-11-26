@@ -285,5 +285,9 @@ each request, or when you call `run_due` with `Drain::WhenAsked`.
   relation's linked rows, Pool's rows) still read every row of a type.
 - The `createdBy` and `deletedBy` stamps, the access policy as data, the
   event stream and MCP, as in development mode.
+- Runtime mode from TypeScript: `@superschematic/rules-handler`
+  ([From TypeScript](/superschematic/guides/development-mode/#from-typescript))
+  serves development mode alone, with no table store, record or publish.
+  The Go and Python libraries are later steps of both modes.
 - Moving between modes: development to runtime with rows, and runtime to
   compiled by the recorded model.

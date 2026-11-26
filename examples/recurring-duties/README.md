@@ -4,7 +4,9 @@ A duties app with recurrence and a calendar (D152): duties that recur on a
 calendar rule, after they were last done, or before an agreement ends;
 due dates that move off weekends and the holidays of a duty's calendar;
 and a calendar, read and fed to a calendar client, that shows each person
-only what they may read.
+only what they may read. The guide's
+[A row's recurrence, and the calendar](https://parable-work.github.io/superschematic/guides/database-tables/#a-rows-recurrence-and-the-calendar)
+section covers it in full.
 
 | Path | What it is |
 |---|---|
@@ -40,3 +42,7 @@ The same scenario, under the fixture names `fixture-recurrence-db` and
 `fixture-recurrence-api`, runs end to end against Postgres in
 `TestGeneratedRecurrenceEndToEnd` (`internal/generator/tsrestgen`), and the
 feed's access in `TestGeneratedAccessEndToEnd`.
+
+The calendar read and its feed are the TypeScript runtime's, on Postgres:
+the Go and Rust servers do not serve them yet, and the generated router
+does not mount `calendarRoutes`, which `server/server.ts` wires.
