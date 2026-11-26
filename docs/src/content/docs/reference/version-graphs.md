@@ -236,12 +236,22 @@ repair rows written by hand. `Sweep` leaves the table alone.
 To the ORM it is a table that is read: a repository with gets, finds, lists
 and pages, and no create, update, upsert or delete. The Go repository and
 the Rust one have no write. The TypeScript one has none in its type
-(`ReadRepository`), though the object the runtime builds still carries
-them, so do not reach past the type. A `@tableOperation` may read and list
-the table; one that writes it is refused. A raw SQL write is not refused;
-do not make one, since the next release that touches the entity overwrites
-it and no release repairs a row it does not touch, short of a release of
-the commit already released.
+(`ReadRepository`) and none in the object the ORM holds: the table's
+definition in `orm.ts` says `readOnly: true`, and the runtime gives it the
+reads alone. A `@tableOperation` may read and list the table; one that
+writes it is refused. A raw SQL write is not refused; do not make one,
+since the next release that touches the entity overwrites it and no
+release repairs a row it does not touch, short of a release of the commit
+already released.
+
+When the graph's root has a `deletedAt`, a soft delete of the root leaves
+its released rows in the table, and every read of the repository leaves
+them out, in each of the three ORMs: a read holds each row to a live row of
+its root, as a read of a soft-deletable table holds each row to its own
+`deletedAt`. A read that asks for deleted rows (`IncludeDeleted`,
+`includeDeleted`, `include_deleted`) reads them. A restore of the root,
+which clears its `deletedAt`, sees the same rows again, since nothing
+deleted them. A hard delete of the root deletes them with it.
 
 The descriptor names the table as the kind's `releasedTable`, which the
 core does not read and each storage adapter does. On SQLite, whose layout
