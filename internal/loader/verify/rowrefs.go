@@ -59,7 +59,7 @@ func checkRowFeatures(schema *ir.Schema, in Input, r *Result) {
 // type, graph member, engine type or sub-table the loader added.
 func plainTable(td *ir.TypeDef) bool {
 	return td.Role == ir.RoleDBTable && td.Projection == nil && td.Queue == nil && !td.JsonField &&
-		td.GraphMember == nil && !codegen.IsEngineType(td) && td.BehaviorTable == nil && td.BehaviorQueue == nil && td.RowTable == nil
+		td.GraphMember == nil && !codegen.IsEngineType(td) && td.BehaviorTable == nil && td.BehaviorQueue == nil && td.RowTable == nil && !td.SearchIndex
 }
 
 // oneKey is td's one key field, or nil when it has none or several.

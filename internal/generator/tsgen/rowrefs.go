@@ -218,7 +218,7 @@ func rowFeaturesOf(schema *ir.Schema, tables []sqlutil.TableModel, members map[s
 // reads it.
 func referenceTarget(td *ir.TypeDef) bool {
 	if td == nil || td.Role != ir.RoleDBTable || td.Queue != nil || td.Projection != nil || td.JsonField || td.GraphMember != nil ||
-		td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil {
+		td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil || td.SearchIndex {
 		return false
 	}
 	keys := 0

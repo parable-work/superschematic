@@ -188,6 +188,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// the calendar merges (core_calendar.go, D152).
 	specs = append(specs, calendarDecorators()...)
 
+	// The fields of a table the database's search index holds, and the queue
+	// a write that changes them enqueues on (core_search.go, D155).
+	specs = append(specs, searchDecorator())
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
