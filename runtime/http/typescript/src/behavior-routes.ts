@@ -1,3 +1,4 @@
+import type { Assurance, Principal, PrincipalKind } from './auth.js';
 import type { RequestContext } from './operation.js';
 import { HttpProblem } from './problem.js';
 
@@ -33,17 +34,48 @@ export interface BehaviorCaller {
   readonly subject: string;
   readonly permissions?: readonly string[];
   readonly standsIn?: boolean;
+  /** What the principal is (D156); absent for a user. */
+  readonly kind?: PrincipalKind;
+  /** The subject it acts for (D77, D156), which Provenance records and an Approvals requirement may count it as. */
+  readonly actingFor?: string;
+  /** The kind of the subject it acts for; absent for a user. */
+  readonly actingForKind?: PrincipalKind;
+  /** The Agent whose run it is (D158, D200): the run principal's agent claim. */
+  readonly agent?: string;
+  /** How its authenticator verified it for the call (D200). */
+  readonly assurance?: Assurance;
+}
+
+/**
+ * The caller a principal is to the behaviors' core (D103, D200): its
+ * subject and its permissions, each once; its kind and whom it acts for,
+ * each left out for a user; an agent run's Agent, from the agent claim the
+ * dispatcher's authenticator sets (D158); and the assurance its
+ * authenticator reports.
+ */
+export function principalCaller(principal: Principal): BehaviorCaller {
+  const agent = principal.kind === 'agent' ? principal.claims?.agent : undefined;
+  const actingForKind = principal.actingFor?.kind;
+  return {
+    subject: principal.subject,
+    permissions: [...new Set(principal.permissions)],
+    ...(principal.kind && principal.kind !== 'user' ? { kind: principal.kind } : {}),
+    ...(principal.actingFor ? { actingFor: principal.actingFor.subject } : {}),
+    ...(principal.actingFor && actingForKind && actingForKind !== 'user' ? { actingForKind } : {}),
+    ...(typeof agent === 'string' && agent !== '' ? { agent } : {}),
+    ...(principal.assurance ? { assurance: principal.assurance } : {}),
+  };
 }
 
 /**
  * The caller a behavior's command runs as (D103): the route's principal
- * with its permissions, each once; else a calling service standing in for
+ * as principalCaller gives it; else a calling service standing in for
  * one (D37), by its deployable, holding none; else no one, an empty
  * subject, on a public route or one without a clause.
  */
 export function behaviorCaller(ctx: RequestContext): BehaviorCaller {
   if (ctx.principal) {
-    return { subject: ctx.principal.subject, permissions: [...new Set(ctx.principal.permissions)] };
+    return principalCaller(ctx.principal);
   }
   if (ctx.serviceCaller) {
     return { subject: ctx.serviceCaller.deployable, standsIn: true };

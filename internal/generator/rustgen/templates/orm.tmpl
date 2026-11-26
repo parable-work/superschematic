@@ -279,13 +279,23 @@ pub mod rules {
         }
     }
 
-    /// Who a command runs as, as the core takes a caller.
+    /// Who a command runs as, as the core takes a caller: with its kind,
+    /// whom it acts for, its run's Agent and its assurance (D200).
     pub(super) fn caller(caller: orm::Caller) -> adapter::Caller {
-        if caller.stands_in {
+        let mut core = if caller.stands_in {
             adapter::Caller::standing_in(caller.subject)
         } else {
             adapter::Caller::new(caller.subject, caller.permissions)
-        }
+        };
+        core.kind = caller.kind;
+        core.acting_for = caller.acting_for;
+        core.acting_for_kind = caller.acting_for_kind;
+        core.agent = caller.agent;
+        core.assurance = caller.assurance.map(|assurance| adapter::Assurance {
+            signed_in_at: assurance.signed_in_at,
+            user_verified: assurance.user_verified,
+        });
+        core
     }
 
     /// The core's refusal, or the adapter's own, as a repository's error.

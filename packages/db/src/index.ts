@@ -49,8 +49,15 @@ export type {
 } from "./decorators";
 export type {
   Approvals,
+  ApprovalsCaller,
+  ApprovalsConditionOn,
+  ApprovalsGateBaseOn,
   ApprovalsGateOn,
   ApprovalsOn,
+  ApprovalsProof,
+  ApprovalsRequirementGateOn,
+  ApprovalsRequirementsFromOn,
+  ApprovalsRowsGateOn,
   AutoGenerate,
   Budget,
   BudgetMeterOn,
