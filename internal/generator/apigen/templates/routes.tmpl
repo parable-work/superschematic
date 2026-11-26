@@ -182,6 +182,15 @@ type Config struct {
 	// RegisterRoutes refuses to start without one.
 	IdempotencyStore runtimeidempotency.Store
 {{- end }}
+{{- if .HasClientRateLimit }}
+
+	// ClientRateLimits holds the counts of every per-client @rateLimit
+	// route, so that each limit holds across the replicas that share it.
+	// Each route's limiter is named by its method and path. Optional: nil
+	// counts each limit in the memory of each replica, and while its store
+	// is unavailable each replica counts alone.
+	ClientRateLimits *runtimemiddleware.ClientRateLimits
+{{- end }}
 {{- if .Deps.RateLimitStore }}
 
 	// RateLimitStore is {{ .Deps.RateLimitStore }}, the memory store the API's config names
@@ -345,6 +354,7 @@ var IdempotencyTable = {{ .IdempotencyTableLiteral }}
 //		},
 //	})
 func RegisterRoutes(r chi.Router, cfg Config) error {
+{{- authSnippet "routesConfigPrepare" . }}
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
@@ -437,7 +447,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}
 				{{- if and .RateLimit (not .PrincipalRateLimited) }}
-				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext{{ if .Output.Deps.RateLimitStore }}, runtimemiddleware.WithStore(cfg.RateLimitStore, {{ printf "%q" .Output.SchemaName }}, {{ printf "%q" .RateLimitOperation }}){{ end }}),
+				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext{{ if .Output.Deps.RateLimitStore }}, runtimemiddleware.WithStore(cfg.RateLimitStore, {{ printf "%q" .Output.SchemaName }}, {{ printf "%q" .RateLimitOperation }}){{ else }}, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, {{ printf "%q" .RateLimitBucket }}){{ end }}),
 				{{- end }}
 				{{- if .BodyLimit }}
 				runtimemiddleware.BodyLimit({{ .BodyLimit }}, RespondError),

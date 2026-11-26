@@ -51,6 +51,13 @@ type Config struct {
 	// Identity.Middleware.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 
+	// ClientRateLimits holds the counts of every per-client @rateLimit
+	// route, so that each limit holds across the replicas that share it.
+	// Each route's limiter is named by its method and path. Optional: nil
+	// counts each limit in the memory of each replica, and while its store
+	// is unavailable each replica counts alone.
+	ClientRateLimits *runtimemiddleware.ClientRateLimits
+
 	// MinClientVersions is the oldest version of each client the API
 	// serves (D143): a request under /api whose X-Client-Version names a
 	// listed client at a lower version is answered 426 client_too_old.
@@ -164,7 +171,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/login",
 			Handler: identityHandler(cfg.Identity, "login"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/auth/login")),
 			},
 		},
 		// Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
@@ -173,7 +180,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/register",
 			Handler: identityHandler(cfg.Identity, "register"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(5, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(5, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/auth/register")),
 			},
 		},
 	}
@@ -334,7 +341,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/keys",
 			Handler: identityHandler(cfg.Identity, "createApiKey"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/auth/keys")),
 			},
 		},
 		// Revokes an API key of the caller's, which authenticates no request after. It answers true.
@@ -361,7 +368,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/password",
 			Handler: identityHandler(cfg.Identity, "changePassword"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/auth/password")),
 			},
 		},
 		{

@@ -104,12 +104,14 @@ operationSets:
           - name: id
             typeRef: { name: string }
             required: true
-      # Claim a widget with a token; returns the token.
+      # Claim a widget with a token, at most five times a minute per
+      # client; returns the token.
       - name: claimWidget
         typeRef: { name: string }
         required: true
         httpMethod: POST
         restPath: widgets/claim
+        middleware: { rateLimit: 5 }
         arguments:
           - name: token
             typeRef: { name: Identity.UUID }

@@ -19,6 +19,11 @@
 {{- end }}
 {{ define "routesConfigValidate" }}{{ end }}
 {{ define "routesConfigExample" }}{{ end }}
+{{ define "routesConfigPrepare" }}
+	if cfg.StepGuard == nil {
+		cfg.StepGuard = defaultStepGuard
+	}
+{{- end }}
 {{ define "routesSetupPre" }}{{ end }}
 {{ define "routesSetup" }}{{ end }}
 {{ define "routesProtectedMiddleware" }}{{ end }}
@@ -48,6 +53,11 @@ func firstStep(string) runtimerouting.Middleware {
 }
 
 func permissionStep(int) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler { return next }
+}
+
+// defaultStepGuard is the StepGuard routesConfigPrepare fills in.
+func defaultStepGuard(string) func(gohttp.Handler) gohttp.Handler {
 	return func(next gohttp.Handler) gohttp.Handler { return next }
 }
 

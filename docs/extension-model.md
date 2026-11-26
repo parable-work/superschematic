@@ -1821,7 +1821,10 @@ The `api` generator takes the provider `auth_provider` selects
   the request the handler reads. `routesConfigFields` adds `Config`
   fields to every API, public or not, for the values those middlewares
   read, and `routesDeclarations` adds the top-level declarations of
-  `routes.go` they call. A route with a service clause runs
+  `routes.go` they call. `routesConfigPrepare` opens `RegisterRoutes`,
+  before it validates `cfg`: statements that fill a core field from the
+  provider's fields, such as a store a provider's `Config` takes under
+  another name. A route with a service clause runs
   `AuthMiddleware` and `routesProtectedMiddleware` in its own chain, just
   before the permission middleware, instead of on the protected group. The
   generator checks the set when it

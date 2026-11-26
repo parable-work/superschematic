@@ -64,6 +64,13 @@ func TestRouterOptionsAnswerTheirRequests(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(apiDir, "router_options_mode_test.go"), []byte(mode), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			rateLimits, err := os.ReadFile(filepath.Join("testdata", "router_options_ratelimit_test.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apiDir, "router_options_ratelimit_test.go"), rateLimits, 0o644); err != nil {
+				t.Fatal(err)
+			}
 			if tc.options.ManualRouteConstants {
 				manual, err := os.ReadFile(filepath.Join("testdata", "router_options_manual_test.go"))
 				if err != nil {
