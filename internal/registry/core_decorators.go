@@ -172,6 +172,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_fenced.go, D119).
 	specs = append(specs, fencedDecorator())
 
+	// Per-record access: a table's audience, the table of grants and the
+	// access log (core_access.go, D156).
+	specs = append(specs, accessDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
@@ -201,7 +205,32 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	fieldFlag("uiHidden", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.UIHidden = true })
 	fieldFlag("internalMetadata", []string{pkgSchema}, func(f *ir.FieldDef) { f.InternalMetadata = true })
 	fieldFlag("virtual", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Virtual = true })
-	fieldFlag("decrypted", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Decrypted = true })
+	// @decrypted, or @decrypted({ permission }): reveal is its own
+	// permission (D156).
+	specs = append(specs, DecoratorSpec{
+		Name: "decrypted", Packages: []string{pkgAPI, pkgSchema}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			n.Field.Decrypted = true
+			if len(args) == 0 {
+				return nil
+			}
+			obj, ok := args[0].(map[string]any)
+			if len(args) != 1 || !ok {
+				return ArgErrorf(0, "@decrypted takes no argument, or { permission }: the permission a caller holds to see the value")
+			}
+			for _, key := range sortedKeys(obj) {
+				if key != "permission" {
+					return ArgErrorf(0, "@decrypted has no option %q; it takes permission", key)
+				}
+			}
+			permission, ok := obj["permission"].(string)
+			if !ok || permission == "" {
+				return ArgErrorf(0, "@decrypted's permission is the permission a caller holds to see the value, as \"contracts.reveal\"")
+			}
+			n.Field.RevealPermission = permission
+			return nil
+		},
+	})
 	fieldFlag("sourceMustProject", []string{pkgDB}, func(f *ir.FieldDef) { f.SourceMustProject = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "conflictUnit", Packages: []string{pkgDB}, Target: TargetField,

@@ -35,6 +35,12 @@ export type Documents = { [document: string]: unknown };
  */
 export type SchemaFile = Document | TypeDef | EnumFile | UnionFile | ScalarFile | OperationSetFile;
 
+export interface AccessGrantsDef {
+}
+
+export interface AccessLogDef {
+}
+
 export interface App {
   comment?: string;
   extensions?: string[];
@@ -60,6 +66,13 @@ export interface ArgumentDef {
   validateMin?: number;
   validateMinLength?: number;
   validatePattern?: string;
+}
+
+export interface AudienceDef {
+  agents?: string;
+  default?: string;
+  inheritFrom?: string;
+  owner?: string;
 }
 
 export interface BehaviorOperationsConfig {
@@ -297,6 +310,7 @@ export interface FieldDef {
   requiredNull?: boolean;
   restMethod?: string;
   restPath?: string;
+  revealPermission?: string;
   runtime?: boolean;
   searchField?: boolean;
   secret?: boolean;
@@ -834,7 +848,10 @@ export interface TraitRef {
 }
 
 export interface TypeDef {
+  accessGrants?: AccessGrantsDef;
+  accessLog?: AccessLogDef;
   allowUnknownFields?: boolean;
+  audience?: AudienceDef;
   /**
    * The behaviors the type composes, in the order their checks run. A registry
    * admits the behaviors it registers: the core's, which the engine

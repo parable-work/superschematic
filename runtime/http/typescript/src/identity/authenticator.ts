@@ -32,6 +32,9 @@ export function principalOf(p: IdentityPrincipal): Principal {
       transport: p.transport,
       roles: p.roles.map(role => ({ id: role.id, name: role.name, permissions: [...role.permissions] })),
     },
+    // A user, and the key it called with, which the access log records (D114, D156).
+    kind: 'user',
+    ...((p.apiKeyId ?? '') !== '' ? { credential: { kind: 'apiKey' as const, id: p.apiKeyId } } : {}),
   };
   identityPrincipals.set(principal, p);
   return principal;
