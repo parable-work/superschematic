@@ -103,27 +103,32 @@ fn mount(
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("currentTenant")
         .apply(get(handle_session_current_tenant));
     router = router.route("/api/auth/me", route);
     let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::TENANT_LIST_TENANTS))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
+        .operation("listTenants")
         .apply(get(handle_tenant_list_tenants));
     router = router.route("/api/tenants", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
+        .operation("createTenant")
         .apply(post(handle_tenant_create_tenant));
     router = router.route("/api/tenants", route);
     let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::TENANT_GET_TENANT))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
+        .operation("getTenant")
         .timeout_seconds(5)
         .apply(get(handle_tenant_get_tenant));
     router = router.route("/api/tenants/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
+        .operation("updateSecret")
         .apply(patch(handle_tenant_update_secret));
     router = router.route("/api/tenants/{id}", route);
     if let Some(manual_routes) = manual_routes {

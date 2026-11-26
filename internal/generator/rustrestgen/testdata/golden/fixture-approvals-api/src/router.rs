@@ -60,22 +60,27 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("approvalsListSignOffs")
         .apply(post(handle_task_approvals_list_sign_offs));
     router = router.route("/api/task/{id}/approvals/list-sign-offs", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("approvalsSignOff")
         .apply(post(handle_task_approvals_sign_off));
     router = router.route("/api/task/{id}/approvals/sign-off", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("approvalsWithdrawSignOff")
         .apply(post(handle_task_approvals_withdraw_sign_off));
     router = router.route("/api/task/{id}/approvals/withdraw-sign-off", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_task_status_transition));
     router = router.route("/api/task/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tasks.admin"])
+        .operation("reassignTask")
         .apply(patch(handle_task_admin_reassign_task));
     router = router.route("/api/tasks/{id}/assignment", route);
     router

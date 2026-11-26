@@ -59,18 +59,22 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["orders.write"])
+        .operation("statusTransition")
         .apply(post(handle_order_status_transition));
     router = router.route("/api/order/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("getOrder")
         .apply(get(handle_order_get_order));
     router = router.route("/api/orders/{id}", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentStatusTransition")
         .apply(post(handle_shipment_payment_status_transition));
     router = router.route("/api/shipment/{id}/payment-status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_shipment_status_transition));
     router = router.route("/api/shipment/{id}/status/transition", route);
     router

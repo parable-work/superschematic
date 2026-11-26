@@ -644,6 +644,13 @@ pub const POSTGRES: &str = r#"{
           "filter": "referencedByUserRoleGrantRole",
           "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id"
         }
+      ],
+      "many": [
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "roleId"
+        }
       ]
     },
     {
@@ -977,6 +984,28 @@ pub const POSTGRES: &str = r#"{
         {
           "filter": "referencedByUserRoleGrantUser",
           "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id"
+        }
+      ],
+      "many": [
+        {
+          "name": "sessions",
+          "target": "Session",
+          "column": "userId"
+        },
+        {
+          "name": "userApiKeys",
+          "target": "UserApiKey",
+          "column": "userId"
+        },
+        {
+          "name": "userCredentials",
+          "target": "UserCredential",
+          "column": "userId"
+        },
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "userId"
         }
       ]
     },
@@ -1595,6 +1624,14 @@ pub mod postgres {
         #[must_use]
         pub fn with_caller(self, caller: orm::Caller) -> Self {
             Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it
