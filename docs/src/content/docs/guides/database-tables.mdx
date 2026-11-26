@@ -454,6 +454,150 @@ that leaves deleted rows out adds it too. A field whose column would be
 `search_text` beside search fields fails the build, since the generated
 column takes that name.
 
+## Search across tables
+
+`@searchField` filters one table's rows. `@searchable` puts a table's rows
+in one index the whole database shares, so one search finds a row of any
+table, ranked, for a page and for an agent alike (D155).
+
+```ts
+import { AutoGenerate, Comments, Encrypted, Relation, attachments, audience, key, queue, searchable } from "@superschematic/db";
+
+// One message per row whose indexed text changed; the build fills its fields.
+@queue()
+export abstract class SearchIndexing {}
+
+@attachments<Task>({ released: FileReleased })
+@searchable<Task>({ title: "title", body: "details", scope: "project", queue: SearchIndexing })
+export abstract class Task implements Comments<Task, {}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  project: Relation<Project, { onDelete: "CASCADE" }>;
+  title: string;
+  details: Nullable<string>;
+  accessCode: Nullable<Encrypted<string>>;
+}
+
+@audience<Page>({ owner: "owner" })
+@searchable<Page>({ title: "title", body: "text", scope: "project", queue: SearchIndexing })
+export abstract class Page {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  project: Relation<Project, { onDelete: "CASCADE" }>;
+  title: string;
+  text: Nullable<string>;
+  owner: Identity.UUID;
+}
+```
+
+| Option | What it sets |
+| --- | --- |
+| `title` | the text field that titles each row: a match in it ranks highest, and a hit shows it |
+| `body` | a text field, or a list of them, that holds the row's body |
+| `scope` | a field holding one value, a text or a key (a relation's among them), that a search may keep to: a workspace, a project |
+| `queue` | the `@queue` class a write that changes the indexed text enqueues on: `sourceTable` and `sourceKey`; required |
+| `comments` | `false` leaves the row's conversation out; indexed when the table implements `Comments` |
+| `attachments` | `false` leaves its files' extracted text out; indexed when the table declares `@attachments` |
+
+The build adds one table to the database, `search_index`, with a row per
+record of every `@searchable` table: its table and key, its title, its
+body, the text of its conversation's messages, its files' extracted text,
+its scope, an optional embedding, and its effective audience and agent
+access ([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+A GIN index covers its words, each weighed by where it is: the title
+first, then the body, then the conversation, then the files.
+
+An `Encrypted<T>` field is never indexed: the build refuses `@searchable`
+naming one, since an index row holds its text in the clear.
+
+### How the index keeps up
+
+A trigger on each `@searchable` table runs in the writer's transaction:
+
+- a delete, or a soft delete, deletes the row's index row;
+- a change of the row's audience is copied into its index row, so a search
+  never shows a row to someone it was just hidden from;
+- an insert, a restore, and an update that changes a title, body or scope
+  field enqueue the row. So does a message posted or edited in its
+  conversation, and a file added, removed or given its extracted text.
+
+The queue keeps one ready message per row, however many writes it takes.
+Its worker calls `indexSearch`, which builds the row's index row again:
+
+```ts
+// An API's @worker({ queue: SearchIndexing }) class IndexSearch.
+export const createWorkers: WorkersConstructor = deps => ({
+  async indexSearch(message) {
+    await indexSearch(deps.orm, message);
+  },
+});
+```
+
+A changed text is found by its new words once the worker has run: under
+`stack dev`, within its poll interval; on Cloudflare Workers, at the next
+Cron firing, within about a minute, since a trigger's enqueue sends no
+wake. Access never waits on the queue. `reindexSearch(orm)` builds every
+row's index row, once, for a table made `@searchable` with rows in it.
+
+### Searching
+
+```ts
+import { searchTables } from "@superschematic/http-runtime/postgres";
+
+const { items, total, more } = await searchTables(orm, principal, { q: "walnut desk", scope: project, limit: 20 });
+// items: [{ table: "Task", key, title, matched: "body", snippet: [{ text: "a " }, { text: "walnut", match: true }, ...], place: 1 }, ...]
+```
+
+A row matches when it holds every word of `q`, folded to lower case, and
+the hits come best first: Postgres's `ts_rank_cd` over the weighed words,
+then table and key, as the engine's Search ranks. `tables` keeps to some
+tables, and `scope` to the rows whose scope field holds one of its values.
+A snippet comes in parts, each match marked, so no markup in a row reaches
+a page.
+
+Access is checked inside the query, so `total` and every page are exact
+and a hidden row never shows as a gap:
+
+- a user's audience is held on the index row's copy of each row's;
+- a party, or an agent run, reaches rows through its grants' relation
+  paths: for it the search keeps each table's rows to those its own list
+  reads show, through the table's repository, and leaves out a table its
+  grants reach no row of;
+- `permissions` in the options names the permission a table's rows need.
+
+`searchRoutes({ orm, authenticate })` serves the search at
+`GET /api/search?q=...&tables=...&scope=...&limit=...&offset=...`, and
+`searchMcpTool` with `callSearchTool` as the MCP tool `search`. An app
+mounts them; an agent run calls the tool with its run token, a grant, and
+finds what its grant reaches.
+
+### Embeddings
+
+Embeddings are off unless the options give them. With a model provider
+that embeds ([Runtime providers](/superschematic/guides/runtime-providers/)):
+
+```ts
+const options = { embeddings: searchEmbeddingsOf(providers.model("MODEL"), "text-embedding-1") };
+await indexSearch(deps.orm, message, options);
+await searchTables(orm, principal, { q }, options);
+```
+
+`indexSearch` then embeds a row's text after it writes the index row, and
+keeps the vector while the text is the same, so a write that leaves the
+text alone costs no model call. A search embeds its query and re-ranks its
+first 200 hits by reciprocal rank fusion of their text place and their
+similarity; the hits and the total stay the rows that hold the words. A
+model that fails leaves the text order.
+
+| Settled | Why |
+| --- | --- |
+| the index lives in each database | the access check reads each row's audience and, for a grant, the row itself, in the query that ranks |
+| a vector costs 8 bytes a dimension a row, a model call per changed text and one per search | a 1536-dimension model is about 12 GB a million rows; a search reads at most 200 vectors |
+| leaving out the option switches embeddings off | no call is made and no search re-ranks; `reindexSearch` embeds every row again after a change of model |
+
+Search across tables is Postgres alone: the build refuses `@searchable` in
+a service that lists `sqlite`.
+
 ## Pages
 
 `FindPage` reads one page of the rows a filter finds, in the order of one

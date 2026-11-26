@@ -2146,3 +2146,82 @@ Left:
 - The calendar on SQLite and D1.
 - `examples/deploy-smoke` with a Recurrence table, and the live
   `smoke.sh Cloudflare` run, which is the maintainer's.
+
+## D155. A `@searchable` table's rows share one search index in its database, a trigger keeps an index row's access and a queue's worker its text, one query ranks every table with the caller's access checked inside it, and embeddings are an option that re-ranks (D58, D77, D84, D103, D156, D159 amended)
+
+Each table filtered its own rows through `searchText`, a `LIKE` over its
+`@searchField` columns, and only the engine searched across schemas: each
+schema's Search ranked its own instances and the engine fused the
+rankings (D16, D58, D77). Nothing found a row of any table for a UI or an
+agent with one call, and nothing indexed a row's conversation or files.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@searchable<T>({ title, body?, scope?, queue, comments?, attachments? })` from `@superschematic/db` on a DB table, a schema feature as `@audience` and `@references` are. `title` is a text field; `body` a text field or a list of them; `scope` a field holding one value, a text or a key (a relation's among them). | A behavior on the core. D103's own test folded the engine's Search into `@searchField`: an index and a read across tables are a storage shape and a query, which a per-table pure core does not see. Moving the engine's every-schema search onto namespace operations (D77's left item) serves engine schemas, not tables. |
+| The loader adds one index table per database, `search_index` (`ir.SearchIndexTypeName`, marked `TypeDef.SearchIndex`, with no repository): one row per record, unique on its table and key as text, with its title, body, conversation text, files' text, scope, the copied `audience UUID[]` and `agents`, and `text_hash`, `embedding DOUBLE PRECISION[]` and `embedding_model`. A GIN expression index covers the weighed words (`ir.SearchDocument`), one GIN index the audience. | An index once per environment, a service of its own: the access check needs each row's audience and, for a grant, the row itself, in the query that ranks; across databases every write would be two transactions, and the check would run on results, which pages and counts cannot survive. An index per table, the engine's shape: a ranking across tables would fuse per-table rankings, whose pages and totals are not exact. A generated `tsvector` column on each table: one ranking across tables would be a union of every table. |
+| The index lives in each database. An environment with several databases searches each one's index; a search across databases is left. | |
+| A trigger on each `@searchable` table runs after every insert, update and delete of a row, in the writer's transaction: a delete, a soft delete and a change of key delete the index row; on an `@audience` table, a change of the effective audience or agent access is copied into the index row; an insert, a restore and an update that changes a title, body or scope field enqueue the row. A trigger on the table's Comments messages and on its attachments sub-table enqueues the row they belong to when their text changes. | Writing the index row in the trigger: each write would aggregate the row's conversation and files, and a model's embedding would sit inside the transaction. Copying the access columns through the queue too: a row made private would show in search until a worker ran, which D156 turned down for its own cascade. |
+| The queue is the declaration's `@queue` class, whose fields the loader fills (`sourceTable`, `sourceKey`) and whose key it sets (D80): one ready message per row, `skip` on a duplicate, one claim at a time per row. Its worker calls `indexSearch(orm, message, options)`, which reads the row under a share lock, so an audience change waits for it, and writes the index row with the row's access columns in one statement. On Workers the queue drains at each Cron firing (D92, D151); a trigger's enqueue sends no wake, so a changed text is found by its new words within about a minute there, and within the worker's poll interval under `stack dev`. | A behavior change queue (`ir.BehaviorQueueChanges`), whose messages a `@behaviorWorker` hands to the core: the index is not a behavior's state. A wake per enqueue, which D151 leaves for change queues. |
+| A row's index row holds its posted and interrupted messages' bodies (Comments) and its ready files' `extracted_text` (D154), each at most 256 KiB, unless the declaration says `comments: false` or `attachments: false`. Their words weigh C and D, the body B, the title A. | A row of the index per message and per file, which would rank a thread's ten messages as ten hits. |
+| `Encrypted<T>` fields are never indexed: the loader refuses `@searchable` naming one as its title, body or scope, since an index row holds its text in the clear. | Indexing the opened value, which would put a sealed value at rest in the clear. A blind index (D85's left), which matches whole values only. |
+| The ranking is the engine's. A query's words are each a phrase of the words Postgres's parser finds in them (`phraseto_tsquery`), all required, as the engine's Search reads a plain query; the configuration is `simple`, the engine's index where it has no `unaccent` (D58); the order is `ts_rank_cd` with the engine's four weight classes, then table and key. | `websearch_to_tsquery`, a second query syntax beside the engine's. `unaccent`, which needs the extension in every database the migration model creates (left). |
+| `searchTables(orm, principal, { q, tables?, scope?, limit?, offset?, vector? }, options)` answers one page, the exact total, `more`, and for each hit its table, key, title, where the words matched and a snippet in parts (`{ text, match? }`), so no markup in a row's text reaches a page. | Snippets as HTML, which a row's own text could break out of. |
+| Access is checked inside the query. The caller's audience is `audienceConditions` (D156) over the index row's copied columns, exact since the trigger copies them in the writer's transaction. A caller with grants, a party or an agent run, reaches a table's rows through its grants' relation paths, which no copy can hold: for it each table's index rows are kept by an `EXISTS` back to the table, with the conditions the table's own repository applies for that caller (`repository.conditions`), and a table no grant reaches is left out of the query. `options.permissions` names the permission a table's rows need. | Filtering the results after the query, which shows a gap or a wrong count where a hidden row was. An `EXISTS` for every caller, a join per hit for a user whose audience the copy holds exactly. Copying a grant's reach into the index, which a role's paths and a grant's target change without a write of the row. |
+| `scope` is the app's filter: the value of the field each declaration names, copied into the index row as text; a search keeps to the values it names (a UUID in its wire form or hyphenated). A table with no scope field is in no scope. | A scope callback in the runtime, which no index serves. |
+| Embeddings are off unless `options.embeddings` (`{ model, embed, maxChars? }`) is given, which `searchEmbeddingsOf(provider, model)` builds from a model provider (D159) that implements the new optional `embed`. `indexSearch` embeds a row's text after its transaction and stores the unit vector only while `text_hash` still holds; an unchanged text keeps its vector and is never embedded again. A search embeds its query (or takes `vector`) and re-ranks the first `RRF_WINDOW` (200) text hits by reciprocal rank fusion of their text place and their cosine place, `RRF_K` 60, the engine's constants; the hits and the total stay the full-text matches. A model that fails leaves the text order. | pgvector's `vector(n)` with an HNSW index: it needs the extension and one dimension per database, and serves a search by vector alone, which the plan does not ask for (left). An embedding call inside the write's transaction. |
+| `searchRoutes({ orm, authenticate, base? })` serves `GET /api/search?q&tables&scope&limit&offset`, and `searchMcpTool` with `callSearchTool(orm, principal, args)` the MCP tool `search`. An app mounts them, as it mounts the calendar's (D152). | Generated routes and tools, which wait on the generated router mounting the runtime's (left, as D152's). |
+
+Settled. The index lives in each database. What embeddings cost at scale:
+one model call per row whose indexed text changes, none for a write that
+leaves it as it was, and one per search; 8 bytes a dimension a row (a
+1536-dimension model is about 12 KiB a row, 12 GB a million rows); a
+search reads at most 200 vectors. Switching them off is leaving out the
+option: no call is made, no search re-ranks, and stored vectors are kept
+until `UPDATE search_index SET embedding = NULL, embedding_model = NULL`
+clears them. A change of model is `reindexSearch(orm, { embeddings })`,
+which embeds every row again. A table made `@searchable` with rows in it
+needs `reindexSearch` once.
+
+How section 8 calls search for an agent run: the run's token is a grant
+(D156), so the MCP endpoint's authenticator, `grantAuthenticator`, resolves
+the call to the run's principal (`kind: "agent"`, `actingFor`, `grants`),
+and the endpoint answers `tools/call` of `search` with
+`callSearchTool(orm, principal, args, options)`. Its hits keep to the rows
+its grants' paths reach, by the `EXISTS` above, and to the rows whose
+audience holds the run or whom it acts for and whose agent access is not
+`none`. `scope` stays the app's filter; it widens nothing.
+
+Built: `ir/search.go`, `internal/registry/core_search.go`,
+`internal/loader/search`, `internal/loader/verify/searchable.go`, the
+triggers in create.sql, drop.sql and migration plans
+(`internal/generator/sqlgen/searchable.go`), the definition in orm.ts
+(`internal/generator/tsgen/searchable.go`),
+`runtime/http/typescript/src/search-tables.ts` (`searchTables`,
+`indexSearch`, `reindexSearch`, `searchRoutes`, `searchMcpTool`,
+`callSearchTool`, `searchEmbeddingsOf`), `ModelProvider.embed` and the
+stub model's; the guide's "Search across tables";
+`examples/search-across-tables`. `TestSearchTablesEndToEnd` runs the
+plan's "done when" on Postgres: two users search the same text across six
+tables and each gets exactly the rows its list reads show, page by page
+with the same total; a party with a grant finds only the contract its
+grant names and the units and requests its role reaches, through the
+route and the MCP tool too, and nothing once the grant is revoked; a
+row's conversation and files are found with it and an encrypted field is
+never in the index; an audience change and a delete hold at once and a
+changed text once the queue drains; scope; and embeddings re-rank, are
+kept while the text holds and fall back to the text order.
+
+Left:
+
+- The Go and Rust repositories and servers, and Python's.
+- The generated router mounting `searchRoutes` and the MCP tool, and a
+  generated handler for the indexing queue; an app wires them.
+- A list operation's row rule (`by`), which is its operation's and not
+  the repository's: search holds audience, grants and per-table
+  permissions, as the calendar does.
+- `unaccent`, prefixes and a query syntax; a search by vector alone.
+- SQLite and D1.
+- A wake for the indexing queue (D151's change-queue wake).
+- A search across the databases of an environment.
+- `examples/deploy-smoke` with a `@searchable` table, and the live
+  `smoke.sh Cloudflare` and `Gcp` runs, which are the maintainer's.
