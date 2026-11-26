@@ -354,6 +354,7 @@ var IdempotencyTable = {{ .IdempotencyTableLiteral }}
 //		},
 //	})
 func RegisterRoutes(r chi.Router, cfg Config) error {
+{{- authSnippet "routesConfigPrepare" . }}
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
