@@ -577,6 +577,37 @@ macro_rules! script {
             answer($run!(entries.upsert_one(&upsert, &on, &EntryUpdate::default(), UpsertOptions::default())), upserted),
         ));
 
+        // Upserts of many rows (D89): a sync of three lines in batches of
+        // two, the first of which upsertEntry wrote; again, one line
+        // changed, only if changed; one that sets no field; lines that set
+        // different columns; and two lines of one key in one batch.
+        let line = |n: u8, external: &str, amount: i64| EntryCreate {
+            external_id: Some(external.to_owned()),
+            ..entry(n, bank, amount, "2026-10-27")
+        };
+        let all = |rows: Vec<Upserted<EntryRow>>| json!(rows.into_iter().map(upserted).collect::<Vec<_>>());
+        let sync = vec![line(20, "x1", 650), line(21, "x2", 700), line(22, "x3", 800)];
+        let in_twos = UpsertManyOptions { batch: Some(2), ..Default::default() };
+        calls.push(("upsertEntries", answer($run!(entries.upsert_many(&sync, &on, &["amountCents"], in_twos)), all)));
+        let mut changed = sync.clone();
+        changed[1].amount_cents = 750;
+        calls.push((
+            "upsertEntriesOnlyIfChanged",
+            answer(
+                $run!(entries.upsert_many(&changed, &on, &["amountCents"], UpsertManyOptions { only_if_changed: true, ..Default::default() })),
+                all,
+            ),
+        ));
+        calls.push(("upsertEntriesKeep", answer($run!(entries.upsert_many(&changed, &on, &[], UpsertManyOptions::default())), all)));
+        let mut mixed = vec![line(23, "x3", 850), line(24, "x4", 900)];
+        mixed[1].memo = Some("Lunch".to_owned());
+        calls.push(("upsertEntriesMixed", answer($run!(entries.upsert_many(&mixed, &on, &["amountCents", "memo"], UpsertManyOptions::default())), all)));
+        calls.push((
+            "upsertEntriesTwice",
+            answer($run!(entries.upsert_many(&[line(25, "x5", 1), line(26, "x5", 2)], &on, &["amountCents"], UpsertManyOptions::default())), all),
+        ));
+        calls.push(("upsertEntriesOfAKey", answer($run!(entries.upsert_many(&sync, &on, &["id"], UpsertManyOptions::default())), all)));
+
         // Deletes: one that stamps the row, which a read then leaves out,
         // one that removes it, and an account's with its entries and
         // without any.

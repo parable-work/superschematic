@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "service": "fixture-queue-db",
+  "queue": "OrderPlaced",
+  "dialect": "sqlite",
+  "operation": "retry",
+  "all": true,
+  "statements": {
+    "dead": "SELECT q.id, q.attempts, COALESCE(q.last_error, ''),\n  strftime('%Y-%m-%dT%H:%M:%SZ', q.updated_at),\n  json_object('order_id', q.\"order_id\", 'placed_at', q.\"placed_at\", 'priority', q.\"priority\", 'quantity', q.\"quantity\", 'note', q.\"note\", 'ship_to', CASE WHEN json_valid(q.\"ship_to\") THEN json(q.\"ship_to\") ELSE q.\"ship_to\" END, 'tags', CASE WHEN json_valid(q.\"tags\") THEN json(q.\"tags\") ELSE q.\"tags\" END),\n  count(*) OVER ()\nFROM order_placed_queue AS q\nWHERE q.state = 'dead'\nORDER BY q.updated_at, q.id\nLIMIT ?1",
+    "states": "SELECT q.id, CASE WHEN q.id IN (SELECT id FROM order_placed_queue WHERE state = 'dead' AND id IN (SELECT value FROM json_each(?1))) THEN '' ELSE q.state END\nFROM order_placed_queue AS q WHERE q.id IN (SELECT value FROM json_each(?1))",
+    "retry": "UPDATE order_placed_queue SET state = 'ready', attempts = 0, due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')\nWHERE state = 'dead' AND id IN (SELECT value FROM json_each(?1))\n  AND (SELECT count(*) FROM (SELECT id FROM order_placed_queue WHERE state = 'dead' AND id IN (SELECT value FROM json_each(?1)))) = json_array_length(?1)\nRETURNING id",
+    "retryAll": "UPDATE order_placed_queue SET state = 'ready', attempts = 0, due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')\nWHERE state = 'dead'\nRETURNING id",
+    "drop": "DELETE FROM order_placed_queue\nWHERE state = 'dead' AND id IN (SELECT value FROM json_each(?1))\n  AND (SELECT count(*) FROM (SELECT id FROM order_placed_queue WHERE state = 'dead' AND id IN (SELECT value FROM json_each(?1)))) = json_array_length(?1)\nRETURNING id",
+    "dropAll": "DELETE FROM order_placed_queue\nWHERE state = 'dead'\nRETURNING id"
+  }
+}

@@ -3788,13 +3788,18 @@ export abstract class FulfilOrders {}
   of the queue would enqueue one for, with the trigger's insert as a
   statement per table, and prints how many. The statements are
   `sqlutil.PostgresQueueOperatorStatements`, beside the claims', each
-  taking IDs as one text-array parameter. The compiler holds no driver
-  (D27), so the command writes them into a queue document
-  (`internal/queueops`) that the migration runner runs,
-  `superschematic-migrate queue`, in one transaction, and prints its
-  result as JSON. On the local target the runner reaches the database at
-  the URL the environment resolves, on the Postgres container `stack dev`
-  runs; the command refuses a queue on another dialect.
+  taking IDs as one text-array parameter, or on a database on SQLite or
+  D1 `sqlutil.SQLiteQueueOperatorStatements` (D68), which take them as a
+  JSON array, name the message's columns in a listing, and retry or drop
+  the IDs named in one statement that changes each of them or none, since
+  D1 has no transaction a refusal could roll back. The compiler holds no
+  driver (D27), so the command writes them into a queue document
+  (`internal/queueops`), which names its dialect when it is SQLite's, that
+  the migration runner runs, `superschematic-migrate queue`, in one
+  transaction, and prints its result as JSON. On the local target the
+  runner reaches the database at the URL the environment resolves, on the
+  Postgres container `stack dev` runs, or the SQLite file of a database on
+  SQLite under the environment's state directory.
   On a cloud target the command runs the document on the deployed run's
   database through the target's queue runner (`TargetSpec.Queues`,
   `registry.QueueRunner`), and refuses a target with none and a run never
@@ -5919,7 +5924,7 @@ app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 | database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. A database whose DB services list postgres first is on `cloudflare.hyperdrive` instead: a database of a Postgres outside Cloudflare, no node, reached through the Hyperdrive config whose id its settings name (section 18.6, D92). |
 | sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. To a database on Hyperdrive, `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive `hyperdrive: { binding: "<FIELD>", config: <the settings' id> }`, and the Worker connects as the config's user. |
 | migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). A database on Hyperdrive is migrated on its origin, the connection string in the shell's `HYPERDRIVE_ORIGIN_<DB>`, once the runner has read the config and found it names that database (D92). |
-| queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96). |
+| queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96); on a D1 database, the runner there too, at its `d1://` URL, the uuid the deploy's outputs hold, with the shell's token (D68). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written, and `cors` an `r2BucketCors` (`<bucket>.cors`) with a rule per element, `cors-1`, `cors-2` (D148). Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |

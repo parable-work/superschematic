@@ -18,9 +18,10 @@ import (
 	"github.com/parable-work/superschematic/runtime/migrate/go/postgres"
 )
 
-// queue runs a queue document (migrate.QueueDocument) on a Postgres
-// database: the one --database-url names, or one on a Cloud SQL instance,
-// reached through the Cloud SQL Go connector as a job's databases are. It
+// queue runs a queue document (migrate.QueueDocument) on a database of its
+// statements' dialect: the one --database-url names, a Postgres, a SQLite
+// file or a D1 database, or a Postgres on a Cloud SQL instance, reached
+// through the Cloud SQL Go connector as a job's databases are. It
 // prints what it did as JSON (migrate.QueueResult), or, with --result,
 // writes that to the object or file --result names and prints only where
 // it went: a listing holds the dead messages' bodies, which may hold
@@ -111,10 +112,14 @@ func runQueueDocument(ctx context.Context, q *migrate.QueueDocument, conn *migra
 	return append(out, '\n'), nil
 }
 
-// queueDriver opens the Postgres database a queue document runs on: on
-// the Cloud SQL instance conn names, or at the URL --database-url or
-// DATABASE_URL names.
+// queueDriver opens the database a queue document runs on: on the Cloud
+// SQL instance conn names, or at the URL --database-url or DATABASE_URL
+// names, a database of the dialect of the document's statements: Postgres,
+// or SQLite's, a SQLite file or a d1:// database (D68).
 func queueDriver(ctx context.Context, q *migrate.QueueDocument, conn *migrate.CloudSQLConnection, database, urlFlag string, o options) (migrate.Driver, func(), error) {
+	if conn != nil && q.DialectOf() != migrate.Postgres {
+		return nil, nil, fmt.Errorf("queue %s of %s: the document's statements are %s's, and a Cloud SQL instance runs Postgres", q.Queue, q.Service, q.DialectOf())
+	}
 	if conn != nil {
 		dial := o.cloudSQL
 		if dial == nil {
@@ -138,10 +143,10 @@ func queueDriver(ctx context.Context, q *migrate.QueueDocument, conn *migrate.Cl
 	if err != nil {
 		return nil, nil, err
 	}
-	// The operator's statements are Postgres's alone, so no other
-	// database is opened for them.
-	if dialect := migrate.URLDialect(url); dialect != migrate.Postgres {
-		return nil, nil, fmt.Errorf("queue %s of %s: a queue's dead messages are read, retried and dropped on Postgres alone, and the database URL selects %s", q.Queue, q.Service, dialect)
+	// The statements are of one dialect, so no database of another is
+	// opened for them.
+	if dialect := migrate.URLDialect(url); dialect != q.DialectOf() {
+		return nil, nil, fmt.Errorf("queue %s of %s: the document's statements are %s's, and the database URL selects %s", q.Queue, q.Service, q.DialectOf(), dialect)
 	}
 	return openDriver(ctx, url, o)
 }

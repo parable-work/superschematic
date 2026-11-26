@@ -31,7 +31,7 @@ use superschematic_http_runtime::orm;
 pub use orm::{
     Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeyring, FieldKeys,
     FindOptions, Found, OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text,
-    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 #[allow(unused_imports)]
@@ -1519,9 +1519,12 @@ pub const POSTGRES: &str = r#"{
     "offset": " OFFSET %d",
     "changed": "(%s) IS DISTINCT FROM (%s)",
     "never": "FALSE",
-    "null": "NULL"
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
   },
   "defaultLimit": 100,
+  "maxParameters": 65535,
   "historyActorCTE": "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   "clearHistoryActor": "SELECT set_config('superschematic.history_actor_id', '', true)",
   "tables": [

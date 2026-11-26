@@ -214,7 +214,8 @@ path for when the store is unavailable.
   of moves in a handler or write the trigger by hand (rules below).
 - **Syncs and imports upsert by a unique key, in batches.** The generated
   repositories' `upsertMany(inputs, on, fields, { onlyIfChanged: true })`
-  (Go `UpsertMany`) writes a batch in one statement and reports each row
+  (Go `UpsertMany`, Rust `upsert_many`, which runs on SQLite too) writes a
+  batch in one statement and reports each row
   `inserted`, `updated` or `unchanged`; an unchanged row is not rewritten,
   so it keeps its `updatedAt` and fires no `@enqueueOnChange`. Use it, or
   `upsertOneResult`, rather than a loop of `upsertOne` or a find then a

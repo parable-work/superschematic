@@ -77,6 +77,34 @@ func TestBackfillSQL(t *testing.T) {
 	}
 }
 
+// TestSQLiteQueueBackfillSQL: the backfill `stack queue backfill` runs on
+// SQLite takes, under replace, the first row of each key by the table's
+// key, as Postgres's DISTINCT ON does, through a window over the rows that
+// meet the conditions; under skip and append it is the plan's (D88).
+func TestSQLiteQueueBackfillSQL(t *testing.T) {
+	for _, onDuplicate := range []string{"", ir.QueueOnDuplicateReplace, ir.QueueOnDuplicateSkip} {
+		out, err := Generate(backfillSchema(onDuplicate), Options{SchemaName: "tasks-db"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := out.EnqueueTriggers[0]
+		got := e.SQLiteQueueBackfillSQL(quoteSQLite)
+		if onDuplicate != ir.QueueOnDuplicateReplace {
+			if want := e.SQLiteBackfillSQL(quoteSQLite); got != want {
+				t.Errorf("%q: the command's backfill is\n%s\nwant the plan's\n%s", onDuplicate, got, want)
+			}
+			continue
+		}
+		want := `INSERT INTO "task_gone_queue" ("task_id", "title")` + "\n" +
+			`SELECT src."id", src."title"` + "\n" +
+			`FROM (SELECT src.*, row_number() OVER (PARTITION BY src."title" ORDER BY src."id") AS "superschematic_backfill_row" FROM "task" AS src WHERE src."done" = 1 AND src."urgent" IS NULL AND src."rank" = 2.5 AND src."title" = 'it''s' AND src."status" = 'open') AS src` + "\n" +
+			`WHERE src."superschematic_backfill_row" = 1` + "\n" + e.SQLiteConflict
+		if got != want {
+			t.Errorf("the command's backfill under replace is\n%s\nwant\n%s", got, want)
+		}
+	}
+}
+
 // TestRoleSeedSQL: a seeded role's insert adds it, and gives a role of its
 // name with no permissions the seed's; its update sets them; a seed with
 // no permissions adds the role and changes none (D88).
