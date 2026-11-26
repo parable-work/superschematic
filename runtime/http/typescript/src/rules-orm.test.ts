@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import pg from 'pg';
-import { NotFoundError, ormOf, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
+import { ormOf } from './orm-postgres';
+import { NotFoundError, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
 import { RulesRefusal, withRulesCore, type BehaviorEvents, type CoreReadRequest, type CoreRowWrite, type RulesCallOptions, type RulesCore, type RulesLayout, type RulesTableCallOptions } from './rules';
 import { bumpVersion, rulesCore, rulesDsn } from './rules.testing';
 import { uuidToDb } from './uuid';
