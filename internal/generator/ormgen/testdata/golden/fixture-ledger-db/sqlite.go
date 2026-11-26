@@ -715,6 +715,51 @@ func (t *sqliteTable) arg(value any, column int) (any, error) {
 	return v, nil
 }
 
+// coreColumns are columns, by column, each a Go value as the Postgres
+// repository binds it, as SQLite holds it: what a write through the
+// behaviors' core writes beside its own fields (D103). A JSON column's
+// value is its JSON text.
+func (t *sqliteTable) coreColumns(columns map[string]any) (map[string]any, error) {
+	if columns == nil {
+		return nil, nil
+	}
+	out := make(map[string]any, len(columns))
+	for name, value := range columns {
+		at := -1
+		for i := range t.columns {
+			if t.columns[i].name == name {
+				at = i
+				break
+			}
+		}
+		switch v := value.(type) {
+		case nil:
+			out[name] = nil
+			continue
+		case []byte:
+			if at >= 0 && (t.columns[at].json || t.columns[at].list) {
+				out[name] = string(v)
+				continue
+			}
+		case string:
+			if at >= 0 && t.columns[at].json {
+				out[name] = v
+				continue
+			}
+		}
+		if at < 0 {
+			out[name] = value
+			continue
+		}
+		converted, err := t.arg(value, at)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = converted
+	}
+	return out, nil
+}
+
 // keyArg is what a key binds as.
 func (t *sqliteTable) keyArg(key any) (any, error) {
 	return t.arg(key, t.key)

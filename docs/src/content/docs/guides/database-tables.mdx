@@ -1767,12 +1767,17 @@ check. What is Postgres's stays Postgres's:
   isolation level and begins an ordinary transaction.
 - The declared queries answer `ErrPostgresOnly`.
 
+A table that composes behaviors writes its rows through the behaviors'
+core on SQLite too (D103): a create, an update, a delete and each use's
+operations run as the core's commands in the repository's transaction,
+over the rules module's SQLite store, and answer as they do on Postgres.
+Its upserts are refused with `ErrSQLiteUnsupported`.
+
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
-`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, a
-version graph's released rows, and a table that composes behaviors. The
-SQLite DDL refuses a vector and a `@versioned` table for the whole
-service. A timestamp is held to the millisecond, so two rows written in one
+`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, and a
+version graph's released rows. The SQLite DDL refuses a vector and a
+`@versioned` table for the whole service. A timestamp is held to the millisecond, so two rows written in one
 millisecond tie in an order by it, and their keys break the tie.
 
 An enqueue on SQLite takes the transaction itself

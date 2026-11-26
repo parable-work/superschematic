@@ -159,9 +159,10 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		ModulePath:  "example.com/schemas/orm/" + svc,
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		// fixture-queue-db lists the sqlite dialect, whose queues the ORM
-		// claims on SQLite too; it and fixture-ledger-db, the tables both
-		// ORMs are held to, have repositories on SQLite (D116).
-		SQLite:   svc == queueFixture || svc == tableParityFixture,
+		// claims on SQLite too; it, fixture-ledger-db, the tables both
+		// ORMs are held to, and fixture-workflow-db, whose writes run
+		// through the behaviors' core, have repositories on SQLite (D116).
+		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture,
 		Registry: reg,
 		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
@@ -224,7 +225,7 @@ func TestWriteORMGolden(t *testing.T) {
 		// Tables whose fields are behaviors (D103): rules.go embeds their
 		// layout, and each repository runs its writes and its fields'
 		// operations through the core.
-		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go"}},
+		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go", "sqlite.go", "sqlite_order.go", "sqlite_shipment.go"}},
 		// Tables that implement Timers (D103): their operations under
 		// Timers(), RunDeadline, no upsert, no repository of a sub-table,
 		// and the deadline queues.

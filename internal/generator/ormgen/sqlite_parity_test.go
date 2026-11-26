@@ -9,9 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
+	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 //go:embed testdata/sqlite/ledger_results_test.go
@@ -53,6 +57,44 @@ func TestRepositoryResultsOfGoOnSQLiteAndPostgres(t *testing.T) {
 	t.Log(alike)
 }
 
+//go:embed testdata/sqlite/workflow_results_test.go
+var sqliteWorkflowResultsTest string
+
+// TestWorkflowTablesOfGoOnSQLiteAndPostgres holds the Go repositories of
+// fixture-workflow-db, whose tables compose a Workflow on their status
+// fields, on a SQLite file to Postgres, call for call (D103, D116): each
+// create, update and delete and each use's operation is a command of the
+// behaviors' core, run on SQLite through the rules module's store over the
+// repository's transaction, and answers what it answers on Postgres,
+// refusals among them: a key a row holds, a transition the Workflow does
+// not list, one without the permission it names, a stale one, and a row
+// no key names. Reads, field selections, filters, an UpdateMany and
+// transactions over the same tables are in the script.
+//
+// It needs the Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL and the
+// rules archive (make rules-archive), and runs outside -short.
+func TestWorkflowTablesOfGoOnSQLiteAndPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the workflow tables' result comparison in -short mode")
+	}
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to hold the workflow tables on SQLite to Postgres")
+	}
+	paths := testpaths.Local(t)
+	ormDir := generateBehaviorORMModule(t, paths, workflowFixture, func(o *Options) { o.SQLite = true })
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, workflowFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load %s: %v", workflowFixture, err)
+	}
+	out := runSQLiteTestIn(t, ormDir, schema, workflowFixture, sqliteWorkflowResultsTest, "TestWorkflowTablesOnSQLiteAndPostgres")
+	alike := regexp.MustCompile(`SQLite and Postgres answered \d+ calls alike, \d+ of them refusals`).FindString(out)
+	if alike == "" {
+		t.Fatalf("the comparison did not run:\n%s", out)
+	}
+	t.Log(alike)
+}
+
 // runSQLiteModuleTest generates fixture's ORM with its repositories on
 // SQLite beside its Postgres DDL, writes the SQLite DDL the build writes
 // at testdata/sqlite.sql and source as a test of the module, which opens
@@ -65,6 +107,13 @@ func runSQLiteModuleTest(t *testing.T, fixture, source, test string) string {
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	return runSQLiteTestIn(t, ormDir, schema, fixture, source, test)
+}
+
+// runSQLiteTestIn is runSQLiteModuleTest in the ORM module at ormDir, of
+// schema.
+func runSQLiteTestIn(t *testing.T, ormDir string, schema *ir.Schema, fixture, source, test string) string {
+	t.Helper()
 	model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: fixture}, sqlmigrate.SQLite)
 	if err != nil {
 		t.Fatalf("the SQLite model of %s: %v", fixture, err)

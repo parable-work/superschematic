@@ -314,8 +314,6 @@ func sqliteRefusal(repo *Repository) string {
 		return "it implements Mergeable, whose MergeInto the Go repositories run on Postgres alone"
 	case repo.Released:
 		return "it holds a version graph's released rows, which the version graph keeps on Postgres alone"
-	case repo.HasBehaviors:
-		return "it composes behaviors, whose writes the Go repositories run through the core on Postgres alone"
 	}
 	for _, f := range repo.Fields {
 		if f.IsGeoPoint || f.IsGeoPointList {
