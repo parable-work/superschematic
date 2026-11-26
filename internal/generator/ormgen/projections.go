@@ -46,6 +46,13 @@ type ProjectionRepository struct {
 	Source          string
 	SearchCondition string
 	SearchProbe     string
+
+	// QualifiedKey is the view's key column, qualified, and Audience its
+	// source's audience, which a read of the view keeps to (D156, D180):
+	// its probe holds the view to the source's rows the caller sees. Nil
+	// for a view of a source no audience holds.
+	QualifiedKey string
+	Audience     *sqlutil.AudienceModel
 }
 
 // Comment is the row struct's doc comment: what it is, then the class's
@@ -168,6 +175,10 @@ func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schem
 			// search column (D99).
 			SearchCondition: sqlutil.SearchConditionOf(view),
 			SearchProbe:     view.SearchProbe,
+			Audience:        view.Audience,
+		}
+		if key := view.KeyColumn(); key != nil {
+			p.QualifiedKey = key.Qualified
 		}
 		if err := p.SQL.CheckFormats(); err != nil {
 			return nil, err

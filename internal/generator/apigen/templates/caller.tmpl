@@ -4,17 +4,48 @@ package {{ toPackageName .SchemaName }}
 
 import (
 	"context"
+{{- if .Deps.AccessLog }}
+	gohttp "net/http"
+{{- end }}
 {{- authSnippet "callerImports" . }}
+
 	orm "{{ .Deps.ORMModule }}"
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
 )
 
 // callerContext is ctx acting, for Deps.DB, the ORM of {{ .Deps.Database }}, as
 // the caller of the request it serves (D87): the principal the route's auth
-// step put on it, by its ID. Each route runs its operation with it, so a
-// write the implementation makes with the context stamps createdBy,
-// updatedBy and deletedBy with the caller. orm.WithUserID or orm.AsSystem
-// on the context acts as another user; a route with no caller, and a job,
-// a worker or a manual route's handler, acts as no one.
+// step put on it, whole (D156, D180). Each route runs its operation with
+// it, so a write the implementation makes with the context stamps
+// createdBy, updatedBy and deletedBy with the caller.
+{{- if .Deps.AccessHeld }}
+// Every read and write keeps to what the caller may see: an @audience
+// table's rows whose audience holds them, and for a party or an agent run
+// the rows its grants reach. A route with no caller reads as the anonymous
+// caller, who sees the rows everyone may; a job, a worker or a manual
+// route's handler reads every row.
+{{- end }}
+// orm.WithUserID or orm.AsSystem on the context acts as another user; a
+// job, a worker or a manual route's handler acts as no one.
 func callerContext(ctx context.Context) context.Context {
-	return orm.WithCaller(ctx, {{ authSnippet "callerPrincipal" . }})
+{{- if .Deps.Access }}
+	return orm.WithPrincipal(ctx, callerPrincipal(ctx))
+{{- else }}
+	return orm.WithCaller(ctx, callerPrincipal(ctx).Subject)
+{{- end }}
 }
+
+// callerPrincipal is the principal the route's auth step put on ctx, whole,
+// as the auth provider names it (its callerPrincipal hook).
+func callerPrincipal(ctx context.Context) runtimesession.Caller {
+	return {{ authSnippet "callerPrincipal" . }}
+}
+{{- if .Deps.AccessLog }}
+
+// accessLogged records each call of operation in the access log of
+// {{ .Deps.Database }} (D156, D180): an agent run's read, and every call made with
+// an API key or a grant's token, before the route's permission check.
+func accessLogged(db orm.DatabaseInterface, operation string) func(gohttp.Handler) gohttp.Handler {
+	return runtimesession.AccessLogged(orm.AccessLogOf(db), operation)
+}
+{{- end }}

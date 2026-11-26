@@ -119,14 +119,15 @@ func TestProviderFileReplacesTheCoreFileOfItsName(t *testing.T) {
 	}
 }
 
-// TestCallerBindsTheProvidersPrincipal: caller.go imports and calls what
-// the provider's caller snippets name, not the session runtime.
+// TestCallerBindsTheProvidersPrincipal: caller.go binds the principal the
+// provider's callerPrincipal snippet names, whole (D180), not the session
+// runtime's GetCaller.
 func TestCallerBindsTheProvidersPrincipal(t *testing.T) {
 	caller := read(t, writeFixtureAPI(t, provider{}), "caller.go")
-	if !strings.Contains(caller, "return orm.WithCaller(ctx, callerID(ctx))") {
+	if !strings.Contains(caller, "return runtimesession.Caller{Subject: callerID(ctx)}") || !strings.Contains(caller, "return orm.WithCaller(ctx, callerPrincipal(ctx).Subject)") {
 		t.Errorf("caller.go does not bind the provider's principal:\n%s", caller)
 	}
-	if strings.Contains(caller, "session") {
-		t.Errorf("caller.go still names the session runtime:\n%s", caller)
+	if strings.Contains(caller, "GetCaller") || strings.Contains(caller, "GetPrincipalID") {
+		t.Errorf("caller.go still reads the session runtime's principal:\n%s", caller)
 	}
 }

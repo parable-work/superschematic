@@ -793,6 +793,10 @@ type OrderFilter struct {
 	Status              *StringFilter
 	StatusEnteredAt     *DateTimeFilter
 	Version             *Int64Filter
+	// Refunds keeps the rows that some Refund row the filter
+	// finds points at by its order (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Refunds *RefundFilter
 	// ReferencedByRefundOrder filters on the presence or absence of a
 	// Refund whose order points at this row.
 	ReferencedByRefundOrder *ReferencedByFilter
@@ -1660,6 +1664,16 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `"order"._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Refunds != nil {
+		before := len(*args)
+		through := f.Refunds.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"order".id IN (SELECT refund.order_id FROM refund%s)`, where))
 	}
 	if f.ReferencedByRefundOrder != nil {
 		probe := `SELECT 1 FROM refund WHERE refund.order_id = "order".id`

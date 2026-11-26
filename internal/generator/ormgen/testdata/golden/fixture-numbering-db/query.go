@@ -836,6 +836,10 @@ type TicketPage struct {
 type CustomerFilter struct {
 	Id   *UUIDFilter
 	Name *StringFilter
+	// Invoices keeps the rows that some Invoice row the filter
+	// finds points at by its customer (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Invoices *InvoiceFilter
 	// ReferencedByInvoiceCustomer filters on the presence or absence of a
 	// Invoice whose customer points at this row.
 	ReferencedByInvoiceCustomer *ReferencedByFilter
@@ -987,6 +991,16 @@ func (f *CustomerFilter) conditions(args *[]interface{}, paramOffset int) []stri
 				conditions = append(conditions, `customer."name" IS NOT NULL`)
 			}
 		}
+	}
+	if f.Invoices != nil {
+		before := len(*args)
+		through := f.Invoices.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`customer.id IN (SELECT invoice.customer_id FROM invoice%s)`, where))
 	}
 	if f.ReferencedByInvoiceCustomer != nil {
 		probe := `SELECT 1 FROM invoice WHERE invoice.customer_id = customer.id`
