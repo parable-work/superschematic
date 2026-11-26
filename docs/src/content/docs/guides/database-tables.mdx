@@ -901,7 +901,10 @@ What a merge does not do:
   hears them as it hears any write.
 - A behavior's sub-tables are the behavior's state of `from` and are not
   repointed: they go with `from` when it is removed, and stay with it
-  when it is deleted softly.
+  when it is deleted softly. An Aliased field's are the exception (D147):
+  `from`'s aliases move to `into`, its name joins them as an alias, and
+  its rows of the names table name `into` their holder
+  ([A row's names](#a-rows-names)).
 - A relation of another schema's table, or of a table outside the schema,
   is not repointed. Its foreign key decides what the delete of `from`
   does to it.
@@ -913,7 +916,14 @@ table: a commit made before a merge would still reference the row merged
 away. And a unique `@index` that lists no `keys` on a table that
 references it: the merge could not tell whether the index holds the
 relation's column, so list the fields its `expression` reads. The repositories run it on
-Postgres, in Go and in TypeScript.
+Postgres in Go and in TypeScript, and the Rust repositories on Postgres
+and on SQLite (`merge_into(&from, &into)`), each in a savepoint of the
+caller's transaction. On Postgres a Rust client outside a transaction is
+refused; on SQLite the savepoint is the merge's own transaction when the
+caller opened none, and the lock is SQLite's one writer, which holds the
+database once the merge writes. A merge whose relations delete rows of a
+`@versioned` table has no SQLite form. The TypeScript and Go
+repositories run on Postgres alone, so D1 has no merge.
 
 ## State machines
 
@@ -3423,6 +3433,74 @@ held where a request's types and the database hold it, so a patch that
 breaks it is kept and fails at its approval. A `@versioned` table keeps a
 history of its own on Postgres: Revisions adds the review step, and keeps
 its log on SQLite and D1 too.
+
+### A row's names
+
+A field typed `Aliased<string, C>` holds a name people know a row by,
+with the names it was also known by (D147). No two rows hold one name, as
+a name or an alias, in its normalized form. The config's `normalize` says
+how two names read as one: `lower`, the default, ignores their case, the
+white space at their ends and each run of it within one; `slug` keeps
+only their letters and digits, in lower case, so "Q3 Plan" and "q3-plan"
+are one name.
+
+```ts
+// companies-db
+export abstract class Company implements Mergeable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: Aliased<string>;
+  city: string;
+}
+
+export abstract class Tag {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  label: Aliased<string, { normalize: "slug" }>;
+}
+```
+
+The field's column holds the name. A create gives it, the one owned field
+a create input holds, and no update sets it: `name.rename({ name })` does,
+and keeps the old name as an alias. A rename to one of the row's aliases
+makes it the name and the old name an alias in its place, and one that
+changes only the case or the spacing keeps no alias. `name.addAlias({
+alias })` and `name.removeAlias({ alias })` keep the rest; the row's name
+is no alias to remove (the veto `is_name`). `name.resolve({ name })`, on
+the table, answers the row a name or an alias names, `{ row: { key, name,
+alias } }`, or `{ row: null }`.
+
+```ts
+await orm.company.createOne({ name: "Acme", city: "Oslo" });
+await orm.company.name.rename(id, { name: "Acme Group" }); // { name: "Acme Group", alias: "Acme" }
+const { row } = await orm.company.name.resolve({ name: "ACME" }); // { key, name: "Acme Group", alias: true }
+```
+
+```go
+out, err := db.Company.Name().Rename(ctx, id, orm.CompanyNameRenameParams{Name: "Acme Group"})
+found, err := db.Company.Name().Resolve(ctx, orm.CompanyNameResolveParams{Name: "ACME"})
+```
+
+The aliases are a sub-table of the row (`company_name_aliases`). Every
+name a row holds is a row of a table of the use's own, kept for the table
+as a whole and keyed by its normalized form (`company_name_names`), whose
+`holder` column holds the row's key. So the database holds each name
+unique: a create, a rename or an addAlias that takes a name inserts its
+row, and two that take one name at once never both hold it. A name
+another row holds is refused with that row's key, the veto `name_taken`
+(`details.vetoDetails.holder`), on Postgres, SQLite and D1 alike. A
+removed alias frees its name for any row, and so does a delete of the
+row, through the repository, for all of its names. A name whose holder is
+no live row, deleted past the repository, is taken over by the next row
+that takes it. Aliased cannot be added to a table with rows, nor removed
+from one, and its `normalize` stays while the table has rows. A table
+whose behaviors keep such tables has no upserts. A write around the core,
+raw SQL of the name, the aliases or the names, runs none of these rules.
+
+A merge of a table with an Aliased field ([Merging rows](#merging-rows))
+moves the aliases of the row merged away to the row that stays, its name
+among them, and its rows of the names table with them, so a merge frees
+no name and takes none.
 
 ### A row's conversation
 

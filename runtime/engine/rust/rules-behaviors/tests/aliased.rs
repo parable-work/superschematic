@@ -125,7 +125,9 @@ fn the_config_takes_its_normalize() {
     assert!(define(&core(), &company(json!({"normalize": "slug"}))).is_ok());
     let refused = define(&core(), &company(json!({"normalize": "upper"}))).unwrap_err();
     assert!(
-        refused.message.contains("must be one of \"lower\", \"slug\""),
+        refused
+            .message
+            .contains("must be one of \"lower\", \"slug\""),
         "{}",
         refused.message
     );
@@ -137,7 +139,11 @@ fn the_config_takes_its_normalize() {
 #[test]
 fn a_create_takes_its_name() {
     let mut host = host(json!({}));
-    changed(create(&mut host, "c1", json!({"name": "Acme  Group", "city": "Oslo"})));
+    changed(create(
+        &mut host,
+        "c1",
+        json!({"name": "Acme  Group", "city": "Oslo"}),
+    ));
     assert_eq!(name(&host, "c1"), json!("Acme  Group"));
     assert_eq!(host.row("c1").own, object(json!({"city": "Oslo"})));
     assert_eq!(names(&host), pairs(&[("acme group", "c1")]));
@@ -150,7 +156,10 @@ fn a_create_needs_a_name_that_names_something() {
     let mut host = host(json!({"normalize": "slug"}));
     let error = refused(create(&mut host, "c1", json!({"city": "Oslo"})));
     assert_eq!(error["code"], "invalid_instance");
-    assert!(error["message"].as_str().unwrap().contains("name is required"));
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("name is required"));
     let error = refused(create(&mut host, "c1", json!({"name": "!!!"})));
     assert_eq!(error["code"], "invalid_instance");
     assert!(error["message"]
@@ -166,7 +175,12 @@ fn a_create_needs_a_name_that_names_something() {
 fn a_name_another_row_holds_is_refused_with_its_key() {
     let mut host = host(json!({}));
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
-    changed(invoke(&mut host, "c1", "addAlias", json!({"alias": "Acme Corp"})));
+    changed(invoke(
+        &mut host,
+        "c1",
+        "addAlias",
+        json!({"alias": "Acme Corp"}),
+    ));
     let (code, details) = veto_of(create(&mut host, "c2", json!({"name": "ACME"})));
     assert_eq!(code, "name_taken");
     assert_eq!(
@@ -177,10 +191,20 @@ fn a_name_another_row_holds_is_refused_with_its_key() {
     assert_eq!(code, "name_taken");
     assert_eq!(details["holder"], "c1");
     changed(create(&mut host, "c2", json!({"name": "Globex"})));
-    let (code, details) = veto_of(invoke(&mut host, "c2", "rename", json!({"name": "acme corp"})));
+    let (code, details) = veto_of(invoke(
+        &mut host,
+        "c2",
+        "rename",
+        json!({"name": "acme corp"}),
+    ));
     assert_eq!(code, "name_taken");
     assert_eq!(details["holder"], "c1");
-    let (code, _) = veto_of(invoke(&mut host, "c2", "addAlias", json!({"alias": "Acme"})));
+    let (code, _) = veto_of(invoke(
+        &mut host,
+        "c2",
+        "addAlias",
+        json!({"alias": "Acme"}),
+    ));
     assert_eq!(code, "name_taken");
     assert_eq!(name(&host, "c2"), json!("Globex"));
     assert!(aliases(&host, "c2").is_empty());
@@ -194,25 +218,24 @@ fn rename_keeps_the_old_name_as_an_alias() {
     let mut host = host(json!({}));
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
     assert_eq!(
-        result(invoke(&mut host, "c1", "rename", json!({"name": "Acme Group"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "rename",
+            json!({"name": "Acme Group"})
+        )),
         json!({"name": "Acme Group", "alias": "Acme"})
     );
     assert_eq!(name(&host, "c1"), json!("Acme Group"));
     assert_eq!(aliases(&host, "c1"), pairs(&[("acme", "Acme")]));
-    assert_eq!(
-        names(&host),
-        pairs(&[("acme", "c1"), ("acme group", "c1")])
-    );
+    assert_eq!(names(&host), pairs(&[("acme", "c1"), ("acme group", "c1")]));
     // Back to the alias: it becomes the name, the other name an alias.
     assert_eq!(
         result(invoke(&mut host, "c1", "rename", json!({"name": "ACME"}))),
         json!({"name": "ACME", "alias": "Acme Group"})
     );
     assert_eq!(aliases(&host, "c1"), pairs(&[("acme group", "Acme Group")]));
-    assert_eq!(
-        names(&host),
-        pairs(&[("acme", "c1"), ("acme group", "c1")])
-    );
+    assert_eq!(names(&host), pairs(&[("acme", "c1"), ("acme group", "c1")]));
     // Only the case: the name is rewritten and no alias kept.
     assert_eq!(
         result(invoke(&mut host, "c1", "rename", json!({"name": "acme"}))),
@@ -235,30 +258,60 @@ fn a_removed_alias_frees_its_name() {
     let mut host = host(json!({"normalize": "slug"}));
     changed(create(&mut host, "c1", json!({"name": "Acme, Inc."})));
     assert_eq!(
-        result(invoke(&mut host, "c1", "addAlias", json!({"alias": "Acme Co"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "addAlias",
+            json!({"alias": "Acme Co"})
+        )),
         json!({"alias": "Acme Co"})
     );
     assert_eq!(
-        result(invoke(&mut host, "c1", "addAlias", json!({"alias": "acme--co"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "addAlias",
+            json!({"alias": "acme--co"})
+        )),
         json!({"alias": "acme--co", "unchanged": true})
     );
     assert_eq!(
-        result(invoke(&mut host, "c1", "addAlias", json!({"alias": "ACME INC"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "addAlias",
+            json!({"alias": "ACME INC"})
+        )),
         json!({"alias": "ACME INC", "unchanged": true})
     );
     assert_eq!(
         names(&host),
         pairs(&[("acme-co", "c1"), ("acme-inc", "c1")])
     );
-    let (code, details) = veto_of(invoke(&mut host, "c1", "removeAlias", json!({"alias": "acme inc"})));
+    let (code, details) = veto_of(invoke(
+        &mut host,
+        "c1",
+        "removeAlias",
+        json!({"alias": "acme inc"}),
+    ));
     assert_eq!(code, "is_name");
     assert_eq!(details, json!({"name": "Acme, Inc."}));
     assert_eq!(
-        result(invoke(&mut host, "c1", "removeAlias", json!({"alias": "Initech"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "removeAlias",
+            json!({"alias": "Initech"})
+        )),
         json!({"alias": "Initech", "unchanged": true})
     );
     assert_eq!(
-        result(invoke(&mut host, "c1", "removeAlias", json!({"alias": "acme co"}))),
+        result(invoke(
+            &mut host,
+            "c1",
+            "removeAlias",
+            json!({"alias": "acme co"})
+        )),
         json!({"alias": "Acme Co"})
     );
     assert!(aliases(&host, "c1").is_empty());
@@ -276,7 +329,12 @@ fn a_removed_alias_frees_its_name() {
 fn resolve_finds_the_row_a_name_names() {
     let mut host = host(json!({}));
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
-    changed(invoke(&mut host, "c1", "rename", json!({"name": "Acme Group"})));
+    changed(invoke(
+        &mut host,
+        "c1",
+        "rename",
+        json!({"name": "Acme Group"}),
+    ));
     assert_eq!(
         resolve(&mut host, "  ACME group"),
         json!({"row": {"key": "c1", "name": "Acme Group", "alias": false}})
@@ -294,7 +352,12 @@ fn resolve_finds_the_row_a_name_names() {
 fn a_delete_frees_the_rows_names() {
     let mut host = host(json!({}));
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
-    changed(invoke(&mut host, "c1", "addAlias", json!({"alias": "Acme Co"})));
+    changed(invoke(
+        &mut host,
+        "c1",
+        "addAlias",
+        json!({"alias": "Acme Co"}),
+    ));
     changed(create(&mut host, "c2", json!({"name": "Globex"})));
     let changes = changed(host.delete(&alice(), "c1"));
     let deleted: Vec<&str> = changes
@@ -305,7 +368,12 @@ fn a_delete_frees_the_rows_names() {
         .collect();
     assert_eq!(deleted, ["acme", "acme co"]);
     assert_eq!(names(&host), pairs(&[("globex", "c2")]));
-    changed(invoke(&mut host, "c2", "addAlias", json!({"alias": "Acme"})));
+    changed(invoke(
+        &mut host,
+        "c2",
+        "addAlias",
+        json!({"alias": "Acme"}),
+    ));
     assert_eq!(resolve(&mut host, "acme")["row"]["key"], "c2");
 }
 
@@ -394,7 +462,12 @@ fn the_parameters_are_checked() {
         .as_str()
         .unwrap()
         .contains("must have required property 'name'"));
-    let error = refused(invoke(&mut host, "c1", "addAlias", json!({"alias": "", "x": 1})));
+    let error = refused(invoke(
+        &mut host,
+        "c1",
+        "addAlias",
+        json!({"alias": "", "x": 1}),
+    ));
     assert_eq!(error["code"], "invalid_argument");
     let long = "a".repeat(257);
     let error = refused(invoke(&mut host, "c1", "addAlias", json!({"alias": long})));

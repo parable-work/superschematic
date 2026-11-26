@@ -190,11 +190,7 @@ impl AliasedConfig {
             Some(Value::String(word)) if word == "lower" => Normalize::Lower,
             Some(Value::String(word)) if word == "slug" => Normalize::Slug,
             Some(_) => {
-                issues.push(
-                    "/normalize",
-                    "enum",
-                    "must be one of \"lower\", \"slug\"",
-                );
+                issues.push("/normalize", "enum", "must be one of \"lower\", \"slug\"");
                 Normalize::Lower
             }
         };
@@ -440,7 +436,12 @@ fn remove_alias(cx: &Cx<'_, AliasedConfig>, given: &str) -> Hook<Value> {
         .sub_rows(ALIASES)?
         .into_iter()
         .find(|row| row.key == normalized)
-        .and_then(|row| row.values.get(ALIAS).and_then(Value::as_str).map(str::to_owned))
+        .and_then(|row| {
+            row.values
+                .get(ALIAS)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .unwrap_or_else(|| given.to_owned());
     cx.delete_row(ALIASES, &normalized)?;
     if let Some(row) = cx.shared_row(NAMES, &normalized)? {
@@ -504,8 +505,7 @@ fn refuse_taken(view: &View<'_, AliasedConfig>, given: &str, normalized: &str) -
     let Some(holder) = holder_of(&row) else {
         return Ok(());
     };
-    if Some(holder.as_str()) == view.key() || view.read_row(view.type_name(), &holder)?.is_none()
-    {
+    if Some(holder.as_str()) == view.key() || view.read_row(view.type_name(), &holder)?.is_none() {
         return Ok(());
     }
     Err(taken(view, given, normalized, &holder))
@@ -573,9 +573,7 @@ fn own_key(view: &View<'_, AliasedConfig>, action: &str) -> Hook<String> {
 // characters, or one whose normalized form is empty.
 fn name_problem(config: &AliasedConfig, name: &str) -> Option<String> {
     if schema::length(name) > MAX_NAME_LENGTH {
-        return Some(format!(
-            "a name holds at most {MAX_NAME_LENGTH} characters"
-        ));
+        return Some(format!("a name holds at most {MAX_NAME_LENGTH} characters"));
     }
     if config.normalize.apply(name).is_empty() {
         return Some(format!(
@@ -634,7 +632,11 @@ fn params_issues(operation: &str, params: &Value) -> Issues {
         );
     }
     match given.get(key) {
-        None => issues.push("", "required", format!("must have required property '{key}'")),
+        None => issues.push(
+            "",
+            "required",
+            format!("must have required property '{key}'"),
+        ),
         Some(value) => {
             let at = schema::member("", key);
             schema::text_issues(&at, value, &mut issues);

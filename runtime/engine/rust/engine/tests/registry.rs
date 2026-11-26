@@ -736,9 +736,9 @@ fn with_the_core_meta_schema_the_loader_itself_refuses_a_behavior_the_core_does_
         // The core's behaviors, as the meta-schema this build carries lists
         // them.
         assert!(
-            found[0]
-                .1
-                .starts_with("must be one of \"Aliased\", \"Approvals\", \"Assignment\", \"Blueprint\""),
+            found[0].1.starts_with(
+                "must be one of \"Aliased\", \"Approvals\", \"Assignment\", \"Blueprint\""
+            ),
             "{}",
             found[0].1
         );
