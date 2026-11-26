@@ -2597,3 +2597,6 @@ Left:
   beside the identity's.
 - A trust read from a request that names its message as `{ table, key }`,
   which runs as entered now.
+- A test that builds an API with the orchestration for Cloudflare: the
+  Workers entrypoints (`fetch.ts`, `drain.ts`) carry the same wiring, and
+  the example's stack has a local environment alone.
