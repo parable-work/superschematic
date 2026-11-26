@@ -83,7 +83,7 @@ var _ api.ManualRoutesConstructor = NewManualRoutes
 // notImplemented answers 501 Not Implemented, naming the operation.
 func notImplemented(operation string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.RespondAppError(w, api.LoggerFromContext(r.Context()), api.NotImplementedError(operation))
+		api.RespondAppError(w, {{ appErrorContext }}api.LoggerFromContext(r.Context()), api.NotImplementedError(operation))
 	})
 }
 {{- end }}

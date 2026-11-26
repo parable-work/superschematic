@@ -200,7 +200,7 @@ func convertBehaviorJSON(from, to any) error {
 func respondBehaviorError(w gohttp.ResponseWriter, r *gohttp.Request, err error) {
 	refusal, ok := rules.AsRefusal(err)
 	if !ok || refusal.Status < 400 || refusal.Status == gohttp.StatusInternalServerError || refusal.Status > 599 {
-		RespondAppError(w, LoggerFromContext(r.Context()), err)
+		RespondAppError(w, {{ appErrorContext }}LoggerFromContext(r.Context()), err)
 		return
 	}
 	if len(refusal.Details) > 0 {

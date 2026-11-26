@@ -308,8 +308,18 @@ func TestDerivedFieldNames(t *testing.T) {
 	if got := named.Field(EdgeBucket, "shop-media"); got != "STORE_SHOP_MEDIA" {
 		t.Errorf("named bucket field = %s", got)
 	}
+	// An API has one database, so its field may leave the service out.
+	single := DerivedFieldNames{Database: "DATABASE"}
+	if err := single.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := single.Field(EdgeSQL, "shop-db"); got != "DATABASE" {
+		t.Errorf("a database field without the service = %s", got)
+	}
 	for _, bad := range []DerivedFieldNames{
-		{Database: "DATABASE"},
+		{Database: "{SERVICE}_{SERVICE}_DATABASE"},
+		{Database: "database"},
+		{Service: "SERVICE"},
 		{Service: "{SERVICE}_{SERVICE}"},
 		{Service: "{SERVICE}-url"},
 		{Database: "9{SERVICE}"},

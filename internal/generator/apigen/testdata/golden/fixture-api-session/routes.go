@@ -50,6 +50,13 @@ type Config struct {
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
 	PayloadDecryptor runtimemiddleware.PayloadDecryptor
 
+	// ClientRateLimits holds the counts of every per-client @rateLimit
+	// route, so that each limit holds across the replicas that share it.
+	// Each route's limiter is named by its method and path. Optional: nil
+	// counts each limit in the memory of each replica, and while its store
+	// is unavailable each replica counts alone.
+	ClientRateLimits *runtimemiddleware.ClientRateLimits
+
 	// ManualRoutes holds the handlers of the @manualRouteRegistration
 	// operations, which RegisterRoutes mounts behind the steps their routes
 	// would have as any other. Optional: nil mounts none, and leaves each
@@ -194,7 +201,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/tenants",
 			Handler: createTenantListTenantsHandler(cfg.Implementations.Tenant),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "GET /api/tenants")),
 				runtimemiddleware.BodyLimit(1, RespondError),
 				runtimesession.RequirePermissions("tenants.read"),
 			},
@@ -214,7 +221,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/tenants/{id}",
 			Handler: createTenantGetTenantHandler(cfg.Implementations.Tenant),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "GET /api/tenants/{id}")),
 				runtimemiddleware.BodyLimit(1, RespondError),
 				runtimesession.RequirePermissions("tenants.read"),
 				runtimemiddleware.Timeout(5*time.Second, LoggerFromContext),

@@ -365,10 +365,10 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 		`Handler: identityHandler(cfg.Identity, "login"),`,
 		`Handler: identityHandler(cfg.Identity, "grantRole"),`,
 		`cfg.Identity.RequirePermissions("identity.roles.write"),`,
-		`runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),`,
+		`runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/auth/login")),`,
 		// The API key routes (D114), createApiKey behind its rate limit and
 		// an administrator's behind users.read and users.write.
-		"\t\t\tPath:    \"/auth/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"createApiKey\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\truntimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),\n",
+		"\t\t\tPath:    \"/auth/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"createApiKey\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\truntimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, \"POST /api/auth/keys\")),\n",
 		"\t\t\tPath:    \"/auth/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"listApiKeys\"),\n\t\t},\n",
 		"\t\t\tPath:    \"/auth/keys/{id}\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"revokeApiKey\"),\n\t\t},\n",
 		"\t\t\tPath:    \"/auth/admin/users/{id}/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"listUserApiKeys\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\tcfg.Identity.RequirePermissions(\"identity.users.read\"),\n",

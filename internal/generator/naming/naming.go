@@ -234,6 +234,10 @@ type Naming struct {
 	// beyond its type, and the text of the errors its triggers raise.
 	SQL SQLConfig `toml:"sql"`
 
+	// GoAPI is the [go_api] table: how the generated Go API routers answer
+	// a request they refuse, and the symbols they write beside the routes.
+	GoAPI GoAPIConfig `toml:"go_api"`
+
 	// TypeComments is how the TypeScript reader reads the comment of a
 	// declaration: a class, an interface, a type alias or an enum.
 	// "attached" (default) reads the comments no blank line parts from
@@ -1408,6 +1412,9 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.SQL.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.GoAPI.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {

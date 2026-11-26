@@ -814,6 +814,33 @@ same three, the service step and the permission check, in the same order
 ([TypeScript](/superschematic/install/typescript/#serve-a-generated-api),
 [Rust](/superschematic/install/rust/#serve-a-generated-api)).
 
+### A per-client rate limit across replicas
+
+A route's `@rateLimit` with no key counts per client: the name the
+authentication gave the client, or its address. Each replica counts in
+its own memory, so an API behind N replicas admits N times the rate. When
+the API's config names a `rateLimitStore` (D75), each such route counts
+in that memory store. Otherwise the Go router's `Config` takes
+`ClientRateLimits`, a `*middleware.ClientRateLimits`, and each such route
+counts in it under its method and path (`POST /api/sessions`):
+
+```go
+limits, err := middleware.NewClientRateLimits(store, sessionSecret, logger)
+// ...
+api.RegisterRoutes(r, api.Config{ClientRateLimits: limits /* , ... */})
+```
+
+`store` is a `middleware.ClientRateLimitStore`, whose `Add` and `Counts`
+keep a count per limiter, client and wall-clock window. The store sees a
+keyed hash of each client, never the client itself: the hash key comes
+from the secret, which every replica holds and the store does not. Nil,
+the default, counts each replica alone, as before. The limit fails open:
+a store call that fails, or takes longer than 50 ms, makes the limiter
+count in its replica alone for five seconds. A store error that wraps
+`middleware.ErrClientRateLimitStoreUnavailable` logs nothing, since the
+store logs its own state; any other logs a warning at most once a minute.
+Each window counts the larger of the store's count and the replica's own.
+
 ### A rate limit per principal
 
 `key: 'principal'` counts a route's requests per the principal the auth

@@ -172,4 +172,9 @@ func TestDecodeRefusal(t *testing.T) {
 	if !strings.HasPrefix(DecodeRefusal(json.RawMessage(`{}`), nil, decodeErr).Reason, "does not match") {
 		t.Fatal("a nil target is a mismatch")
 	}
+	// A closed type's decoder owns its refusal of a string an enum lacks.
+	strict := DecodeRefusal(json.RawMessage(body), &input, decodeErr, StrictType("Task"))
+	if strict.Reason != "does not match the declared type" || strict.Errors != nil {
+		t.Errorf("a strict type: refusal = %+v", strict)
+	}
 }

@@ -140,6 +140,7 @@ var AuthSnippets = []string{
 	"routesConfigFields",           // Config fields of every API, public or not, before Implementations: the fields the provider's route middlewares read
 	"routesConfigValidate",         // Validate checks for those fields (the same APIs), after the AuthMiddleware or Identity check
 	"routesConfigExample",          // doc-comment lines after AuthMiddleware, or Identity, in the RegisterRoutes example
+	"routesConfigPrepare",          // statements on cfg at the top of RegisterRoutes of every API, before it validates cfg: a core field the provider's fields fill
 	"routesSetupPre",               // RegisterRoutes setup before LoggerMiddleware (public APIs)
 	"routesSetup",                  // RegisterRoutes setup after DatabaseMiddleware (public APIs)
 	"routesProtectedMiddleware",    // middlewares after cfg.AuthMiddleware on the protected group, and in the end-user step of a route with a service clause (D37)
@@ -147,6 +148,8 @@ var AuthSnippets = []string{
 	"routePermissions",             // per-endpoint permission middleware, after the rate and body limits and the service step and before the decryptor and timeout; data is the EndpointInfo
 	"routesDeclarations",           // top-level declarations of routes.go the provider's route snippets call, after the handler factories: helpers, types and per-endpoint values
 	"routeMiddlewaresAfterDecrypt", // per-endpoint middlewares after the payload decryptor and before the timeout, which read the request the handler reads; data is the EndpointInfo. A route with no other middleware gets a list when it is not empty
+	"routeUploadBody",              // the reading of a route's multipart or JSON upload body, in place of the core's when not empty: it declares input and files, which the implementation call reads; data is the EndpointInfo
+	"routeQueryList",               // the reading of one list in the query string, in place of the core's when not empty: it declares the list's variable, named by its GoName; data is the Param
 	// module.tmpl
 	"moduleRequires", // extra require lines
 	"moduleReplaces", // extra replace lines
