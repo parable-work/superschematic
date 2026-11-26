@@ -30,6 +30,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
@@ -1359,6 +1360,11 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.Rules = apigen.DeclaresTableBehaviors(schema)
 		deps.Queues = len(schema.Queues()) > 0
 		deps.Access, deps.AccessHeld, deps.AccessLog = apigen.DeclaresAccess(schema)
+		// The Go server refuses the platform features of its database it
+		// does not serve yet (D180), as the loader does when it reads it.
+		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
+			return deps, nil, err
+		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)

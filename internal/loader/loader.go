@@ -270,7 +270,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				return nil, nil, err
 			}
 			vin.AuthDB = authDB
-			if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg, vin.GoServer); err != nil {
+			if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
 				return nil, nil, err
 			}
 			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
@@ -383,7 +383,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		return nil, nil, err
 	}
 	vin.AuthDB = authDB
-	if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg, vin.GoServer); err != nil {
+	if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
 		return nil, nil, err
 	}
 	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
@@ -445,15 +445,14 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 // databaseFor reads the API's database (ir.Schema.Database), whose tables
 // its @behaviorOperations sets and @behaviorWorker classes name (D103),
 // its @tableOperation operations read and write (D106) and whose version
-// graphs its @graphOperations sets serve (D138), and, for goServer, a Go
-// server, whose database's features the Go outputs may not serve (D180):
+// graphs its @graphOperations sets serve (D138):
 // authDB when the database is the authDb and it is read already, else
 // through the dependency loader (WithDependencyLoader) or as the service
 // of that name beside this one. It reads nothing for a schema with no such
 // set, worker or operation, one that is not an API, one that connects to no one
 // database, or the load of a database itself; the verification pass
 // refuses the ones that need it.
-func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema, reg *registry.Registry, goServer bool) (*ir.Schema, error) {
+func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
 	if o.authDBRead || schema.Kind != ir.SchemaKindAPI {
 		return nil, nil
 	}
@@ -476,11 +475,6 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 	}
 	if len(schema.IdempotentOperations()) > 0 {
 		why = "which keeps the keys of its @idempotent operations"
-	}
-	if why == "" && goServer {
-		// A Go server's checks read its database's tables, which it serves
-		// through the Go ORM (D180, verify.checkGoFeatures).
-		why = "whose tables its Go server serves"
 	}
 	if why == "" {
 		return nil, nil

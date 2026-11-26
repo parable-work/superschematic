@@ -26,6 +26,10 @@ import (
 //
 // The Rust and SQLite ports refuse their own in files of their own; a
 // later Go workstream that serves one of these removes its line here.
+//
+// The loader checks an API's database when it reads it, for a set or an
+// operation that names its tables; the Go server's generation, which reads
+// it always, checks it through GoServerDatabaseErr.
 func checkGoFeatures(schema *ir.Schema, in Input, r *Result) {
 	if !in.GoServer || schema.Kind != ir.SchemaKindAPI {
 		return
@@ -35,6 +39,19 @@ func checkGoFeatures(schema *ir.Schema, in Input, r *Result) {
 		checkGoTables(in.Database, where+", over "+in.Database.Name+",", r)
 	}
 	checkGoOperations(schema, where, r)
+}
+
+// GoServerDatabaseErr is the refusal of the features of db, the database
+// of api, a Go server, that the Go server does not serve yet (D180), or
+// nil. The generator calls it when it reads the database for the Go
+// server's Deps.
+func GoServerDatabaseErr(api, db *ir.Schema) error {
+	if api == nil || db == nil {
+		return nil
+	}
+	r := &Result{}
+	checkGoTables(db, "the Go server of "+api.Name+", over "+db.Name+",", r)
+	return r.Err()
 }
 
 // goUnserved is the refusal of one feature in a Go output.

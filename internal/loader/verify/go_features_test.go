@@ -18,6 +18,22 @@ func goFeatureFindings(schema *ir.Schema, in Input) []string {
 	return out
 }
 
+// TestGoServerDatabaseErrRefusesTheDatabasesFeatures: the generator's
+// check of a Go server's database (D180) names the feature and the table,
+// and passes a database with none.
+func TestGoServerDatabaseErrRefusesTheDatabasesFeatures(t *testing.T) {
+	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
+	db := ir.NewSchema("app-db", ir.SchemaKindDB)
+	db.Types["Ticket"] = &ir.TypeDef{Name: "Ticket", Role: ir.RoleDBTable}
+	if err := GoServerDatabaseErr(api, db); err != nil {
+		t.Fatalf("a plain database: %v", err)
+	}
+	db.Types["Ticket"].Searchable = &ir.SearchableDef{}
+	if err := GoServerDatabaseErr(api, db); err == nil || !strings.Contains(err.Error(), "the Go server of app-api, over app-db, does not serve @searchable on Ticket yet (D155, D180)") {
+		t.Fatalf("a searchable table: %v", err)
+	}
+}
+
 // TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe: a Go server over a
 // database refuses each feature of D152 to D159 of its tables that Go does
 // not serve yet, naming the feature, the table and the decision (D180).
