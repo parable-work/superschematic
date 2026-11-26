@@ -104,6 +104,14 @@ func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyTy
 	if from == into {
 		return nil, fmt.Errorf("merge {{ .TypeName }} %v: %w", from, ErrMergeSelf)
 	}
+	{{- if $.HeldByAccess }}
+	// Both rows are ones the operation's caller may write (D156, D180).
+	for _, id := range []{{ .PrimaryKeyType }}{from, into} {
+		if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+			return nil, fmt.Errorf("merge {{ .TypeName }} %v: %w", id, err)
+		}
+	}
+	{{- end }}
 	{{- if .Merge.RequiresUser }}
 	// The merge stamps a row deleted, which records who deleted it: it
 	// needs an acting user before it writes, as a soft delete does.

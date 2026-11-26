@@ -133,7 +133,7 @@ export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, {{ if .Emit
           handle: async (signal: AbortSignal) => {
             const run = await orm
               .withBehaviorCaller({{ .CallerConst }})
-              .transaction(tx => tx.{{ .Repository }}.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => {{ .EventFunc }}(workers, tx, claim.message, signal)));
+              .transaction(tx => tx.{{ .Repository }}.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => {{ .EventFunc }}(workers, tx as {{ $.DepsTx }}, claim.message, signal)));
             if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
           },
         })),

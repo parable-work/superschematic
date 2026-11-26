@@ -43,7 +43,7 @@ import (
 	runtimeresponse "{{ $.Naming.HTTPRuntimeGoModule }}/response"
 	"{{ $.Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
-{{- if or .TablesRequireCaller .Tables.UsesRowRules (and .Tables.Rules (not .HasBehaviorEndpoints)) }}
+{{- if or .TablesRequireCaller .Tables.UsesRowRules .Tables.Reveals (and .Tables.Rules (not .HasBehaviorEndpoints)) }}
 	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
 {{- end }}
 {{- if .Tables.Rules }}
@@ -165,6 +165,12 @@ func tableReadError(err error, rows tableRows) error {
 		return NotFoundError(rows.Type, err).WithCode("not_found")
 	case errors.Is(err, orm.ErrNoUserInContext):
 		return UnauthorizedError(err).WithCode("unauthorized")
+{{- if .Deps.AccessHeld }}
+	case errors.Is(err, orm.ErrAccessRefused):
+		// A party or an agent run made a row its grants do not reach
+		// (D156): the transaction kept nothing.
+		return ForbiddenError(err).WithCode("forbidden")
+{{- end }}
 {{- if .Tables.UsesPaging }}
 	case errors.Is(err, orm.ErrPageKey):
 		return paging.RefusedCursor()
@@ -469,6 +475,53 @@ func {{ .Func }}(row *{{ .RowType }}) types.{{ .View }} {
 	{{ . }}
 {{- end }}
 	return view
+}
+{{- end }}
+{{- range $reveal := .Tables.Reveals }}
+
+// {{ .Func }} opens the members of view, filled from row, a row of {{ .Table }},
+// that a reveal permission holds (D156, D180): for a caller who holds the
+// permission, each value it opens is recorded in the access log, in the
+// operation's transaction, as the system actor; any other caller sees it
+// masked.
+func {{ .Func }}(ctx context.Context, tx orm.TxInterface, operation string, row *{{ .RowType }}, view *types.{{ .View }}) error {
+{{- range .Fields }}
+	if !tableRevealed(ctx, {{ printf "%q" .Permission }}) {
+		{{- if .Pointer }}
+		if view.{{ .Member }} != nil {
+			masked := runtimesession.SecretMask
+			view.{{ .Member }} = &masked
+		}
+		{{- else }}
+		if view.{{ .Member }} != "" {
+			view.{{ .Member }} = runtimesession.SecretMask
+		}
+		{{- end }}
+	} else if view.{{ .Member }} != {{ if .Pointer }}nil{{ else }}""{{ end }} {
+		if err := orm.RecordAccess(ctx, tx, runtimesession.RevealEntry(ctx, operation, {{ printf "%q" $reveal.Table }}, {{ $reveal.Key }}, {{ printf "%q" .Field }})); err != nil {
+			return err
+		}
+	}
+{{- end }}
+	return nil
+}
+{{- end }}
+{{- if .Tables.Reveals }}
+
+// tableRevealed reports whether the request's caller holds permission, a
+// reveal permission (D156), by a grant that covers it.
+func tableRevealed(ctx context.Context, permission string) bool {
+	return runtimesession.HasPrincipalID(ctx) && runtimesession.AnyRoleCovers(runtimesession.GetRoles(ctx), permission)
+}
+{{- end }}
+{{- if .Tables.UsesRevealKey }}
+
+// tableRevealKey is a row's key as the access log names it.
+func tableRevealKey[K interface{ String() string }](key *K) string {
+	if key == nil {
+		return ""
+	}
+	return (*key).String()
 }
 {{- end }}
 {{- range .Tables.Handlers }}
