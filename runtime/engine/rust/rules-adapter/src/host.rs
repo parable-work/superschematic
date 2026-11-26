@@ -63,7 +63,12 @@ impl<'a> Host<'a> {
         self
     }
 
-    /// Wakes the worker of `queue`, when the host has a wake.
+    /// Wakes the worker of `queue`, when the host has a wake: the run loop
+    /// does, which a build with no store leaves out.
+    #[cfg_attr(
+        not(any(feature = "postgres", feature = "sqlite", test)),
+        allow(dead_code)
+    )]
     pub(crate) fn wake(&self, queue: &str) {
         if let Some(wake) = &self.wake {
             wake(queue);
