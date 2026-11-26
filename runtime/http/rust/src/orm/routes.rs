@@ -318,6 +318,9 @@ impl From<Error> for ApiError {
             Error::Invalid(message) => ApiError::bad_request(message),
             Error::Constraint(constraint) => ApiError::conflict(constraint.message),
             Error::Busy(_) => ApiError::service_unavailable("The database is busy; try again"),
+            // A merge of a row into itself, or into a row that references
+            // it (D147), conflicts with the rows as they are.
+            Error::Merge { message, .. } => ApiError::conflict(message),
             // A refusal of the behaviors' core is the problem of its
             // status, code, message and details, as a behavior operation's
             // route answers it; one of status 500, or of no error status,

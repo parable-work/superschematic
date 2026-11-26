@@ -14,8 +14,8 @@ use serde_json::Value;
 use super::plan::{DeletePlan, Plan, Statement};
 use super::{
     Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
-    FindOptions, Found, PageOptions, RowPage, Table, UpsertOptions, UpsertStatus, Upserted, Values,
-    WriteOptions,
+    FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertOptions, UpsertStatus,
+    Upserted, Values, WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,
@@ -367,6 +367,157 @@ impl<C: Client> Runner<'_, C> {
     ) -> Result<Value, Error> {
         let command = self.plan.core_table_operation(member, operation, params)?;
         self.client.core_table_operation(command).await
+    }
+
+    /// Folds the row `from` into the row `into` (D147), as the Go ORM's and
+    /// the TypeScript repositories' merges do, in a savepoint of the
+    /// caller's transaction, so a merge that is refused or fails writes
+    /// nothing: it locks both rows (on Postgres; SQLite's one writer holds
+    /// the database once the merge writes), runs each step's statements, a
+    /// relation of the table to itself refusing a row that would reference
+    /// itself, and then deletes `from` as `delete_one` does. On Postgres a
+    /// client outside a transaction is refused; on SQLite the savepoint is
+    /// the merge's own transaction when the caller opened none.
+    pub(crate) async fn merge_into(
+        &self,
+        from: &Value,
+        into: &Value,
+    ) -> Result<MergeResult, Error> {
+        let Some(merge) = &self.table.merge else {
+            return Err(Error::Invalid(format!(
+                "{} does not implement Mergeable, so its repository has no merge_into (D147)",
+                self.table.name
+            )));
+        };
+        let (from_key, into_key) = (self.plan.key(from)?, self.plan.key(into)?);
+        if from_key.value == into_key.value {
+            return Err(Error::Merge {
+                code: "self",
+                message: format!("{} {from} cannot be merged into itself", self.table.name),
+            });
+        }
+        // The merge stamps a row deleted, which records who deleted it.
+        if merge.requires_user {
+            self.plan.merge_user()?;
+        }
+        let savepoint = |sql: &str| super::plan::Statement {
+            sql: sql.to_owned(),
+            args: Vec::new(),
+        };
+        self.execute(&savepoint("SAVEPOINT merge_into"))
+            .await
+            .map_err(|err| match err {
+                Error::Database(message) => Error::Invalid(format!(
+                    "merge_into of {} runs in a transaction the caller opens: {message}",
+                    self.table.name
+                )),
+                other => other,
+            })?;
+        match self.merge_steps(merge, from, into).await {
+            Ok(result) => {
+                self.execute(&savepoint("RELEASE SAVEPOINT merge_into"))
+                    .await?;
+                Ok(result)
+            }
+            Err(err) => {
+                self.execute(&savepoint("ROLLBACK TO SAVEPOINT merge_into"))
+                    .await?;
+                self.execute(&savepoint("RELEASE SAVEPOINT merge_into"))
+                    .await?;
+                Err(err)
+            }
+        }
+    }
+
+    // merge_steps runs a merge's statements in its savepoint.
+    async fn merge_steps(
+        &self,
+        merge: &super::Merge,
+        from: &Value,
+        into: &Value,
+    ) -> Result<MergeResult, Error> {
+        let merged = Column {
+            name: "merged".to_owned(),
+            boolean: true,
+            ..Column::default()
+        };
+        let lock = self.plan.merge_statement(
+            &super::MergeStatement {
+                sql: merge.lock.clone(),
+                actor: None,
+            },
+            from,
+            into,
+        )?;
+        self.plan.session.traced(&lock.sql);
+        let found: Vec<bool> = self
+            .client
+            .cells(self.table, &lock, &[&merged])
+            .await?
+            .into_iter()
+            .map(|cells| {
+                matches!(cells.first(), Some(Value::Bool(true)))
+                    || cells.first().and_then(Value::as_i64) == Some(1)
+            })
+            .collect();
+        if !found.contains(&true) {
+            return Err(self.not_found(from));
+        }
+        if !found.contains(&false) {
+            return Err(self.not_found(into));
+        }
+        if merge.history_actor {
+            self.execute(&self.plan.merge_history_actor()).await?;
+        }
+        let mut result = MergeResult::default();
+        for step in &merge.steps {
+            if let Some(read) = &step.self_reference {
+                let statement = self.plan.merge_statement(
+                    &super::MergeStatement {
+                        sql: read.clone(),
+                        actor: None,
+                    },
+                    from,
+                    into,
+                )?;
+                if self.client.scalar(self.table, &statement).await?.is_some() {
+                    return Err(Error::Merge {
+                        code: "self_reference",
+                        message: format!(
+                            "{} {into} references {from} through {}, and would reference itself: point it elsewhere first",
+                            self.table.name, step.field
+                        ),
+                    });
+                }
+            }
+            for before in &step.before {
+                self.execute(&self.plan.merge_statement(before, from, into)?)
+                    .await?;
+            }
+            for collision in &step.collisions {
+                let n = self
+                    .execute(&self.plan.merge_statement(collision, from, into)?)
+                    .await?;
+                if n > 0 {
+                    *result.deleted.entry(step.source.clone()).or_default() += n;
+                }
+            }
+            let n = self
+                .execute(&self.plan.merge_statement(&step.repoint, from, into)?)
+                .await?;
+            if n > 0 {
+                *result.repointed.entry(step.source.clone()).or_default() += n;
+            }
+        }
+        if merge.history_actor {
+            self.execute(&super::plan::Statement {
+                sql: self.plan.definition.clear_history_actor.clone(),
+                args: Vec::new(),
+            })
+            .await?;
+        }
+        self.delete_one(from, &WriteOptions::default()).await?;
+        Ok(result)
     }
 
     /// Clears the history actor a versioned table's hard delete set, so a

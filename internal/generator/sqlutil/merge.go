@@ -2,6 +2,7 @@ package sqlutil
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -102,6 +103,13 @@ type MergeStatement struct {
 // MergePlanOf writes the merge of the Mergeable table of type name among
 // tables, the tables of schema (TablesOf).
 func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePlan, error) {
+	return mergePlanOf(schema, tables, name, false)
+}
+
+// mergePlanOf writes the merge, its statements Postgres's, but for the row
+// an expression's collision reads, which on SQLite is a SELECT of named
+// values, since SQLite names no VALUES list's columns.
+func mergePlanOf(schema *ir.Schema, tables []TableModel, name string, sqlite bool) (*MergePlan, error) {
 	var target *TableModel
 	for i := range tables {
 		if tables[i].Type == name {
@@ -137,7 +145,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 				// reference to the row merged away.
 				return nil, fmt.Errorf("sqlutil: %s.%s references %s, which implements Mergeable, and %s is a version graph's table, whose rows a commit versions: a merge writes rows in place, so a commit made before it would still reference the row merged away; keep the reference in a table outside the graph, or leave Mergeable off %s (D147)", source.Type, column.Field, name, source.Type, name)
 			}
-			step, err := mergeStep(td, source, column, name)
+			step, err := mergeStep(td, source, column, name, sqlite)
 			if err != nil {
 				return nil, err
 			}
@@ -173,7 +181,7 @@ func MergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePla
 
 // mergeStep writes the step of the relation column of source, whose type is
 // td, that references the merged table of type name.
-func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name string) (MergeStep, error) {
+func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name string, sqlite bool) (MergeStep, error) {
 	t := source.Quoted
 	pk := Qualify(source.Name, source.Key)
 	ref := column.Qualified
@@ -247,7 +255,15 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 					values[i] = "CAST($2 AS " + keyColumn.SQLType() + ")"
 				}
 			}
-			moved = append(moved, "(SELECT ("+idx.Expression+") FROM (VALUES ("+strings.Join(values, ", ")+")) AS "+t+" ("+strings.Join(names, ", ")+")) AS k1")
+			row := "(VALUES (" + strings.Join(values, ", ") + ")) AS " + t + " (" + strings.Join(names, ", ") + ")"
+			if sqlite {
+				named := make([]string, len(values))
+				for i := range values {
+					named[i] = values[i] + " AS " + names[i]
+				}
+				row = "(SELECT " + strings.Join(named, ", ") + ") AS " + t
+			}
+			moved = append(moved, "(SELECT ("+idx.Expression+") FROM "+row+") AS k1")
 			held = append(held, "("+idx.Expression+") AS k1")
 			match = append(match, "moved.k1"+equal+"held.k1")
 		} else {
@@ -359,6 +375,66 @@ func repointOf(source *TableModel, quoted, qualified string) MergeStatement {
 	}
 	out.SQL = "UPDATE " + source.Quoted + " SET " + sets + source.fenced(written...) + " WHERE " + qualified + " = $1"
 	return out
+}
+
+// SQLiteMergePlanOf writes the merge of the Mergeable table of type name in
+// SQLite's dialect (D147's merges on SQLite): MergePlanOf's statements,
+// each placeholder ?N where Postgres writes $N; the lock a read that takes
+// none, since SQLite's one writer holds the database from a write
+// transaction's first statement; the clock strftime's, as the queues' times
+// hold it; a value compared with nulls alike by IS; and a key read into an
+// expression's row as it is bound, since SQLite's columns are typed by
+// affinity and a cast to Postgres's type would change it. A merge whose
+// steps delete a @versioned table's rows, whose tombstones record their
+// actor on Postgres alone, is refused.
+func SQLiteMergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*MergePlan, error) {
+	plan, err := mergePlanOf(schema, tables, name, true)
+	if err != nil {
+		return nil, err
+	}
+	if plan.HistoryActor {
+		return nil, fmt.Errorf("sqlutil: a merge of %s deletes rows of a @versioned table, whose tombstones record their actor on Postgres alone; it has no merge on SQLite (D147)", name)
+	}
+	out := *plan
+	out.Lock = sqliteMergeSQL(strings.TrimSuffix(plan.Lock, " FOR UPDATE"))
+	out.Steps = make([]MergeStep, len(plan.Steps))
+	for i, step := range plan.Steps {
+		s := step
+		s.SelfReference = sqliteMergeSQL(step.SelfReference)
+		s.Before = sqliteMergeStatements(step.Before)
+		s.Collisions = sqliteMergeStatements(step.Collisions)
+		s.Repoint.SQL = sqliteMergeSQL(step.Repoint.SQL)
+		out.Steps[i] = s
+	}
+	return &out, nil
+}
+
+// sqliteMergeStatements are statements in SQLite's dialect.
+func sqliteMergeStatements(in []MergeStatement) []MergeStatement {
+	if in == nil {
+		return nil
+	}
+	out := make([]MergeStatement, len(in))
+	for i, statement := range in {
+		out[i] = MergeStatement{SQL: sqliteMergeSQL(statement.SQL), Actor: statement.Actor}
+	}
+	return out
+}
+
+var (
+	mergePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
+	mergeCast        = regexp.MustCompile(`CAST\(\?([0-9]+) AS [^)]+\)`)
+)
+
+// sqliteMergeSQL is one of a merge's statements in SQLite's dialect.
+func sqliteMergeSQL(text string) string {
+	if text == "" {
+		return ""
+	}
+	text = mergePlaceholder.ReplaceAllString(text, "?$1")
+	text = mergeCast.ReplaceAllString(text, "?$1")
+	text = strings.ReplaceAll(text, " IS NOT DISTINCT FROM ", " IS ")
+	return strings.ReplaceAll(text, "now()", sqliteNow)
 }
 
 // The behavior and the tables of an Aliased use whose rows a merge moves
