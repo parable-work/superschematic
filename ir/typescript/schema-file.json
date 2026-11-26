@@ -4208,6 +4208,18 @@
       "properties": {},
       "type": "object"
     },
+    "ConversationsDef": {
+      "additionalProperties": false,
+      "properties": {
+        "part": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part"
+      ],
+      "type": "object"
+    },
     "DNSPlacement": {
       "additionalProperties": false,
       "properties": {
@@ -5976,6 +5988,16 @@
       ],
       "type": "object"
     },
+    "PartyDef": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ProjectionCollapse": {
       "additionalProperties": false,
       "properties": {
@@ -6513,6 +6535,11 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "RunRequestsDef": {
+      "additionalProperties": false,
+      "properties": {},
       "type": "object"
     },
     "ScalarDef": {
@@ -7080,6 +7107,9 @@
           "default": "",
           "type": "string"
         },
+        "conversations": {
+          "$ref": "#/$defs/ConversationsDef"
+        },
         "database": {
           "$ref": "#/$defs/DatabaseDecl"
         },
@@ -7185,6 +7215,9 @@
           "default": "",
           "type": "string"
         },
+        "party": {
+          "$ref": "#/$defs/PartyDef"
+        },
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
@@ -7226,6 +7259,9 @@
         },
         "rowReferences": {
           "$ref": "#/$defs/RowReferencesDef"
+        },
+        "runRequests": {
+          "$ref": "#/$defs/RunRequestsDef"
         },
         "searchable": {
           "$ref": "#/$defs/SearchableDef"

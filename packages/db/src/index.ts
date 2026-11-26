@@ -139,6 +139,8 @@ export type { AgentAccessValue, AudienceOptions, AudienceValue, CalendarSourceOp
 export { attachments, references } from "./rowrefs";
 export { channelIdentities, event, notifier } from "./notifications";
 export type { EventOptions, NotifierPart, Urgency } from "./notifications";
+export { conversations, party, runRequests } from "./parties";
+export type { ConversationsPart, PartyOptions } from "./parties";
 export type { AttachmentsOptions, ReferencesOptions } from "./rowrefs";
 export { searchable } from "./search";
 export type { SearchableOptions } from "./search";

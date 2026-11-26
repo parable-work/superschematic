@@ -196,6 +196,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// of channel identities (core_notifications.go, D153).
 	specs = append(specs, notificationDecorators()...)
 
+	// The tables whose rows are parties, the conversations' tables and the
+	// queue of run requests (core_parties.go, D157).
+	specs = append(specs, partyDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 
