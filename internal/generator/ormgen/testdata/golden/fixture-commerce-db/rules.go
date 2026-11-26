@@ -46,7 +46,8 @@ const rulesLayoutJSON = `{
         {
           "field": "lines",
           "column": "lines",
-          "type": "Line"
+          "type": "Line",
+          "list": true
         },
         {
           "field": "wrapId",
