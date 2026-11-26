@@ -189,6 +189,24 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		}
 		m.Triggers = append(m.Triggers, trigger)
 	}
+	// The search index's triggers (D155): each @searchable table's, and
+	// each of its conversation's and files' sub-tables'.
+	for _, t := range out.SearchTriggers {
+		m.Functions = append(m.Functions, &Function{Name: t.FunctionName, Definition: t.FunctionSQL(), Origin: t.Origin})
+		trigger, err := modelTrigger(t.Trigger(), t.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+	for _, c := range out.SearchChildTriggers {
+		m.Functions = append(m.Functions, &Function{Name: c.FunctionName, Definition: c.FunctionSQL(), Origin: c.Origin})
+		trigger, err := modelTrigger(c.Trigger(), c.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
 
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {

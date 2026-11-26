@@ -6831,6 +6831,39 @@
       ],
       "type": "object"
     },
+    "SearchableDef": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "type": "boolean"
+        },
+        "body": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "comments": {
+          "type": "boolean"
+        },
+        "queue": {
+          "type": "string"
+        },
+        "scope": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "queue"
+      ],
+      "type": "object"
+    },
     "ServerDecl": {
       "additionalProperties": false,
       "properties": {
@@ -7304,6 +7337,9 @@
         },
         "rowReferences": {
           "$ref": "#/$defs/RowReferencesDef"
+        },
+        "searchable": {
+          "$ref": "#/$defs/SearchableDef"
         },
         "seedRoles": {
           "default": [],

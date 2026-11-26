@@ -420,6 +420,33 @@ export {
   type CalendarSourceDefinition,
   type IssueCalendarFeedInput,
 } from './calendar.js';
+// Search across tables (D155): one ranked search over every @searchable
+// table of a database as a caller reads them, its route and MCP tool, and
+// the indexing a declaration's queue's worker runs.
+export {
+  MAX_INDEXED_TEXT,
+  MAX_SEARCH_WORDS,
+  RRF_K,
+  RRF_WINDOW,
+  callSearchTool,
+  indexSearch,
+  reindexSearch,
+  searchEmbeddingsOf,
+  searchMcpTool,
+  searchRoutes,
+  searchSourcesOf,
+  searchTables,
+  searchWords,
+  type SearchEmbeddings,
+  type SearchHit,
+  type SearchIndexing,
+  type SearchOptions,
+  type SearchRequest,
+  type SearchResult,
+  type SearchRoutesOptions,
+  type SearchableDefinition,
+  type SnippetPart,
+} from './search-tables.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

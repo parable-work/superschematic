@@ -360,7 +360,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	// operations write it.
 	owned := map[string]bool{}
 	for _, t := range tables {
-		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil) {
+		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil || td.SearchIndex) {
 			owned[t.Type] = true
 		}
 	}

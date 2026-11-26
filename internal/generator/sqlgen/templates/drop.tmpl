@@ -42,6 +42,18 @@ DROP TRIGGER IF EXISTS {{ quote $guard.TriggerName }} ON {{ $guard.QuotedTable }
 DROP FUNCTION IF EXISTS {{ quote $guard.FunctionName }}();
 {{- end }}
 {{- end }}
+{{- if or .SearchTriggers .SearchChildTriggers }}
+
+-- Drop the triggers and functions of the search index
+{{- range $child := .SearchChildTriggers }}
+DROP TRIGGER IF EXISTS {{ quote $child.TriggerName }} ON {{ $child.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $child.FunctionName }}();
+{{- end }}
+{{- range $search := .SearchTriggers }}
+DROP TRIGGER IF EXISTS {{ quote $search.TriggerName }} ON {{ $search.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $search.FunctionName }}();
+{{- end }}
+{{- end }}
 {{- if or .ReferencesClears .AttachmentsReleases }}
 
 -- Drop the triggers and functions of references and attachments

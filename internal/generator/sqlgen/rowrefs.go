@@ -243,7 +243,7 @@ func buildRowFeatures(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 // point at td's rows: a plain table of the database with one key.
 func referenceTarget(td *ir.TypeDef) bool {
 	if td.Role != ir.RoleDBTable || td.Queue != nil || td.Projection != nil || td.JsonField || td.GraphMember != nil ||
-		td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil {
+		td.BehaviorTable != nil || td.BehaviorQueue != nil || td.RowTable != nil || td.SearchIndex {
 		return false
 	}
 	keys := 0

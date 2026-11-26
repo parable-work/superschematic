@@ -286,6 +286,17 @@ type TypeDef struct {
 	// [CalendarSourceDef].
 	CalendarSources []CalendarSourceDef `json:"calendarSources,omitempty" yaml:"calendarSources,omitempty"`
 
+	// Searchable is the @searchable declaration of a DB table (D155): the
+	// fields that title its rows and hold their body, which the database's
+	// search index holds. Nil for every other type. See [SearchableDef].
+	Searchable *SearchableDef `json:"searchable,omitempty" yaml:"searchable,omitempty"`
+
+	// SearchIndex marks the index table the loader adds to a database with
+	// a @searchable table (D155), [SearchIndexTypeName], which only the
+	// triggers and the runtime's indexing write, and for which no
+	// repository is generated.
+	SearchIndex bool `json:"searchIndex,omitempty" yaml:"searchIndex,omitempty" jsonschema:"-"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].
