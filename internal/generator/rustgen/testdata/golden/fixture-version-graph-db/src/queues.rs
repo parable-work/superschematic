@@ -89,13 +89,17 @@ pub const RECIPE_PUBLISHED_QUEUE: &str = r#"{
       "name": "commit",
       "column": "\"commit\"",
       "uuid": true
+    },
+    {
+      "name": "sequence",
+      "column": "\"sequence\""
     }
   ],
   "statements": {
     "insert": "INSERT INTO recipe_published_queue",
     "dueIn": "clock_timestamp() + make_interval(secs => $1)",
     "expire": "UPDATE recipe_published_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
-    "claim": "WITH due AS (\n  SELECT m.id FROM recipe_published_queue AS m\n  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n    AND NOT EXISTS (SELECT 1 FROM recipe_published_queue AS o WHERE o.root = m.root AND o.id <> m.id\n      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))\n  ORDER BY m.due_at, m.id\n  LIMIT $1\n  FOR UPDATE OF m SKIP LOCKED\n)\nUPDATE recipe_published_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q.\"commit\"",
+    "claim": "WITH due AS (\n  SELECT m.id FROM recipe_published_queue AS m\n  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n    AND NOT EXISTS (SELECT 1 FROM recipe_published_queue AS o WHERE o.root = m.root AND o.id <> m.id\n      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))\n  ORDER BY m.due_at, m.id\n  LIMIT $1\n  FOR UPDATE OF m SKIP LOCKED\n)\nUPDATE recipe_published_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q.\"commit\", q.\"sequence\"",
     "complete": "UPDATE recipe_published_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
     "fail": "UPDATE recipe_published_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE recipe_published_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",

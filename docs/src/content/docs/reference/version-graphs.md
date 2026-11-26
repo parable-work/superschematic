@@ -279,6 +279,7 @@ export abstract class RecipeCommitted {
 export abstract class RecipePublished {
   root: Identity.UUID;
   commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
 }
 
 @versionGraph({ enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })
@@ -295,7 +296,7 @@ write, whatever made it:
 | Option | Enqueues | Sets |
 | --- | --- | --- |
 | `enqueueOnCommit` | For every row written to the commit table: a change set's commit and a merge's alike, tagged or not. | `root` and `commit`, and `ref` and `sequence` when the message declares them. `sequence` is null on a commit that is not tagged. |
-| `enqueueOnRelease` | When a root's release pointer is first written, and when it moves to another commit, a rollback included. A release of the commit it already names enqueues nothing. | `root` and `commit`. |
+| `enqueueOnRelease` | When a root's release pointer is first written, and when it moves to another commit, a rollback included. A release of the commit it already names enqueues nothing. | `root` and `commit`, and `sequence` when the message declares it: the released commit's, which the trigger reads from the commit table, since the pointer holds none. |
 
 Verification refuses a queue that is not a `@queue` class of the schema,
 one whose message has no required `root` and `commit` of the root key's

@@ -11,5 +11,6 @@ export function maskSecretsRecipePublished(value: RecipePublished): RecipePublis
   return {
     root: value.root,
     commit: value.commit,
+    sequence: value.sequence,
   };
 }

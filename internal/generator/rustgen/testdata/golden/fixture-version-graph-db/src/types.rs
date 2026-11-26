@@ -267,6 +267,8 @@ pub struct RecipePatch {
 pub struct RecipePublished {
     pub root: IdentityUUID,
     pub commit: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<GenericInt64>,
 }
 
 /// A line of the Recipe version graph: a primary line when parentRef is null, else a change set.

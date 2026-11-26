@@ -96,8 +96,9 @@ func checkGraphRoot(schema *ir.Schema, td *ir.TypeDef, memberCount int, generate
 // release (D138) to what the trigger can set: a @queue class of the
 // schema whose message has a root and a commit, each a required field of
 // the root key's scalar; a ref of that scalar and an Int64 sequence when
-// it declares them, each nullable where the write has none (a release has
-// neither, and a commit that is not tagged no sequence); and no other
+// it declares them, each nullable where the write may have none (a release
+// has no ref, and a commit that is not tagged no sequence; a release's is
+// its commit's); and no other
 // field the trigger would have to set.
 func checkGraphQueue(schema *ir.Schema, td *ir.TypeDef, option, queue string, commit bool, r *Result) {
 	if queue == "" {
@@ -131,7 +132,7 @@ func checkGraphQueue(schema *ir.Schema, td *ir.TypeDef, option, queue string, co
 			}
 		case "sequence":
 			if !single(fd, "Generic.Int64") || fd.Required {
-				r.errorf(td.Owner, "%s: @versionGraph %s: %s.sequence must be a Nullable<Generic.Int64>: a commit that is not tagged has none, and a release sets none", td.Name, option, queue)
+				r.errorf(td.Owner, "%s: @versionGraph %s: %s.sequence must be a Nullable<Generic.Int64>: a commit that is not tagged has none, and a release takes its commit's", td.Name, option, queue)
 			}
 		default:
 			if fd.Required && fd.Default == nil {
