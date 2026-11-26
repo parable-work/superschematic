@@ -15,7 +15,10 @@ import (
 // the field through the database's Rust types, a struct of the inputs of
 // each, and Derivers, which holds one value of each trait and which the
 // implementation's create_derivers builds. A deriver's entrypoint hands
-// each stale field to its method.
+// each stale field to its method. A deriver fills engine types, through
+// the engine's loop (D74), or tables that implement Derived, through the
+// HTTP runtime's loop over the database's repositories (D146); deps.rs
+// types the items of one loop, so an API's derivers fill one kind.
 
 // DeriversFunc is the function an implementation of an API with derivers
 // declares in its src/lib.rs, which a deriver's entrypoint calls with the

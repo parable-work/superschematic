@@ -19,8 +19,8 @@ import (
 // fields, which the generated Derivers interface types its methods with,
 // and refuses what no deriver can run: a schema that composes no Derived,
 // a deriver with no schema, one whose schemas are engine types and tables
-// both, a Go API's deriver, and a rules policy that admits no engine
-// deriver's subject.
+// both, a Go API's deriver of engine types, a Rust API whose derivers fill
+// both kinds, and a rules policy that admits no engine deriver's subject.
 
 // deriversOf reads the derivers of the API api over the types of db, its
 // database: engineTypes, its engine types, and tableTypes, its tables that
