@@ -2056,11 +2056,13 @@ checked. A row rule's path and `@decrypted({ permission })` are served by
 the generated table operations, as in TypeScript.
 
 The Rust outputs refuse, at build time, the platform features they do not
-serve yet: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
-`@references`, `@attachments`, `@searchable`, `@party`, `@conversations`,
-`@runRequests` and `@agents` on a table of a DB service with Rust types,
-and on a Rust server `@providers` slots, `@autonomy` and a table that
-composes Recurrence.
+serve yet: `@event`, `@notifier`, `@channelIdentities`, `@party`,
+`@conversations`, `@runRequests` and `@agents` on a table of a DB service
+with Rust types, and on a Rust server `@autonomy` and a provider with no
+Rust crate. References and attachments and the runtime providers are
+served (D185), and so are Recurrence, the calendar and search across
+tables, on Postgres (D188): a Rust server whose database lists `sqlite`
+first is refused Recurrence and a calendar source.
 
 ### What access does not do yet
 
