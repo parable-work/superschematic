@@ -962,7 +962,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 	output.Auth = auth
 
-	types := newTypeMapper(schema, opts.Dependencies)
+	types := newTypeMapper(schema, opts.Dependencies, codegen.GoOptionalShapes{KeepZero: opts.Naming.Go.KeepsOptionalZero()})
 	output.TypeFields = types.allTypeFields()
 	output.TypeUnions = types.allTypeUnions()
 	output.TypeEnums = types.allTypeEnums()
@@ -1644,6 +1644,9 @@ type typeMapper struct {
 	schema       *ir.Schema
 	dependencies map[string]*ir.Schema
 	scalars      map[string]scalarEntry
+	// shapes is how the Go types hold an optional field
+	// (go.optional_zero, D161), which goMemberOf reads.
+	shapes codegen.GoOptionalShapes
 }
 
 type scalarEntry struct {
@@ -1651,7 +1654,7 @@ type scalarEntry struct {
 	traits codegen.ScalarTraits
 }
 
-func newTypeMapper(schema *ir.Schema, dependencies map[string]*ir.Schema) *typeMapper {
+func newTypeMapper(schema *ir.Schema, dependencies map[string]*ir.Schema, shapes codegen.GoOptionalShapes) *typeMapper {
 	scalars := make(map[string]scalarEntry, len(schema.Scalars))
 	for name, scalarDef := range schema.Scalars {
 		tokens := codegen.BuildScalarTokens(name)
@@ -1664,7 +1667,7 @@ func newTypeMapper(schema *ir.Schema, dependencies map[string]*ir.Schema) *typeM
 			traits: codegen.BuildScalarTraits(scalarDef, tokens, scalarDef.TypeMappings["go"]),
 		}
 	}
-	return &typeMapper{schema: schema, dependencies: dependencies, scalars: scalars}
+	return &typeMapper{schema: schema, dependencies: dependencies, scalars: scalars, shapes: shapes}
 }
 
 // isInputType reports whether an argument of this type is the operation's

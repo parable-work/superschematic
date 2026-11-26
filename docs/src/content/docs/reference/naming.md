@@ -1026,8 +1026,9 @@ An absent key decodes to a pointer to the default, and an explicit `null`
 to `nil`: the default does not apply. In an `@envVars` class a field with
 a default stays its value, since an unset variable is absent and never
 null; one whose default is not its zero value is always written. The ORM
-reads and writes each column into the type's shape, and the env loader
-assigns it. Any other value fails the load.
+reads and writes each column into the type's shape, the env loader
+assigns it, and the Go server's `@tableOperation` handlers copy it
+between the API's types and the rows. Any other value fails the load.
 
 ### `go.env_number_scalars`
 
