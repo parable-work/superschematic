@@ -23,6 +23,7 @@ export interface TaskApprovalsListSignOffsParams {
 export interface TaskApprovalsSignOffParams {
   id: string;
   note?: string;
+  read?: TaskApprovalsSignOffInput['read'];
   state: TaskApprovalsGate;
   version?: TaskApprovalsSignOffInput['version'];
 }
@@ -240,7 +241,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       hidden: false,
       name: `Task approvals: sign off`,
       handle: 'task_approvals_sign_off',
-      description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+      description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
       invocationPolicy: 'auto',
       _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
     },
@@ -251,19 +252,20 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
     requiredPermissions: [],
     replay: null,
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     namespace: 'task',
     methodName: 'approvals.signOff',
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:056da1f3d069c7f2238a6468441bad86d0fcc00993b7088ed3c5aa5dd5432729',
+    inputSchemaDigest: 'sha256:a7745045442e888d1b439d21d14efedfab4cdae22d66b058631d97beb950ba0a',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
+        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -413,13 +415,14 @@ export const openAIFunctions: OpenAIFunction[] = [
   },
   {
     name: 'task.approvals.signOff',
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
+        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -491,13 +494,14 @@ export const anthropicTools: AnthropicTool[] = [
   },
   {
     name: 'task.approvals.signOff',
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
+        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -584,7 +588,7 @@ export async function invokeTool<T extends ToolName>(
     case TASK_APPROVALS_LIST_SIGN_OFFS:
       return sdk.task.approvals.listSignOffs((params as TaskApprovalsListSignOffsParams).id, { cursor: (params as TaskApprovalsListSignOffsParams).cursor, limit: (params as TaskApprovalsListSignOffsParams).limit, state: (params as TaskApprovalsListSignOffsParams).state });
     case TASK_APPROVALS_SIGN_OFF:
-      return sdk.task.approvals.signOff((params as TaskApprovalsSignOffParams).id, { note: (params as TaskApprovalsSignOffParams).note, state: (params as TaskApprovalsSignOffParams).state, version: (params as TaskApprovalsSignOffParams).version });
+      return sdk.task.approvals.signOff((params as TaskApprovalsSignOffParams).id, { note: (params as TaskApprovalsSignOffParams).note, read: (params as TaskApprovalsSignOffParams).read, state: (params as TaskApprovalsSignOffParams).state, version: (params as TaskApprovalsSignOffParams).version });
     case TASK_APPROVALS_WITHDRAW_SIGN_OFF:
       return sdk.task.approvals.withdrawSignOff((params as TaskApprovalsWithdrawSignOffParams).id, { state: (params as TaskApprovalsWithdrawSignOffParams).state });
     case TASK_STATUS_TRANSITION:

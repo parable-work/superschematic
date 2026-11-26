@@ -12,7 +12,7 @@ type FixtureApprovalsApiSDK struct {
 	//
 	// Endpoints:
 	// - Approvals.ListSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. Requires authentication.
-	// - Approvals.SignOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. Requires authentication.
+	// - Approvals.SignOff: Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. Requires authentication.
 	// - Approvals.WithdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. Requires authentication.
 	// - Status.Transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. Requires authentication.
 	TaskNamespace *namespaces.TaskNamespace

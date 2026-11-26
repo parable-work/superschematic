@@ -967,9 +967,11 @@ func EnumValues(enum *ir.EnumDef) []string {
 // withdrawSignOff name a gated state. listSignOffs takes any state, a gate
 // a later version removed included. On a table the gated states are the
 // alias <Base>Gate, and signOff takes the row's version its signer read,
-// optional, which a pinned gate needs (D104); an engine type's Approvals
-// refuses version and never answers stale, so its types name the states
-// inline and have neither.
+// optional, which a pinned gate needs (D104), and read, the values of the
+// fields a gate pins (D200); an engine type's Approvals refuses version and
+// read, takes no requirement of D200's and never answers stale,
+// not_counted or countsToward, so its types name the states inline and
+// have none of them.
 func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 	gates, _ := config["gates"].(map[string]any)
 	states := SortedKeys(gates)
@@ -996,10 +998,15 @@ func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 		}
 	}
 	if !table {
-		if err := deleteProperty(n.Params["signOff"], "version"); err != nil {
-			return fmt.Errorf("operation signOff: %w", err)
+		for _, param := range []string{"version", "read"} {
+			if err := deleteProperty(n.Params["signOff"], param); err != nil {
+				return fmt.Errorf("operation signOff: %w", err)
+			}
 		}
-		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "stale" })
+		if err := deleteProperty(n.Results["signOff"], "countsToward"); err != nil {
+			return fmt.Errorf("operation signOff's result: %w", err)
+		}
+		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "stale" || code == "not_counted" })
 	}
 	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
 }

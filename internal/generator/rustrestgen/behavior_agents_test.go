@@ -194,7 +194,7 @@ func TestWriteRustAPIGoldenAgents(t *testing.T) {
 		},
 		"src/behaviors.rs": {
 			"use serde_json::{Map, Value};",
-			"DeadlineRun, Error, ExecuteOptions, Host, Layout,",
+			"Deadline, DeadlineRun, Error, ExecuteOptions, Host,",
 			"pub(crate) async fn run_operation_with_preconditions<K, P, R>(",
 			"let ran = postgres::run_operation_with(",
 			"pub(crate) async fn run_table_operation<P, R>(",
