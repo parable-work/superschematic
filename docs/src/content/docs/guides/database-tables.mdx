@@ -2760,8 +2760,9 @@ Task <id>'s urgent only turns true: an update may not move it from true to false
   Relation<Authority>`. Its TypeScript types (`FieldOf<T>` from
   `@superschematic/db`) take that name and refuse the relation's, as the
   build does, in Constants' `fields` and `oneWay`, StateRules' `required`,
-  `frozen` and `by`, Approvals' `resetOn`, and the field members of
-  Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
+  `frozen` and `by`, Approvals' `resetOn`, `pinOn`, `excludeSubjectsIn`,
+  a condition's `field` and `requirementsFrom`'s `in`, and the field
+  members of Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
   a `link` or `via` name the relation itself.
 
 **StateRules.** `states` gives, by a state of the table's Workflow, its

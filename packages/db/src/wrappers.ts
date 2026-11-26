@@ -264,7 +264,7 @@ export type ApprovalsProof = "none" | "recent-sign-in" | "user-verification";
 
 /** One condition on a table's own field under which a requirement applies (D200). */
 export interface ApprovalsConditionOn<T> {
-  readonly field: Extract<keyof T, string>;
+  readonly field: FieldOf<T>;
   /** every-matches and any-matches test glob patterns, contains the values, at-most the one number. */
   readonly test: "every-matches" | "any-matches" | "contains" | "at-most";
   readonly values: readonly string[];
@@ -281,7 +281,7 @@ export interface ApprovalsGateBaseOn<T> {
   /** signOff names the row's version its signer read, and a stale one is vetoed. */
   readonly pinned?: boolean;
   /** signOff names in read the value of each of these own fields as its signer read it, and a stale one is vetoed (D200). */
-  readonly pinOn?: readonly Extract<keyof T, string>[];
+  readonly pinOn?: readonly FieldOf<T>[];
 }
 
 /** A gate whose one requirement the config writes: @superschematic/schema's ApprovalsGate and D200's requirement members. */
@@ -295,7 +295,7 @@ export interface ApprovalsRequirementGateOn<T> extends ApprovalsGateBaseOn<T>, A
   /** Whether the person the creator acted for, the table's createdFor, is refused a sign-off too; false when absent. */
   readonly excludeCreatorPerson?: boolean;
   /** Own fields that list subjects, persons and Agents who may not sign. */
-  readonly excludeSubjectsIn?: readonly Extract<keyof T, string>[];
+  readonly excludeSubjectsIn?: readonly FieldOf<T>[];
   /** Whether each guard reads each signer's permission again; false when absent. */
   readonly recheckPermission?: boolean;
   /** The conditions under which it applies, all of them; it always applies when absent. */
@@ -307,13 +307,13 @@ export interface ApprovalsRequirementGateOn<T> extends ApprovalsGateBaseOn<T>, A
 export interface ApprovalsRequirementsFromOn<T> {
   readonly schema: string;
   readonly link: string;
-  readonly in?: Extract<keyof T, string>;
+  readonly in?: FieldOf<T>;
 }
 
 /** A gate that reads its requirements from rows each instance writes (D200). It names its own resetOn, and no requirement member: each row holds its own. */
 export interface ApprovalsRowsGateOn<T> extends ApprovalsGateBaseOn<T> {
   readonly requirementsFrom: ApprovalsRequirementsFromOn<T>;
-  readonly resetOn: readonly Extract<keyof T, string>[];
+  readonly resetOn: readonly FieldOf<T>[];
   readonly count?: never;
   readonly permission?: never;
   readonly excludeCreator?: never;
