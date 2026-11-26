@@ -15,15 +15,17 @@ stop switch ends every run in flight.
 | Built | Not built yet |
 | --- | --- |
 | `@agents("<part>")` on the orchestration's tables, which the build fills | Go and Rust runtimes; SQLite and D1 |
-| run requests on a queue from routes, assignments, schedules, principals and inbound messages | a generated server that builds the dispatcher into its `Deps` and mounts its routes |
-| the run's token as a grant per target row, acting for its principal | `@autonomy` carried into the generated MCP tool records |
-| autonomy per agent and operation or class, approvals bound to their parameters' hash | a real container platform's sandbox provider and a model API's provider |
-| budgets per agent and in total, warnings, pauses; stop switches | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
-| asking in a row's thread, with a follow-up row at the deadline | an agent that hands work to another agent |
+| run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
+| the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
+| autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | an agent that hands work to another agent |
+| an inbound message's trust: a sender entered by hand asks before every write | |
+| budgets per agent and in total, warnings, pauses; stop switches | |
+| asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | |
 
-D158 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
-records the design and what is left. `examples/agent-orchestration` is
+D158 and D183 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+record the design and what is left. `examples/agent-orchestration` is
 the worked example this page quotes.
 
 ## Declare the tables
@@ -81,7 +83,10 @@ puts one in the caller's transaction.
 
 A run's principal may not request a run: only the dispatcher starts one.
 
-The dispatcher is a `@worker` of the requests queue. It claims a request,
+The dispatcher is a `@worker` of the requests queue. A generated
+TypeScript server builds it into the API's `Deps` (`deps.agents`) when the
+API's database declares the orchestration; see [Wire the
+dispatcher](#wire-the-dispatcher). It claims a request,
 writes the run, takes the run's Lease, mints the token and starts a
 sandbox instance with the definition, the token, the agent routes' URL and
 the credential references. A watch message polls the instance until it
@@ -97,8 +102,19 @@ kind `agent`:
 
 - its permissions are the role's, narrowed to those whom it acts for holds;
 - it reaches its target rows and the rows its role's `reaches` name;
+- acting for a party, it reaches through only the paths the party's grant
+  of the same target reaches too: the role's `TaskNote:task` reaches a
+  task's notes only when the party's grant's role names it as well, and
+  from the party's row and its message's it reaches those rows alone;
 - each row's audience and agent access (`followRole`, `readOnly`, `none`)
   holds, as for any agent run.
+
+A run an inbound message started records the message's trust on the run
+(`trust`) and in the token's claims. `verified` is a message from an
+identity a code verified; `entered` is one from an identity entered by
+hand, and so is a message the dispatcher cannot read. An `entered`
+sender's run reads as its policy says, and every other operation asks,
+whatever a policy row says, as a money movement always does.
 
 The token ends when the run does. A tool runs as this principal, so no
 tool widens the run's scope. Search across tables, through its `search`
@@ -119,7 +135,10 @@ With no row, the operation's own mode holds, then its class's default.
 
 An API operation says its class with `@autonomy("moneyMovement")`. The
 build refuses `@autonomy("moneyMovement", "auto")`, and `setPolicy`
-refuses a row that lets money move on its own.
+refuses a row that lets money move on its own. The generated MCP tool
+records carry each operation's `@autonomy`, so `agents.mcpGate`, the
+endpoint's call gate, holds a run's call to the operation's class; an
+operation with none is an internal write.
 
 `ask` writes an approval with the exact parameters and their SHA-256, and
 raises `approval.requested` on it as urgent. A route sends it to the
@@ -135,6 +154,38 @@ A message to a party is class `messageParty`, so it asks by default. With
 `approve: request => agents.sendApproval(request)` to `createInbound`: a
 run's send that asks is held `awaitingApproval`, the approval holds its
 message, and approving it releases the message; denying it refuses it.
+
+## Wire the dispatcher
+
+A TypeScript API whose database declares the orchestration holds the
+dispatcher in its `Deps`. The generated entrypoint builds `deps.agents`
+with `createAgents` over `deps.orm` and the requests queue, and the rest of
+its options from the implementation's `createAgentOptions`:
+
+```ts
+export const createAgentOptions: AgentOptionsConstructor = deps => ({
+  endpoint: deps.config.AGENT_ENDPOINT ?? 'http://localhost:8080/api/agents',
+  providers, // providersFrom over the config's slots (D159)
+  notifier, // createNotifier, whose approval replies run agents' reply actions
+  inbound, // createInbound, whose approve hook is agents.sendApproval
+  tools,
+  search: true,
+});
+```
+
+| What the generated server does | Where |
+| --- | --- |
+| builds `deps.agents` with `withAgents` | every entrypoint that builds `Deps` |
+| mounts `deps.agents.routes()` at the endpoint's path | the server |
+| passes `agents.mcpGate` as the MCP endpoint's call gate | a server that serves the API's MCP endpoint |
+| hands each message to `agents.handle` | a `@worker` of the requests queue, and of the `@runRequests` queue (D157) |
+| prunes the transcripts past their retention with the queue | the requests queue's worker |
+
+The implementation's `Workers` has no method for a worker of either
+queue. An authenticator that takes a run's token on the API's own routes
+is `deps.agents.authenticator(inner)`; such a route holds an agent's call
+to its run's autonomy with `deps.agents.gate`, as `examples/agent-orchestration`'s
+`payInvoice` does.
 
 ## Budgets and stop switches
 

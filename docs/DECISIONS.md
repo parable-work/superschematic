@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D165 is the highest so far.
+  the highest number any branch has used. D199 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -2403,9 +2403,6 @@ Left:
 
 - Go and Rust: the inbound path, party principals and sends, and SQLite
   and D1.
-- The agent run that takes a run request held to the message's trust:
-  D158 takes the request and narrows its run to the request's grant's
-  role, and records the trust.
 - Comments' `via` on a table: the rules core's caller carries no channel,
   so a message posted into a row's Comments for a text's sender records
   its `for` and not its channel. The core's `Caller` gains a channel, the
@@ -2505,21 +2502,98 @@ its Lease; and administration is permissions.
 
 Left:
 
-- An inbound message's trust (`verified`, `entered`, D157) narrowing its
-  run: the run records it (`input.trust`) and runs as a verified one's.
 - Go and Rust: the dispatcher, the run's authenticator, autonomy and the
   runner; SQLite and D1.
-- The generated server building the dispatcher into its `Deps`, mounting
-  the agent routes and filling the requests queue's `@worker` with
-  `agents.handle`; an app wires them (`examples/agent-orchestration/server`).
-- `@autonomy` in the generated MCP tool records (`mcptools`), so
-  `mcpGate` reads a generated tool's class; it reads an internal write now.
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
   Postgres through Hyperdrive as the notifier's does.
 - A reply interpreter that is a model (D153's left), through an agent run.
-- A party the run acts for narrowing the role's relation paths to its
-  grant's; today the run's scope is the grant's target, the party's row
-  and the message's, and the agent's role's paths from them.
-- The schema writer writing `@agents` and `@autonomy` back.
+
+## D183. An entered sender's run asks before every write, a party's run reaches only its grant's paths, a generated MCP tool carries its operation's @autonomy, and a generated TypeScript server builds the dispatcher into its Deps and runs its queues (D157, D158 amended)
+
+D158 left five of its own follow-ups in TypeScript. A run an inbound
+message started recorded the message's trust and ran as a verified one's;
+a run acting for a party reached through every path the agent's role
+names, whatever the party's grant reaches; `mcpGate` held every generated
+tool as an internal write; an app wired the dispatcher, its routes and its
+workers by hand; and the schema writer dropped `@agents` and `@autonomy`.
+
+### Trust
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A run an inbound message started records the message's trust on the run (`trust`, a field the loader adds to the runs part): `verified` when the message's row says so, and `entered` for anything else, an identity entered by hand, a row with no trust, a message the dispatcher cannot read or that the request carries as text. The dispatcher reads it from the message's row, never from the request. | The request's word for it, which any enqueuer could forge. A missing trust read as verified, which fails open. |
+| An `entered` sender's run reads as its policy says, and every other operation asks, whatever a policy row or the tool's mode says, as a money movement always does (`effectiveAutonomy`). `gate` reads the trust from the run's row, so the app's tools, `mcpGate`, `message_party` (through `sendPolicy`) and `ask_principal`, now gated as an internal write, all hold to it. The token's claims carry the trust (`claims.trust`) for the app; the approval's summary says the sender was entered by hand. | Its role narrowed to read and reply, which a write the party's grant allows could then never make, even with a person's approval. Refusing the run, which drops a real message from a known party. Narrowing its permissions, which would leave the policy rows to say auto for what remains. |
+
+### A party's paths
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A run acting for a party reaches, from each target, only the paths the agent's role names and the party's grant of the same target names too (`narrowReaches`), read on every call: the grant the run is under when the run names it, else each active grant of the party. A target no grant of the party names, the party's own row and its message's, gives no path: the run reaches the row alone. A grant that ended gives none. | Issuing the run's grants with a role of the intersection, a role row per run. Paths fixed when the run starts, which a grant revoked mid-run would not narrow. |
+
+### The generated MCP tools
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A tool's record in the router's table carries its operation's `@autonomy` (`autonomy: { class, mode? }`), which TypeScript's `McpRouteTool` declared and `mcpGate` already read; Rust's router reads the same table and ignores it. A tool whose operation declares none carries none, and the gate holds it as an internal write. | The class in the tool's `_meta`, which `tools/list` would show every client. |
+
+### The generated wiring
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A TypeScript API whose database declares the orchestration (and whose types write the repositories) holds the dispatcher in its `Deps` (`agents: Agents`). The API package's `agents.ts` exports `withAgents(deps, options)`, `createAgents` over `deps.orm` and the `@agents("requests")` queue with the app's options, and `dispatchAgentMessage`. Every entrypoint that builds `Deps` builds it but the dispatcher, asks the implementation's `createAgentOptions` (`AgentOptionsConstructor`, of `Deps` but its dispatcher) for the rest of `createAgents`' options, and builds `Deps` with `withAgents`. The scaffold writes a `createAgentOptions` that names an endpoint alone, and a build refuses an implementation that exports none. | Providers, the notifier and the inbound path built by the generator too, which D159, D153 and D157 leave to the app until the generated server builds each. The app building `createAgents` itself, which leaves the ORM and the queue to it. |
+| A server mounts `deps.agents.routes()` ahead of the API's router, which answers only under the endpoint's path, and passes `agents.mcpGate` as its MCP endpoint's call gate. | Mounting the routes at a fixed path, which the endpoint the sandbox is given must name anyway. |
+| A `@worker` of the requests queue or of D157's `@runRequests` queue is the dispatcher's: its entrypoint hands each message to `agents.handle` (`dispatchAgentMessage`) and calls no `createWorkers`, the requests queue's prune deletes the transcripts past their retention too, and the `Workers` interface and the implementation check have no method for either. Any other `@worker` stays the implementation's. | `inbound.runWorker(pool, m => agents.handle(m))` in the generated worker, which needs the app's inbound path in a process that runs nothing else of it; the queue is a queue, and its handler is the dispatcher's either way. |
+| The behavior worker's event handler takes the transaction as `Deps`' transaction type: the runtime's `OrmTx` lacked the `references` and `attachments` members a database with `@references` adds, so an API over one did not type-check. | A wider `transaction` type in the runtime, which every ORM caller reads. |
+
+### The schema writer
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript writer writes an orchestration class as `@agents("<part>")` and an operation's `@autonomy(class, mode?)`; the loader's fields and indexes carry `ir.OriginAgents` and are left out, so reading it back fills them again. The data forms carry both already. | Writing the part's fields, which the reader would then hold to the part's scalars twice. |
+
+Settled. An entered sender's run is held, not refused: it reads, and a
+person approves each write. A run reaches through a path only when both
+the agent's role and the party's grant name it. The generated server
+builds the dispatcher, its routes, its MCP gate and its queues' workers;
+the app gives the options only it knows.
+
+Built: the runs' `trust` (`internal/loader/agents`); `trustOf`,
+`effectiveAutonomy` and `narrowReaches` in `agents.ts`, the dispatcher
+recording the trust, the run's principal narrowing its paths and carrying
+the trust, `gate` holding an entered run to ask, `ask_principal` gated;
+`@autonomy` in `mcptools`' tool records; the agents' `Deps`, `agents.ts`
+and the scaffold's `createAgentOptions` (`tsrestgen`), the entrypoints'
+dispatcher, routes, MCP gate and workers (`servergen`), the build's check
+of `createAgentOptions` and of the workers' methods; the behavior worker's
+transaction type; `@agents` and `@autonomy` in the TypeScript writer;
+`examples/agent-orchestration`'s stack and implementation in place of its
+hand wiring; the guide's "Wire the dispatcher". The tests:
+`TestAgentRunsEndToEnd`, on Postgres, now with a verified and an entered
+sender's runs, a party's paths narrowed and ended with its grant;
+`TestMCPToolsCarryAutonomy`, `TestDepsHoldTheAgentDispatcher`,
+`TestTypeScriptRouterHoldsAgentRunsToTheirAutonomy`,
+`TestTSWriterWritesAgentOrchestration`, and
+`TestAgentOrchestrationExampleUsesTheGeneratedWiring`, which builds the
+example's stack and type-checks its server and workers against its
+implementation.
+
+Left:
+
+- Go, Rust and SQLite: the trust, the narrowed paths, the tool records'
+  `@autonomy` read by their gates, and the generated wiring (D158's left).
+- A run's token on the API's own routes: the generated server accepts it
+  only where the implementation's authenticator does
+  (`deps.agents.authenticator(inner)`), and a route holds the call to its
+  run's autonomy only where the implementation asks `deps.agents.gate`;
+  the generated router could gate every route an agent calls as the MCP
+  endpoint does.
+- The approval routes (`<endpoint>/approvals/<id>/approve`) in the
+  generated server, which `routes()` serves only with an authenticator of
+  a `Request`; approvals are decided through a reply or the app's own
+  operation meanwhile.
+- The channel's trust (D153's `channelTrust`) narrowing an inbound run
+  beside the identity's.
+- A trust read from a request that names its message as `{ table, key }`,
+  which runs as entered now.
