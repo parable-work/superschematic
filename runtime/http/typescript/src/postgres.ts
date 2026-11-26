@@ -345,6 +345,34 @@ export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, READ
 // applies as a repository does, and the refusal of a write a party's or an
 // agent run's grants do not reach.
 export { AccessRefusedError, audienceConditions, type AudienceDefinition } from './orm.js';
+// References and attachments on any row (D154): orm.references and
+// orm.attachments, the definitions a DB's ./orm entry gives them, and the
+// Comments attachment block of a file.
+export {
+  RowFeatureError,
+  attachmentBlock,
+  previewObjectOf,
+  type Attachment,
+  type AttachmentBlock,
+  type Attachments,
+  type AttachmentsDefinition,
+  type AttachmentsHolderDefinition,
+  type AttachmentsMembers,
+  type Backlink,
+  type Backlinks,
+  type CommentsSourceDefinition,
+  type FileRef,
+  type ProcessingState,
+  type Reference,
+  type ReferenceTargetDefinition,
+  type References,
+  type ReferencesHolderDefinition,
+  type ReferencesMembers,
+  type RowRef,
+  type RowReferencesDefinition,
+  type RowTableDefinition,
+  type Upload,
+} from './rowfeatures.js';
 // Grants and the access log (D156): the authenticator of a grant's token,
 // the making, revoking and reading of grants, and the log's writer.
 export {
@@ -364,6 +392,142 @@ export {
   type GrantRow,
   type IssueGrantInput,
 } from './access.js';
+// The calendar (D152): the read that merges every @calendarSource of a
+// database's tables as a caller reads them, its routes and MCP tool, and
+// the iCalendar feed, whose token is a grant that reads the feed alone.
+export {
+  CALENDAR_FEED,
+  CALENDAR_FEED_DAYS,
+  calendarFeedOf,
+  calendarIcs,
+  calendarMcpTool,
+  calendarReference,
+  calendarRoutes,
+  calendarSourcesOf,
+  callCalendarTool,
+  isCalendarFeed,
+  issueCalendarFeed,
+  readCalendar,
+  revokeCalendarFeed,
+  rotateCalendarFeed,
+  type CalendarDetail,
+  type CalendarEntry,
+  type CalendarFeedScope,
+  type CalendarOccurrencesDefinition,
+  type CalendarOptions,
+  type CalendarRead,
+  type CalendarRoutesOptions,
+  type CalendarSourceDefinition,
+  type IssueCalendarFeedInput,
+} from './calendar.js';
+// Search across tables (D155): one ranked search over every @searchable
+// table of a database as a caller reads them, its route and MCP tool, and
+// the indexing a declaration's queue's worker runs.
+export {
+  MAX_INDEXED_TEXT,
+  MAX_SEARCH_WORDS,
+  RRF_K,
+  RRF_WINDOW,
+  callSearchTool,
+  indexSearch,
+  reindexSearch,
+  searchEmbeddingsOf,
+  searchMcpTool,
+  searchRoutes,
+  searchSourcesOf,
+  searchTables,
+  searchWords,
+  type SearchEmbeddings,
+  type SearchHit,
+  type SearchIndexing,
+  type SearchOptions,
+  type SearchRequest,
+  type SearchResult,
+  type SearchRoutesOptions,
+  type SearchableDefinition,
+  type SnippetPart,
+} from './search-tables.js';
+// Events, notifications and channels (D153): the notifier that raises a
+// table's events in the caller's transaction, routes them by rows, holds
+// each recipient to the record's audience, delivers through the channel
+// adapters an environment configures, and runs a reply as its sender; and
+// password reset over the email channel (D81).
+export {
+  CODE_ATTEMPTS,
+  CODE_TTL_SECONDS,
+  DEFAULT_DELIVERY_RETENTION_DAYS,
+  DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+  HEALTH_TTL_MS,
+  INAPP,
+  NotifierError,
+  createNotifier,
+  normaliseAddress,
+  passwordReset,
+  quietDelaySeconds,
+  sameId,
+  type AddIdentityInput,
+  type ChannelIdentityRow,
+  type EscalationStep,
+  type NoticeRow,
+  type NoticeWork,
+  type Notifier,
+  type NotifierOptions,
+  type PasswordResetOptions,
+  type RaiseInput,
+  type RaisedEvent,
+  type RecipientRef,
+  type RecipientSpec,
+  type RenderedNotice,
+  type ReplyAction,
+  type ReplyContext,
+  type ReplyInput,
+  type ReplyOutcome,
+  type Urgency,
+} from './notify.js';
+// Agent orchestration (D158): the dispatcher of agent runs, their tokens,
+// autonomy, budgets and stop switches, over the @agents tables.
+export {
+  AGENT_PERMISSIONS,
+  AgentsError,
+  DEFAULT_TRANSCRIPT_RETENTION_DAYS,
+  createAgents,
+  defaultAutonomy,
+  paramsHash,
+  type AgentRunRequest,
+  type AgentSandboxTool,
+  type AgentTool,
+  type AgentToolContext,
+  type AgentTrigger,
+  type Agents,
+  type AgentsOptions,
+  type AskThread,
+  type Autonomy,
+  type GateOutcome,
+  type OperationClass,
+  type PrincipalRef,
+  type TranscriptEntry,
+  type TranscriptStore,
+} from './agents.js';
+export type { EventDefinition } from './orm.js';
+// Outside parties and inbound messages (D157): the principal a party is,
+// the one path every inbound message takes, conversations whose messages
+// are rows, and sending to a party as a permission.
+export {
+  InboundError,
+  createInbound,
+  emailAuthenticated,
+  type Inbound,
+  type InboundDisposition,
+  type InboundOptions,
+  type InboundOutcome,
+  type MessageRow,
+  type ReceivedMessage,
+  type RunRequest,
+  type SendDecision,
+  type SendInput,
+  type SendOutcome,
+} from './inbound.js';
+export { identityLapsed, partyPrincipal, partyTablesOf, type IdentityStanding, type PartyPrincipalOptions, type PartyRef } from './parties.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

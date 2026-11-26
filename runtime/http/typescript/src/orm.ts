@@ -6,9 +6,12 @@ import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './queue.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import type { SearchableDefinition } from './search-tables.js';
+import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
+import type { CalendarSourceDefinition } from './calendar.js';
 
 /*
 The generated repositories' runtime (D79): a DB service's TypeScript types
@@ -443,6 +446,28 @@ export interface TableDefinition {
    * the access log, or the UserRole table whose rows a grant's role names.
    */
   readonly access?: 'grants' | 'log' | 'roles';
+  /** The table's @calendarSource declarations (D152), which the calendar read and feed merge; absent for a table with none. */
+  readonly calendar?: readonly CalendarSourceDefinition[];
+  /** A @searchable table's index (D155), which the search across tables ranks and indexSearch builds; absent for a table that is not @searchable. */
+  readonly searchable?: SearchableDefinition;
+  /** What the table is to the notifier (D153): one of its parts, or the table of channel identities; absent for any other table. */
+  readonly notifier?: 'inbox' | 'deliveries' | 'routes' | 'preferences' | 'subscriptions' | 'channelTrust' | 'replies' | 'channelIdentities';
+  /** What the table is to the agent orchestration (D158): one of its parts; absent for any other table. */
+  readonly agents?: 'definitions' | 'runs' | 'policies' | 'approvals' | 'controls';
+  /** The table's @event declarations (D153), which the notifier raises and routes; absent for a table with none. */
+  readonly events?: readonly EventDefinition[];
+  /** A @party table (D157): its rows are principals of kind party, which act through grants alone; title is the member a party is named by. Absent for any other table. */
+  readonly party?: { readonly title?: string };
+  /** What the table is to the conversations (D157): the conversations, or their messages; absent for any other table. */
+  readonly conversations?: 'conversations' | 'messages';
+}
+
+/** One @event of a table (D153): its kind, its default urgency, the member a notice is titled by and the members its payload carries. */
+export interface EventDefinition {
+  readonly kind: string;
+  readonly urgency: 'urgent' | 'normal' | 'digest' | 'record';
+  readonly title?: string;
+  readonly payload?: readonly string[];
 }
 
 /**
@@ -611,6 +636,14 @@ export interface OrmDefinition {
    * operations under the use's id. Absent for a database with none.
    */
   readonly rules?: RulesLayout;
+  /**
+   * The references of the database's @references tables and the ref blocks
+   * of its tables' Comments (D154), which orm.references reads; absent for
+   * a database with neither.
+   */
+  readonly references?: RowReferencesDefinition;
+  /** The files of the database's @attachments tables (D154), which orm.attachments reads; absent for a database with none. */
+  readonly attachments?: AttachmentsDefinition;
 }
 
 /** A database's system actor, which asSystem() acts as (D87): a user's id and the name an app shows for it. */
@@ -1225,7 +1258,7 @@ export type OrmTx<R> = R &
   };
 
 /** The members a repository's table may not take, which an ORM holds itself. */
-export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'withBehaviorCaller', 'transaction', 'query', 'exec', 'queries'];
+export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'withBehaviorCaller', 'transaction', 'query', 'exec', 'queries', 'references', 'attachments'];
 
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
@@ -3317,7 +3350,7 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
 function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = queryOf(orm, runner, acting, keys);
-  return {
+  return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
@@ -3346,7 +3379,38 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
       await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
       return out;
     },
-  } as unknown as OrmTx<R>;
+  }) as unknown as OrmTx<R>;
+}
+
+/**
+ * An ORM's or a transaction's references and attachments members, when its
+ * database declares them (D154), over target itself: its raw query, its
+ * repositories, which read as its viewer, and its transaction.
+ */
+function withRowFeatures<T extends object>(orm: OrmDefinition, viewer: Viewer, target: T): T {
+  if (!orm.references && !orm.attachments) return target;
+  return Object.assign(target, rowFeatureMembers(rowFeatureHost(orm, viewer, target)));
+}
+
+function rowFeatureHost(orm: OrmDefinition, viewer: Viewer, target: object): RowFeatureHost {
+  const self = target as unknown as Record<string, unknown> & {
+    query(text: string, values: readonly unknown[]): Promise<OrmQueryResult<Record<string, unknown>>>;
+    transaction<T>(fn: (tx: object) => Promise<T>): Promise<T>;
+    readonly actingUser: string | undefined;
+  };
+  return {
+    ...(orm.references ? { references: orm.references } : {}),
+    ...(orm.attachments ? { attachments: orm.attachments } : {}),
+    async query(text, values) {
+      const result = await self.query(text, values);
+      return { rows: result.rows, rowCount: result.rowCount ?? 0 };
+    },
+    repository: member => self[member] as ReturnType<RowFeatureHost['repository']>,
+    transaction: fn => self.transaction(tx => fn(rowFeatureHost(orm, viewer, tx))),
+    actingUser: () => self.actingUser,
+    sees: () => (viewer === CALLER ? currentAccess() ?? ALL : viewer),
+    notFound: message => new NotFoundError(message),
+  };
 }
 
 /**
@@ -3368,7 +3432,7 @@ export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | n
 function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false, pool };
   const query = queryOf(orm, runner, acting, keys);
-  return {
+  return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
@@ -3383,5 +3447,5 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: Fie
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
-  } as unknown as Orm<R>;
+  }) as unknown as Orm<R>;
 }

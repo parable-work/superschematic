@@ -860,7 +860,19 @@ export interface McpRouteTool extends McpTool {
    * core's (D93).
    */
   readonly confirm?: boolean;
+  /**
+   * What the operation is to an agent's autonomy policy (D158), its
+   * @autonomy: its class, and its mode when no policy row names it.
+   */
+  readonly autonomy?: { readonly class: 'read' | 'internalWrite' | 'messageParty' | 'moneyMovement'; readonly mode?: 'auto' | 'tell' | 'ask' };
 }
+
+/**
+ * A check of a tool's call before its route runs (D158): the problem the
+ * call answers instead, or undefined to run it. An agent run's autonomy
+ * policy is one: createAgents's mcpGate.
+ */
+export type McpCallGate = (ctx: RequestContext, tool: McpRouteTool, args: Readonly<Record<string, unknown>>) => Promise<ProblemBody | undefined>;
 
 /** The router options of an API's MCP endpoint. */
 export interface McpOptions {
@@ -887,6 +899,12 @@ export interface McpOptions {
    * deployment with several replicas passes one they share.
    */
   readonly confirmationStore?: McpConfirmationStore;
+  /**
+   * A check of every call before its route runs (D158), after the
+   * person's confirmation (D93): an agent run's autonomy policy, whose ask
+   * answers 428 approval_required until the call's approval is approved.
+   */
+  readonly callGate?: McpCallGate;
 }
 
 /** What the generated router says about its endpoint. */
@@ -996,7 +1014,7 @@ export function mountMcp<E extends Env>(
   };
   // Each request is served as its caller, whom a confirmation is bound to.
   const serve = (c: Context<E>, ctx: RequestContext) =>
-    serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
+    serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx, options.callGate), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
     const spec: OperationSpec = {
       name: '$mcp',
@@ -1075,7 +1093,8 @@ function routerTools<E extends Env>(
   runtime: RouterRuntimeOptions,
   mount: McpMount,
   c: Context<E>,
-  ctx: RequestContext
+  ctx: RequestContext,
+  gate?: McpCallGate
 ): McpToolSet {
   // A tool whose route the caller may call: its auth requirement, by the
   // router's permission matcher, admits the caller the gate established.
@@ -1119,6 +1138,8 @@ function routerTools<E extends Env>(
       if (!entry || !offered(entry.spec)) throw new McpUnknownToolError(`${mount.api} has no tool ${JSON.stringify(name)}`);
       const request = toolRequest(entry.tool, entry.spec, args, c.req.raw, ctx);
       if (request instanceof HttpProblem) return { problem: problemBody(request, ctx.requestId) };
+      const gated = gate ? await gate(ctx, entry.tool, args) : undefined;
+      if (gated) return { problem: gated };
       return outcomeOf(await app.fetch(request, c.env), ctx.requestId, new URL(request.url).pathname);
     },
   };

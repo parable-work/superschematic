@@ -198,6 +198,12 @@ type ResolvedDeployable struct {
 	// Bindings bind every config field of a server or a job, sorted by
 	// field. An optional field with no value and no default has none.
 	Bindings []*Binding `json:"bindings,omitempty"`
+
+	// Providers are the runtime providers a deployable that runs code uses
+	// in the environment (D159), one per provider slot of the configs it
+	// reads whose binding names one, sorted by slot. A slot left unset has
+	// none.
+	Providers []ResolvedProvider `json:"providers,omitempty"`
 }
 
 // ResolvedImage is what a stack adds to one deployable's image (D144).
@@ -772,4 +778,19 @@ type DeployStep struct {
 
 	// Resources are the IDs of the resources the step applies, sorted.
 	Resources []string `json:"resources,omitempty"`
+}
+
+// ResolvedProvider is the runtime provider one provider slot of a
+// deployable's config names in an environment (D159).
+type ResolvedProvider struct {
+	// Slot is the config field that names the provider.
+	Slot string `json:"slot"`
+	// Interface is the runtime interface the slot takes.
+	Interface string `json:"interface"`
+	// Provider is the provider's name, the slot's value.
+	Provider string `json:"provider"`
+	// Package is the provider's package.
+	Package string `json:"package"`
+	// Service is the API whose config declares the slot.
+	Service string `json:"service"`
 }

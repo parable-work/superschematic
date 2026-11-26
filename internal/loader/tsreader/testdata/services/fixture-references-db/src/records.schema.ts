@@ -1,0 +1,36 @@
+import { Identity, Temporal } from "superscalar";
+import { AutoGenerate, Comments, attachments, audience, key, queue, references } from "@superschematic/db";
+
+// One message per reference a target's delete cleared, which the build
+// fills: the row that held it, the row deleted and the role.
+@queue()
+export abstract class ReferenceCleared {}
+
+// One message per file row deleted, or upload never completed, naming its
+// object, which the build fills.
+@queue()
+export abstract class AttachmentReleased {}
+
+// A ticket: a conversation whose messages carry attachment blocks,
+// references to rows of any table, and files of at most 1 MiB, 4 MiB and
+// ten files a ticket.
+@references<Ticket>({ cleared: ReferenceCleared })
+@attachments<Ticket>({ released: AttachmentReleased, maxFileBytes: 1048576, maxRowBytes: 4194304, maxFiles: 10 })
+export abstract class Ticket implements Comments<Ticket, { attachments: { maxBytes: 1048576; schemes: ["attachment"] } }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+}
+
+// A note, which its owner may keep to themselves, and which points at
+// tickets and other notes alone.
+@audience<Note>({ owner: "owner" })
+@references<Note>({ tables: [Ticket, Note], cleared: ReferenceCleared })
+@attachments<Note>({ released: AttachmentReleased, mediaTypes: ["text/*", "image/*", "application/pdf"] })
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  owner: Identity.UUID;
+  createdAt: Temporal.DateTime;
+}

@@ -100,5 +100,9 @@ $$ LANGUAGE plpgsql
 {{- define "trigger" }}{{ $trigger := . -}}
 CREATE TRIGGER {{ quote $trigger.Name }}
   {{ $trigger.Timing }} ON {{ $trigger.QuotedTable }}
+{{- if $trigger.Transition }}
+  {{ $trigger.Transition }} FOR EACH STATEMENT EXECUTE FUNCTION {{ quote $trigger.Function }}()
+{{- else }}
   FOR EACH ROW EXECUTE FUNCTION {{ quote $trigger.Function }}()
+{{- end }}
 {{- end }}

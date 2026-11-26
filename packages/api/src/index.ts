@@ -3,6 +3,7 @@ export {
   allowService,
   app,
   auth,
+  autonomy,
   behaviorOperations,
   behaviorWorker,
   bodyLimit,
@@ -36,6 +37,8 @@ export {
 } from "./decorators";
 export type {
   AppOptions,
+  AutonomyClass,
+  AutonomyMode,
   BehaviorWorkerOptions,
   BodyLimitConfig,
   DeriverOptions,

@@ -119,6 +119,16 @@ const (
 	// inherited node the parent environment lacks, or a deploy order the
 	// dependencies contradict.
 	CodeGraph Code = "graph"
+
+	// CodeProvider is a provider slot whose value names no provider its
+	// API lists, one of another interface, or one whose settings the
+	// environment leaves unbound (D159).
+	CodeProvider Code = "provider"
+
+	// CodeNoProvider is a deployable whose API uses a feature that needs a
+	// runtime provider, notifications a channel adapter for one, while
+	// the environment names no provider of that interface (D159).
+	CodeNoProvider Code = "no-provider"
 )
 
 // Error is one resolution failure.

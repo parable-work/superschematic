@@ -1101,6 +1101,53 @@ enum with no such line gets neither method. The member's `@title` tag
 (D48) is a separate label, which the methods do not read. `off` writes
 neither method. Any other value fails the load.
 
+### `[go.projection_capture]`
+
+Default: unset
+
+Two functions the Go types package of a DB schema writes, in
+`projection_capture.go`, so a program can capture a snapshot of what a
+`@projection` view serves without reading the view itself. A view is
+listed when the only setting it reads is `setting`: it reads no other
+required setting and no optional one. When `pool` is set, the view must
+also be in that pool.
+
+```toml
+[go.projection_capture]
+queries = "AccountCaptureQueries"
+uuid_columns = "AccountUUIDColumns"
+setting = "app.account_id"
+pool = "scope"
+```
+
+- `queries` names a function that returns `map[string]string`: the
+  relation a reader queries, such as `scope.notes`, mapped to the `SELECT`
+  that the view's migration wraps. It reads the same tables, in the same
+  source schema.
+- `uuid_columns` names a function that returns `map[string][]string`: for
+  each relation that `queries` lists, its columns whose Postgres type is
+  `uuid`, in column order, or `nil` for a view without one. A field of a
+  uuid scalar, or of a scalar that aliases one, is such a column. A list of
+  them is `uuid[]` and is not.
+- `setting` is the one setting a listed view reads, such as
+  `app.account_id`.
+- `pool` limits the list to the views of one pool. Leave it out to list
+  the views of every pool.
+
+Each call returns a new map. To capture a view, set the setting in a
+transaction with `set_config(name, value, true)` and run its query. The
+query returns the rows that the view serves under that value. A caller
+can re-encode the uuid columns as the readers of the view see them.
+
+The module writes the file only when at least one view is listed. Without
+the table, or with `queries` empty, it writes neither function.
+`queries`, `uuid_columns` and `setting` are set together: a table that
+leaves one out fails the load. `queries` and `uuid_columns` are two
+different exported Go identifiers. `setting` is two or more lowercase
+identifiers joined by dots, and `pool` is one lowercase identifier. A
+function name that a type, a union or an enum of the module already
+declares fails the build.
+
 ## `[go_api]`
 
 How the generated Go API routers answer a request they refuse, and the

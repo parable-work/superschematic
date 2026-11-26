@@ -386,6 +386,7 @@ workerd (D91 and D92 Left):
 | cloudflare | A service binding's request carries the browser's `Host` and a body | the sign-in that sends `Origin` alone, and each POST's JSON body |
 | cloudflare | Cloudflare accepts the version's Hyperdrive binding, and Hyperdrive reaches a real origin over TLS | the deploy, then every call that reads or writes, the declared query and `nearest` among them |
 | cloudflare | The Cron drainer's wall time and CPU | the time from the enqueue to the drain, within a firing a minute; the drainer Worker's invocation in Workers Logs |
+| cloudflare | A client's `PUT` to R2's S3 API through a URL the Worker signed with the edge's R2 credential, and the bytes read back through the binding and hashed with workerd's DigestStream | the file's upload and its completion, which holds the bytes to their SHA-256 (D154) |
 | cloudflare | argon2id's CPU on a sign-in | the sign-ins' times, the first of an isolate about 120 ms more for the hash it makes as it builds the identity service; their CPU in Workers Logs |
 | gcp | A job whose derived name is past a GCP limit deploys | `smoke-api-sync-all-linked-accounts`'s Cloud Run job, scheduler job and account, named `smoke-api-sync-all-lin-` and a hash (D97) |
 

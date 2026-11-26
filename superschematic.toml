@@ -177,6 +177,17 @@ orm_relation_filter_suffix = ""
 orm_default_selection = "all"
 enum_text_methods = "off"
 
+# The Go types of a DB schema can write two functions that return the
+# SELECT behind each @projection view that reads only one setting, and the
+# uuid columns of each, so a program can capture what the view serves.
+# Unset by default, which writes neither. pool is optional:
+#
+#   [go.projection_capture]
+#   queries = "AccountCaptureQueries"
+#   uuid_columns = "AccountUUIDColumns"
+#   setting = "app.account_id"
+#   pool = "scope"
+
 # How the generated Go API routers answer a request they refuse, and the
 # symbols they write beside the routes. Each key left out keeps the core's
 # router. A project whose clients know the answers of another router sets

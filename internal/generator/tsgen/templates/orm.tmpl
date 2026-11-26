@@ -321,8 +321,37 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Audience}}
   audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}} },
 {{- end}}
+{{- if .Calendar}}
+  calendar: [
+{{- range .Calendar}}
+    { name: {{jsonString .Name}}, kind: {{jsonString .Kind}}, title: {{jsonString .Title}}{{if .Color}}, color: {{jsonString .Color}}{{end}}{{if .Field}}, field: {{jsonString .Field}}{{end}}{{if .End}}, end: {{jsonString .End}}{{end}}{{if .Owner}}, owner: {{jsonString .Owner}}{{end}}{{with .Occurrences}}, occurrences: { table: {{jsonString .Table}}, row: {{jsonString .Row}}, key: {{jsonString .Key}}, due: {{jsonString .Due}}, dueAt: {{jsonString .DueAt}}, state: {{jsonString .State}} }{{end}} },
+{{- end}}
+  ],
+{{- end}}
+{{- if .Searchable}}
+  searchable: {{.Searchable}},
+{{- end}}
 {{- if .Access}}
   access: {{jsonString .Access}},
+{{- end}}
+{{- if .Notifier}}
+  notifier: {{jsonString .Notifier}},
+{{- end}}
+{{- if .Agents}}
+  agents: {{jsonString .Agents}},
+{{- end}}
+{{- if .Party}}
+  party: { {{- if .PartyTitle}} title: {{jsonString .PartyTitle}} {{end -}} },
+{{- end}}
+{{- if .Conversations}}
+  conversations: {{jsonString .Conversations}},
+{{- end}}
+{{- if .TableEvents}}
+  events: [
+{{- range .TableEvents}}
+    { kind: {{jsonString .Kind}}, urgency: {{jsonString .Urgency}}{{if .Title}}, title: {{jsonString .Title}}{{end}}{{if .Payload}}, payload: [{{range $i, $p := .Payload}}{{if $i}}, {{end}}{{jsonString $p}}{{end}}]{{end}} },
+{{- end}}
+  ],
 {{- end}}
   uniqueKeys: {
 {{- range .UniqueKeys}}
@@ -502,11 +531,11 @@ export interface {{.Name}}Repositories {
 {{- end}}
 }
 
-/** The repositories of {{$.SchemaName}} over a pool, acting as a user or none. */
-export type {{.Name}}Orm = Orm<{{.Name}}Repositories>;
+/** The repositories of {{$.SchemaName}} over a pool, acting as a user or none{{if or .References .Attachments}}, with{{if .References}} its references{{end}}{{if and .References .Attachments}} and{{end}}{{if .Attachments}} its attachments{{end}}{{end}}. */
+export type {{.Name}}Orm = Orm<{{.Name}}Repositories>{{if .References}} & ReferencesMembers{{end}}{{if .Attachments}} & AttachmentsMembers{{end}};
 
 /** The repositories of {{$.SchemaName}} in a transaction, with its raw SQL. */
-export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories>;
+export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories>{{if .References}} & ReferencesMembers{{end}}{{if .Attachments}} & AttachmentsMembers{{end}};
 
 {{- if .Rules}}
 
@@ -563,6 +592,12 @@ export const {{.Const}}: OrmDefinition = {
 {{- if .Rules}}
   rules: {{.RulesConst}},
 {{- end}}
+{{- if .References}}
+  references: {{.References}},
+{{- end}}
+{{- if .Attachments}}
+  attachments: {{.Attachments}},
+{{- end}}
 };
 
 /**
@@ -573,9 +608,9 @@ export const {{.Const}}: OrmDefinition = {
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): {{.Name}}Orm {
 {{- if .Rules}}
-  return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, withRulesCore(options, initSync));
+  return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, withRulesCore(options, initSync)){{if or .References .Attachments}} as {{.Name}}Orm{{end}};
 {{- else}}
-  return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, options);
+  return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, options){{if or .References .Attachments}} as {{.Name}}Orm{{end}};
 {{- end}}
 }
 {{- end}}

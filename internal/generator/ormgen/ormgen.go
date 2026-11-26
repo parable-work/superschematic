@@ -1068,8 +1068,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	repositories := make([]Repository, 0, len(tableTypes))
 	for i, typeDef := range tableTypes {
-		if typeDef.BehaviorTable != nil {
-			// A behavior's sub-table has no repository: only its behavior's
+		if typeDef.BehaviorTable != nil || typeDef.RowTable != nil || typeDef.SearchIndex {
+			// A behavior's sub-table, and a @references or an @attachments
+			// table's (D154), has no repository: only its behavior's
 			// operations write it, through the core (D103).
 			continue
 		}

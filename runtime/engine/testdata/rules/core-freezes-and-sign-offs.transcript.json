@@ -26,7 +26,8 @@
     "Stock",
     "Holds",
     "Calendar",
-    "Payments"
+    "Payments",
+    "Recurrence"
   ],
   "scenarios": [
     {
