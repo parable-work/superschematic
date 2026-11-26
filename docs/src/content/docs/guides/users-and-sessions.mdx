@@ -393,7 +393,9 @@ agent.SetToken(made.Token) // key_..., shown this once
 The token is `key_` and 43 characters, sent as a session's is,
 `Authorization: Bearer key_...`, and never in the cookie. The database
 keeps its SHA-256. Every server of an API over that `authDb` takes it,
-whether or not it serves the routes.
+whether or not it serves the routes. A TypeScript router whose options
+carry the access log writes a row of it for each call a key makes
+([The access log](/superschematic/guides/api-routes/#the-access-log)).
 
 - **Its life.** A key ends at its `expiresAt`: `expiresInSeconds` after
   it was made, from 1 to the config's `apiKeyMaxTtlSeconds`, and that
@@ -410,7 +412,9 @@ whether or not it serves the routes.
   asks only for a caller admits any key, and a row rule
   ([Row rules](/superschematic/guides/api-routes/#row-rules)) sees the
   key's user. An agent that should reach less gets a user of its own
-  with a role of its own.
+  with a role of its own, or runs as an agent run, whose token is a
+  grant on the rows of its task, in the TypeScript runtime
+  ([Agent runs](/superschematic/guides/agent-runs/#the-runs-token)).
 - **What it may not do.** A key does not act on its own account:
   `createApiKey`, `listApiKeys`, `revokeApiKey`, `logout` and
   `changePassword` need a session, and a key gets 403. A leaked key
@@ -433,3 +437,9 @@ factors or passkeys, email verification, password reset or account
 lockout; login's rate limit and the hash's cost bound guessing instead. A
 deployment that needs its own identity model registers its own auth
 provider, as `examples/acme-schematic` does for its own keys.
+
+A person or an organisation who never signs in, a contractor who texts a
+photo, is no user: they are a party, a row of an app's own table that
+acts through grants. Parties are built in the TypeScript runtime
+([Outside parties](/superschematic/guides/parties/),
+[Per-record access](/superschematic/guides/api-routes/#per-record-access)).

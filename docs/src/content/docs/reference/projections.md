@@ -213,6 +213,13 @@ Every key starts with the naming file's
 A reader sets every required setting (`SET LOCAL` or `set_config(name,
 value, true)` in the scan's transaction) before it reads the view.
 
+To capture what a view serves without reading the view, the naming file's
+[`[go.projection_capture]`](/superschematic/reference/naming/#goprojection_capture)
+table has the Go types package write two functions (D168): the `SELECT`
+each view's migration wraps, by the relation a reader queries
+(`scope.notes`), and each view's `uuid` columns. It lists the views whose
+one setting is the table's `setting`, in its `pool` when it names one.
+
 ## Read a projection
 
 A projection whose columns include its source table's key, or the one

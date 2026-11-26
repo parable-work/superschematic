@@ -21,6 +21,7 @@ the design.
 | traces over OTLP/HTTP in protobuf from every Go, TypeScript and Rust server, job and worker: a span per request, per call to another API, per job run and per worker message | metrics; logs over OTLP |
 | `stack dev` and `stack run` hand your shell's `OTEL_` variables to each process | a collector that `stack dev` starts for you |
 | [on gcp](#on-google-cloud), an environment's `telemetry` exports to Cloud Trace, or to a collector, and a deployable's turns its own off or on | a collector on gcp that the target runs for you |
+| on cloudflare, an environment's `telemetry` exports each server's, job's and worker's traces to the collector its `endpoint` names, and a deployable's turns its own off or on ([Servers on Workers](/superschematic/guides/stacks/#servers-on-workers)) | a collector that needs a header from a secret |
 
 ## Trace a stack on your machine
 
