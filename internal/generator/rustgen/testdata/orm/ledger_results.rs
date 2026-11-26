@@ -608,6 +608,20 @@ macro_rules! script {
             answer($run!(entries.upsert_many(&[line(25, "x5", 1), line(26, "x5", 2)], &on, &["amountCents"], UpsertManyOptions::default())), all),
         ));
         calls.push(("upsertEntriesOfAKey", answer($run!(entries.upsert_many(&sync, &on, &["id"], UpsertManyOptions::default())), all)));
+        // More lines than D1 binds the parameters of in one statement, the
+        // TypeScript and Go scripts' call (D89); again, every other line
+        // changed, only if changed.
+        let mut many: Vec<EntryCreate> = (0..30u8).map(|i| line(40 + i, &format!("m{i}"), 1000 + i64::from(i))).collect();
+        calls.push(("upsertManyEntries", answer($run!(entries.upsert_many(&many, &on, &["amountCents"], UpsertManyOptions::default())), all)));
+        for (i, changed) in many.iter_mut().enumerate() {
+            if i % 2 == 0 {
+                changed.amount_cents += 100;
+            }
+        }
+        calls.push((
+            "upsertManyEntriesAgain",
+            answer($run!(entries.upsert_many(&many, &on, &["amountCents"], UpsertManyOptions { only_if_changed: true, ..Default::default() })), all),
+        ));
 
         // Deletes: one that stamps the row, which a read then leaves out,
         // one that removes it, and an account's with its entries and

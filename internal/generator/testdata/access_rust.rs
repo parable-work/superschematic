@@ -21,7 +21,7 @@ use api::runtime::access::{
     GrantAuthenticator, IssueGrant, Logged,
 };
 use api::runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Repositories};
-use api::runtime::orm::{AccessCaller, FieldKeyring, FindOptions, Values};
+use api::runtime::orm::{AccessCaller, FieldKeyring, FindOptions, UpsertManyOptions, UpsertOptions, Values};
 use api::runtime::postgres::Pool;
 use api::runtime::{bearer_token, ActingFor, ApiError, Authenticator, Principal, PrincipalKind};
 use api::{build_router, Handlers, Implementations};
@@ -349,6 +349,22 @@ async fn per_record_access() {
         })
         .await;
     assert_eq!(counted, (Some(2), Some(1)));
+    // An upsert, of one row or of many, through repositories that keep to a
+    // caller is refused: its update could reach a row the caller does not
+    // see (D156, D89).
+    let refused = app
+        .system(async |db| {
+            let client = db.client();
+            let held = Repositories::new(client, db.definition()).unwrap().with_access(AccessCaller::of(Some(&other)));
+            let documents = held.table("Document").unwrap();
+            let input = json!({"title": "Upserted"}).as_object().cloned().unwrap();
+            let one = documents.upsert_one(&input, &["id"], &Values::new(), UpsertOptions::default()).await.unwrap_err().to_string();
+            let many = documents.upsert_many(std::slice::from_ref(&input), &["id"], &["title"], UpsertManyOptions::default()).await.unwrap_err().to_string();
+            (one, many)
+        })
+        .await;
+    assert!(refused.0.contains("upsert_one of Document: the table's rows keep to the operation's caller (D156)"), "{}", refused.0);
+    assert!(refused.1.contains("upsert_many of Document: the table's rows keep to the operation's caller (D156)"), "{}", refused.1);
     // The repository, outside any operation, reads every row, as a job
     // does.
     let read = app

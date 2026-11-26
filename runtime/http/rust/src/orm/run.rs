@@ -152,12 +152,13 @@ impl<C: Client> Runner<'_, C> {
         }
     }
 
-    /// Refuses an upsert of a table whose reads keep to a caller (D156):
-    /// its update could reach a row the caller does not see.
-    fn refuse_held_upsert(&self) -> Result<(), Error> {
+    /// Refuses an upsert, `upsert_one` or `upsert_many`, of a table whose
+    /// reads keep to a caller (D156): its update could reach a row the
+    /// caller does not see.
+    fn refuse_held_upsert(&self, method: &str) -> Result<(), Error> {
         if self.plan.kept(self.table) {
             return Err(Error::Definition(format!(
-                "upsert_one of {}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key",
+                "{method} of {}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key",
                 self.table.name
             )));
         }
@@ -335,7 +336,7 @@ impl<C: Client> Runner<'_, C> {
         update: &Values,
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
-        self.refuse_held_upsert()?;
+        self.refuse_held_upsert("upsert_one")?;
         if self.table.behaviors.is_some() {
             return self.core_upsert(input, on, update, options).await;
         }
@@ -409,6 +410,7 @@ impl<C: Client> Runner<'_, C> {
         fields: &[&str],
         options: UpsertManyOptions,
     ) -> Result<Vec<Upserted<Values>>, Error> {
+        self.refuse_held_upsert("upsert_many")?;
         let plan = self.plan.upsert_many(inputs, on, fields, options)?;
         let sqlite = self.plan.definition.dialect == Dialect::Sqlite;
         let mut results: Vec<Option<Upserted<Values>>> = vec![None; inputs.len()];
