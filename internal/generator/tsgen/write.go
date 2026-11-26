@@ -205,8 +205,12 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				// parse<Union>FromJSON comes from.
 				ParserUnionTypes   []string
 				ParserUnionImports []ModuleImport
-				ParserScalarsUsed  []ScalarInfo
-				NeedsJSONParse     bool
+				// ParserVariantImports are where the variant unions of
+				// the type's variant fields (D149) are read from: their
+				// validate<Union>By and parse<Union>FromJSONBy.
+				ParserVariantImports []ModuleImport
+				ParserScalarsUsed    []ScalarInfo
+				NeedsJSONParse       bool
 				// ValidatesNestedObjects is true when validate<Type>
 				// validates a nested object field and reports its errors
 				// with addNestedErrors.
@@ -232,6 +236,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 			}
 			data.ParserNestedImports = nestedImports(data.ParserNestedTypes, nestedModules)
 			data.ParserUnionImports = unionImports(data.ParserUnionTypes, unionModules)
+			data.ParserVariantImports = unionImports(typeVariantUnionTypes(t), unionModules)
 			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {
 				return fmt.Errorf("failed to generate %s: %w", outPath, err)

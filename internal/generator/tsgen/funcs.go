@@ -524,6 +524,23 @@ func typeParserUnionTypes(t *TypeInfo) []string {
 	return names
 }
 
+// typeVariantUnionTypes returns the unique variant unions of the type's
+// variant fields (D149), whose values validate<Type> checks with
+// validate<Union>By and parse<Type>FromJSON reads with
+// parse<Union>FromJSONBy.
+func typeVariantUnionTypes(t *TypeInfo) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, f := range t.Fields {
+		if f.Variant == nil || seen[f.Type] {
+			continue
+		}
+		seen[f.Type] = true
+		names = append(names, f.Type)
+	}
+	return names
+}
+
 // ModuleImport is one import statement of parsers: the parse<Name>FromJSON
 // of each of Names, from Module.
 type ModuleImport struct {

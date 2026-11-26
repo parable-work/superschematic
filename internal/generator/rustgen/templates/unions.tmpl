@@ -92,5 +92,24 @@ impl<'de> Deserialize<'de> for {{.Name}} {
     }
 }
 {{- end}}
+{{- if .By}}
+{{- $union := .}}
+
+impl {{.Name}} {
+    /// Decodes a `{{.Name}}`, a variant union (D149), as the member `by`, the
+    /// value of the field's sibling `{{escapeString .By}}`, names, as every
+    /// language reads it. A value while `by` names no member is decoded as
+    /// `Deserialize` picks it; every validator refuses it with the rule
+    /// `variant`.
+    pub fn from_variant(by: Option<&str>, value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        match by {
+{{- range .Arms}}
+            Some("{{escapeString .Value}}") => serde_json::from_value::<{{.Type}}>(value).map(Self::{{.Type}}),
+{{- end}}
+            _ => serde_json::from_value(value),
+        }
+    }
+}
+{{- end}}
 
 {{end -}}

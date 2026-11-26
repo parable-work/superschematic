@@ -31,6 +31,9 @@ import { parse{{.Name}}FromJSON, validate{{.Name}}{{if $.Type.StrictJSON}}Requir
 {{range .ParserUnionImports}}
 import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSON, validate{{$name}}{{end}} } from '{{.Module}}';
 {{end}}
+{{range .ParserVariantImports}}
+import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSONBy, validate{{$name}}By{{end}} } from '{{.Module}}';
+{{end}}
 
 /**
  * Validates a {{.Type.Name}} object
@@ -141,7 +144,26 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{end}}
   }
   {{end}}
-  {{if and (not .IsScalar) .IsUnion}}
+  {{if .Variant}}
+  {
+    // {{.TSName}} is a variant field (D149): its value is checked as the
+    // member {{.Variant.ByKey}} names (validate{{.Type}}By), its errors under
+    // the field's path. A value while {{.Variant.ByKey}} names no member is
+    // "variant", and one that is no object "type". null is left to the
+    // field's presence checks.
+    const variant = value.{{.TSName}} as unknown;
+    if (variant !== null && variant !== undefined) {
+      const checked = validate{{.Type}}By((value as unknown as Record<string, unknown>)[{{jsonString .Variant.ByKey}}], variant);
+      if (checked === 'variant') {
+        addFieldError(errors, "{{.TSName}}", "variant", {{jsonString (print "holds a value its " .Variant.ByKey " names no member for")}});
+      } else if (checked === 'type') {
+        addFieldError(errors, "{{.TSName}}", "type", "expected an object");
+      } else if (checked !== true) {
+        addNestedErrors(errors, "{{.TSName}}", checked);
+      }
+    }
+  }
+  {{else if and (not .IsScalar) .IsUnion}}
   {
     // A union value is validated as the member the union picks
     // (validate{{.Type}}), its errors under the value's path, as the Go
@@ -924,6 +946,10 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
     {{.TSName}}: Array.isArray(obj.{{.TSName}})
       ? (obj.{{.TSName}} as unknown[]).map((item) => parse{{.Type}}FromJSON(item))
       : (obj.{{.TSName}} as {{.Type}}[]{{if not .Required}} | null{{end}}),
+    {{else if .Variant}}
+    {{.TSName}}: obj.{{.TSName}} != null
+      ? parse{{.Type}}FromJSONBy(obj[{{jsonString .Variant.ByKey}}], obj.{{.TSName}})
+      : (obj.{{.TSName}} as unknown as {{.Type}}{{if not .Required}} | null{{end}}),
     {{else}}
     {{.TSName}}: obj.{{.TSName}} != null
       ? parse{{.Type}}FromJSON(obj.{{.TSName}})

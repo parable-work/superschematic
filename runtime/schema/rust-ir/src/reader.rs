@@ -398,10 +398,27 @@ fn parse_ir_scalar(raw: &Value, path: &str) -> Result<ScalarDef, IrError> {
 
 fn parse_ir_union(name: &str, raw: &Value, path: &str) -> Result<UnionDef, IrError> {
     let definition = as_object(raw, path)?;
+    // A variant union (D149): the sibling that names the member, and each
+    // of its values' member.
+    let arms = definition
+        .get("arms")
+        .and_then(Value::as_object)
+        .map(|arms| {
+            arms.iter()
+                .filter_map(|(value, member)| {
+                    member
+                        .as_str()
+                        .map(|member| (value.clone(), member.to_owned()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(UnionDef {
         name: name.to_owned(),
         description: doc_text(definition),
         types: as_string_array(definition.get("types")),
+        by: as_string(definition.get("by")),
+        arms,
     })
 }
 
