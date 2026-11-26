@@ -785,6 +785,10 @@ type ProductPage struct {
 type OrderFilter struct {
 	Id       *UUIDFilter
 	PlacedAt *DateTimeFilter
+	// OrderLines keeps the rows that some OrderLine row the filter
+	// finds points at by its order (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OrderLines *OrderLineFilter
 	// ReferencedByOrderLineOrder filters on the presence or absence of a
 	// OrderLine whose order points at this row.
 	ReferencedByOrderLineOrder *ReferencedByFilter
@@ -959,6 +963,16 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `"order".placed_at IS NOT NULL`)
 			}
 		}
+	}
+	if f.OrderLines != nil {
+		before := len(*args)
+		through := f.OrderLines.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"order".id IN (SELECT order_line.order_id FROM order_line%s)`, where))
 	}
 	if f.ReferencedByOrderLineOrder != nil {
 		probe := `SELECT 1 FROM order_line WHERE order_line.order_id = "order".id`
@@ -1399,6 +1413,10 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 type ProductFilter struct {
 	Id   *UUIDFilter
 	Name *StringFilter
+	// OrderLines keeps the rows that some OrderLine row the filter
+	// finds points at by its product (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OrderLines *OrderLineFilter
 	// ReferencedByOrderLineProduct filters on the presence or absence of a
 	// OrderLine whose product points at this row.
 	ReferencedByOrderLineProduct *ReferencedByFilter
@@ -1550,6 +1568,16 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `product."name" IS NOT NULL`)
 			}
 		}
+	}
+	if f.OrderLines != nil {
+		before := len(*args)
+		through := f.OrderLines.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`product.id IN (SELECT order_line.product_id FROM order_line%s)`, where))
 	}
 	if f.ReferencedByOrderLineProduct != nil {
 		probe := `SELECT 1 FROM order_line WHERE order_line.product_id = product.id`

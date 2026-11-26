@@ -17,7 +17,7 @@ depends on none of them.
 | `credentials` | `list` (titles and sites only), `resolve` into a sealed injection the runner applies | `CredentialProvider` |
 | `channel` | `send`, `health`, and the delivery statuses (`status`) and inbound messages (`inbound`) a `@webhook` route received | `ChannelAdapter` |
 | `sandbox` | `start`, `cancel`, `status` and `cost` of a run's instance | `SandboxProvider` |
-| `model` | `complete` a turn with tools, with its usage | `ModelProvider` |
+| `model` | `complete` a turn with tools, with its usage, and the `providerState` each completion keeps for the turns after it ([agent runs](/superschematic/guides/agent-runs/#each-turn)) | `ModelProvider` |
 | `files` | `extractText` and `preview` | `FileProcessor` |
 
 | Built | Not built yet |

@@ -314,6 +314,53 @@ func TestMCPToolsConfirmByTheBuildsPolicy(t *testing.T) {
 	}
 }
 
+// TestMCPToolsCarryAutonomy: a tool's record carries its operation's
+// @autonomy (D158, D183), the class and the mode, which an agent run's
+// mcpGate reads; a tool whose operation declares none carries none, and
+// the gate holds it as an internal write.
+func TestMCPToolsCarryAutonomy(t *testing.T) {
+	outDir := t.TempDir()
+	output := generateMCPFixture(t, mcpFixture(t, func(schema *ir.Schema) {
+		for _, set := range schema.OperationSets {
+			for _, op := range set.Operations {
+				switch op.Name {
+				case "updateOrder":
+					op.Autonomy = &ir.OperationAutonomy{Class: ir.AgentClassMoneyMovement}
+				case "getOrder":
+					op.Autonomy = &ir.OperationAutonomy{Class: ir.AgentClassRead, Mode: ir.AutonomyTell}
+				}
+			}
+		}
+	}))
+	if err := WriteAPI(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, tool := range mcpToolsOf(t, outDir) {
+		got[tool.Name] = "none"
+		if tool.Autonomy != nil {
+			got[tool.Name] = tool.Autonomy.Class + "/" + tool.Autonomy.Mode
+		}
+	}
+	for name, want := range map[string]string{"update_order": "moneyMovement/", "get_order": "read/tell"} {
+		if got[name] != want {
+			t.Errorf("%s's autonomy = %q, want %q (all: %v)", name, got[name], want, got)
+		}
+	}
+	for name, autonomy := range got {
+		if name != "update_order" && name != "get_order" && autonomy != "none" {
+			t.Errorf("%s declares no @autonomy, and its record says %s", name, autonomy)
+		}
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, MCPFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\"autonomy\": {\n      \"class\": \"moneyMovement\"\n    }"; !strings.Contains(string(source), want) {
+		t.Errorf("mcp.ts lacks %s:\n%s", want, source)
+	}
+}
+
 // TestGeneratedMCPRuntime boots fixture-mcp's router, built with mcp on,
 // under bun: it type-checks, serves its OpenAPI document and page, and
 // serves its MCP tools, each call through its route.

@@ -384,6 +384,15 @@ type TypeScriptWorker struct {
 	// then.
 	Behavior   *apigen.BehaviorWorkerInfo
 	QueuesFunc string
+
+	// Dispatcher is set for a @worker of the agent dispatcher's queues
+	// (D158, D183), the database's @agents("requests") queue or its
+	// @runRequests queue (D157): the entrypoint hands each message to
+	// Deps.agents.handle and calls no createWorkers. Transcripts is set
+	// for the requests queue, whose prune also deletes the transcripts
+	// past their retention (agents.prune).
+	Dispatcher  bool
+	Transcripts bool
 }
 
 // Messages names what a behavior worker's messages carry, for its main's
@@ -519,6 +528,19 @@ type TypeScriptAPI struct {
 
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
+
+	// Agents is true when Deps holds the agent dispatcher (D158, D183):
+	// the entrypoint builds Deps but its dispatcher as AgentsBase, asks the
+	// implementation's createAgentOptions for the dispatcher's options and
+	// builds Deps with withAgents. A server mounts the agent routes a
+	// run's sandbox instance calls (AgentRoutes) and holds its MCP
+	// endpoint's calls to a run's autonomy (agents.mcpGate).
+	Agents      bool
+	AgentsBase  string
+	AgentRoutes string
+
+	// MCP is true when the server serves the API's MCP endpoint (D81).
+	MCP bool
 
 	// ORM is whether Deps.orm holds the repositories of Database (D79),
 	// which the entrypoint builds over its pool with Database.ORM.
@@ -886,6 +908,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
+		if w.Dispatcher {
+			// The agent dispatcher's queue: Deps.agents.handle takes each
+			// message (D183).
+			s.Worker.Dispatcher = true
+			s.Worker.Transcripts = o.Deps.Agents != nil && w.Queue == o.Deps.Agents.Requests
+		}
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
 			// through the repositories, on Postgres alone (D103).
@@ -1010,6 +1038,16 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// A job or a worker serves no request, so it turns no client
 			// away (D143).
 			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
+		}
+		api.MCP = o.MCP != nil && !background
+		if o.HasAgents() {
+			// Deps holds the agent dispatcher, which the implementation's
+			// createAgentOptions gives its options (D183).
+			api.Agents = true
+			api.AgentsBase = taken.take(stem + "DepsBase")
+			if !background {
+				api.AgentRoutes = taken.take(stem + "AgentRoutes")
+			}
 		}
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
@@ -1312,9 +1350,18 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// the store is unavailable (D75).
 		out = append(out, fmt.Sprintf("rateLimit: { store: memoryStoreRateLimitStore(%s, %s) }", a.RateLimitStore.Var, tsQuote(a.Service)))
 	}
+	var mcp []string
 	if a.MCPConfirmationKey != "" {
 		// Its MCP endpoint signs confirmations with the secret (D93).
-		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
+		mcp = append(mcp, "confirmationKey: "+a.MCPConfirmationKey)
+	}
+	if a.Agents && a.MCP {
+		// A call an agent run makes with its token is held to the run's
+		// autonomy, by the tool's @autonomy (D158, D183).
+		mcp = append(mcp, "callGate: "+a.Deps+".agents.mcpGate")
+	}
+	if len(mcp) > 0 {
+		out = append(out, "mcp: { "+strings.Join(mcp, ", ")+" }")
 	}
 	if a.MinClientVersions != "" {
 		// Its routes turn away a client under its minimum (D143).

@@ -7,12 +7,23 @@ way its API takes it. No credential value is ever in a message: a
 credential reaches only the runner (credentials.ts).
 */
 
-/** One message of a turn. */
+/**
+ * One message of a turn. An assistant message is an earlier completion of
+ * the run, replayed: its content, the tool calls it made, which the tool
+ * messages after it answer, and the provider's own state of it, as the
+ * provider returned them. A provider builds its API's conversation from
+ * these alone, a Claude provider each tool_use block before its
+ * tool_result and the turn's thinking blocks passed back unchanged.
+ */
 export interface ModelMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
   /** For a tool message: the call it answers. */
   readonly toolCallId?: string;
+  /** For an assistant message: the tool calls its completion made, in order. */
+  readonly toolCalls?: readonly ModelToolCall[];
+  /** For an assistant message: the providerState its completion returned, unchanged. */
+  readonly providerState?: unknown;
   /** Content from outside the app, which is data and never instructions. */
   readonly untrusted?: boolean;
 }
@@ -55,6 +66,16 @@ export interface ModelCompletion {
   readonly toolCalls: readonly ModelToolCall[];
   readonly stop: 'end' | 'toolUse' | 'maxTokens';
   readonly usage: ModelUsage;
+  /**
+   * The provider's own record of the turn, as JSON, which no one but the
+   * provider reads: a Claude provider's content blocks, its thinking with
+   * their signatures among them. The dispatcher keeps it with the
+   * completion, unredacted while the run lives, and passes it back,
+   * unchanged, on that assistant message in every later turn; a reader of
+   * the transcript, and the transcript a run leaves when it ends, hold it
+   * redacted. A provider that keeps none leaves it out.
+   */
+  readonly providerState?: unknown;
 }
 
 /** Texts to embed (D155): each becomes one vector, under model or the provider's default. */

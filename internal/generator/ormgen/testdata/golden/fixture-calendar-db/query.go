@@ -1309,6 +1309,10 @@ type DeskFilter struct {
 	Id      *UUIDFilter
 	Title   *StringFilter
 	Version *Int64Filter
+	// Bookings keeps the rows that some Booking row the filter
+	// finds points at by its desk (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Bookings *BookingFilter
 	// ReferencedByBookingDesk filters on the presence or absence of a
 	// Booking whose desk points at this row.
 	ReferencedByBookingDesk *ReferencedByFilter
@@ -1525,6 +1529,16 @@ func (f *DeskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `desk._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Bookings != nil {
+		before := len(*args)
+		through := f.Bookings.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`desk.id IN (SELECT booking.desk_id FROM booking%s)`, where))
 	}
 	if f.ReferencedByBookingDesk != nil {
 		probe := `SELECT 1 FROM booking WHERE booking.desk_id = desk.id`

@@ -125,6 +125,12 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// GoServer is an API whose server is Go (outputs.api, language GO or
+	// unset, with the Go types on), which the loader reads from the config.
+	// checkGoFeatures refuses in it, and in its Database, each platform
+	// feature the Go server does not serve yet (D180).
+	GoServer bool
+
 	// TypesLanguages are the languages whose types a DB service's config
 	// enables (outputs.types), sorted, which the loader reads from the
 	// config. The features whose SQLite tables only some languages'
@@ -302,6 +308,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkNotifications(schema, in, r)
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
+	checkGoFeatures(schema, in, r)
 	checkRustFeatures(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)

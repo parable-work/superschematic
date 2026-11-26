@@ -7,7 +7,7 @@ APIs.
 */ -}}
 
 {{- define "ts-deps" -}}
-  const {{ .Deps }}: {{ .Module }}.Deps = {
+  const {{ if .Agents }}{{ .AgentsBase }}: Omit<{{ .Module }}.Deps, 'agents'>{{ else }}{{ .Deps }}: {{ .Module }}.Deps{{ end }} = {
 {{- if .Config }}
     config: {{ .Config }},
 {{- end }}
@@ -35,6 +35,14 @@ APIs.
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- if .Agents }}
+  // Its agent dispatcher (D158, D183), over its repositories and its
+  // requests queue, with the options the implementation answers.
+  const {{ .Deps }}: {{ .Module }}.Deps = {{ .Module }}.withAgents(
+    {{ .AgentsBase }},
+    await construct({{ tsQuote .Service }}, 'agent options', () => {{ .Impl }}.createAgentOptions({{ .AgentsBase }}))
+  );
+{{- end }}
 {{- end }}
 
 {{- define "ts-orm-imports" -}}

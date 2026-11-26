@@ -150,9 +150,6 @@ var (
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 
-{{ define "callerImports" }}
+{{ define "callerImports" }}{{ end }}
 
-	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
-{{- end }}
-
-{{ define "callerPrincipal" }}runtimesession.GetPrincipalID(ctx){{ end }}
+{{ define "callerPrincipal" }}runtimesession.GetCaller(ctx){{ end }}

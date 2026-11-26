@@ -30,6 +30,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
@@ -820,6 +821,14 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 			if keys != nil {
 				tsDeps.ORMFieldKeys = keys.Name
 			}
+			// A database that uses the agent orchestration puts its
+			// dispatcher in Deps, over the repositories (D158, D183).
+			if requests := schema.AgentsTable(ir.AgentRequests); requests != nil {
+				tsDeps.Agents = &tsrestgen.DepsAgents{Requests: requests.Name}
+				if runs := schema.RunRequestsQueue(); runs != nil {
+					tsDeps.Agents.RunRequests = runs.Name
+				}
+			}
 		}
 	}
 	if e := apiOutput.Engine; e != nil {
@@ -1358,6 +1367,12 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
 		deps.Rules = apigen.DeclaresTableBehaviors(schema)
 		deps.Queues = len(schema.Queues()) > 0
+		deps.Access, deps.AccessHeld, deps.AccessLog = apigen.DeclaresAccess(schema)
+		// The Go server refuses the platform features of its database it
+		// does not serve yet (D180), as the loader does when it reads it.
+		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
+			return deps, nil, err
+		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
