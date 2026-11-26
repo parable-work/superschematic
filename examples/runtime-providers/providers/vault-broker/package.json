@@ -1,0 +1,20 @@
+{
+  "name": "@example-providers/vault-broker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A credential provider over a password manager's service API, scoped to named vaults, with items named by secret reference (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "vault-broker",
+      "implements": "credentials",
+      "config": {
+        "URL": { "description": "The password manager's service API." },
+        "TOKEN": { "secret": true, "description": "A service account token the password manager limits to the vaults below." },
+        "VAULTS": { "description": "The vaults a run may use, comma-separated; every other is refused here as well." }
+      }
+    }
+  }
+}

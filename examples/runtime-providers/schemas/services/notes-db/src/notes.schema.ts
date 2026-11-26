@@ -1,0 +1,31 @@
+import { Identity } from "superscalar";
+import { AutoGenerate, event, key, notifier, queue } from "@superschematic/db";
+
+// A note. Its edits raise note.changed, which the notifier (D153) routes
+// to the people its routes name and sends through the channel adapter the
+// environment configures.
+@event<Note>({ kind: "note.changed", payload: ["title"], title: "title" })
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  title: string;
+
+  body: string;
+}
+
+// The notifier's tables, which the build fills: the inbox, the deliveries,
+// the routes and its dispatch queue. A database that declares them needs a
+// channel adapter in every environment that runs an API over it.
+@notifier("inbox")
+export abstract class Notice {}
+
+@notifier("deliveries")
+export abstract class Delivery {}
+
+@notifier("routes")
+export abstract class NoticeRoute {}
+
+@queue()
+@notifier("dispatch")
+export abstract class NoticeWork {}

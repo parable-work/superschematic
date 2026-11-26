@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange, Outcome,
-    ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange, Source, SubRow, SubRowChange,
-    TypeSpec,
+    merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange, KeyedRow,
+    LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange, Source,
+    SubRow, SubRowChange, TypeSpec,
 };
 
 pub const START: i64 = 1_000_000;
@@ -50,6 +50,34 @@ impl Source for Memory {
             ReadRequest::SubRows {
                 key, use_id, table, ..
             } => Ok(Answer::SubRows(self.table(key, use_id, table))),
+            // A read across another type's rows (Recurrence's holidays,
+            // D152): those of `others` whose own fields hold `equal`'s
+            // values, in key order.
+            ReadRequest::Rows {
+                type_name,
+                equal,
+                after,
+                limit,
+                ..
+            } => {
+                let rows: Vec<KeyedRow> = self
+                    .others
+                    .iter()
+                    .filter(|((named, key), row)| {
+                        named == type_name
+                            && after.as_ref().is_none_or(|after| key > after)
+                            && equal
+                                .iter()
+                                .all(|(field, value)| row.own.get(field) == Some(value))
+                    })
+                    .map(|((_, key), row)| KeyedRow::new(key.clone(), row.clone()))
+                    .collect();
+                let more = rows.len() > *limit;
+                Ok(Answer::Linked(LinkedRows {
+                    rows: rows.into_iter().take(*limit).collect(),
+                    more,
+                }))
+            }
             ReadRequest::SharedRow {
                 use_id, table, key, ..
             } => Ok(Answer::SharedRow(

@@ -1,0 +1,18 @@
+{
+  "name": "@example-providers/stub-model",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A model provider stub whose answers follow from the turn, for tests of agent runs (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "stub-model",
+      "implements": "model",
+      "config": {
+        "MODEL": { "optional": true, "description": "The model name the stub reports; stub-1 when unset." }
+      }
+    }
+  }
+}

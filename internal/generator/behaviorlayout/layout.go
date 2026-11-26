@@ -153,7 +153,10 @@ type Table struct {
 	// converts the core's string key to.
 	Key Column `json:"key"`
 
-	// Version is the column each row's version is in, [VersionColumn].
+	// Version is the column each row's version is in, [VersionColumn]; ""
+	// for a table in the layout read-only, which composes no behavior and
+	// a use reads (registry.BehaviorReads, D152), whose rows an adapter
+	// reads at version 0 and no command writes.
 	Version string `json:"version"`
 
 	// Live is the condition a row of a soft-deletable table is live under,
@@ -633,7 +636,61 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		}
 		layout.Types[td.Name] = table
 	}
+	if layout == nil {
+		return nil, nil
+	}
+	// A table a use reads beside its own row's (registry.BehaviorReads:
+	// Recurrence's holidays and relative target, D152) that composes no
+	// behavior is in the layout read-only, so an adapter answers the core's
+	// reads of its rows.
+	for _, td := range sqlutil.TableTypes(schema) {
+		for _, ref := range td.TableBehaviors() {
+			for _, name := range registry.BehaviorReads(ref.Name, ref.Config) {
+				if layout.Types[name] != nil {
+					continue
+				}
+				read, err := readTableOf(schema, name, tables)
+				if err != nil {
+					return nil, fmt.Errorf("behaviorlayout: table %s implements %s, which reads %s: %w", td.Name, ref.Name, name, err)
+				}
+				layout.Types[name] = read
+			}
+		}
+	}
 	return layout, nil
+}
+
+// readTableOf is the read-only layout of a table of schema that composes
+// no behavior and a use reads (D152): its key, its own columns, its audit
+// columns and its live condition, no use and no version column, which an
+// adapter reads as version 0. No command writes it.
+func readTableOf(schema *ir.Schema, name string, tables []sqlutil.TableModel) (*Table, error) {
+	var model *sqlutil.TableModel
+	for i := range tables {
+		if tables[i].Type == name {
+			model = &tables[i]
+		}
+	}
+	td := schema.Types[name]
+	if model == nil || td == nil {
+		return nil, fmt.Errorf("%s is not a table of schema %s", name, schema.Name)
+	}
+	own, relations := ownColumnsOf(schema, model)
+	t := &Table{Type: name, Table: model.Name, Own: own, Audit: readAudit(td, model), Uses: []Use{}}
+	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); model.SoftDelete && deletedAt != nil {
+		t.Live = &Live{Column: deletedAt.Name}
+	}
+	for _, c := range model.Columns {
+		if c.Key {
+			t.Key = Column{Field: c.Field, Column: c.Name, Type: keyType(c)}
+			t.Key.Convert = ConvertOf(t.Key.Type)
+		}
+	}
+	if t.Key.Column == "" {
+		return nil, fmt.Errorf("table %s has no key column", name)
+	}
+	t.Spec = TypeSpec{Name: name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own, relations)}
+	return t, nil
 }
 
 // TableOf is the layout of td, a table of schema that composes behaviors

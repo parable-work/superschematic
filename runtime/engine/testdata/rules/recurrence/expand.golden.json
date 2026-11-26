@@ -1,0 +1,803 @@
+{
+  "description": "Recurrence's expansion (D152), the golden every language holds the core to: each case's input is what the core's expand operation takes, and its output what it answers. Rust (rules-behaviors' recurrence_golden test), TypeScript (@superschematic/rules's recurrence test, over the wasm32 module) and Go (runtime/rules/go's TestExpandGolden, over the static archive) each expand every input and compare. The three anchors run two years out, across a daylight-saving change in each zone and a holiday that moves a due date, and a holiday calendar whose observed day moved. Rewrite the outputs with RECURRENCE_GOLDEN_UPDATE=1 cargo test -p superschematic-rules-behaviors --test recurrence_golden, and read the diff by eye.",
+  "cases": [
+    {
+      "name": "calendar: the last day of every month at 17:00 in London, two years, moved before weekends and two holidays; British Summer Time starts on 2026-03-29 and 2027-03-28 and ends on 2026-10-25 and 2027-10-31",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+        "start": "2026-01-31T17:00",
+        "timeZone": "Europe/London",
+        "adjust": "before",
+        "holidays": [
+          "2026-12-25",
+          "2026-12-28",
+          "2027-04-30",
+          "2027-12-31"
+        ],
+        "remindBefore": "P3D",
+        "from": 1767225600000,
+        "to": 1830297600000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-01-31T17:00",
+            "due": "2026-01-30T17:00",
+            "dueAt": 1769792400000,
+            "remindAt": 1769533200000,
+            "overdueAt": 1769792400000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2026-02-28T17:00",
+            "due": "2026-02-27T17:00",
+            "dueAt": 1772211600000,
+            "remindAt": 1771952400000,
+            "overdueAt": 1772211600000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2026-03-31T17:00",
+            "due": "2026-03-31T17:00",
+            "dueAt": 1774972800000,
+            "remindAt": 1774717200000,
+            "overdueAt": 1774972800000
+          },
+          {
+            "key": "2026-04-30T17:00",
+            "due": "2026-04-30T17:00",
+            "dueAt": 1777564800000,
+            "remindAt": 1777305600000,
+            "overdueAt": 1777564800000
+          },
+          {
+            "key": "2026-05-31T17:00",
+            "due": "2026-05-29T17:00",
+            "dueAt": 1780070400000,
+            "remindAt": 1779811200000,
+            "overdueAt": 1780070400000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2026-06-30T17:00",
+            "due": "2026-06-30T17:00",
+            "dueAt": 1782835200000,
+            "remindAt": 1782576000000,
+            "overdueAt": 1782835200000
+          },
+          {
+            "key": "2026-07-31T17:00",
+            "due": "2026-07-31T17:00",
+            "dueAt": 1785513600000,
+            "remindAt": 1785254400000,
+            "overdueAt": 1785513600000
+          },
+          {
+            "key": "2026-08-31T17:00",
+            "due": "2026-08-31T17:00",
+            "dueAt": 1788192000000,
+            "remindAt": 1787932800000,
+            "overdueAt": 1788192000000
+          },
+          {
+            "key": "2026-09-30T17:00",
+            "due": "2026-09-30T17:00",
+            "dueAt": 1790784000000,
+            "remindAt": 1790524800000,
+            "overdueAt": 1790784000000
+          },
+          {
+            "key": "2026-10-31T17:00",
+            "due": "2026-10-30T17:00",
+            "dueAt": 1793379600000,
+            "remindAt": 1793120400000,
+            "overdueAt": 1793379600000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2026-11-30T17:00",
+            "due": "2026-11-30T17:00",
+            "dueAt": 1796058000000,
+            "remindAt": 1795798800000,
+            "overdueAt": 1796058000000
+          },
+          {
+            "key": "2026-12-31T17:00",
+            "due": "2026-12-31T17:00",
+            "dueAt": 1798736400000,
+            "remindAt": 1798477200000,
+            "overdueAt": 1798736400000
+          },
+          {
+            "key": "2027-01-31T17:00",
+            "due": "2027-01-29T17:00",
+            "dueAt": 1801242000000,
+            "remindAt": 1800982800000,
+            "overdueAt": 1801242000000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-02-28T17:00",
+            "due": "2027-02-26T17:00",
+            "dueAt": 1803661200000,
+            "remindAt": 1803402000000,
+            "overdueAt": 1803661200000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-03-31T17:00",
+            "due": "2027-03-31T17:00",
+            "dueAt": 1806508800000,
+            "remindAt": 1806249600000,
+            "overdueAt": 1806508800000
+          },
+          {
+            "key": "2027-04-30T17:00",
+            "due": "2027-04-29T17:00",
+            "dueAt": 1809014400000,
+            "remindAt": 1808755200000,
+            "overdueAt": 1809014400000,
+            "shifted": "holiday"
+          },
+          {
+            "key": "2027-05-31T17:00",
+            "due": "2027-05-31T17:00",
+            "dueAt": 1811779200000,
+            "remindAt": 1811520000000,
+            "overdueAt": 1811779200000
+          },
+          {
+            "key": "2027-06-30T17:00",
+            "due": "2027-06-30T17:00",
+            "dueAt": 1814371200000,
+            "remindAt": 1814112000000,
+            "overdueAt": 1814371200000
+          },
+          {
+            "key": "2027-07-31T17:00",
+            "due": "2027-07-30T17:00",
+            "dueAt": 1816963200000,
+            "remindAt": 1816704000000,
+            "overdueAt": 1816963200000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-08-31T17:00",
+            "due": "2027-08-31T17:00",
+            "dueAt": 1819728000000,
+            "remindAt": 1819468800000,
+            "overdueAt": 1819728000000
+          },
+          {
+            "key": "2027-09-30T17:00",
+            "due": "2027-09-30T17:00",
+            "dueAt": 1822320000000,
+            "remindAt": 1822060800000,
+            "overdueAt": 1822320000000
+          },
+          {
+            "key": "2027-10-31T17:00",
+            "due": "2027-10-29T17:00",
+            "dueAt": 1824825600000,
+            "remindAt": 1824566400000,
+            "overdueAt": 1824825600000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-11-30T17:00",
+            "due": "2027-11-30T17:00",
+            "dueAt": 1827594000000,
+            "remindAt": 1827334800000,
+            "overdueAt": 1827594000000
+          },
+          {
+            "key": "2027-12-31T17:00",
+            "due": "2027-12-30T17:00",
+            "dueAt": 1830186000000,
+            "remindAt": 1829926800000,
+            "overdueAt": 1830186000000,
+            "shifted": "holiday"
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "calendar: every year on 31 October at 09:00 in New York, moved after a weekend, three years from a start in 2026; the first falls on a Saturday",
+      "input": {
+        "anchor": "calendar",
+        "rule": "RRULE:FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=31",
+        "start": "2026-10-31T09:00",
+        "timeZone": "America/New_York",
+        "adjust": "after",
+        "opensBefore": "P30D",
+        "overdueAfter": "P1D",
+        "from": 1767225600000,
+        "to": 1861920000000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-10-31T09:00",
+            "due": "2026-11-02T09:00",
+            "dueAt": 1793628000000,
+            "opensAt": 1791032400000,
+            "overdueAt": 1793714400000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-10-31T09:00",
+            "due": "2027-11-01T09:00",
+            "dueAt": 1825074000000,
+            "opensAt": 1822482000000,
+            "overdueAt": 1825160400000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2028-10-31T09:00",
+            "due": "2028-10-31T09:00",
+            "dueAt": 1856610000000,
+            "opensAt": 1854018000000,
+            "overdueAt": 1856696400000
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "calendar: every Sunday at 02:30 in New York across 2027-03-14, whose 02:30 the change skips (read with the offset before the gap: 03:30 EDT)",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=WEEKLY;BYDAY=SU",
+        "start": "2027-03-07T02:30",
+        "timeZone": "America/New_York",
+        "from": 1803859200000,
+        "to": 1806537600000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-03-07T02:30",
+            "due": "2027-03-07T02:30",
+            "dueAt": 1804404600000,
+            "overdueAt": 1804404600000
+          },
+          {
+            "key": "2027-03-14T02:30",
+            "due": "2027-03-14T02:30",
+            "dueAt": 1805009400000,
+            "overdueAt": 1805009400000
+          },
+          {
+            "key": "2027-03-21T02:30",
+            "due": "2027-03-21T02:30",
+            "dueAt": 1805610600000,
+            "overdueAt": 1805610600000
+          },
+          {
+            "key": "2027-03-28T02:30",
+            "due": "2027-03-28T02:30",
+            "dueAt": 1806215400000,
+            "overdueAt": 1806215400000
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "calendar: every Sunday at 01:30 in New York across 2027-11-07, whose 01:30 the change repeats (its first pass, EDT)",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=WEEKLY;BYDAY=SU",
+        "start": "2027-10-17T01:30",
+        "timeZone": "America/New_York",
+        "from": 1823558400000,
+        "to": 1827532800000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-10-17T01:30",
+            "due": "2027-10-17T01:30",
+            "dueAt": 1823751000000,
+            "overdueAt": 1823751000000
+          },
+          {
+            "key": "2027-10-24T01:30",
+            "due": "2027-10-24T01:30",
+            "dueAt": 1824355800000,
+            "overdueAt": 1824355800000
+          },
+          {
+            "key": "2027-10-31T01:30",
+            "due": "2027-10-31T01:30",
+            "dueAt": 1824960600000,
+            "overdueAt": 1824960600000
+          },
+          {
+            "key": "2027-11-07T01:30",
+            "due": "2027-11-07T01:30",
+            "dueAt": 1825565400000,
+            "overdueAt": 1825565400000
+          },
+          {
+            "key": "2027-11-14T01:30",
+            "due": "2027-11-14T01:30",
+            "dueAt": 1826173800000,
+            "overdueAt": 1826173800000
+          },
+          {
+            "key": "2027-11-21T01:30",
+            "due": "2027-11-21T01:30",
+            "dueAt": 1826778600000,
+            "overdueAt": 1826778600000
+          },
+          {
+            "key": "2027-11-28T01:30",
+            "due": "2027-11-28T01:30",
+            "dueAt": 1827383400000,
+            "overdueAt": 1827383400000
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "calendar: the second Tuesday of each quarter's first month at 10:00 in Tokyo, UNTIL in UTC read as Tokyo's wall time",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MONTHLY;INTERVAL=3;BYDAY=2TU;UNTIL=20271012T010000Z",
+        "start": "2026-01-13T10:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-01-13T10:00",
+            "due": "2026-01-13T10:00",
+            "dueAt": 1768266000000,
+            "overdueAt": 1768266000000
+          },
+          {
+            "key": "2026-04-14T10:00",
+            "due": "2026-04-14T10:00",
+            "dueAt": 1776128400000,
+            "overdueAt": 1776128400000
+          },
+          {
+            "key": "2026-07-14T10:00",
+            "due": "2026-07-14T10:00",
+            "dueAt": 1783990800000,
+            "overdueAt": 1783990800000
+          },
+          {
+            "key": "2026-10-13T10:00",
+            "due": "2026-10-13T10:00",
+            "dueAt": 1791853200000,
+            "overdueAt": 1791853200000
+          },
+          {
+            "key": "2027-01-12T10:00",
+            "due": "2027-01-12T10:00",
+            "dueAt": 1799715600000,
+            "overdueAt": 1799715600000
+          },
+          {
+            "key": "2027-04-13T10:00",
+            "due": "2027-04-13T10:00",
+            "dueAt": 1807578000000,
+            "overdueAt": 1807578000000
+          },
+          {
+            "key": "2027-07-13T10:00",
+            "due": "2027-07-13T10:00",
+            "dueAt": 1815440400000,
+            "overdueAt": 1815440400000
+          },
+          {
+            "key": "2027-10-12T10:00",
+            "due": "2027-10-12T10:00",
+            "dueAt": 1823302800000,
+            "overdueAt": 1823302800000
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "afterDone: 90 days after the last completion at 08:00 in Sydney, done on 2026-02-10, projected two years with each done on its due date, moved after weekends and a holiday; daylight saving ends on 2026-04-05 and 2027-04-04 and starts on 2026-10-04 and 2027-10-03",
+      "input": {
+        "anchor": "afterDone",
+        "every": "P90D",
+        "start": "2026-01-15T08:00",
+        "lastDone": 1770681600000,
+        "timeZone": "Australia/Sydney",
+        "adjust": "after",
+        "holidays": [
+          "2026-12-25",
+          "2026-12-28",
+          "2027-01-26"
+        ],
+        "remindBefore": "P7D",
+        "from": 1767225600000,
+        "to": 1830297600000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-05-11T08:00",
+            "due": "2026-05-11T08:00",
+            "dueAt": 1778450400000,
+            "remindAt": 1777845600000,
+            "overdueAt": 1778450400000
+          },
+          {
+            "key": "2026-08-09T08:00",
+            "due": "2026-08-10T08:00",
+            "dueAt": 1786312800000,
+            "remindAt": 1785708000000,
+            "overdueAt": 1786312800000,
+            "shifted": "weekend",
+            "projected": true
+          },
+          {
+            "key": "2026-11-08T08:00",
+            "due": "2026-11-09T08:00",
+            "dueAt": 1794171600000,
+            "remindAt": 1793566800000,
+            "overdueAt": 1794171600000,
+            "shifted": "weekend",
+            "projected": true
+          },
+          {
+            "key": "2027-02-07T08:00",
+            "due": "2027-02-08T08:00",
+            "dueAt": 1802034000000,
+            "remindAt": 1801429200000,
+            "overdueAt": 1802034000000,
+            "shifted": "weekend",
+            "projected": true
+          },
+          {
+            "key": "2027-05-09T08:00",
+            "due": "2027-05-10T08:00",
+            "dueAt": 1809900000000,
+            "remindAt": 1809295200000,
+            "overdueAt": 1809900000000,
+            "shifted": "weekend",
+            "projected": true
+          },
+          {
+            "key": "2027-08-08T08:00",
+            "due": "2027-08-09T08:00",
+            "dueAt": 1817762400000,
+            "remindAt": 1817157600000,
+            "overdueAt": 1817762400000,
+            "shifted": "weekend",
+            "projected": true
+          },
+          {
+            "key": "2027-11-07T08:00",
+            "due": "2027-11-08T08:00",
+            "dueAt": 1825621200000,
+            "remindAt": 1825016400000,
+            "overdueAt": 1825621200000,
+            "shifted": "weekend",
+            "projected": true
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "afterDone: nothing done yet, so the first is due at its start",
+      "input": {
+        "anchor": "afterDone",
+        "every": "P1M",
+        "start": "2026-03-31T12:00",
+        "timeZone": "UTC",
+        "limit": 4
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-03-31T12:00",
+            "due": "2026-03-31T12:00",
+            "dueAt": 1774958400000,
+            "overdueAt": 1774958400000
+          },
+          {
+            "key": "2026-04-30T12:00",
+            "due": "2026-04-30T12:00",
+            "dueAt": 1777550400000,
+            "overdueAt": 1777550400000,
+            "projected": true
+          },
+          {
+            "key": "2026-05-30T12:00",
+            "due": "2026-05-30T12:00",
+            "dueAt": 1780142400000,
+            "overdueAt": 1780142400000,
+            "projected": true
+          },
+          {
+            "key": "2026-06-30T12:00",
+            "due": "2026-06-30T12:00",
+            "dueAt": 1782820800000,
+            "overdueAt": 1782820800000,
+            "projected": true
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "relative: 60 days before each anniversary of 2025-01-05 at 09:00 in New York, two years, a 14-day window opening before the change of 2026-11-01, reminded 3 days before and overdue a day after, the second moved before a weekend",
+      "input": {
+        "anchor": "relative",
+        "date": "2025-01-05T09:00",
+        "offset": "-P60D",
+        "every": "P1Y",
+        "timeZone": "America/New_York",
+        "adjust": "before",
+        "opensBefore": "P14D",
+        "remindBefore": "P3D",
+        "overdueAfter": "P1D",
+        "from": 1767225600000,
+        "to": 1830297600000
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-11-06T09:00",
+            "due": "2026-11-06T09:00",
+            "dueAt": 1793973600000,
+            "opensAt": 1792760400000,
+            "remindAt": 1793714400000,
+            "overdueAt": 1794060000000
+          },
+          {
+            "key": "2027-11-06T09:00",
+            "due": "2027-11-05T09:00",
+            "dueAt": 1825419600000,
+            "opensAt": 1824210000000,
+            "remindAt": 1825160400000,
+            "overdueAt": 1825506000000,
+            "shifted": "weekend"
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "relative: a date given as epoch milliseconds, read in the zone, with no offset",
+      "input": {
+        "anchor": "relative",
+        "date": 1798761600000,
+        "timeZone": "America/Los_Angeles"
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-12-31T16:00",
+            "due": "2026-12-31T16:00",
+            "dueAt": 1798761600000,
+            "overdueAt": 1798761600000
+          }
+        ],
+        "more": false
+      }
+    },
+    {
+      "name": "a holiday moves a due date: the 15th of each month in Paris moved after weekends and holidays; May's falls on a Saturday and the Monday after, 2027-05-17, is a holiday, so it moves to the Tuesday",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MONTHLY;BYMONTHDAY=15",
+        "start": "2027-04-15T09:00",
+        "timeZone": "Europe/Paris",
+        "adjust": "after",
+        "holidays": [
+          "2027-05-17",
+          "2027-08-15"
+        ],
+        "limit": 6
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-04-15T09:00",
+            "due": "2027-04-15T09:00",
+            "dueAt": 1807772400000,
+            "overdueAt": 1807772400000
+          },
+          {
+            "key": "2027-05-15T09:00",
+            "due": "2027-05-18T09:00",
+            "dueAt": 1810623600000,
+            "overdueAt": 1810623600000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-06-15T09:00",
+            "due": "2027-06-15T09:00",
+            "dueAt": 1813042800000,
+            "overdueAt": 1813042800000
+          },
+          {
+            "key": "2027-07-15T09:00",
+            "due": "2027-07-15T09:00",
+            "dueAt": 1815634800000,
+            "overdueAt": 1815634800000
+          },
+          {
+            "key": "2027-08-15T09:00",
+            "due": "2027-08-16T09:00",
+            "dueAt": 1818399600000,
+            "overdueAt": 1818399600000,
+            "shifted": "holiday"
+          },
+          {
+            "key": "2027-09-15T09:00",
+            "due": "2027-09-15T09:00",
+            "dueAt": 1820991600000,
+            "overdueAt": 1820991600000
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "the same, its holiday calendar's observed day moved from 2027-05-14 to 2027-06-15: May's occurrence is back on its day and June's moves",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MONTHLY;BYMONTHDAY=15",
+        "start": "2027-04-15T09:00",
+        "timeZone": "Europe/Paris",
+        "adjust": "after",
+        "holidays": [
+          "2027-06-15",
+          "2027-08-15"
+        ],
+        "limit": 6
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-04-15T09:00",
+            "due": "2027-04-15T09:00",
+            "dueAt": 1807772400000,
+            "overdueAt": 1807772400000
+          },
+          {
+            "key": "2027-05-15T09:00",
+            "due": "2027-05-17T09:00",
+            "dueAt": 1810537200000,
+            "overdueAt": 1810537200000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-06-15T09:00",
+            "due": "2027-06-16T09:00",
+            "dueAt": 1813129200000,
+            "overdueAt": 1813129200000,
+            "shifted": "holiday"
+          },
+          {
+            "key": "2027-07-15T09:00",
+            "due": "2027-07-15T09:00",
+            "dueAt": 1815634800000,
+            "overdueAt": 1815634800000
+          },
+          {
+            "key": "2027-08-15T09:00",
+            "due": "2027-08-16T09:00",
+            "dueAt": 1818399600000,
+            "overdueAt": 1818399600000,
+            "shifted": "holiday"
+          },
+          {
+            "key": "2027-09-15T09:00",
+            "due": "2027-09-15T09:00",
+            "dueAt": 1820991600000,
+            "overdueAt": 1820991600000
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "a weekend of Friday and Saturday",
+      "input": {
+        "anchor": "relative",
+        "date": "2027-01-01",
+        "every": "P1M",
+        "timeZone": "Asia/Dubai",
+        "adjust": "before",
+        "weekendDays": [
+          "friday",
+          "saturday"
+        ],
+        "limit": 4
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-01-01T00:00",
+            "due": "2026-12-31T00:00",
+            "dueAt": 1798660800000,
+            "overdueAt": 1798660800000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-02-01T00:00",
+            "due": "2027-02-01T00:00",
+            "dueAt": 1801425600000,
+            "overdueAt": 1801425600000
+          },
+          {
+            "key": "2027-03-01T00:00",
+            "due": "2027-03-01T00:00",
+            "dueAt": 1803844800000,
+            "overdueAt": 1803844800000
+          },
+          {
+            "key": "2027-04-01T00:00",
+            "due": "2027-04-01T00:00",
+            "dueAt": 1806523200000,
+            "overdueAt": 1806523200000
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "the limit, and more past it",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=DAILY",
+        "start": "2026-01-01T00:00",
+        "limit": 2
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2026-01-01T00:00",
+            "due": "2026-01-01T00:00",
+            "dueAt": 1767225600000,
+            "overdueAt": 1767225600000
+          },
+          {
+            "key": "2026-01-02T00:00",
+            "due": "2026-01-02T00:00",
+            "dueAt": 1767312000000,
+            "overdueAt": 1767312000000
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "refused: a rule finer than hourly",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MINUTELY",
+        "start": "2026-01-01T00:00"
+      },
+      "output": {
+        "refused": "rule \"FREQ=MINUTELY\": FREQ=MINUTELY is finer than a recurrence dates: HOURLY at the finest (Schedules' cron runs finer)"
+      }
+    },
+    {
+      "name": "refused: a zone the bundled database lacks",
+      "input": {
+        "anchor": "relative",
+        "date": "2026-01-01",
+        "timeZone": "Mars/Olympus_Mons"
+      },
+      "output": {
+        "refused": "\"Mars/Olympus_Mons\" is not a time zone of the IANA database the core bundles"
+      }
+    }
+  ]
+}

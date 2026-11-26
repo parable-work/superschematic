@@ -261,8 +261,12 @@ func ParseLayout(data []byte) (*Layout, error) {
 			return nil, fmt.Errorf("rules: the behaviors' layout's type %s is null", name)
 		case table.Type != name:
 			return nil, fmt.Errorf("rules: the behaviors' layout holds type %s under %s", table.Type, name)
-		case table.Table == "" || table.Key.Column == "" || table.Version == "":
-			return nil, fmt.Errorf("rules: the behaviors' layout's type %s names no table, key column or version column", name)
+		case table.Table == "" || table.Key.Column == "":
+			return nil, fmt.Errorf("rules: the behaviors' layout's type %s names no table or key column", name)
+		case table.Version == "" && len(table.Uses) > 0:
+			// A table with no version column is one the layout holds
+			// read-only (D152), which composes no behavior.
+			return nil, fmt.Errorf("rules: the behaviors' layout's type %s composes behaviors and names no version column", name)
 		}
 	}
 	return &layout, nil
