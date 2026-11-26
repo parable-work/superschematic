@@ -13,9 +13,10 @@ import (
 // The database of a server, a job or a worker resolves to a dialect its
 // generated Deps reach (docs/stack-model.md, section 18.6, D64): a
 // TypeScript API's Deps.db is the client of its DB service's first
-// dialect, as a Rust API's is (D116), a Go API's Deps reach Postgres
-// alone, and a TypeScript API over the user model is refused on a
-// sqlite-first database.
+// dialect, as a Rust API's is (D116), with the repositories on that
+// dialect, a Go API's Deps reach Postgres alone, and a TypeScript API over
+// the user model keeps its users on a sqlite-first database's file
+// (D116).
 
 // notesStack is a stack of one API, notes, written in lang, on notes-db,
 // whose DB service lists dialects in order, with a local environment, Dev.
@@ -119,16 +120,22 @@ func TestARustAPIRunsOnItsDatabasesFirstDialect(t *testing.T) {
 	mustFail(t, errs, stack.CodeUnrealizable, "server shop-api is a Rust server on shop-db, whose DB service lists sqlite first, and environment Staging places shop-db on shop-db, a postgres database; a Rust API's Deps.db is the client of its database's first dialect (D64, D116)")
 }
 
-// TestATypeScriptIdentityAPIOnASQLiteFirstDatabaseIsRefused: the identity
-// runtime's TypeScript store runs on Postgres, and none over SQLite is
-// built, so a TypeScript API over the user model on a sqlite-first
-// database is refused (D50).
-func TestATypeScriptIdentityAPIOnASQLiteFirstDatabaseIsRefused(t *testing.T) {
+// TestATypeScriptIdentityAPIRunsOnASQLiteFirstDatabase: the identity
+// runtime's TypeScript store runs over a SQLite file, beside the
+// repositories that share it (D116), so a TypeScript API over the user
+// model on a sqlite-first database resolves on the local target, its
+// server on the file, where it was refused before (D50).
+func TestATypeScriptIdentityAPIRunsOnASQLiteFirstDatabase(t *testing.T) {
 	reg := assemble(t)
 	s, services := notesStack(registry.APILanguageTypeScript, registry.SQLDialectSQLite, registry.SQLDialectPostgres)
 	service(services, "notes").Identity = true
-	_, errs := resolve(t, reg, s, services, "Dev")
-	mustFail(t, errs, stack.CodeUnrealizable, "server notes serves notes, which authenticates its users with the identity runtime over notes-db, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)")
+	env := mustResolve(t, reg, s, services, "Dev")
+	if db := env.Deployable("notes-db"); db == nil || db.Platform != "local.sqlite" || db.Dialect != registry.SQLDialectSQLite {
+		t.Fatalf("notes-db = %+v, want it on local.sqlite", db)
+	}
+	if notes := env.Deployable("notes"); notes == nil || notes.Language != registry.APILanguageTypeScript {
+		t.Fatalf("notes = %+v, want a TypeScript server of the environment", notes)
+	}
 }
 
 // TestADatabaseOfTwoFirstDialectsStaysOnTheKindsPlatform: a database that

@@ -18,9 +18,10 @@
 // ./workers-telemetry carries a span's context in AsyncLocalStorage, which
 // the Worker's nodejs_als compatibility flag gives (D64, amended).
 //
-// The server reaches Postgres through Hyperdrive with node-postgres, which
-// imports Node's modules, by their bare names and through require (D92), so
-// its Worker runs with them: Node's modules come with the compatibility
+// The server reaches Postgres through Hyperdrive with node-postgres, or
+// runs the repositories of a D1 database, whose runtime seals a field with
+// node:crypto, and those import Node's modules, by their bare names and
+// through require (D92, D116), so its Worker runs with them: Node's modules come with the compatibility
 // date the extension pins, and the Worker's version names nodejs_compat
 // under an earlier one. Each Node module is kept external by its node:
 // name, and a require of one resolves to a module that imports it, since an

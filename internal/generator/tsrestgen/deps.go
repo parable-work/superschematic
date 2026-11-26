@@ -169,33 +169,30 @@ func (o *APIOutput) DepsPool() bool {
 }
 
 // DepsORM reports whether Deps holds the database's repositories, orm
-// (D79): Deps.db is a pool, and the database's types write orm.ts.
+// (D79): the database's types write orm.ts, whose repositories run over
+// Deps.db, a pool on Postgres, or a SQLite file or a D1 binding for a
+// database whose DB service lists sqlite first (D116).
 func (o *APIOutput) DepsORM() bool {
 	return depsORM(o.Deps)
 }
 
-// depsORM reports whether deps holds the database's repositories: a pool,
-// its database listing postgres first, and the type of orm.ts's
-// repositories.
+// depsORM reports whether deps holds the database's repositories: a
+// database, and the type of orm.ts's repositories.
 func depsORM(deps DepsInfo) bool {
-	return deps.Database != "" && deps.Dialect != SQLiteDialect && deps.ORM != "" && deps.DatabaseTypesPackage != ""
+	return deps.Database != "" && deps.ORM != "" && deps.DatabaseTypesPackage != ""
 }
 
 // checkBehaviorDeps refuses deps for an API that serves a table's behavior
 // operations (D103) when they hold no repositories: the router runs each
 // operation through RouterOptions.orm, which a server builds from Deps.orm,
-// the repositories the database's TypeScript types export for Postgres.
+// the repositories the database's TypeScript types export.
 func (o *APIOutput) checkBehaviorDeps(deps DepsInfo) error {
 	routes := o.BehaviorRoutes()
 	if len(routes) == 0 || depsORM(deps) {
 		return nil
 	}
 	route := routes[0]
-	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
-	if deps.Dialect == SQLiteDialect {
-		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D103)", route.Database)
-	}
-	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, why)
+	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export; enable outputs.types.typescript in %s's config", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, route.Database)
 }
 
 // checkTableDeps refuses deps for an API with a table operation (D106)
@@ -207,11 +204,7 @@ func (o *APIOutput) checkTableDeps(deps DepsInfo) error {
 		return nil
 	}
 	route := routes[0]
-	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
-	if deps.Dialect == SQLiteDialect {
-		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D106)", route.Database)
-	}
-	return fmt.Errorf("tsrestgen: %s serves %s, a @tableOperation (a %s of %s), which runs through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Operation, route.Kind, route.Type, route.Database, why)
+	return fmt.Errorf("tsrestgen: %s serves %s, a @tableOperation (a %s of %s), which runs through Deps.orm, the repositories %s's TypeScript types export; enable outputs.types.typescript in %s's config", o.SchemaName, route.Operation, route.Kind, route.Type, route.Database, route.Database)
 }
 
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
@@ -643,15 +636,20 @@ func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
 // checkBehaviorWorkers refuses deps for an API that declares a behavior
 // worker (D103) when they hold no repositories: its handlers run each
 // deadline and each change through Deps.orm's repository of the table, on
-// Postgres.
+// Postgres, where its queues are claimed. One on a sqlite-first database
+// is refused even with the repositories there (D116): its claims are
+// Postgres's.
 func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	workers := o.BehaviorWorkers()
-	if len(workers) == 0 || depsORM(deps) {
+	if len(workers) == 0 {
 		return nil
 	}
 	w := workers[0]
-	if deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Runs(), deps.Database)
+	if deps.Database != "" && deps.Dialect == SQLiteDialect {
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116)", w.Name, w.Behavior.Runs(), deps.Database)
+	}
+	if depsORM(deps) {
+		return nil
 	}
 	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }

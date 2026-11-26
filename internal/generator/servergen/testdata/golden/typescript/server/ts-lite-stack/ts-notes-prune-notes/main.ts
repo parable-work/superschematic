@@ -23,6 +23,7 @@ import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
+import { createSqliteOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
 
 const logger = createLogger({ stack: 'ts-lite-stack', job: 'ts-notes-prune-notes' });
 
@@ -48,6 +49,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   const jobs = await construct('ts-notes', 'jobs', () => tsNotesImpl.createJobs(tsNotesDeps));

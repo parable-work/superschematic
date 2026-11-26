@@ -957,12 +957,13 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 
 // typeScriptORM is the type of the repositories the TypeScript API's
 // Deps.orm holds (D79), which the ./orm entry of db's TypeScript types
-// exports: db, the API's database, lists postgres first, so Deps.db is a
-// pool, generates TypeScript types, whose orm.ts runs on Postgres, and has
-// a table. Empty otherwise, and for a build that loads no dependency or has
-// no config for db.
+// exports: db, the API's database, generates TypeScript types, whose orm.ts
+// runs over Deps.db, a pool on Postgres or, for a DB service that lists
+// sqlite first, a SQLite file or a D1 binding on its statements there
+// (D116), and has a table. Empty otherwise, and for a build that loads no
+// dependency or has no config for db.
 func (r run) typeScriptORM(db, dialect string) (string, error) {
-	if dialect == registry.SQLDialectSQLite || r.Options.LoadDependency == nil {
+	if r.Options.LoadDependency == nil {
 		return "", nil
 	}
 	var cfg *schemaconfig.SchemaConfig

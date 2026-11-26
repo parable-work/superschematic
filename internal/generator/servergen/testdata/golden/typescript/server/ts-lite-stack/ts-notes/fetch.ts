@@ -4,7 +4,8 @@
 // ts-notes (docs/stack-model.md, section 18.5). superschematic writes
 // it beside main.ts, which stack dev runs on Bun, because an environment of
 // the stack places the server on Cloudflare Workers; bundle.ts bundles it
-// for workerd, with no Node API but AsyncLocalStorage, under nodejs_als.
+// for workerd, with Node's modules, which node-postgres and the repositories'
+// runtime need (D92, D116).
 //
 // When Cloudflare loads the version, fetch.ts reads each API's config from
 // the Worker's string bindings, so a refused config fails the version's
@@ -37,6 +38,7 @@ import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono
 import { binding, perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { ping, type SqlDatabase } from '@superschematic/http-runtime/d1';
+import { createD1Orm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
 
@@ -89,6 +91,7 @@ async function build(): Promise<Handle> {
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   const tsNotesImplementations = await construct('ts-notes', 'implementation', () => tsNotesImpl.create(tsNotesDeps));
