@@ -317,6 +317,12 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Agents}}
   agents: {{jsonString .Agents}},
 {{- end}}
+{{- if .Party}}
+  party: { {{- if .PartyTitle}} title: {{jsonString .PartyTitle}} {{end -}} },
+{{- end}}
+{{- if .Conversations}}
+  conversations: {{jsonString .Conversations}},
+{{- end}}
 {{- if .TableEvents}}
   events: [
 {{- range .TableEvents}}

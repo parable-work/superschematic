@@ -444,6 +444,10 @@ export interface TableDefinition {
   readonly agents?: 'definitions' | 'runs' | 'policies' | 'approvals' | 'controls';
   /** The table's @event declarations (D153), which the notifier raises and routes; absent for a table with none. */
   readonly events?: readonly EventDefinition[];
+  /** A @party table (D157): its rows are principals of kind party, which act through grants alone; title is the member a party is named by. Absent for any other table. */
+  readonly party?: { readonly title?: string };
+  /** What the table is to the conversations (D157): the conversations, or their messages; absent for any other table. */
+  readonly conversations?: 'conversations' | 'messages';
 }
 
 /** One @event of a table (D153): its kind, its default urgency, the member a notice is titled by and the members its payload carries. */

@@ -2348,6 +2348,113 @@ Left:
 - The schema writer writing `@event`, `@notifier` and `@channelIdentities`
   back.
 
+## D157. A party is a row of an app's table that acts through grants, every inbound message takes one path that decides who sent it, conversations are core tables whose messages are rows, an identity whose grants have all ended is verified again, parties may share an address that a thread settles, and sending to a party is a permission (D77, D103, D153, D154, D156 amended)
+
+Every caller was a user with a session or a key. D156 gave grants to
+callers who are no users and D153 resolved a reply's sender through
+channel identities, but nothing recognised a text or an email from someone
+outside the User table, nothing recorded the conversation, and an agent
+run (D158) had no inbound trigger. Section 7 of the platform plan asks for
+parties, one inbound path, messages as rows and sending as a permission.
+
+### Parties and their identities
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@party<T>({ title? })` from `@superschematic/db` marks a DB table whose rows are principals of kind `party` (D156). Its key is one UUID, which a grant names as its holder and a channel identity as its principal (`principalKind: party`, `principalTable`, `principal`, D153's columns, no migration). A schema with a `@party` table declares `@accessGrants`. The generated definition carries `party`. | A core table of parties, which would hold an app's facts (a contractor's trade, a supplier's terms) apart from the app's own rows. A party as a user with no login, which would give it a user's sessions and roles. |
+| `partyPrincipal(orm, party, { grant? })` (`./postgres`, `parties.ts`) resolves a party as `grantAuthenticator` resolves a grant's token: kind `party`, its subject the row's key, the reach of each active grant (or of the one named) and the permissions of those grants' roles. `inbound.principalOf` is the same. | A principal with every grant's permissions over every grant's reach and no way to narrow it, which an agent run acting under one grant needs. |
+| An identity lapses when its party holds no active grant and some grant of it did not end, by its date or its revocation, before the identity was verified (a grant ended by its target's state counts as ended after). A lapsed identity resolves to no one for inbound and is sent nothing; a code replied with, or `confirmIdentity`, verifies it again, which now always restamps `verifiedAt`. It is decided from the rows (`identityLapsed`), with no stamp to keep in step with the grants. | A `lapsedAt` column a revoke writes, which a grant ending by its date or its target's state would not. Re-verifying on every new grant, which would ask a party that kept its number. |
+| An address entered by hand (D153's `entered`) resolves at the lowest trust, as section 3 built it; a party's message records the identity's trust (`trust`), so a run acting on it can be held to it. | A trust level of parties apart from users'. |
+| An opt-out is recorded on every identity of the address (`optedOutAt`, a field the loader adds to `@channelIdentities`): the adapter reads its channel's keywords (`InboundMessage.optOut`, STOP and START for SMS) and the core records them. The notifier's sends and `send` skip an opted-out identity. | Opt-out keywords in the core, which differ by channel and carrier. |
+
+### Two parties on one address
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Two parties may share an address (a household's phone, an office's inbox). A message from it belongs to the party whose conversation it continues: its `In-Reply-To` or `References`, or the service's id of the text it answers, names a message of that party's conversation. One that names neither is held in triage, given to no one. A user never shares: an address that is a user's and a party's resolves to no one, as D153's two principals did. | A unique address, which turns away a real case. The most recent conversation on the address, which guesses, and a guess reaches a grant's rows. |
+
+### One inbound path
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `createInbound({ orm, notifier, runs, providers?, bucket?, inboundAddress?, ... })` (`./postgres`, `inbound.ts`). `inbound.inbound(slot, request)` reads an adapter's `@webhook` request and `receive` takes each message: the sender normalised; an email held to its authentication; an opt-out recorded; the address resolved through `notifier.resolveSender`. A user's message goes to `notifier.reply` as is. A party's with an active grant is a message row with its files and a run request on the `@runRequests` queue. A party's with none is on its timeline (its conversation, and a reference to its row) and in triage. A lapsed identity's, an unknown sender's, and a shared address's that no thread settles: triage alone. A code from an address with no identity verifies through the notifier. | A pipeline of hooks an app orders, which would let one skip the authentication check. The notifier's `inbound` taking parties too: it stays the reply path of an app with no parties. |
+| The adapter reports an email's SPF, DKIM and DMARC (`InboundMessage.authentication`); the core decides (`emailAuthenticated`): DMARC pass, and neither SPF nor DKIM failing (`fail`, `softfail`, `permerror`). Anything else, no report included, is an unknown sender. | Each adapter deciding, which would make trust a provider's choice. All three passing, which turns away forwarded mail whose DKIM carries its DMARC. |
+| One inbound address per deployment (`inboundAddress`, the example's `INBOUND_ADDRESS`): mail to another is dropped (`ignored`), and an outbound email asks for its reply there (`replyTo`). An outbound email carries a `Message-ID` the core makes, and `In-Reply-To` and `References` from the conversation's latest inbound email, through `OutboundMessage`'s new `messageId`, `inReplyTo`, `references` and `replyTo`. | An address per conversation (plus-addressing), which some relays strip. |
+| The run request is `{ trigger: "inbound", party: { table, key }, message, grant }` on the `@queue() @runRequests()` class's queue, enqueued once the message and its files are stored. `grant` is the grant the thread's message ran under while it is active, else the party's newest active grant. `inbound.runWorker(pool, handle)` is the queue as a worker claims it, its handler the agent dispatcher's (D158) or an app's own. `examples/parties`'s stub writes a report on the granted job as the party and files the message onto it. | A run started in process, which ties the inbound route to the run's time and to a sandbox. One request per active grant, which runs one message many times. |
+
+### Conversations are rows
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The conversations are core tables, as section 3's channel identities are: classes the app declares and the loader fills, `@conversations("conversations")` (one per party and channel, or per unknown address and channel) and `@conversations("messages")` (direction, `via` the channel kind and `slot`, the addresses, subject, body, `messageId`, `inReplyTo`, `threadRefs`, `providerMessageId`, `authentication`, `identity` and `trust`, the party, `author`, `authorKind` and `forSubject` on whose behalf, `disposition`, `state`, `triage`, `grant`, `detail`, `at`). The expansion runs before D154's, so the messages class may take `@references` and `@attachments`. Postgres alone. | A core extension, which the inbound path, the notifier's party recipients and the agent runs all need from the core. Tables the loader adds unasked. |
+| A message's files are its `@attachments`: the adapter fetches them (`InboundMessage.attachments`), and the core stores each through `begin`, a put to its object and `complete`, so its hash is checked as a browser's upload's is. `inbound.file({ message, to, as })` files a message onto a row its principal reads: a reference to the row, so the row lists the message among its backlinks (D154), and each file with no second upload. | Files on the conversation, which a message's reference could not carry onto a row. |
+| Triage is a state of a message (`triage: open`, then `closed` by `settle`), read and settled with `parties.triage`. | A triage table beside the messages, a second copy of each. |
+
+### Sending to a party
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `inbound.send({ as, party, channel, body, subject?, about? })` takes `parties.message` (`sendPermission`), granted per role; the sender reads the party's row; the party's identity on the channel is verified or entered, not opted out and not lapsed; a party is sent at most `rateLimit` messages in its window (20 an hour); and `approve`, the approval policy hook D158 sets `ask` policies through, answers `allow`, `deny` or `ask`. An asked message waits as `awaitingApproval` until `release` sends it, its identity checked again, or `reject` refuses it. Each refusal but the permission's is a message row with its reason. | A permission of each channel, which a role would list per provider. A rate limit in the adapter, which knows no party. |
+
+Settled. Channel identities and conversations are core tables, as section 3
+settled identities, for the same reason: the core's own paths read and
+write them. Two parties may share an address, a thread settles which one
+wrote, and a user shares with no one. Comments on tables keeps the `for`
+D103 built (`forSubject`); its `via`, the channel, waits for the core's
+caller to carry one (left below), and a conversation's message records its
+own `via` and `forSubject` meanwhile. Section 3's inbox stays the
+notifier's; a party's notices are its inbox rows of `recipientKind: party`.
+
+Built: the IR (`ir/parties.go`), `@party`, `@conversations` and
+`@runRequests` (`internal/registry/core_parties.go`), the loader's filling
+(`internal/loader/conversations`) and checks
+(`internal/loader/verify/parties.go`), the identity's `optedOutAt`, the
+definitions in orm.ts (`party`, `conversations`), `@superschematic/db`'s
+decorators, the schema file's types; `parties.ts` (`partyPrincipal`,
+`identityLapsed`) and `inbound.ts` (`createInbound`, `emailAuthenticated`)
+in `./postgres`; the notifier skipping opted-out and lapsed identities and
+restamping a verified one; `InboundMessage`'s and `OutboundMessage`'s new
+members; the SMS relay's media and STOP and START, and the mail relay's
+inbound mail, authentication, threading and attachments, in
+`examples/runtime-providers`; the guide's "Outside parties and inbound
+messages"; `examples/parties`. The tests: the registry's, the loader's
+(`TestPartiesFixtureLoads`, `TestPartiesRefusals`,
+`TestPartiesExampleLoads`), the runtime's pure parts, and
+`TestPartiesEndToEnd`, which runs the plan's "done when" on Postgres
+through the relays over stand-in services: a text with a photo from a
+party with a grant becomes a report on the granted job with the photo
+attached, and the message is on the job's, the report's and the party's
+backlinks; a text from an unknown number lands in triage; the same text
+from a party whose grant has ended reaches nothing until the number is
+verified again; email failing DMARC is treated as unknown, and an
+authenticated reply threads to its party's conversation; a party with no
+grant is on its timeline; two parties on one address are told apart by
+the thread; and sending is held to the permission, the rate limit, the
+approval policy and STOP.
+
+Left:
+
+- Go and Rust: the inbound path, party principals and sends, and SQLite
+  and D1.
+- The agent run that takes a run request held to the message's trust:
+  D158 takes the request and narrows its run to the request's grant's
+  role, and records the trust.
+- Comments' `via` on a table: the rules core's caller carries no channel,
+  so a message posted into a row's Comments for a text's sender records
+  its `for` and not its channel. The core's `Caller` gains a channel, the
+  declaration's messages a `via`, and the core is built again for every
+  language.
+- A generated server that builds the inbound path into its `Deps`, mounts
+  each relay's inbound route and fills a `@worker` of the run requests;
+  an app wires them now (`examples/parties/server`).
+- Settling a held message onto a party (adding its identity from triage),
+  and a triage page in Topcoat.
+- A messaging bridge's inbound (D159's examples are SMS and mail).
+- `examples/deploy-smoke` with the inbound path, and the live `smoke.sh
+  Cloudflare` run, which is the maintainer's.
+- The schema writer writing `@party`, `@conversations` and `@runRequests`
+  back.
+
 ## D158. Agents are rows, a dispatcher on a queue starts each run in a fresh sandbox with a token that is a grant per target row acting for its principal, autonomy is rows per operation whose ask binds an approval to the parameters' hash, budgets pause, and switches cancel through the sandbox (D77, D93, D104, D114, D153, D156, D159 amended)
 
 D77 named an agent dispatcher and never built it. An agent called the MCP
@@ -2365,7 +2472,8 @@ task bounds, autonomy per operation, budgets and stop switches.
 | The dispatcher is a worker of the requests queue (`agents.workerQueue(pool)`, `agents.handle`). A start writes the run, takes its Lease (D104) as the dispatcher's behavior caller, mints the token and starts a sandbox instance (D159) with the definition, the token as a secret, the agent routes' URL and the credential references. A `watch` message, a delayed enqueue (D80), polls the instance and heartbeats the lease until it ends; the run then ends: token revoked, cost metered, transcript written, lease released. A start that fails is recorded with Retries, whose backoff sets when the start is tried again; exhausted, the run fails. On Workers the queue drains as any `@worker`'s does, at each Cron firing and on a wake for a message due within the minute (D92, D151): no process waits on an instance. | A long-running supervisor per run, which Workers has no place for. The queue's own claim lease and attempts in place of Lease and Retries, which the plan names and which give a run a fencing token and per-class backoff. |
 | The model turn runs in the app, not the sandbox: the instance posts its tool results to `<endpoint>/turn`, where the definition's model provider completes the turn with the run's tools, records the usage on the run and the budget, and writes the transcript. The instance calls tools at `<endpoint>/mcp` with its token, and runs the sandbox's own tools (a fetch, a browser) in process. `runAgentInstance` in `./providers` is that side. | The model called from the sandbox, which needs a model key in every instance and a budget the app cannot see. |
 | Credentials are references in the definition. The instance resolves each with `useCredential` into the runner that uses it and reports the reference, provider, target and time to `<endpoint>/credential`, which the run's `credentialUses` keeps. The app passes the broker's own settings to the instance through `sandboxSpec`. | Resolving in the app and passing values to the instance, which puts them in the app's memory and the spec's log. |
-| Triggers are request messages. A notifier route's recipient may be `{ agent }`, which enqueues a request about the event's record in the routing transaction (`createNotifier({ agents })`). `agents.request(tx, ...)` enqueues one for an assignment, a schedule or a principal. A party's inbound message (D157) is `{ trigger: "inbound", party, message, grant }`, which names no agent: the definition whose `inbound` is set takes it, its scope the grant's target, acting for the party. | A queue per trigger. Inbound messages through the notifier's reply path, which runs a sender's own verbs. |
+| Triggers are request messages. A notifier route's recipient may be `{ agent }`, which enqueues a request about the event's record in the routing transaction (`createNotifier({ agents })`). `agents.request(tx, ...)` enqueues one for an assignment, a schedule or a principal. A party's inbound message is D157's run request, `{ trigger: "inbound", party, message, grant }` on the `@runRequests` queue, which `inbound.runWorker(pool, m => agents.handle(m))` hands the dispatcher as it is. It names no agent: the definition whose `inbound` is set takes it, acting for the party, permissions narrowed by `partyPrincipal` under the request's grant, its scope the grant's target, the party's row and the message's row, its task the message's body, marked untrusted. | One queue for both, which would make D157's inbound path write a table of D158's. Inbound messages through the notifier's reply path, which runs a sender's own verbs. |
+| A run writes to a party with the `message_party` tool, through D157's `inbound.send` (its permission, the party's identity, its rate limit). `createInbound({ approve: agents.sendApproval })` holds the send to the run's policy as `send_message`, class `messageParty`: ask holds the message `awaitingApproval`, the approval records it (`holds`), and approving it releases the message, denying it refuses it. | Gating the tool as well as the send, which would ask twice for one message. |
 | Autonomy is rows: per agent or every agent, per operation or class (`read`, `internalWrite`, `messageParty`, `moneyMovement`), `auto`, `tell` or `ask`. The most specific row wins; with none, the tool's mode or the operation's `@autonomy`, then the class's default (auto for a read and an internal write, ask otherwise). A money movement is ask whatever a row says: `@autonomy("moneyMovement", mode)` with another mode is the load's refusal, and `setPolicy` refuses such a row. | Autonomy in the schema alone, which ground rule 1 turns down. A mode the runtime merely defaults, which a row could set to auto. |
 | `ask` writes an approval holding the exact parameters and the SHA-256 of the operation and them as canonical JSON (`paramsHash`), raises `approval.requested` on it as urgent, and the call answers `428 approval_required`. Anyone holding the approval's permission (`agents.approve` unless the row names one) decides it, on any channel: `replyActions` are D153's reply actions `approve` and `deny`, and `agents.approve` is the API's. The same call then runs once and spends it. A call of the operation with other parameters supersedes the run's open approvals of it and asks again. `mcpGate`, a new `callGate` of `mountMcp`, holds a generated API's tools to the same policy for a run's token: D93's confirmation for calls a key or a token makes (D114). | A confirmation token the agent carries, which an agent could ask for and redeem itself. An approval of the operation alone, which a changed amount would reuse. |
 | Budgets are the Budget behavior on the controls (D104): each turn's tokens and each instance's wall seconds count on the agent's row, whose meter's scope is every agent's budget row. `agent.budgetWarning` is raised as usage crosses the row's `warnAt` percent. At the agent's cap the agent pauses (`pausedReason: budget`) and its runs are cancelled; at every agent's cap a scheduled run is refused and a principal's run waits on an `agents.overBudget` approval, which `agents.budgets` decides. A limit changes only through `setBudget`, as a principal holding the Budget's `limitPermission`. | A meter of the dispatcher's own, beside the behavior the plan names. |
@@ -2390,23 +2498,24 @@ example and the fixture `AgentRunRequest`, table
 is `{ step?, agent?, trigger?, subjectTable?, subjectKey?, targets?,
 event?, input?, requestedBy?, actingFor?, party?, message?, grant?, run?,
 ask? }`. Section 7's inbound message is `{ trigger: "inbound", party:
-{ table, key }, message, grant }`, `message` the message row's key (a
-base62 UUID, as PR 532's queue carries it), its row as `{ table, key }`
-or its text as `{ body }`. `agents.handle(message)` takes it as it is, and
-`agents.request(tx, message)` enqueues it; `inboundMessage` reads a keyed
-message's text, the run's untrusted task, and its row, which joins the
-run's scope. `agents.sendPolicy(principal, operation, params)` answers
-section 7's send approval (`allow`, `ask`, `deny`): a run's message to a
-party is held to its autonomy policy as class `messageParty`.
+{ table, key }, message, grant }`, `message` the message row's key, on D157's
+`@runRequests` queue, not this one: `agents.handle(message)` takes it as it
+is. `createAgents({ inbound })` reads the message through
+`inbound.message`, or the app's `inboundMessage`. A request may also carry
+the message's row as `{ table, key }` or its text as `{ body }`.
+`agents.sendApproval` is `createInbound`'s `approve`, and
+`agents.sendPolicy(principal, operation, params)` the same policy for any
+send.
 
 Built: `ir/agents.go`, `@agents`, `@autonomy` and the agents feature
 (`internal/registry/core_agents.go`), the loader's filling
 (`internal/loader/agents`) and checks (`internal/loader/verify/agents.go`),
-the definition's part in orm.ts, `@superschematic/db`'s `agents` and
+the definition's part in orm.ts, the approvals' `holds`, `@superschematic/db`'s `agents` and
 `@superschematic/api`'s `autonomy`; `runtime/http/typescript/src/agents.ts`
 (`createAgents`, in `./postgres`), `runAgentInstance`
 (`src/providers/agent-runner.ts`), the notifier's `{ agent }` recipient and
-`agents` option, and `mountMcp`'s `callGate`; the guide's "Agent runs";
+`agents` option, `mountMcp`'s `callGate`, and the wiring to D157's inbound
+path (`inbound`, `message_party`, `sendApproval`); the guide's "Agent runs";
 `examples/agent-orchestration`. The tests: the registry's, the loader's
 (`TestAgentsFixtureLoads`, `TestAgentsRefusals`,
 `TestAgentOrchestrationExampleLoads`,
@@ -2419,23 +2528,18 @@ scope; an ask waits for an approval given by SMS, then runs; a changed
 amount asks again; a budget cap pauses the agent, and every agent's stops
 scheduled runs and asks before a principal's; pausing every agent cancels
 a run in flight and returns its assigned row; the transcript, the run row,
-the approvals and the logs hold no credential value; an inbound message is
-data and its run acts for its party; an unanswered question makes a
+the approvals and the logs hold no credential value; a party's text down
+D157's inbound path starts a run through its `@runRequests` queue, which
+acts for the party, narrowed to its grant's role, and obeys nothing the
+text says, and the run's message back waits on its approval, given by text,
+before D157's send releases it; an unanswered question makes a
 follow-up row; Retries starts a failed instance again while the run holds
 its Lease; and administration is permissions.
 
 Left:
 
-- Wire section 7's inbound trigger and send approvals (D157, PR 532, not
-  on this base). Its queue is a class of its own (`@queue() @runRequests()`,
-  `RunRequest`, `run_request_queue`), whose message D158 takes as it is:
-  `inbound.runWorker(pool, message => agents.handle(message))`, or one
-  queue of the two. Its `createInbound({ approve })` takes
-  `req => agents.sendPolicy(req.principal, 'send_message', req)` once its
-  request's shape names the sender; `inbound.release(id)` follows an
-  approval. Its `partyPrincipal` may replace the permissions D158 reads
-  for a party it acts for, and its message trust (`verified`, `entered`)
-  may narrow the run.
+- An inbound message's trust (`verified`, `entered`, D157) narrowing its
+  run: the run records it (`input.trust`) and runs as a verified one's.
 - Go and Rust: the dispatcher, the run's authenticator, autonomy and the
   runner; SQLite and D1.
 - The generated server building the dispatcher into its `Deps`, mounting
@@ -2449,6 +2553,6 @@ Left:
   Postgres through Hyperdrive as the notifier's does.
 - A reply interpreter that is a model (D153's left), through an agent run.
 - A party the run acts for narrowing the role's relation paths to its
-  grant's; today the run's scope is the grant's target and the agent's
-  role's paths.
+  grant's; today the run's scope is the grant's target, the party's row
+  and the message's, and the agent's role's paths from them.
 - The schema writer writing `@agents` and `@autonomy` back.

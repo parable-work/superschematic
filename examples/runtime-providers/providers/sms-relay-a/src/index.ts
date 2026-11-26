@@ -2,7 +2,9 @@
 // POST <URL>/v1/messages and a Bearer token, and reads the relay's
 // callbacks, delivery statuses and inbound messages, from the request a
 // @webhook route received, after checking the relay's HMAC-SHA256
-// signature of the body with the same token.
+// signature of the body with the same token. An inbound text's media it
+// fetches from the relay, and STOP and START it reads as an opt-out and an
+// opt-in (D157).
 import {
   defineProvider,
   type ChannelAdapter,
@@ -14,6 +16,10 @@ import {
 export interface SmsRelayAOptions {
   readonly fetch?: typeof fetch;
 }
+
+/** The keywords SMS carriers treat as opting out of, and back into, a sender's messages (D157). */
+const OPT_OUT = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']);
+const OPT_IN = new Set(['START', 'UNSTOP']);
 
 /** The relay's states, as the adapter's DeliveryState. */
 const STATES: Readonly<Record<string, DeliveryState>> = { accepted: 'queued', sent: 'sent', delivered: 'delivered', undelivered: 'failed', failed: 'failed' };
@@ -79,14 +85,34 @@ export function smsRelayA(options: SmsRelayAOptions = {}) {
           }));
         },
         async inbound(request) {
-          const body = (await verified(request)) as { messages?: { id: string; from: string; text: string; at: string; replyTo?: string }[] };
-          return (body.messages ?? []).map(message => ({
-            providerMessageId: message.id,
-            from: message.from,
-            body: message.text,
-            receivedAt: new Date(message.at),
-            ...(message.replyTo ? { inReplyTo: message.replyTo } : {}),
-          }));
+          const body = (await verified(request)) as {
+            messages?: { id: string; from: string; text: string; at: string; replyTo?: string; media?: { url: string; type: string; name?: string }[] }[];
+          };
+          const out = [];
+          for (const message of body.messages ?? []) {
+            // A photo the text came with is the relay's to keep: the
+            // adapter fetches its bytes, with the relay's token, so the
+            // core files them (D157).
+            const attachments = [];
+            for (const [i, media] of (message.media ?? []).entries()) {
+              const response = await call(media.url, { headers: { authorization: `Bearer ${token.reveal()}` } });
+              if (!response.ok) throw new Error(`sms-relay-a: the relay's media answered ${response.status}`);
+              attachments.push({ name: media.name ?? `media-${i + 1}`, mediaType: media.type, bytes: new Uint8Array(await response.arrayBuffer()) });
+            }
+            const keyword = message.text.trim().toUpperCase();
+            out.push({
+              providerMessageId: message.id,
+              from: message.from,
+              body: message.text,
+              receivedAt: new Date(message.at),
+              ...(message.replyTo ? { inReplyTo: message.replyTo } : {}),
+              ...(attachments.length > 0 ? { attachments } : {}),
+              // The opt-out and opt-in keywords of SMS are the adapter's to
+              // read; the core records them and sends nothing after STOP.
+              ...(OPT_OUT.has(keyword) ? { optOut: 'out' as const } : OPT_IN.has(keyword) ? { optOut: 'in' as const } : {}),
+            });
+          }
+          return out;
         },
       };
     },

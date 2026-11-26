@@ -181,7 +181,8 @@ func copyDir(t *testing.T, from, to string) {
 
 // TestAgentOrchestrationExampleLoads: examples/agent-orchestration's schemas
 // load (D158): work-db holds every part of the orchestration, work-api runs
-// the dispatcher on a worker of its request queue beside the notifier's,
+// the dispatcher on a worker of its request queue and of section 7's run
+// requests (D157), beside the notifier's,
 // its operations carry their autonomy, and the API uses the agents feature
 // (a sandbox and a model) and the notifications feature (a channel).
 func TestAgentOrchestrationExampleLoads(t *testing.T) {
@@ -206,6 +207,9 @@ func TestAgentOrchestrationExampleLoads(t *testing.T) {
 	}
 	if w := workers["Dispatch"]; w == nil || w.Queue != "AgentRunRequest" {
 		t.Errorf("Dispatch is %+v", w)
+	}
+	if w := workers["InboundRuns"]; w == nil || w.Queue != "RunRequest" {
+		t.Errorf("InboundRuns is %+v", w)
 	}
 	classes := map[string]string{}
 	for _, set := range api.OperationSets {

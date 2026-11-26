@@ -2,7 +2,7 @@ import { Generic, Identity } from "superscalar";
 import { Nullable, Secret } from "@superschematic/schema";
 import { Authenticated, HttpMethod, autonomy, behaviorWorker, requirePermission, rest, worker } from "@superschematic/api";
 import { envVars, providers } from "@superschematic/schema-config";
-import { AgentRunRequest, NoticeWork, Task } from "@schemas/work-db";
+import { AgentRunRequest, NoticeWork, RunRequest, Task } from "@schemas/work-db";
 
 // The API's config (D159). An agent's run needs a sandbox and a model
 // (D158), so an environment that fills no SANDBOX or no MODEL slot is
@@ -75,6 +75,11 @@ export class Work extends Authenticated {
 // due within the minute wakes it (D92, D151).
 @worker({ queue: AgentRunRequest, concurrency: 4 })
 export abstract class Dispatch {}
+
+// The run requests a customer's inbound message makes (D157), which the
+// dispatcher takes as they are.
+@worker({ queue: RunRequest, concurrency: 4 })
+export abstract class InboundRuns {}
 
 // The notifier (D153), which routes a schedule's run to an agent and an
 // approval's request to those who may give it.

@@ -137,6 +137,10 @@ export interface CalendarSourceDef {
 export interface ChannelIdentitiesDef {
 }
 
+export interface ConversationsDef {
+  part: string;
+}
+
 export interface DNSPlacement {
   platform: string;
   values?: { [key: string]: unknown };
@@ -606,6 +610,10 @@ export interface Origin {
   site: ServiceRef;
 }
 
+export interface PartyDef {
+  title?: string;
+}
+
 export interface ProjectionCollapse {
   by: string[];
   order?: ProjectionOrder[];
@@ -751,6 +759,9 @@ export interface RowReferencesDef {
   tables?: string[];
 }
 
+export interface RunRequestsDef {
+}
+
 export interface ScalarDef {
   caseInsensitive?: boolean;
   comment?: string;
@@ -894,6 +905,7 @@ export interface TypeDef {
   calendarSources?: CalendarSourceDef[];
   channelIdentities?: ChannelIdentitiesDef;
   comment?: string;
+  conversations?: ConversationsDef;
   database?: DatabaseDecl;
   denyUnknownFields?: boolean;
   description?: string;
@@ -917,6 +929,7 @@ export interface TypeDef {
   notifier?: NotifierDef;
   optimistic?: boolean;
   owner?: string;
+  party?: PartyDef;
   projection?: ProjectionDef;
   providerSlots?: { [key: string]: string };
   query?: QueryDef;
@@ -925,6 +938,7 @@ export interface TypeDef {
   rawSql?: RawSQLDef[];
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
   rowReferences?: RowReferencesDef;
+  runRequests?: RunRequestsDef;
   searchable?: SearchableDef;
   seedRoles?: RoleSeed[];
   server?: ServerDecl;

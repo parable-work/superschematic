@@ -9,9 +9,12 @@ import {
   UserRole,
   accessGrants,
   channelIdentities,
+  conversations,
   key,
   notifier,
+  party,
   queue,
+  runRequests,
   searchable,
   unique
 } from "@superschematic/db";
@@ -47,7 +50,9 @@ export abstract class Grant {}
 @queue()
 export abstract class SearchIndexing {}
 
-// A customer outside the user table, who reaches a task through a grant.
+// A customer outside the user table, a party (D157), who reaches a task
+// through a grant and whose messages start an agent run.
+@party<Customer>({ title: "name" })
 export abstract class Customer {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -130,3 +135,16 @@ export abstract class NoticeWork {}
 
 @channelIdentities()
 export abstract class ChannelIdentity {}
+
+// The conversations with parties and their messages (D157), and the queue
+// of run requests an inbound message from a party with a grant puts on,
+// which the agent dispatcher drains (D158).
+@conversations("conversations")
+export abstract class Conversation {}
+
+@conversations("messages")
+export abstract class Message {}
+
+@queue()
+@runRequests()
+export abstract class RunRequest {}

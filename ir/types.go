@@ -294,6 +294,17 @@ type TypeDef struct {
 	// tables (D158); the loader adds the fields of its part the class does
 	// not declare. Nil for every other type. See [AgentsDef].
 	Agents *AgentsDef `json:"agents,omitempty" yaml:"agents,omitempty"`
+	// Party marks a DB table whose rows are parties (D157): principals of
+	// kind party, outside the User table, that act through grants alone.
+	// Nil for every other type. See [PartyDef].
+	Party *PartyDef `json:"party,omitempty" yaml:"party,omitempty"`
+
+	// Conversations marks a DB class that is one of the conversations'
+	// tables (D157), and RunRequests the @queue class that is the queue of
+	// run requests; the loader fills their fields. Nil for every other
+	// type.
+	Conversations *ConversationsDef `json:"conversations,omitempty" yaml:"conversations,omitempty"`
+	RunRequests   *RunRequestsDef   `json:"runRequests,omitempty" yaml:"runRequests,omitempty"`
 
 	// CalendarSources are the @calendarSource declarations of a DB table
 	// (D152): the dates of its rows, or the occurrences of its Recurrence,

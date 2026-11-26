@@ -27,6 +27,8 @@ export type {
   ChannelHealth,
   DeliveryState,
   DeliveryStatus,
+  InboundAttachment,
+  InboundAuthentication,
   InboundMessage,
   OutboundMessage,
   SendResult,

@@ -6,7 +6,9 @@ import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
 import { serveMcp, type McpCallGate, type McpCallOutcome, type McpTool, type McpToolSet } from './mcp.js';
 import { canonicalJson } from './mcpconfirm.js';
+import type { Inbound, SendDecision, SendInput } from './inbound.js';
 import type { Notifier, ReplyAction } from './notify.js';
+import { partyPrincipal } from './parties.js';
 import type { RequestContext } from './operation.js';
 import type { ModelCompletion, ModelMessage, ModelTool, ModelUsage } from './providers/model.js';
 import type { Providers } from './providers/registry.js';
@@ -253,9 +255,17 @@ export interface AgentsOptions {
   /** Makes the follow-up row of an ask nobody answered by its deadline. */
   readonly followUp?: (tx: any, input: { readonly run: Readonly<Record<string, unknown>>; readonly row: RowRef; readonly question: string }) => Promise<RowRef | void>;
   /**
-   * Reads an inbound message (D157) whose request names it by its key, as
-   * section 7's queue does: its text, the run's task, which is marked
-   * untrusted, and its row, which joins the run's scope.
+   * The inbound path and conversations (D157, createInbound): an inbound
+   * message's run reads the message through it, and the message_party tool
+   * sends through it, held to its permission, identity, rate limit and the
+   * approval policy, whose hook is sendApproval.
+   */
+  readonly inbound?: Inbound;
+  /**
+   * Reads an inbound message whose request names it by its key, as the
+   * @runRequests queue does: its text, the run's task, marked untrusted,
+   * and its row, which joins the run's scope. inbound.message and the
+   * conversations' messages table unless set.
    */
   readonly inboundMessage?: (tx: any, input: { readonly party: RowRef; readonly message: string; readonly grant: string }) => Promise<{ readonly text: string; readonly row?: RowRef } | null>;
   /** Returns a row assigned to an agent to its queue when the agent is paused and its run cancelled. */
@@ -318,6 +328,8 @@ export interface Agents {
    * 'deny' when it was denied; a principal of any other kind is 'allow'.
    */
   sendPolicy(principal: Principal | null | undefined, operation: string, params: Readonly<Record<string, unknown>>): Promise<'allow' | 'deny' | 'ask'>;
+  /** createInbound's approve hook (D157): a send as an agent run is send_message, class messageParty, of its party, channel, subject and body. */
+  sendApproval(request: SendInput): Promise<SendDecision>;
   /** Holds a call of operation with args to the run's autonomy policy. */
   gate(principal: Principal, operation: string, args: Readonly<Record<string, unknown>>, options?: { readonly class?: OperationClass; readonly mode?: Autonomy }): Promise<GateOutcome>;
   approve(principal: Principal, approval: string, options?: { readonly tx?: any; readonly via?: string }): Promise<void>;
@@ -447,6 +459,15 @@ export function createAgents(options: AgentsOptions): Agents {
   /** The relation of the controls to the table of every agent's budget, its Budget meter's scope. */
   const totalRelation = controlsDef.relations?.find(r => r.target !== parts.controls);
   const definitionOf = (type: string) => all.find(([, r]) => r.def.name === type)?.[1].def;
+  const messagesTable = (all.find(([, r]) => (r.def as { conversations?: string }).conversations === 'messages')?.[1].def as { name?: string } | undefined)?.name;
+  /** An inbound message by its key: the app's reader, or the inbound path's message row. */
+  const readInbound = async (input: { readonly party: RowRef; readonly message: string; readonly grant: string }): Promise<{ text: string; row?: RowRef; trust?: string } | null> => {
+    if (options.inboundMessage) return orm.transaction((tx: any) => options.inboundMessage!(tx, input));
+    if (!options.inbound) return null;
+    const row = await options.inbound.message(input.message);
+    if (!row) return null;
+    return { text: String(row.body ?? ''), ...(messagesTable ? { row: { table: messagesTable, key: String(row.id) } } : {}), ...(row.trust ? { trust: String(row.trust) } : {}) };
+  };
 
   // ---- redaction and the transcript ----
 
@@ -694,8 +715,10 @@ export function createAgents(options: AgentsOptions): Agents {
       const grant = (await activeGrants(orm, { holder: request.party.key, now: now() })).find(g => String(g.id) === String(request.grant));
       if (!grant) return 'the party holds no such active grant';
       add({ table: String(grant.targetType), key: String(grant.targetId) });
-      if (typeof request.message === 'string' && options.inboundMessage) {
-        const read = await orm.transaction((tx: any) => options.inboundMessage!(tx, { party: request.party!, message: request.message as string, grant: String(request.grant) }));
+      // The party's own row, which a message to it reads, and the message's.
+      add({ table: request.party.table, key: request.party.key });
+      if (typeof request.message === 'string') {
+        const read = await readInbound({ party: request.party, message: request.message, grant: String(request.grant) });
         if (read?.row) add(read.row);
       }
       return out;
@@ -738,9 +761,9 @@ export function createAgents(options: AgentsOptions): Agents {
       const targets = await scopeOf(request);
       if (typeof targets === 'string') return refuseRun(request, definition, 'refused', targets);
       const fields = runFields(request, definition, targets);
-      if (request.trigger === 'inbound' && typeof request.message === 'string' && options.inboundMessage) {
-        const read = await orm.transaction((tx: any) => options.inboundMessage!(tx, { party: request.party!, message: request.message as string, grant: String(request.grant) }));
-        if (read) fields.input = { ...(fields.input as Values), inboundText: read.text };
+      if (request.trigger === 'inbound' && typeof request.message === 'string') {
+        const read = await readInbound({ party: request.party!, message: request.message, grant: String(request.grant) });
+        if (read) fields.input = { ...(fields.input as Values), inboundText: read.text, ...(read.trust ? { trust: read.trust } : {}), grant: String(request.grant) };
       }
       run = await runs().createOne(fields);
       // The run on the timeline of the row that started it (D154): a reference from the run, which the row lists among its backlinks.
@@ -917,7 +940,7 @@ export function createAgents(options: AgentsOptions): Agents {
 
   // ---- the run's principal ----
 
-  const permissionsOf = async (ref: { kind: string; subject: string }): Promise<string[]> => {
+  const permissionsOf = async (ref: { kind: string; subject: string; table?: string; grant?: string }): Promise<string[]> => {
     const db = sys(orm);
     if (!rolesMember) return [];
     const out = new Set<string>();
@@ -928,6 +951,9 @@ export function createAgents(options: AgentsOptions): Agents {
         const role = await repo(db, rolesMember).findOne({ id: { eq: grant.roleId } });
         for (const p of (role?.permissions as string[] | undefined) ?? []) out.add(p);
       }
+    } else if (ref.table) {
+      // A party is what D157's partyPrincipal says it is: its active grants' roles, or the one grant the run is under.
+      return [...(await partyPrincipal(orm, { table: ref.table, key: ref.subject }, { now: now(), ...(ref.grant ? { grant: ref.grant } : {}) })).permissions];
     } else {
       for (const grant of await activeGrants(db, { holder: ref.subject, now: now() })) {
         const role = await repo(db, rolesMember).findOne({ name: { eq: grant.role } });
@@ -967,7 +993,10 @@ export function createAgents(options: AgentsOptions): Agents {
       reaches.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: reachesOf(role?.reaches as string[] | undefined) });
     }
     const actingFor = run.actingForKind && run.actingFor ? { kind: run.actingForKind as 'user' | 'party', subject: String(run.actingFor) } : undefined;
-    const permissions = actingFor ? narrow(base.permissions, await permissionsOf(actingFor)) : [...base.permissions];
+    const input = (run.input as Values | null) ?? {};
+    const permissions = actingFor
+      ? narrow(base.permissions, await permissionsOf({ ...actingFor, ...(run.actingForTable ? { table: String(run.actingForTable) } : {}), ...(typeof input.grant === 'string' ? { grant: input.grant } : {}) }))
+      : [...base.permissions];
     return {
       subject: base.subject,
       kind: 'agent',
@@ -1072,6 +1101,19 @@ export function createAgents(options: AgentsOptions): Agents {
     if (principal.kind === 'agent') throw new AgentsError(403, 'forbidden', 'an agent run may not decide an approval');
     if (approval.state !== 'pending') throw new AgentsError(409, 'not_pending', `the approval is ${approval.state}`);
     await approvals.updateOne(id, { state, decidedBy: principal.subject, decidedVia: decideOptions.via ?? 'api', decidedAt: now() });
+    // A message to a party held for this approval goes, or is refused, with it (D157).
+    if (approval.holds && options.inbound) {
+      if (state === 'approved') {
+        await approvals.updateOne(id, { state: 'used', usedAt: now() });
+        await options.inbound.release(String(approval.holds));
+      } else {
+        await options.inbound.reject(String(approval.holds), 'its approval was denied');
+      }
+      if (approval.run) {
+        const held = await runs(db).findOne({ id: { eq: approval.run } });
+        if (held?.status === 'waiting') await moveRun(db, String(approval.run), 'running');
+      }
+    }
     if (approval.operation === 'agents.overBudget' && approval.run) {
       if (state === 'approved') await enqueue(db, options.requests, { step: 'start', run: String(approval.run) });
       else await enqueue(db, options.requests, { step: 'watch', run: String(approval.run) });
@@ -1178,6 +1220,37 @@ export function createAgents(options: AgentsOptions): Agents {
           const answer = await callSearchTool(orm, principal, args, searchOptions);
           await record('search', args, 'problem' in answer ? 'refused' : 'done', 'problem' in answer ? {} : { reads: 1 });
           return 'problem' in answer ? problem(answer.problem.status, answer.problem.title, answer.problem.detail) : { result: answer.result };
+        },
+      });
+    }
+    if (options.inbound && allowed(definition, 'message_party')) {
+      const inbound = options.inbound;
+      offered.push({
+        tool: {
+          name: 'message_party',
+          description: 'Sends a message to a party on a channel: the party the run acts for unless another is named. It is held for approval as the autonomy policy says.',
+          inputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['channel', 'body'],
+            properties: { channel: { type: 'string' }, body: { type: 'string', minLength: 1 }, subject: { type: 'string' }, party: { type: 'object', properties: { table: { type: 'string' }, key: { type: 'string' } } } },
+          },
+        },
+        call: async args => {
+          const named = args.party as { table?: string; key?: string } | undefined;
+          const party = named?.table && named?.key ? { table: named.table, key: named.key } : run.actingForKind === 'party' && run.actingForTable ? { table: String(run.actingForTable), key: String(run.actingFor) } : undefined;
+          if (!party) return problem(400, 'invalid_argument', 'the run acts for no party; name one');
+          // The send's own approval hook is this run's policy (sendApproval), so the call is not gated twice.
+          const subject = typeof args.subject === 'string' ? { subject: args.subject } : {};
+          const sent = await withCaller(principal, () => inbound.send({ as: principal, party, channel: String(args.channel), body: String(args.body), ...subject, about: targetsOf(run) }));
+          if (sent.outcome === 'awaitingApproval' && sent.message) {
+            const hash = paramsHash('send_message', { party, channel: String(args.channel), ...subject, body: String(args.body) });
+            const approvals = repo(self(orm), parts.approvals);
+            const open = (await approvals.findMany({ run: { eq: run.id }, operation: { eq: 'send_message' }, paramsHash: { eq: hash }, state: { eq: 'pending' } }, { limit: 1, count: false })).rows[0];
+            if (open) await approvals.updateOne(open.id, { holds: sent.message });
+          }
+          await record('message_party', args, sent.outcome, sent.outcome === 'sent' ? { messagesSent: 1 } : {});
+          return sent.outcome === 'refused' || sent.outcome === 'failed' ? problem(sent.outcome === 'refused' ? 403 : 502, sent.outcome, sent.detail ?? sent.outcome) : { result: sent };
         },
       });
     }
@@ -1442,6 +1515,9 @@ export function createAgents(options: AgentsOptions): Agents {
     return gated.status === 428 ? 'ask' : 'deny';
   };
 
+  const sendParams = (request: SendInput): Values => ({ party: { table: request.party.table, key: request.party.key }, channel: request.channel, ...(request.subject ? { subject: request.subject } : {}), body: request.body });
+  const sendApproval: Agents['sendApproval'] = request => sendPolicy(request.as, 'send_message', sendParams(request));
+
   const mcpGate: McpCallGate = async (ctx, tool, args) => {
     const principal = ctx.principal;
     if (!principal || principal.kind !== 'agent' || !principal.claims?.run) return undefined;
@@ -1455,6 +1531,7 @@ export function createAgents(options: AgentsOptions): Agents {
     handle,
     mcpGate,
     sendPolicy,
+    sendApproval,
     workerQueue,
     authenticator,
     principalOf,

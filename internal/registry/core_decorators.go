@@ -200,6 +200,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_agents.go, D158).
 	specs = append(specs, agentDecorators()...)
 
+	// The tables whose rows are parties, the conversations' tables and the
+	// queue of run requests (core_parties.go, D157).
+	specs = append(specs, partyDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

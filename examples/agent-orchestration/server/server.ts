@@ -10,11 +10,11 @@ The imports name the packages `superschematic build-all` writes for the
 example's two services, and the providers of examples/runtime-providers.
 */
 import pg from 'pg';
-import { createAgents, createNotifier, type AgentTool, type Agents, type Notifier } from '@superschematic/http-runtime/postgres';
+import { createAgents, createInbound, createNotifier, type AgentTool, type Agents, type Inbound, type Notifier } from '@superschematic/http-runtime/postgres';
 import { providersFrom, SecretValue, type RuntimeInterface } from '@superschematic/http-runtime/providers';
 import type { Bucket } from '@superschematic/http-runtime';
 import { createOrm } from '@schemas/work-db-types/orm';
-import { agentRunRequestQueue, noticeWorkQueue } from '@schemas/work-db-types/queues';
+import { agentRunRequestQueue, noticeWorkQueue, runRequestQueue } from '@schemas/work-db-types/queues';
 import { localSandbox } from '../../runtime-providers/providers/local-sandbox/src/index.ts';
 import { stubModel } from '../../runtime-providers/providers/stub-model/src/index.ts';
 import { smsRelayA } from '../../runtime-providers/providers/sms-relay-a/src/index.ts';
@@ -53,6 +53,8 @@ const tools: Record<string, AgentTool> = {
 export interface Wiring {
   readonly agents: Agents;
   readonly notifier: Notifier;
+  /** The inbound path (D157): a customer's message is a message row and a run request; a send to a customer asks the agent's policy. */
+  readonly inbound: Inbound;
   /** The agent routes, at <endpoint>/turn, /mcp, /credential and /finish, which only a run's token calls. */
   readonly routes: (request: Request) => Promise<Response | null>;
 }
@@ -81,12 +83,19 @@ export function wire(pool: pg.Pool, config: Record<string, unknown>, endpoint: s
     // A route whose recipients name { agent: "reviewer" } starts a run.
     agents: { request: (tx, input) => agents!.notifierAgents.request(tx, input) },
   });
+  // A send to a party as an agent run is send_message, class
+  // messageParty: it asks unless a policy row says otherwise, and the
+  // approval releases the held message.
+  const inbound = createInbound({ orm, notifier, runs: runRequestQueue, providers, approve: request => agents!.sendApproval(request) });
   agents = createAgents({
     orm,
     requests: agentRunRequestQueue,
     endpoint,
     providers,
     notifier,
+    // An inbound message's run reads it through the inbound path, and the
+    // message_party tool sends through it.
+    inbound,
     tools,
     search: true,
     transcripts,
@@ -107,11 +116,13 @@ export function wire(pool: pg.Pool, config: Record<string, unknown>, endpoint: s
       await tx.task.updateOne(row.key, { state: 'queued', assignee: null });
     },
   });
-  return { agents, notifier, routes: agents.routes() };
+  return { agents, notifier, inbound, routes: agents.routes() };
 }
 
 /**
- * The handlers of the API's workers: Dispatch runs the dispatcher, Notify
+ * The handlers of the API's workers: Dispatch runs the dispatcher,
+ * InboundRuns hands the dispatcher each run request a customer's message
+ * made, as the inbound path wrote it (D157), Notify
  * the notifier, and TaskDeadlines hands each schedule's run to the
  * notifier, whose route names the agent. On Workers each drains at a Cron
  * firing and a message due within the minute wakes it (D92, D151).
@@ -119,6 +130,7 @@ export function wire(pool: pg.Pool, config: Record<string, unknown>, endpoint: s
 export function workers(pool: pg.Pool, wiring: Wiring) {
   return {
     Dispatch: wiring.agents.workerQueue(pool),
+    InboundRuns: wiring.inbound.runWorker(pool, message => wiring.agents.handle(message)),
     Notify: wiring.notifier.workerQueue(pool),
     TaskDeadlines: {
       async schedulesRun(tx: unknown, event: { readonly key: string; readonly kind: string; readonly payload?: unknown }) {

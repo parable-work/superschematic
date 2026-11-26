@@ -179,6 +179,7 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 	errs = append(errs, validateSearchable(td)...)
 	errs = append(errs, validateEvents(td)...)
 	errs = append(errs, validateAgents(td)...)
+	errs = append(errs, validateParties(td)...)
 	return errs
 }
 

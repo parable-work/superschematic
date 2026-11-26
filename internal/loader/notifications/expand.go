@@ -141,6 +141,7 @@ func identityFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		withDefault(required(ir.ChannelIdentityCodeAttemptsField, int64Scalar, "How many wrong answers the code has had."), &zero),
 		withDefault(required(ir.ChannelIdentityCreatedAtField, dateTimeScalar, "When the identity was added."), now()),
 		optional(ir.ChannelIdentityRevokedAtField, dateTimeScalar, "When it stopped resolving to its principal."),
+		optional(ir.ChannelIdentityOptedOutAtField, dateTimeScalar, "When the address opted out, by a keyword its adapter read (D157): nothing is sent to it after, until it opts in again."),
 	}, []ir.IndexDef{
 		{Keys: []string{ir.ChannelIdentityKindField, ir.ChannelIdentityAddressField}, Name: "address"},
 		{Keys: []string{ir.ChannelIdentityPrincipalField}, Name: "principal"},

@@ -268,6 +268,7 @@ func approvalFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		optional("decidedAt", dateTimeScalar, ""),
 		optional("usedAt", dateTimeScalar, "When the call it approved ran."),
 		optional("expiresAt", dateTimeScalar, "When a pending or approved one stops counting."),
+		optional("holds", "string", "What the approval releases once approved, or refuses once denied: a message to a party held awaiting it (D157), by its row's key."),
 	}, []ir.IndexDef{
 		{Keys: []string{"run", "operation"}, Name: "run"},
 		{Keys: []string{"state"}, Name: "state"},
