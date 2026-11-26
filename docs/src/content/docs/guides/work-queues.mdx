@@ -573,6 +573,11 @@ definition's link stamps the steps in that create. To settle the parent
 from its steps, give it `Reactions` with `allTerminal` and `anyTerminal`
 rules ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 
+A DB table does not implement Blueprint, since the behaviors' core does
+not run it yet. D149 keeps it a behavior, to be ported onto the core, so
+`examples/engine-jobs` runs on the engine and not on
+[development mode](/superschematic/guides/development-mode/).
+
 ## Budget
 
 Reserve-then-settle budgets in units you name: each meter counts what the

@@ -28,7 +28,7 @@ route too, with a credential of its own beside the end user's
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
 | `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
 | `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set or a set with a service clause |
-| `@auth`, `@requirePermission([...])` or `@publicRoute` on a `@behaviorOperations` class | as on a method, for every route the class serves; the behaviors' core then checks the permissions the behavior's config names against the caller's ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations)) |
+| `@auth`, `@requirePermission([...])` or `@publicRoute` on a `@behaviorOperations` or `@graphOperations` class | as on a method, for every route the class serves; on a `@behaviorOperations` class the behaviors' core then checks the permissions the behavior's config names against the caller's ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations), [A version graph's operations](/superschematic/guides/api-routes/#who-may-call)) |
 | `@requireService` or `@allowService` on the set or the method | a listed calling service, in place of or beside the end user ([Service callers](#service-callers)) |
 | none of these | nothing: anyone may call it |
 
@@ -100,9 +100,11 @@ sessions its `login` starts, since both read `shop-db`:
 
 <Snippet file="schemas/services/shop-api/src/account.schema.ts" />
 
-The auth provider is the naming file's `auth_provider`, `session` by
-default, which wires the identity runtime in. An extension can register
-another provider, as `examples/acme-schematic` does for keys of its own; see
+The Go server's auth provider is the naming file's `auth_provider`,
+`session` by default, which wires the identity runtime in. An extension
+can register another provider, which brings its own middleware, route
+steps and `Config` fields; `examples/acme-schematic` registers one for
+its own keys. See
 [Write an extension](/superschematic/extending/write-an-extension/#an-auth-provider).
 
 A program that calls as a user, an agent over MCP among them, takes an
@@ -167,7 +169,9 @@ the request context, with the bearer token already read into
 
 The router applies the same 401 and 403 rules and the same nesting.
 `buildRouter`'s `permissionMatcher` option replaces the matching rule for a
-project with its own permission vocabulary.
+project with its own permission vocabulary. A principal may also say its
+`kind`, a user when it says none, and whom it acts for, `actingFor`
+([Which rows a caller reaches](#which-rows-a-caller-reaches)).
 
 ## Say who the caller is: Rust
 
@@ -193,6 +197,38 @@ request's head and returns a `Principal` or `None`. See
 who holds whatever permissions a test grants:
 
 <Snippet file="go/orders_test.go" symbol={['TestPublicAndAuthRoutes', 'TestPermissions']} />
+
+## Which rows a caller reaches
+
+A permission opens a route. Which rows the route then reaches is said
+apart from it:
+
+- A row rule keeps a generated operation to the rows whose members, or a
+  path through their relations, name the caller
+  ([Row rules](/superschematic/guides/api-routes/#row-rules)).
+- `@audience` keeps every read and write of a table in an operation to
+  the rows its caller may see, a hand-written implementation's among
+  them. A grant lets a caller who is no user reach a target row and the
+  rows its role reaches from it. `@decrypted({ permission })` makes
+  revealing an encrypted field a permission of its own, and the access
+  log records each reveal, an agent run's reads, and each call with an
+  API key or a grant
+  ([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+
+Every caller is one principal of one kind (D156): a `user`, signed in
+with a session or an API key; a `party`, a row of an app's own table that
+acts through grants ([Outside parties](/superschematic/guides/parties/));
+an `agent` run, whose token is a grant and which acts for whom it serves
+([Agent runs](/superschematic/guides/agent-runs/)); or an `extension`, a
+runtime provider calling as itself
+([Runtime providers](/superschematic/guides/runtime-providers/)).
+Permissions are checked the same way for each kind.
+
+The kinds, audiences, grants, reveal, the access log and a row rule
+through relations are built in the TypeScript server and its
+repositories. The Go and Rust servers and repositories have none of them
+yet; each holds a row rule to the row's own members
+([What access does not do yet](/superschematic/guides/api-routes/#what-access-does-not-do-yet)).
 
 ## Send credentials from an SDK
 

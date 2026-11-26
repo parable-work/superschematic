@@ -26,8 +26,8 @@ depends on none of them.
 | the same in the Rust HTTP runtime, and a provider crate whose `Cargo.toml` declares it ([In Rust](#in-rust)) | |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
 | `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated TypeScript server that links the packages and builds `Providers` in its `Deps`; a Rust server does |
-| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | attachments, which registers as it is built |
-| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
+| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
+| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | provider packages in `build-all`'s dependency graph and its build cache key |
 
 D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/runtime-providers` is the

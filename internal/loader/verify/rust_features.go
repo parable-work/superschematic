@@ -15,9 +15,10 @@ import (
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
 // reveal and the access log. An audience on SQLite is refused for every
-// language (checkAccess). So are references and attachments (D154, D185),
-// on Postgres, and the runtime providers of an API's @providers slots
-// (D159, D185), each a provider crate the server links.
+// language but TypeScript (refuseSQLiteReaders, D182). References and
+// attachments (D154, D185) are served on Postgres, and the runtime
+// providers of an API's @providers slots (D159, D185), each a provider
+// crate the server links.
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
 // for a listed provider with no Rust crate, an @autonomy operation, and

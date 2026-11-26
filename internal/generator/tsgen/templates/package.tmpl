@@ -57,7 +57,11 @@
     "./orm": {
       "types": "./orm.ts",
       "import": "./orm.ts"
-    }{{end}}{{if .HasEnvConfig}},
+    }{{if .ORM.SQLite}},
+    "./orm/sqlite": {
+      "types": "./orm-sqlite.ts",
+      "import": "./orm-sqlite.ts"
+    }{{end}}{{end}}{{if .HasEnvConfig}},
     "./config": {
       "types": "./config.ts",
       "import": "./config.ts"
