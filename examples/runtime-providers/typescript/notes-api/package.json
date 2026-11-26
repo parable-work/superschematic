@@ -1,0 +1,22 @@
+{
+  "name": "@notes/notes-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the notes-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@notes/notes-api-api": "workspace:*",
+    "@notes/notes-api-types": "workspace:*",
+    "@notes/notes-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}
