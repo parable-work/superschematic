@@ -80,10 +80,19 @@ type Deps struct {
 	{{ .Field }} *{{ .Alias }}.{{ .Client }}
 {{ end }}
 {{- range .Deps.Buckets }}
+{{- if .ContentAddressed }}
+	// {{ .Field }} is {{ .Service }}, a bucket the API lists that names each
+	// object by its content (D142): Put writes a body of at most
+	// {{ .MaxBytes }} bytes under the SHA-256 of its bytes if no object has
+	// that name, and Has, Missing, Get and SignedURL read by hash. Raw is
+	// the plain bucket.
+	{{ .Field }} *bucket.ContentBucket
+{{- else }}
 	// {{ .Field }} is {{ .Service }}, a bucket the API lists: private object
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	{{ .Field }} bucket.Bucket
+{{- end }}
 {{ end }}
 {{- range .Deps.MemoryStores }}
 	// {{ .Field }} is {{ .Service }}, a memory store the API lists, which every

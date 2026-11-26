@@ -1212,12 +1212,13 @@ func TestBucketsReachTheEmulator(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	test := exec.Command("go", "test", "-v", "-count=1", "-run", "^TestBucketOnTheEmulator$", ".")
+	test := exec.Command("go", "test", "-v", "-count=1", "-run", "^(TestBucketOnTheEmulator|TestPutIfAbsentFindsATakenObjectPastAChunk)$", ".")
 	test.Dir = dir
 	// PWD keeps go in dir as the build saw it, through a symlinked
 	// temporary directory, which the replaces' relative paths count from.
 	test.Env = append(os.Environ(), append(bucketVariables(t, "SHOP_MEDIA_BUCKET", endpoint), "PWD="+dir)...)
-	if out, err := test.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestBucketOnTheEmulator") {
+	if out, err := test.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestBucketOnTheEmulator") ||
+		!strings.Contains(string(out), "--- PASS: TestPutIfAbsentFindsATakenObjectPastAChunk") {
 		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
 	}
 }

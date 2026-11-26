@@ -64,6 +64,7 @@ async function main(): Promise<void> {
   // Trace export, on when the environment names an OTLP endpoint (D67).
   const telemetry = startTelemetry({ service: 'shop-storefront', stack: 'shop-stack', kind: 'server', logger });
   const port = listenPort();
+  const shopStorefrontConfig = configure('shop-storefront', () => shopStorefrontApi.loadEnvConfig());
 
   const app = new Hono();
   // With trace export on, each request but the probes is a server span.
@@ -77,11 +78,12 @@ async function main(): Promise<void> {
 
   // shop-storefront: its implementation, built from its Deps, and its routes.
   const shopStorefrontDeps: shopStorefrontApi.Deps = {
+    config: shopStorefrontConfig,
     logger: logger.child({ api: 'shop-storefront' }),
   };
   const shopStorefrontImplementations = await construct('shop-storefront', 'implementation', () => shopStorefrontImpl.create(shopStorefrontDeps));
   const shopStorefrontAuthenticate = await construct('shop-storefront', 'authenticator', () => shopStorefrontImpl.authenticate(shopStorefrontDeps));
-  app.route('/', shopStorefrontApi.buildRouter(shopStorefrontImplementations, { authenticate: shopStorefrontAuthenticate }));
+  app.route('/', shopStorefrontApi.buildRouter(shopStorefrontImplementations, { authenticate: shopStorefrontAuthenticate, minClientVersions: shopStorefrontConfig.MIN_CLIENT_VERSIONS }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 

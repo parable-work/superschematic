@@ -338,6 +338,13 @@ type TypeScriptServer struct {
 	// WebAssembly module and emits its dist/.
 	Rules bool
 
+	// VersionGraphPool is the name the entrypoint imports the version-graph
+	// package's pgPool as (Naming.VersionGraphNpmPackage's ./postgres
+	// entry), which each graph's facade is built over, when an API the
+	// server serves has a @graphOperations set (D138); empty otherwise. The
+	// package then depends on the version-graph package.
+	VersionGraphPool string
+
 	// Docker is the Dockerfile's plan, nil when none is written, and
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
@@ -529,6 +536,12 @@ type TypeScriptAPI struct {
 	// a deriver's API, which mount no routes.
 	Behaviors bool
 
+	// Graphs are the version graphs whose operations the API serves
+	// (D138): main.ts hands the router each one's facade, built over
+	// Database's pool, as RouterOptions.graphs. None for a job's, a
+	// worker's and a deriver's API.
+	Graphs []TypeScriptGraphUse
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -539,6 +552,18 @@ type TypeScriptAPI struct {
 	// @rateLimit routes count in, nil for none (D75).
 	MemoryStores   []TypeScriptMemoryStoreUse
 	RateLimitStore *TypeScriptMemoryStore
+
+	// MinClientVersions is the expression of its config that holds the
+	// oldest version of each client it serves, which its router options
+	// carry (D143); empty for an API whose config does not say
+	// clientVersions.
+	MinClientVersions string
+
+	// IdempotencyStore is the expression that builds the store of its
+	// @idempotent operations' keys over its database, on the table the API
+	// package names, which its router options carry (D140); empty for an
+	// API with none.
+	IdempotencyStore string
 
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
@@ -570,6 +595,11 @@ type TypeScriptCall struct {
 type TypeScriptBucketUse struct {
 	Field  string
 	Bucket *TypeScriptBucket
+
+	// ContentAddressed is true for a bucket Deps holds as a content
+	// bucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // TypeScriptBucket is a bucket main.ts opens once, for every API that
@@ -642,6 +672,11 @@ type TypeScriptDatabase struct {
 	ORM        string
 	ORMModule  string
 	ORMPackage string
+
+	// Graphs are the facades of the database's version graphs the
+	// entrypoint imports (D138), from the ./versiongraph entry of its
+	// TypeScript types package, each once.
+	Graphs []*TypeScriptGraph
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -741,7 +776,7 @@ var tsReserved = []string{
 	"connectPostgres", "ping", "Pool", "Database", "Service", "DEFAULT_PORT", "SHUTDOWN_TIMEOUT_MS",
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
-	"server", "stopping", "shutdown", "port", "process", "openBucket",
+	"server", "stopping", "shutdown", "port", "process", "openBucket", "contentBucket",
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
@@ -951,6 +986,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
+		if a.Config != nil && a.Config.ClientVersions && api.Config != "" && !background {
+			// A job or a worker serves no request, so it turns no client
+			// away (D143).
+			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
+		}
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
 			// ask with the secret the API's config holds (D93).
@@ -996,6 +1036,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 			api.Database = d
+			if o.IdempotencyTable != nil && !background {
+				// A job or a worker serves no request, so it keeps no key.
+				store := "postgresIdempotencyStore"
+				if d.SQLite {
+					store = "sqliteIdempotencyStore"
+				}
+				api.IdempotencyStore = fmt.Sprintf("%s(%s, %s.idempotencyTable)", store, d.Var, api.Module)
+			}
 			if o.DepsORM() && !d.SQLite {
 				api.ORM = true
 				// orm.ts of a database whose fields are behaviors imports
@@ -1010,6 +1058,18 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMEntry
 					d.ORMPackage = o.Deps.DatabaseTypesPackage
 				}
+			}
+		}
+		if o.HasGraphs() && !background && api.Database != nil {
+			// The router runs a version graph's operations (D138) through
+			// the graph's facade, which the entrypoint builds over the
+			// database's pool.
+			if s.VersionGraphPool == "" {
+				s.VersionGraphPool = taken.take("versionGraphPool")
+			}
+			for _, set := range o.GraphSets {
+				graph := api.Database.graph(set.Facade, o.GraphFacadeModule(), taken)
+				api.Graphs = append(api.Graphs, TypeScriptGraphUse{Member: set.Member, Graph: graph, Pool: s.VersionGraphPool})
 			}
 		}
 		if o.RouterNeedsORM() && !background {
@@ -1107,7 +1167,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			h := memoryStores[m.Service]
@@ -1236,10 +1296,27 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its MCP endpoint signs confirmations with the secret (D93).
 		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
 	}
+	if a.MinClientVersions != "" {
+		// Its routes turn away a client under its minimum (D143).
+		out = append(out, "minClientVersions: "+a.MinClientVersions)
+	}
+	if a.IdempotencyStore != "" {
+		// Its @idempotent routes keep their keys in its database (D140).
+		out = append(out, "idempotencyStore: "+a.IdempotencyStore)
+	}
 	if a.Behaviors {
 		// Its behavior operations (D103) and its table operations (D106)
 		// run through the repositories Deps holds.
 		out = append(out, "orm: "+a.Deps+".orm")
+	}
+	if len(a.Graphs) > 0 {
+		// Its graph operations (D138) run through each graph's facade,
+		// built over the database's pool.
+		members := make([]string, 0, len(a.Graphs))
+		for _, use := range a.Graphs {
+			members = append(members, fmt.Sprintf("%s: new %s(%s(%s))", use.Member, use.Graph.Class, use.Pool, a.Database.Var))
+		}
+		out = append(out, "graphs: { "+strings.Join(members, ", ")+" }")
 	}
 	return out
 }
@@ -1307,6 +1384,18 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.RateLimitStore != nil }) {
 		out = append(out, "memoryStoreRateLimitStore")
+	}
+	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool {
+		return slices.ContainsFunc(a.Buckets, func(b TypeScriptBucketUse) bool { return b.ContentAddressed })
+	}) {
+		// Deps holds a content bucket over the bucket main.ts opens (D142).
+		out = append(out, "contentBucket")
+	}
+	for _, store := range []string{"postgresIdempotencyStore", "sqliteIdempotencyStore"} {
+		// The store of an API's idempotency keys, over its database (D140).
+		if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return strings.HasPrefix(a.IdempotencyStore, store+"(") }) {
+			out = append(out, store)
+		}
 	}
 	return out
 }
@@ -1509,6 +1598,11 @@ func (s *TypeScriptServer) planPackage() {
 		// Which run a behavior through the behaviors' core (D103).
 		deps[s.Naming.RulesNpmPackage] = "*"
 	}
+	if s.VersionGraphPool != "" {
+		// The entrypoint builds a graph's facade over the version-graph
+		// package's Postgres client (D138).
+		deps[s.Naming.VersionGraphNpmPackage] = "*"
+	}
 	for _, e := range s.Engines {
 		// main.ts opens the engine through the engine's ./server entry, with
 		// the engine document of the database's types (D58).
@@ -1558,6 +1652,12 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	if in.Paths.HTTPRuntimeTypeScript == "" {
 		return nil, "the naming file's [paths] http_runtime_typescript is unset, and the image builds the HTTP runtime's package from a checkout, since none is published yet; set it to a superschematic checkout's runtime/http/typescript", nil
+	}
+	if s.servesGraphs() {
+		// A graph's facade loads the version-graph core's WebAssembly module,
+		// which no published package ships and no stage of the image
+		// builds yet.
+		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships and the generated image does not build yet; run it from the checkout, or build its image from a Dockerfile of the project's own", s.Kind, s.Naming.VersionGraphNpmPackage), nil
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {

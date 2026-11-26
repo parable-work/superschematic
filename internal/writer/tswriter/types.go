@@ -141,7 +141,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
-		def.User != nil || def.UserRole != nil || def.Mergeable ||
+		def.User != nil || def.UserRole != nil || def.IdempotencyKeys != nil || def.Mergeable ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
 		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
@@ -280,7 +280,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
 	if def.VersionGraph != nil {
-		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), e.versionGraphArgs(def.VersionGraph))
 	}
 	if def.GraphMember != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("graphMember"), e.graphMemberArgs(def.GraphMember))
@@ -500,8 +500,9 @@ func versionedConfigArgs(cfg *ir.VersionedConfig) string {
 }
 
 // versionGraphArgs renders the @versionGraph config, or nothing for the
-// zero config.
-func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
+// zero config. enqueueOnCommit and enqueueOnRelease name classes as values,
+// imported when a sibling file declares them.
+func (e *emitter) versionGraphArgs(cfg *ir.VersionGraphConfig) string {
 	var parts []string
 	if cfg.Name != "" {
 		parts = append(parts, "name: "+quote(cfg.Name))
@@ -511,6 +512,14 @@ func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
 	}
 	if cfg.SnapshotEvery != nil {
 		parts = append(parts, fmt.Sprintf("snapshotEvery: %d", *cfg.SnapshotEvery))
+	}
+	if cfg.EnqueueOnCommit != "" {
+		e.recordHeritageImports(cfg.EnqueueOnCommit)
+		parts = append(parts, "enqueueOnCommit: "+cfg.EnqueueOnCommit)
+	}
+	if cfg.EnqueueOnRelease != "" {
+		e.recordHeritageImports(cfg.EnqueueOnRelease)
+		parts = append(parts, "enqueueOnRelease: "+cfg.EnqueueOnRelease)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -532,6 +541,9 @@ func (e *emitter) graphMemberArgs(cfg *ir.GraphMemberConfig) string {
 	}
 	if cfg.Singleton {
 		parts = append(parts, "singleton: true")
+	}
+	if cfg.Released {
+		parts = append(parts, "released: true")
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
@@ -611,7 +623,7 @@ func (e *emitter) implementedBehaviors(def *ir.TypeDef) []string {
 
 // identityTraits renders the core traits a table carries: the user
 // model's (D50), User<{ login: "email"; name: "displayName" }> and
-// UserRole, and Mergeable (D147).
+// UserRole, IdempotencyKeys (D140), and Mergeable (D147).
 func (e *emitter) identityTraits(def *ir.TypeDef) []string {
 	var out []string
 	if user := def.User; user != nil {
@@ -623,6 +635,9 @@ func (e *emitter) identityTraits(def *ir.TypeDef) []string {
 	}
 	if def.UserRole != nil {
 		out = append(out, e.useCoreTrait("UserRole"))
+	}
+	if def.IdempotencyKeys != nil {
+		out = append(out, e.useCoreTrait(ir.IdempotencyKeysTraitName))
 	}
 	if def.Mergeable {
 		out = append(out, e.useCoreTrait("Mergeable"))

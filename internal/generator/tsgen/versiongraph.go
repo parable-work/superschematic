@@ -24,6 +24,10 @@ type VersionGraphInfo struct {
 	SnapshotEvery int64
 
 	Kinds []VersionGraphKindInfo
+
+	// Ordered is the type of the members arrange takes, those whose order
+	// is a string key (D137): a union of their names as literals, or never.
+	Ordered string
 }
 
 // VersionGraphKindInfo is one member kind of a graph: its descriptor name,
@@ -71,12 +75,20 @@ func versionGraphs(schema *ir.Schema) ([]VersionGraphInfo, error) {
 			SchemaEpoch:   g.Root.VersionGraph.SchemaEpoch,
 			SnapshotEvery: g.Root.VersionGraph.SnapshotInterval(),
 		}
+		var ordered []string
 		for i, member := range g.Members {
 			kind, err := versionGraphKind(schema, member, g.Descriptor.Kinds[i])
 			if err != nil {
 				return nil, fmt.Errorf("tsgen: version graph %s: %w", g.Name, err)
 			}
 			vg.Kinds = append(vg.Kinds, kind)
+			if g.Descriptor.Kinds[i].OrderIsKey() {
+				ordered = append(ordered, "'"+kind.Member+"'")
+			}
+		}
+		vg.Ordered = "never"
+		if len(ordered) > 0 {
+			vg.Ordered = strings.Join(ordered, " | ")
 		}
 		graphs = append(graphs, vg)
 	}

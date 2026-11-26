@@ -95,6 +95,9 @@ type step struct {
 	SnapshotEvery int                       `json:"snapshotEvery"`
 	Sweep         *sweepOptions             `json:"sweep"`
 	Kind          string                    `json:"kind"`
+	Parent        string                    `json:"parent"`
+	Keys          []string                  `json:"keys"`
+	Key           string                    `json:"key"`
 	Statement     statements                `json:"statement"`
 	Args          []sqlArg                  `json:"args"`
 	Expect        expect                    `json:"expect"`
@@ -204,11 +207,19 @@ type expect struct {
 	Conflicts     *[]partialRow           `json:"conflicts"`
 	Changes       *[]partialRow           `json:"changes"`
 	Commits       *[]string               `json:"commits"`
+	EntityHistory *[]entityChangeExpect   `json:"entityHistory"`
 	Rows          *[]partialRow           `json:"rows"`
 	Patches       *[]partialRow           `json:"patches"`
 	Snapshot      *[]partialRow           `json:"snapshot"`
 	Release       *releaseExpect          `json:"release"`
 	Report        partialRow              `json:"report"`
+}
+
+// entityChangeExpect is one entry of an entityHistory step's result: the
+// commit, by name, and what it did to the entity.
+type entityChangeExpect struct {
+	Commit    string `json:"commit"`
+	Operation string `json:"operation"`
 }
 
 type releaseExpect struct {
@@ -606,20 +617,22 @@ func (r *runner) run(t *testing.T, st step) {
 		actor = *st.Actor
 	}
 	var (
-		err         error
-		ref         *storage.Ref
-		commit      *storage.Commit
-		tree        *engine.TreeResult
-		saved       engine.Tree
-		conflicts   []versiongraph.Conflict
-		changes     []versiongraph.Change
-		history     []storage.Commit
-		rows        []json.RawMessage
-		patches     []storage.Patch
-		entries     []storage.SnapshotEntry
-		release     *storage.Release
-		report      *engine.SweepReport
-		commitAware bool
+		err           error
+		ref           *storage.Ref
+		commit        *storage.Commit
+		tree          *engine.TreeResult
+		saved         engine.Tree
+		conflicts     []versiongraph.Conflict
+		changes       []versiongraph.Change
+		history       []storage.Commit
+		entityHistory []engine.EntityChange
+		entityAware   bool
+		rows          []json.RawMessage
+		patches       []storage.Patch
+		entries       []storage.SnapshotEntry
+		release       *storage.Release
+		report        *engine.SweepReport
+		commitAware   bool
 	)
 	switch st.Op {
 	case "createPrimary", "branch":
@@ -642,6 +655,11 @@ func (r *runner) run(t *testing.T, st step) {
 		}
 		var result *engine.SaveResult
 		if result, err = eng.Save(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref), edits); err == nil {
+			ref, saved = &result.Ref, result.Saved
+		}
+	case "arrange":
+		var result *engine.SaveResult
+		if result, err = eng.Arrange(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref), st.Kind, st.Parent, st.Keys); err == nil {
 			ref, saved = &result.Ref, result.Saved
 		}
 	case "commit", "seal", "revert":
@@ -716,6 +734,9 @@ func (r *runner) run(t *testing.T, st step) {
 		changes, err = eng.Diff(ctx, r.commitID(t, st.From), r.commitID(t, st.To))
 	case "history":
 		history, err = eng.History(ctx, r.refID(t, st.Ref))
+	case "entityHistory":
+		entityHistory, err = eng.EntityHistory(ctx, st.Root, st.Kind, st.Key)
+		entityAware = true
 	case "discard":
 		err = eng.Discard(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref))
 	case "rows":
@@ -810,6 +831,18 @@ func (r *runner) run(t *testing.T, st step) {
 		}
 		if !reflect.DeepEqual(got, *x.Commits) && !(len(got) == 0 && len(*x.Commits) == 0) {
 			r.fatalf(t, "history %q, want %q", got, *x.Commits)
+		}
+	}
+	if x.EntityHistory != nil {
+		if !entityAware {
+			r.fatalf(t, "expects an entity's history, and %s returns none", st.Op)
+		}
+		got := []entityChangeExpect{}
+		for _, change := range entityHistory {
+			got = append(got, entityChangeExpect{Commit: r.commitName(change.Commit.ID), Operation: change.Operation})
+		}
+		if !reflect.DeepEqual(got, append([]entityChangeExpect{}, *x.EntityHistory...)) {
+			r.fatalf(t, "entity history %+v, want %+v", got, *x.EntityHistory)
 		}
 	}
 	if x.Rows != nil {

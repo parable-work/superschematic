@@ -833,6 +833,13 @@ var planCases = []planCase{
 	{name: "graph-content-add", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		addField(s, "Cover", &ir.FieldDef{Name: "caption", TypeRef: stringRef})
 	}},
+	// The order key moves to another string field: its column, and its
+	// copy in part_released, take COLLATE "C" in place, and the former
+	// key's lose it (D137).
+	{name: "graph-order-key-collation", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
+		typeNamed(s, "Part").GraphMember.Order = "heading"
+		typeNamed(s, "Recipe").VersionGraph.SchemaEpoch = 2
+	}},
 	// A field leaves the content and no column changes: a step with no SQL.
 	{name: "graph-content-exclude", noSQLite: "the version graph fixture is @versioned", base: filepath.Join(sqlgenFixtures, "fixture-version-graph-db"), after: func(s *ir.Schema) {
 		fieldNamed(s, "Note", "body").ConflictUnit = ir.ConflictUnitExcluded

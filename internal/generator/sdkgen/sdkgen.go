@@ -138,6 +138,9 @@ type EndpointInfo struct {
 	// every other: the method resolves to a DownloadedFile, the bytes and
 	// the filename the server offered.
 	FileDownload *ir.FileDownloadDef
+	// Idempotent marks an @idempotent operation (D140): the method sends
+	// an Idempotency-Key, its options' idempotencyKey or a UUID it makes.
+	Idempotent bool
 
 	// JSON parse configuration
 	HasOutputParser bool // True if the output type has a parseFromJSON function
@@ -632,6 +635,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
 		FileDownload:     ep.FileDownload,
+		Idempotent:       ep.Idempotent != nil,
 		HasOutputParser:  hasOutputParser,
 
 		OutputIsArrayOfArrays: ep.OutputIsArrayOfArrays,

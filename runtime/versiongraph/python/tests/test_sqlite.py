@@ -4,8 +4,9 @@ name and a discarded ref's name free again, the history it writes, STRICT
 tables and foreign keys, two graphs in one file, the name function, the
 clock, its ids, the write lock a second connection waits on, savepoints and
 the caller's transaction, a number's digits end to end, the canonical
-vectors as a round trip, and the sqlite3 binding: what it refuses and what
-it returns. The Python counterpart of the TypeScript package's
+vectors as a round trip, the released table and what write_released writes
+into it, a root's primary lines and an entity's patches, and the sqlite3
+binding: what it refuses and what it returns. The Python counterpart of the TypeScript package's
 test/sqlite-cases.ts. None needs a database server."""
 
 import json
@@ -34,22 +35,38 @@ from superschematic_versiongraph.errors import NameTakenError, NotFoundError, Ve
 from superschematic_versiongraph.exactjson import dumps, loads
 from superschematic_versiongraph.sqlite import (
     MIN_SQLITE_VERSION,
+    RELEASED_TABLE,
     SQLITE_TABLES,
     Client,
     SqliteAdapter,
     default_table_name,
     is_unique_violation,
     micros_to_date_time,
+    released_layout,
     sqlite_client,
     sqlite_layout,
 )
-from superschematic_versiongraph.storage import NewCommit, NewRef, Patch, Pin, RefUpdate, ReleaseWrite, RowWrite, Tx
+from superschematic_versiongraph.storage import (
+    NewCommit,
+    NewRef,
+    Patch,
+    Pin,
+    RefUpdate,
+    ReleasedWrite,
+    ReleaseWrite,
+    RowWrite,
+    Tx,
+)
 
 GRAPH = "recipe"
 COOK = "Cook"
 BREAD = "Bread"
 DAY = 86_400_000_000
 MAX_SAFE = (1 << 53) - 1
+
+# The layout's tables and the released table, which the fixture's graph has
+# since its part kind keeps its released rows.
+FIXTURE_TABLES = SQLITE_TABLES + (RELEASED_TABLE,)
 
 # Each kind's columns' value classes, as the fixture declares them.
 COLUMNS: Dict[str, Dict[str, str]] = {k["kind"]: k["columns"] for k in json.loads(DESCRIPTOR)["kinds"]}
@@ -615,7 +632,7 @@ def test_every_table_is_strict(setup: Callable[..., Setup]) -> None:
             "VALUES ('A', 'recipe', 'Bread', 'main', 'today', 'Cook', 0, 'Cook', 1)"
         )
     assert_sqlite_error(refused.value, SQLITE_CONSTRAINT_DATATYPE)
-    for table in SQLITE_TABLES:
+    for table in FIXTURE_TABLES:
         [sql] = s.connection.execute(
             "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?1", [default_table_name(table)]
         ).fetchone()
@@ -692,6 +709,12 @@ def test_foreign_keys_check_each_of_the_layouts_edges(setup: Callable[..., Setup
             ref.id,
             lambda t: 'INSERT INTO "graph_member" (id, graph, kind, entity_key, ref_id, root_id, tombstone, _version, '
             f"data) VALUES ('{fresh()}', 'recipe', 'step', '{fresh()}', '{t}', 'Bread', 0, 1, '{{}}')",
+        ),
+        (
+            "a released row's commit",
+            commit,
+            lambda t: 'INSERT INTO "graph_released" (graph, kind, root_id, entity_key, commit_id, sequence, data) '
+            f"VALUES ('recipe', 'part', 'Bread', '{fresh()}', '{t}', 1, '{{}}')",
         ),
     ]
     for edge, target, insert in edges:
@@ -878,7 +901,7 @@ def test_the_name_function_names_every_table_and_index(setup: Callable[..., Setu
     objects = s.connection.execute(
         "SELECT type, name, tbl_name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_autoindex_%' ORDER BY name"
     ).fetchall()
-    assert [o[1] for o in objects if o[0] == "table"] == sorted(table_name(t) for t in SQLITE_TABLES)
+    assert [o[1] for o in objects if o[0] == "table"] == sorted(table_name(t) for t in FIXTURE_TABLES)
     for kind, name, table in objects:
         assert re.fullmatch(r"vg_[a-z_]+", name), f"{kind} {name} is named by the function"
         assert table.startswith("vg_")
@@ -889,10 +912,402 @@ def test_the_name_function_names_every_table_and_index(setup: Callable[..., Setu
     assert count(s.connection, 'SELECT count(*) FROM "vg_member"') == 1
     # The layout's statements name each object with the function, and the
     # default's start with graph_.
-    for statement in sqlite_layout():
+    for statement in sqlite_layout() + released_layout():
         assert re.match(r'CREATE (UNIQUE )?(TABLE|INDEX) IF NOT EXISTS "graph_[a-z_]+" ', statement), statement
     with pytest.raises(TypeError, match="the table name function named"):
         sqlite_layout(lambda name: "")
+    with pytest.raises(TypeError, match="the table name function named"):
+        released_layout(lambda name: "")
+
+
+def ticking(start: int = 1_800_000_000_000_000) -> Callable[[], int]:
+    """A clock that moves a second at each read, so each transaction has a
+    later time than the one before."""
+    now = [start]
+
+    def clock() -> int:
+        now[0] += 1_000_000
+        return now[0]
+
+    return clock
+
+
+def test_primary_refs_are_a_roots_live_lines_in_the_order_they_were_created(setup: Callable[..., Setup]) -> None:
+    """primary_refs reads a root's refs with no parent that are not
+    discarded, by the time each was created and then by id. A change set,
+    a discarded line, another root's line and another graph's are left
+    out."""
+    s = setup(clock=ticking())
+
+    def line(name: str, root: str = BREAD) -> Any:
+        return s.storage.transact(lambda tx: tx.create_ref(NewRef(root, None, None, name, COOK)))
+
+    later = line("later")
+    # Two lines of one transaction have one time, and the id orders them.
+    pair = s.storage.transact(lambda tx: [tx.create_ref(NewRef(BREAD, None, None, name, COOK)) for name in ("b", "a")])
+    dropped = line("dropped")
+    s.storage.transact(lambda tx: tx.create_ref(NewRef(BREAD, later.id, None, "draft", COOK)))
+    soup = line("main", "Soup")
+    SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client).transact(
+        lambda tx: tx.create_ref(NewRef(BREAD, None, None, "main", COOK))
+    )
+    s.storage.transact(lambda tx: tx.discard_ref(dropped.id, dropped.version, COOK))
+
+    def lines(root: str) -> List[str]:
+        return [ref.id for ref in s.storage.transact(lambda tx: tx.primary_refs(root))]
+
+    assert lines(BREAD) == [later.id] + sorted(ref.id for ref in pair)
+    assert lines("Soup") == [soup.id]
+    assert lines("Stew") == []
+    found = s.storage.transact(lambda tx: tx.primary_refs(BREAD))[0]
+    assert found == s.storage.transact(lambda tx: tx.read_ref(later.id))
+
+
+def test_entity_patches_are_one_entitys_among_the_commits_given(setup: Callable[..., Setup]) -> None:
+    """entity_patches reads the patches of one entity of one kind among the
+    commits it is given: another kind's entity of the same key, another
+    entity of the kind, a commit it is not given and another graph's patches
+    are left out. No commits read as no patches, and an unknown kind is
+    refused."""
+    s = setup()
+    main, first = s.storage.transact(ref_and_commit)
+    second = s.storage.transact(
+        lambda tx: tx.insert_commit(NewCommit(BREAD, main.id, first, "", 1, "0" * 64, None, COOK)).id
+    )
+    s.storage.transact(
+        lambda tx: [
+            tx.insert_patches(
+                first,
+                [
+                    Patch("", "step", "Mix", "StepRow", 1, "ADD"),
+                    Patch("", "part", "Mix", "PartRow", 1, "ADD"),
+                    Patch("", "step", "Bake", "BakeRow", 1, "ADD"),
+                ],
+            ),
+            tx.insert_patches(second, [Patch("", "step", "Mix", "StepRow", 2, "UPDATE")]),
+        ]
+    )
+
+    def patches(commits: List[str], kind: str, key: str) -> List[Patch]:
+        return sorted(s.storage.transact(lambda tx: tx.entity_patches(commits, kind, key)), key=lambda p: p.entity_version)
+
+    assert patches([first, second], "step", "Mix") == [
+        Patch(first, "step", "Mix", "StepRow", 1, "ADD"),
+        Patch(second, "step", "Mix", "StepRow", 2, "UPDATE"),
+    ]
+    assert patches([second, first], "part", "Mix") == [Patch(first, "part", "Mix", "PartRow", 1, "ADD")]
+    assert patches([second], "part", "Mix") == []
+    assert patches([first, second], "part", "Bake") == []
+    assert patches([], "step", "Mix") == []
+    menu = SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client)
+    assert menu.transact(lambda tx: tx.entity_patches([first, second], "step", "Mix")) == []
+    with pytest.raises(ValueError, match='sqlite: unknown kind "stew"'):
+        patches([first], "stew", "Mix")
+
+
+def test_an_entitys_history_lists_each_primary_lines_commits_that_changed_it(setup: Callable[..., Setup]) -> None:
+    """The engine's entity_history over the adapter: a root's primary lines
+    in the order they were created, each line's commits that changed the
+    entity newest first with what each did, at most the walk ceiling of
+    commits a line; a change set's own commits and a discarded line's are
+    not in it."""
+    s = setup(clock=ticking())
+    main = s.engine.create_primary(COOK, BREAD, "main")
+    other = s.engine.create_primary(COOK, BREAD, "other")
+    n = [0]
+
+    def change(line: Any, edits: Dict[str, KindEdits]) -> Any:
+        """Merges a change set's edits into a line: the line, and the
+        commit the merge wrote on it."""
+        n[0] += 1
+        draft = s.engine.branch(COOK, line.id, f"draft {n[0]}")
+        draft = s.engine.save(COOK, draft.id, draft.version, edits).ref
+        s.engine.commit(COOK, draft.id, draft.version)
+        merged = s.engine.merge(COOK, draft.id, line.id, line.version, [], CommitOptions(message=f"change {n[0]}"))
+        assert merged.commit is not None
+        return merged.ref, merged.commit
+
+    main, added = change(main, {"part": KindEdits(upsert=[part_row("Mix", "Mix")])})
+    other, stirred = change(other, {"part": KindEdits(upsert=[part_row("Mix", "Stir")])})
+    main, edited = change(main, {"part": KindEdits(upsert=[part_row("Mix", "Mix well")])})
+    main, _ = change(main, {"step": KindEdits(upsert=[step_row("Mix", "Mix")])})
+    main, deleted = change(main, {"part": KindEdits(delete=["Mix"])})
+
+    def history(engine: Engine = s.engine, root: str = BREAD, key: str = "Mix") -> List[Any]:
+        return [(c.commit.id, c.commit.message, c.operation) for c in engine.entity_history(root, "part", key)]
+
+    assert history() == [
+        (deleted.id, "change 5", "DELETE"),
+        (edited.id, "change 3", "UPDATE"),
+        (added.id, "change 1", "ADD"),
+        (stirred.id, "change 2", "ADD"),
+    ]
+    # An id reads hyphenated as it reads canonical.
+    assert history(root=uuid_hyphenated(BREAD), key=uuid_hyphenated("Mix")) == history()
+    # Each line is walked to the ceiling: main's two newest commits, of
+    # which one did not change the part, and other's one.
+    assert history(s.engine.with_walk_ceiling(2)) == [(deleted.id, "change 5", "DELETE"), (stirred.id, "change 2", "ADD")]
+    assert history(key="Bake") == []
+    assert history(root="Soup") == []
+    s.engine.discard(COOK, main.id, main.version)
+    assert history() == [(stirred.id, "change 2", "ADD")]
+
+
+def part_row(key: Optional[str], heading: Optional[str], rank: str = "V", **extra: Any) -> str:
+    """A part row of the fixture, as a release hands it to write_released."""
+    return json.dumps({"entity_key": key, "parent_key": None, "rank": rank, "heading": heading, **extra})
+
+
+def released_rows(connection: sqlite3.Connection, graph: str = GRAPH) -> List[Any]:
+    """A graph's released rows, in the table's own order: by kind, root and
+    entity key."""
+    return connection.execute(
+        'SELECT kind, root_id, entity_key, commit_id, sequence, data FROM "graph_released" WHERE graph = ?1 '
+        "ORDER BY kind, root_id, entity_key",
+        [graph],
+    ).fetchall()
+
+
+def test_the_released_table_is_one_statement_apart_from_the_layout(open_db: Callable[..., sqlite3.Connection]) -> None:
+    """released_layout is one statement, under the default names the one
+    every language's adapter creates, and create_tables runs it only for a
+    graph with a kind that keeps its released rows: the layout's nine tables
+    stay as they are, and a graph without such a kind has no tenth, releases
+    without one, and is refused a write of released rows."""
+    assert released_layout() == [
+        'CREATE TABLE IF NOT EXISTS "graph_released" (graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, '
+        'entity_key TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES "graph_commit" (id), sequence INTEGER NOT NULL, '
+        "data TEXT NOT NULL, PRIMARY KEY (graph, kind, root_id, entity_key)) STRICT"
+    ]
+    assert released_layout(None) == released_layout(default_table_name)
+    assert released_layout(lambda name: f"vg_{name}")[0].startswith(
+        'CREATE TABLE IF NOT EXISTS "vg_released" (graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, '
+        'entity_key TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES "vg_commit" (id), '
+    )
+    layout = sqlite_layout()
+    assert sum(statement.startswith("CREATE TABLE ") for statement in layout) == len(SQLITE_TABLES)
+    assert not any("released" in statement for statement in layout)
+
+    d = json.loads(DESCRIPTOR)
+    for k in d["kinds"]:
+        k.pop("releasedTable", None)
+    connection = open_db()
+    client = sqlite_client(connection)
+    adapter = SqliteAdapter(d, graph=GRAPH)
+    adapter.create_tables(client)
+    tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")]
+    assert tables == sorted(default_table_name(t) for t in SQLITE_TABLES)
+    storage = adapter.storage(client)
+    engine = Engine(d, storage, schema_epoch=1, snapshot_every=3)
+    main = engine.create_primary(COOK, BREAD, "main")
+    draft = engine.branch(COOK, main.id, "draft")
+    draft = engine.save(COOK, draft.id, draft.version, {"part": KindEdits(upsert=[part_row("Mix", "Mix")])}).ref
+    draft = engine.commit(COOK, draft.id, draft.version).ref
+    tagged = engine.merge(COOK, draft.id, main.id, main.version, [], CommitOptions(tag=True)).commit
+    assert tagged is not None
+    # The engine asks for no released rows, of a table the file does not
+    # have: a first release, and a release of the commit already released.
+    assert engine.release(COOK, BREAD, tagged.id, 0).version == 1
+    assert engine.release(COOK, BREAD, tagged.id, 1).version == 2
+    with pytest.raises(ValueError, match='sqlite: write the released part rows: kind "part" keeps no released table'):
+        storage.transact(lambda tx: tx.write_released("part", ReleasedWrite(BREAD, tagged.id, 1, True)))
+
+
+def test_the_released_table_is_named_only_where_it_is_kept(open_db: Callable[..., sqlite3.Connection]) -> None:
+    """A name function that names the layout's nine tables alone, and has no
+    name for the released table or raises for it, serves the layout and an
+    adapter of a graph that keeps no released rows, which is never asked for
+    the tenth; released_layout and an adapter of a graph that keeps them
+    refuse it."""
+    asked: List[str] = []
+
+    def nine(name: str) -> str:
+        asked.append(name)
+        return "" if name == RELEASED_TABLE else f"vg_{name}"
+
+    def raises(name: str) -> str:
+        if name == RELEASED_TABLE:
+            raise KeyError(name)
+        return f"vg_{name}"
+
+    without = json.loads(DESCRIPTOR)
+    for k in without["kinds"]:
+        k.pop("releasedTable", None)
+    assert without != json.loads(DESCRIPTOR), "a kind of the fixture keeps its released rows"
+
+    for table_name in (nine, raises):
+        assert len(sqlite_layout(table_name)) == len(sqlite_layout())
+        adapter = SqliteAdapter(without, graph=GRAPH, table_name=table_name)
+        connection = open_db()
+        client = sqlite_client(connection)
+        adapter.create_tables(client)
+        tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")]
+        assert tables == sorted(f"vg_{t}" for t in SQLITE_TABLES)
+        engine = Engine(without, adapter.storage(client), schema_epoch=1, snapshot_every=3)
+        assert engine.create_primary(COOK, BREAD, "main").name == "main"
+    assert RELEASED_TABLE not in asked
+
+    with pytest.raises(TypeError, match='sqlite: the table name function named "released" ""'):
+        released_layout(nine)
+    with pytest.raises(TypeError, match='sqlite: the table name function named "released" ""'):
+        SqliteAdapter(DESCRIPTOR, graph=GRAPH, table_name=nine)
+    with pytest.raises(KeyError):
+        released_layout(raises)
+    with pytest.raises(KeyError):
+        SqliteAdapter(DESCRIPTOR, graph=GRAPH, table_name=raises)
+
+
+def test_write_released_replaces_upserts_and_deletes_a_roots_rows_of_a_kind(setup: Callable[..., Setup]) -> None:
+    """write_released writes a release's rows of one kind of one root: with
+    replace it clears the root's rows of the kind first, it removes the
+    entities delete names, and it writes each upsert by its entity key with
+    the release's commit and sequence, its data the kind's content columns,
+    canonical, sorted, null for one the row lacks. A row it does not name
+    stays as an earlier release wrote it, and so do another root's rows and
+    another graph's."""
+    s = setup()
+    main, first = s.storage.transact(ref_and_commit)
+    second = s.storage.transact(
+        lambda tx: tx.insert_commit(NewCommit(BREAD, main.id, first, "", 1, "0" * 64, tx.next_sequence(BREAD), COOK)).id
+    )
+    _, soup = s.storage.transact(lambda tx: ref_and_commit(tx, "Soup"))
+
+    def write(root: str, commit: str, sequence: int, replace: bool, upsert: List[str] = [], delete: List[str] = []) -> None:
+        s.storage.transact(lambda tx: tx.write_released("part", ReleasedWrite(root, commit, sequence, replace, upsert, delete)))
+
+    # A first release: the whole tree. A row arrives as the engine read it,
+    # role and excluded columns among its members, an id in either form.
+    whole = json.dumps(
+        {
+            "_version": 3,
+            "deleted_on_ref": False,
+            "entity_key": "00000000-0000-0000-0000-00000000003d",
+            "heading": "Knead",
+            "id": "Row",
+            "parent_key": "00000000-0000-0000-0000-00000000003e",
+            "rank": "V",
+            "recipe_id": BREAD,
+            "ref_id": main.id,
+        }
+    )
+    write(BREAD, first, 1, True, [part_row("Mix", "Mix", "F"), whole, '{"entity_key":"Bake","rank":"k"}'])
+    write("Soup", soup, 1, True, [part_row("Mix", "Make the stock")])
+    assert released_rows(s.connection) == [
+        ("part", "Bread", "Bake", first, 1, '{"heading":null,"parent_key":null,"rank":"k"}'),
+        ("part", "Bread", "Mix", first, 1, '{"heading":"Mix","parent_key":null,"rank":"F"}'),
+        ("part", "Bread", "z", first, 1, '{"heading":"Knead","parent_key":"10","rank":"V"}'),
+        ("part", "Soup", "Mix", soup, 1, '{"heading":"Make the stock","parent_key":null,"rank":"V"}'),
+    ]
+
+    # A later release: a changed row and an added one take its commit and
+    # sequence, a deleted one goes, and the row it does not name stays.
+    write(BREAD, second, 2, False, [part_row("Mix", "Mix well", "F"), part_row("Rest", "Rest", "c")], ["Bake", "Missing"])
+    assert released_rows(s.connection) == [
+        ("part", "Bread", "Mix", second, 2, '{"heading":"Mix well","parent_key":null,"rank":"F"}'),
+        ("part", "Bread", "Rest", second, 2, '{"heading":"Rest","parent_key":null,"rank":"c"}'),
+        ("part", "Bread", "z", first, 1, '{"heading":"Knead","parent_key":"10","rank":"V"}'),
+        ("part", "Soup", "Mix", soup, 1, '{"heading":"Make the stock","parent_key":null,"rank":"V"}'),
+    ]
+
+    # Another graph in the file keeps its own rows of the same root: its
+    # replace clears none of this graph's, nor this graph's any of its.
+    menu = SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client)
+    _, theirs = menu.transact(ref_and_commit)
+    menu.transact(lambda tx: tx.write_released("part", ReleasedWrite(BREAD, theirs, 1, True, [part_row("Mix", "Carve")])))
+    assert len(released_rows(s.connection)) == 4
+    write(BREAD, first, 1, True, [part_row("Rest", "Rest", "c")])
+    assert released_rows(s.connection) == [
+        ("part", "Bread", "Rest", first, 1, '{"heading":"Rest","parent_key":null,"rank":"c"}'),
+        ("part", "Soup", "Mix", soup, 1, '{"heading":"Make the stock","parent_key":null,"rank":"V"}'),
+    ]
+    assert released_rows(s.connection, "menu") == [
+        ("part", "Bread", "Mix", theirs, 1, '{"heading":"Carve","parent_key":null,"rank":"V"}')
+    ]
+    # A replace with no rows leaves the root none.
+    write(BREAD, first, 1, True)
+    assert [row[1] for row in released_rows(s.connection)] == ["Soup"]
+
+
+def test_write_released_refuses_a_kind_without_a_released_table_and_a_commit_or_a_row_it_cannot_write(
+    setup: Callable[..., Setup],
+) -> None:
+    """A kind whose descriptor names no released table is refused, and so are
+    an unknown kind, a commit that is another root's or another graph's, a
+    row that is not an object, one without an entity key and one whose value
+    is not its column's class. A refused write leaves the rows as they were,
+    its own replace undone."""
+    s = setup()
+    _, commit = s.storage.transact(ref_and_commit)
+    _, soup = s.storage.transact(lambda tx: ref_and_commit(tx, "Soup"))
+    _, theirs = SqliteAdapter(DESCRIPTOR, graph="menu").storage(s.client).transact(ref_and_commit)
+    s.storage.transact(lambda tx: tx.write_released("part", ReleasedWrite(BREAD, commit, 1, True, [part_row("Mix", "Mix")])))
+    kept = released_rows(s.connection)
+    assert len(kept) == 1
+
+    for what, kind, write, pattern in [
+        (
+            "a kind without a released table",
+            "step",
+            ReleasedWrite(BREAD, commit, 1, True),
+            'sqlite: write the released step rows: kind "step" keeps no released table',
+        ),
+        ("an unknown kind", "stew", ReleasedWrite(BREAD, commit, 1, True), 'sqlite: unknown kind "stew"'),
+        (
+            "another root's commit",
+            "part",
+            ReleasedWrite(BREAD, soup, 1, True),
+            "sqlite: the release's commit: commit .+ is not a commit of root Bread in graph recipe",
+        ),
+        (
+            "another graph's commit",
+            "part",
+            ReleasedWrite(BREAD, theirs, 1, True),
+            "sqlite: the release's commit: commit .+ is not a commit of root Bread in graph recipe",
+        ),
+        (
+            "a row that is not an object",
+            "part",
+            ReleasedWrite(BREAD, commit, 1, True, ["[]"]),
+            "sqlite: write the released part rows: a released part row is a JSON object",
+        ),
+        (
+            "a row without an entity key",
+            "part",
+            ReleasedWrite(BREAD, commit, 1, True, [part_row(None, "Rest")]),
+            "the released part row's entity key is a string",
+        ),
+        (
+            "a value that is not its column's class",
+            "part",
+            ReleasedWrite(BREAD, commit, 1, True, [part_row("Rest", "Rest", parent_key="not a uuid")]),
+            "sqlite: column parent_key: canonical: uuid: ",
+        ),
+    ]:
+        with pytest.raises(Exception, match=pattern):
+            s.storage.transact(lambda tx: tx.write_released(kind, write))
+        assert released_rows(s.connection) == kept, what
+
+
+def test_a_release_writes_the_released_rows_in_its_transaction(setup: Callable[..., Setup]) -> None:
+    """The engine's release hands the adapter the rows of the kind that
+    keeps them, in the transaction that moves the pointer: a release refused
+    for its version writes none, and one that moves the pointer writes each
+    row with its commit and sequence."""
+    s = setup()
+    main = s.engine.create_primary(COOK, BREAD, "main")
+    draft = s.engine.branch(COOK, main.id, "draft")
+    edits = {"part": KindEdits(upsert=[part_row("Mix", "Mix")]), "step": KindEdits(upsert=[step_row("Mix", "Mix")])}
+    draft = s.engine.save(COOK, draft.id, draft.version, edits).ref
+    draft = s.engine.commit(COOK, draft.id, draft.version).ref
+    tagged = s.engine.merge(COOK, draft.id, main.id, main.version, [], CommitOptions(tag=True)).commit
+    assert tagged is not None
+    with pytest.raises(VersionConflictError):
+        s.engine.release(COOK, BREAD, tagged.id, 1)
+    assert released_rows(s.connection) == []
+    s.engine.release(COOK, BREAD, tagged.id, 0)
+    assert released_rows(s.connection) == [
+        ("part", "Bread", "Mix", tagged.id, 1, '{"heading":"Mix","parent_key":null,"rank":"V"}')
+    ]
 
 
 def test_a_transaction_reads_the_clock_once_and_every_write_in_it_has_its_time(setup: Callable[..., Setup]) -> None:
@@ -1111,8 +1526,8 @@ def test_a_name_with_a_double_quote_is_quoted_by_doubling_it(setup: Callable[...
 
     s = setup(table_name=table_name)
     names = [row[0] for row in s.connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")]
-    assert names == sorted(table_name(t) for t in SQLITE_TABLES)
-    assert all('"vg""' in statement for statement in sqlite_layout(table_name))
+    assert names == sorted(table_name(t) for t in FIXTURE_TABLES)
+    assert all('"vg""' in statement for statement in sqlite_layout(table_name) + released_layout(table_name))
     main = s.engine.create_primary(COOK, BREAD, "main")
     draft = s.engine.branch(COOK, main.id, "draft")
     s.engine.save(COOK, draft.id, draft.version, {"step": KindEdits(upsert=[step_row("Mix", "Mix")])})

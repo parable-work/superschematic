@@ -468,3 +468,59 @@ site:
 		t.Fatalf("ReadFile of a dev server with a script: %v", err)
 	}
 }
+
+// TestClientVersionsIsAnAPIsAlone: clientVersions (D143) is read from a
+// data-form config into the schema, and refused on a service that is no
+// API, which serves no request.
+func TestClientVersionsIsAnAPIsAlone(t *testing.T) {
+	cfg, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-api\nkind: API\nclientVersions: true\noutputs: {}\n"), coreKinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !cfg.ClientVersions || !cfg.NewSchema().ClientVersions {
+		t.Errorf("clientVersions: true reads as %+v", cfg)
+	}
+	if cfg, err := ReadFile(writeConfig(t, "schema.config.json", `{"name": "shop-api", "kind": "API", "outputs": {}}`), coreKinds); err != nil || cfg.ClientVersions || cfg.NewSchema().ClientVersions {
+		t.Errorf("a config without clientVersions: %+v, %v", cfg, err)
+	}
+	_, err = ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-db\nkind: DB\nclientVersions: true\noutputs: {}\n"), coreKinds)
+	if err == nil || !strings.Contains(err.Error(), "schema config for shop-db sets clientVersions, which only an API service may set (this service is kind DB)") {
+		t.Errorf("clientVersions on a DB service: %v", err)
+	}
+	if _, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-api\nkind: API\nclientVersions: yes please\noutputs: {}\n"), coreKinds); err == nil {
+		t.Error("clientVersions that is no boolean was read")
+	}
+}
+
+// TestContentAddressedIsABucketsAlone: a Bucket service's contentAddressed
+// and maxBytes (D142) are read from a data-form config; maxBytes is 32 MiB
+// when absent; and each is refused where it means nothing: on a service
+// that is no Bucket, maxBytes without contentAddressed, and a maxBytes
+// that is not above 0.
+func TestContentAddressedIsABucketsAlone(t *testing.T) {
+	kinds := append(kindList{}, coreKinds...)
+	kinds = append(kinds, string(ir.SchemaKindBucket))
+	cfg, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-blobs\nkind: Bucket\ncontentAddressed: true\nmaxBytes: 1048576\noutputs: {}\n"), kinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !cfg.ContentAddressed || cfg.MaxBytes != 1<<20 || cfg.ContentMaxBytes() != 1<<20 {
+		t.Errorf("config = %+v", cfg)
+	}
+	cfg, err = ReadFile(writeConfig(t, "schema.config.json", `{"name": "shop-blobs", "kind": "Bucket", "contentAddressed": true, "outputs": {}}`), kinds)
+	if err != nil || !cfg.ContentAddressed || cfg.MaxBytes != 0 || cfg.ContentMaxBytes() != ir.DefaultContentMaxBytes || ir.DefaultContentMaxBytes != 32<<20 {
+		t.Errorf("a content-addressed bucket with no maxBytes: %+v, %v", cfg, err)
+	}
+	for config, want := range map[string]string{
+		"name: shop-api\nkind: API\ncontentAddressed: true\noutputs: {}\n":                    "schema config for shop-api sets contentAddressed, which only a Bucket service may set (this service is kind API)",
+		"name: shop-blobs\nkind: Bucket\nmaxBytes: 1024\noutputs: {}\n":                       "schema config for shop-blobs sets maxBytes without contentAddressed",
+		"name: shop-blobs\nkind: Bucket\ncontentAddressed: true\nmaxBytes: -1\noutputs: {}\n": "schema config for shop-blobs sets maxBytes to -1; it is a whole number of bytes above 0",
+	} {
+		if _, err := ReadFile(writeConfig(t, "schema.config.yaml", config), kinds); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", config, err, want)
+		}
+	}
+	if _, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-blobs\nkind: Bucket\ncontentAddressed: true\nmaxBytes: 1.5\noutputs: {}\n"), kinds); err == nil {
+		t.Error("a maxBytes that is no whole number was read")
+	}
+}

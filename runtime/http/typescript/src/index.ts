@@ -16,7 +16,9 @@ router's behavior operations (behavior-routes.ts, D103), which build the
 behaviors' core's caller and answer its refusals, importing nothing of the
 repositories, and the handlers of its table operations (table-routes.ts,
 D106), which read and write a table's rows through the repositories they
-are handed. It also holds what a generated server's
+are handed, and the handlers of its graph operations (graph-routes.ts,
+D138), which run a version graph's operations through the graph's facade
+they are handed. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
@@ -162,6 +164,26 @@ export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPrecondition
 export type { BehaviorCaller } from './behavior-routes.js';
 export { tableCreate, tableDelete, tableFilter, tableList, tableRead, tableUpdate } from './table-routes.js';
 export type { TableOperation, TableOperationKind, TableRequest } from './table-routes.js';
+export {
+  GRAPH_PRIMARY_NAME,
+  graphArrange,
+  graphBranch,
+  graphCommit,
+  graphCompose,
+  graphDiff,
+  graphDiscard,
+  graphEntityHistory,
+  graphHistory,
+  graphMaterialize,
+  graphMerge,
+  graphRebase,
+  graphRelease,
+  graphReleased,
+  graphRevert,
+  graphSave,
+  graphSeal,
+} from './graph-routes.js';
+export type { GraphFacade, GraphKind, GraphOperation, GraphOperationName, GraphRelation, GraphRequest, GraphSet } from './graph-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,
@@ -184,8 +206,53 @@ export {
   uploadBodyLimitBytes,
 } from './upload.js';
 export type { UploadInput, UploadedFiles } from './upload.js';
-export { contentDisposition, downloadFilename, downloadResponse } from './download.js';
-export type { FileDownload } from './download.js';
+export {
+  contentDisposition,
+  downloadFilename,
+  downloadResponse,
+  entityTag,
+  ifNoneMatchNames,
+  notModified,
+  parseHttpDate,
+  sandboxPolicy,
+} from './download.js';
+export type { DownloadRequest, FileDownload } from './download.js';
+export {
+  CLIENT_TOO_OLD,
+  CLIENT_VERSION_HEADER,
+  MIN_CLIENT_VERSIONS_SETTING,
+  clientTooOld,
+  clientTooOldProblem,
+  compareVersions,
+  loadMinClientVersions,
+  parseMinClientVersions,
+} from './client-version.js';
+export type { ClientTooOld, MinClientVersions } from './client-version.js';
+export {
+  DEFAULT_IDEMPOTENCY_IN_FLIGHT_SECONDS,
+  DEFAULT_IDEMPOTENCY_TTL_SECONDS,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENT_REPLAY_HEADER,
+  IdempotencyCode,
+  idempotencyLookup,
+  idempotencyRequestHash,
+  isIdempotencyKey,
+  memoryIdempotencyStore,
+  postgresIdempotencyStore,
+  runIdempotent,
+  sqlIdempotencyStore,
+  sqliteIdempotencyStore,
+} from './idempotency.js';
+export type {
+  IdempotencyAttempt,
+  IdempotencyBegin,
+  IdempotencyPgQueryable,
+  IdempotencySql,
+  IdempotencyStore,
+  IdempotencyTable,
+  IdempotentRequest,
+  OperationIdempotency,
+} from './idempotency.js';
 export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
@@ -203,6 +270,7 @@ export {
 } from './stackconfig.js';
 export {
   CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   CORS_MAX_AGE,
   CORS_PREFLIGHT_VARY,
   CORS_VARY,
@@ -231,15 +299,29 @@ export type {
   ServiceCredentialSource,
   StackEnv,
 } from './stackconfig.js';
-export { DEFAULT_PAGE_SIZE, MAX_SIGNED_URL_SECONDS, ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './bucket.js';
+export {
+  CONTENT_PREFIX,
+  ContentTooLargeError,
+  DEFAULT_CONTENT_MAX_BYTES,
+  DEFAULT_PAGE_SIZE,
+  MAX_SIGNED_URL_SECONDS,
+  ObjectNotFoundError,
+  checkObjectName,
+  checkSignedUrlOptions,
+  contentBucket,
+  contentObjectName,
+} from './bucket.js';
 export type {
   Bucket,
   BucketBody,
   BucketObject,
   BucketRead,
+  ContentBucket,
+  ContentPut,
   ListOptions,
   ListPage,
   PutOptions,
+  PutResult,
   SignedUrlMethod,
   SignedUrlOptions,
 } from './bucket.js';

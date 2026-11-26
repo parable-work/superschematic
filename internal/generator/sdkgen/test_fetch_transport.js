@@ -450,6 +450,89 @@ describe("generated HttpClient fetch transport", () => {
     }
   });
 
+  test("config.client sends X-Client-Version on every call, and no client sends none (D143)", async () => {
+    const seen = [];
+    const fetchImpl = async (_input, init = {}) => {
+      seen.push(new Headers(init.headers).get("x-client-version"));
+      return jsonResponse(envelope({ ok: true }));
+    };
+    const named = new HttpClient({
+      baseUrl: "https://api.example.com",
+      client: { name: "acme-cli", version: "0.5.0-rc.1+b7" },
+      fetch: fetchImpl,
+    });
+    await named.get("/v1/x");
+    // A header of the same name a call passes does not replace the client's.
+    await named.post("/v1/x", { a: 1 }, { headers: { "X-Client-Version": "other/9.9.9" } });
+    await new HttpClient({ baseUrl: "https://api.example.com", fetch: fetchImpl }).get("/v1/x");
+    expect(seen).toEqual(["acme-cli/0.5.0-rc.1+b7", "acme-cli/0.5.0-rc.1+b7", null]);
+  });
+
+  test("a client name or version the header cannot carry throws where the client is built (D143)", async () => {
+    for (const client of [
+      { name: "", version: "1.0.0" },
+      { name: "acme/cli", version: "1.0.0" },
+      { name: "acme cli", version: "1.0.0" },
+      { name: "-cli", version: "1.0.0" },
+      { name: "cli", version: "" },
+      { name: "cli", version: "1.0.0\r\nX-Other: 1" },
+      { name: "cli", version: "1.0/0" },
+      { name: "cli", version: "1.0.0\n" },
+      { name: "cli" },
+    ]) {
+      expect(() => new HttpClient({ baseUrl: "https://api.example.com", client, fetch: async () => jsonResponse({}) })).toThrow(/client\.(name|version)/);
+    }
+  });
+
+  test("a 426 client_too_old is a ClientTooOldError with the minimum (D143)", async () => {
+    const { ClientTooOldError } = await import(
+      pathToFileURL(path.join(sdkDir, "types.ts")).href
+    );
+    const answers = [
+      {
+        type: "about:blank",
+        title: "Upgrade Required",
+        status: 426,
+        detail: "cli 0.4.0 is older than 0.5.0",
+        code: "client_too_old",
+        requestId: "req-9",
+        details: { client: "cli", version: "0.4.0", minimum: "0.5.0" },
+      },
+      { status: 426, detail: "use TLS", code: "upgrade_required" },
+    ];
+    const client = new HttpClient({
+      baseUrl: "https://api.example.com",
+      client: { name: "cli", version: "0.4.0" },
+      fetch: async () =>
+        new Response(JSON.stringify(answers.shift()), {
+          status: 426,
+          statusText: "Upgrade Required",
+          headers: { "Content-Type": "application/problem+json", "X-Request-ID": "req-9" },
+        }),
+    });
+    let refused;
+    try {
+      await client.get("/v1/x");
+    } catch (err) {
+      refused = err;
+    }
+    expect(refused).toBeInstanceOf(ClientTooOldError);
+    expect(refused).toBeInstanceOf(ApiError);
+    expect([refused.client, refused.version, refused.minimum]).toEqual(["cli", "0.4.0", "0.5.0"]);
+    expect([refused.statusCode, refused.code, refused.requestId, refused.message]).toEqual([426, "client_too_old", "req-9", "cli 0.4.0 is older than 0.5.0"]);
+
+    // A 426 with another code is the plain error.
+    let other;
+    try {
+      await client.get("/v1/x");
+    } catch (err) {
+      other = err;
+    }
+    expect(other).toBeInstanceOf(ApiError);
+    expect(other).not.toBeInstanceOf(ClientTooOldError);
+    expect([other.statusCode, other.code]).toEqual([426, "upgrade_required"]);
+  });
+
   test("responseInterceptor runs before envelope unwrap", async () => {
     let sawMeta = false;
     const client = new HttpClient({

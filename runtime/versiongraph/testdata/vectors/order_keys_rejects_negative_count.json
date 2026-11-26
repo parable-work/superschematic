@@ -1,0 +1,13 @@
+{
+  "name": "order_keys_rejects_negative_count",
+  "op": "order_keys",
+  "input": {
+    "count": -1
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: count must be an integer from 0 to 1000000"
+    }
+  }
+}

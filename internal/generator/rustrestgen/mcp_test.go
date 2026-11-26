@@ -91,7 +91,8 @@ func TestMCPRouterGolden(t *testing.T) {
 	router := generated["src/router.rs"]
 	for _, want := range []string{
 		"\nmod mcp;\n",
-		"    let routes = router\n        .with_state(Arc::clone(&state))\n        .layer(axum::middleware::from_fn(request_ids));\n",
+		"    let routes = router\n        .with_state(Arc::clone(&state))\n        .layer(axum::middleware::from_fn_with_state(\n",
+		"        ))\n        .layer(axum::middleware::from_fn(request_ids));\n",
 		"    let endpoint = mcp::endpoint(&routes, &state, &options, false);\n    routes\n        .merge(endpoint)\n        .merge(openapi_router(",
 		"/// Always, for this API: update_order runs only once the\n/// person confirms the call (D93)",
 	} {

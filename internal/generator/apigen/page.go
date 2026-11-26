@@ -141,6 +141,42 @@ func (e EndpointInfo) GoImplResultType() string {
 	return e.GoResultType()
 }
 
+// FileSpecLiteral is the endpoint's FileDownload as the API package's
+// FileSpec (D141): the media type, and each member the schema writes
+// beside it.
+func (e EndpointInfo) FileSpecLiteral() string {
+	download := e.FileDownload
+	members := []string{"ContentType: " + strconv.Quote(download.ContentType)}
+	if len(download.ContentTypes) > 0 {
+		members = append(members, "ContentTypes: "+goStringList(download.ContentTypes))
+	}
+	if download.Filename != "" {
+		members = append(members, "Filename: "+strconv.Quote(download.Filename))
+	}
+	if download.DispositionOrDefault() != ir.FileDispositionAttachment {
+		members = append(members, "Disposition: "+strconv.Quote(download.Disposition))
+	}
+	if download.CacheControl != "" {
+		members = append(members, "CacheControl: "+strconv.Quote(download.CacheControl))
+	}
+	if download.Sandbox != nil {
+		members = append(members, "Sandbox: true")
+		if len(download.Sandbox.Allow) > 0 {
+			members = append(members, "SandboxAllow: "+goStringList(download.Sandbox.Allow))
+		}
+	}
+	return "FileSpec{" + strings.Join(members, ", ") + "}"
+}
+
+// goStringList is values as a Go []string literal.
+func goStringList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = strconv.Quote(value)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
 // HasFileDownloads reports whether an endpoint's result is a FileDownload
 // (D81): response.go then aliases the runtime's FileDownload.
 func (o *APIOutput) HasFileDownloads() bool {

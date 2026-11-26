@@ -29,10 +29,12 @@
 // A primary line (a ref with no parent) takes writes only from merge: work
 // happens on a change set, which rebase catches up with its parent's head
 // and merge brings back. A root's release pointer names one tagged commit,
-// which release moves and released reads. A commit is snapshotted, its full
-// pin set stored, when it is tagged, released, or snapshotEvery commits past
-// the nearest snapshot on its chain, and materialize stops at the nearest
-// snapshot. sweep and runSweeper are the graph's maintenance.
+// which release moves and released reads; a release also rewrites the root's
+// rows of each kind that keeps a released table (D139). A commit is
+// snapshotted, its full pin set stored, when it is tagged, released, or
+// snapshotEvery commits past the nearest snapshot on its chain, and
+// materialize stops at the nearest snapshot. sweep and runSweeper are the
+// graph's maintenance.
 
 import { CanonicalError, uuidCanonical } from "./canonical.js";
 import type { Descriptor, Finding, OperationName, Take } from "./contract.js";
@@ -116,7 +118,11 @@ export interface KindEdits {
  */
 export type Edits = Readonly<Record<string, KindEdits>>;
 
-/** A saved ref at its new version and the rows save upserted, as stored, in edit order per kind. */
+/**
+ * A saved ref at its new version and the rows save upserted, as stored, in
+ * edit order per kind. arrange returns one too: the rows it gave a new order
+ * key, in the order wanted.
+ */
 export interface SaveResult {
   ref: Ref;
   saved: Tree;
@@ -194,6 +200,12 @@ export interface Change {
   row?: string;
 }
 
+/** One commit that changed an entity, and what it did to it. */
+export interface EntityChange {
+  commit: Commit;
+  operation: "ADD" | "UPDATE" | "DELETE";
+}
+
 /** Configure a maintenance pass. */
 export interface SweepOptions {
   /** Who the pass writes as: the discards it makes and the deletes of discarded refs' rows record it. */
@@ -229,6 +241,8 @@ interface KindRoles {
   id: string;
   tombstone: string;
   version: string;
+  /** True for a kind that keeps a released table (D139). */
+  released: boolean;
 }
 
 /** What the engine reads of one row. */
@@ -281,6 +295,26 @@ function actorID(actor: string): string {
   return id("actor", actor);
 }
 
+/**
+ * Makes count order keys that sort strictly between before and after, the
+ * start and the end when absent, null or empty: evenly spread, each as
+ * short as it can be (D137). A row saved with one of them as its order
+ * reads between the rows that hold the bounds. The core makes them, so
+ * every language makes the same keys, and refuses bounds no key lies
+ * between with no_order_key.
+ */
+export function orderKeys(
+  core: VersionGraph,
+  before: string | null | undefined,
+  after: string | null | undefined,
+  count: number,
+): string[] {
+  // Through run, so the keys read the same whatever JSON codec the core's
+  // typed operations were given.
+  const request = JSON.stringify({ before: before === "" ? null : before, after: after === "" ? null : after, count });
+  return (JSON.parse(core.run("order_keys", request)) as { keys: string[] }).keys;
+}
+
 /** A storage call's name: a method of SyncTx, and so of Tx. */
 type Method = keyof SyncTx;
 
@@ -324,6 +358,8 @@ const calls: Calls = {
   insertPatches: call("insertPatches"),
   walk: call("walk"),
   refCommits: call("refCommits"),
+  primaryRefs: call("primaryRefs"),
+  entityPatches: call("entityPatches"),
   patches: call("patches"),
   nextSequence: call("nextSequence"),
   snapshot: call("snapshot"),
@@ -331,6 +367,7 @@ const calls: Calls = {
   commits: call("commits"),
   readRelease: call("readRelease"),
   writeRelease: call("writeRelease"),
+  writeReleased: call("writeReleased"),
   prune: call("prune"),
   discardedRefs: call("discardedRefs"),
   idleDrafts: call("idleDrafts"),
@@ -475,6 +512,30 @@ export class Engine {
   }
 
   /**
+   * Puts one parent's children of kind in the order keys gives, on a change
+   * set at version (D137). keys are the entity keys of every live child of
+   * parent in the ref's tree, in the order wanted; a parent that is absent,
+   * null or empty is none, the rows of the kind that have no parent. The
+   * longest run of children already in order keeps its order keys, and each
+   * other child takes a new one between its neighbors', written as the
+   * ref's row of it. It returns the ref at its new version and the rows
+   * written, as stored, in the order wanted. The kind's order is a string
+   * key: the core refuses another with order_not_a_key, and a list that is
+   * not exactly the parent's live children with invalid_arrangement. It
+   * refuses a sealed ref, and a primary line with PrimaryMergeOnlyError.
+   */
+  async arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): Promise<SaveResult> {
+    return this.#transact(this.#ops.arrange(actor, ref, version, kind, parent, keys));
+  }
+
+  /**
    * Composes a change set at version, diffs it against its last commit (or
    * its base), writes a commit with a patch per changed entity and moves the
    * ref's head. It rejects with NothingToCommitError when nothing changed,
@@ -541,6 +602,13 @@ export class Engine {
    * commit and writes no member rows, so a rollback is a release to an
    * earlier tagged commit, and the pointer's history is the release log. An
    * untagged commit is NotTaggedError; another root's is RootMismatchError.
+   *
+   * For each kind that keeps a released table (D139) it rewrites the root's
+   * rows there in the same transaction, from the diff between the tree of
+   * the commit released before and this one's: an added or changed entity
+   * is written with this commit and its sequence, and a deleted one removed.
+   * A root's first release writes the whole tree, and so does a release of
+   * the commit already released, which rebuilds the root's rows.
    */
   async release(actor: string, root: string, commit: string, version: number): Promise<Release> {
     return this.#transact(this.#ops.release(actor, root, commit, version));
@@ -573,6 +641,18 @@ export class Engine {
   /** Lists the commits a ref wrote, newest first. */
   async history(ref: string): Promise<Commit[]> {
     return this.#transact(this.#ops.history(ref));
+  }
+
+  /**
+   * Lists the commits of root's primary line that changed the entity key of
+   * kind, newest first, each with what it did to the entity (D138). It
+   * reads the line's commits and the entity's patches among them, and no
+   * tree. A root with several primary lines lists each line's in the order
+   * the lines were created; one with none, or an entity no commit changed,
+   * lists nothing. It walks at most the engine's ceiling of commits a line.
+   */
+  async entityHistory(root: string, kind: string, key: string): Promise<EntityChange[]> {
+    return this.#transact(this.#ops.entityHistory(root, kind, key));
   }
 
   /** Soft-deletes a ref at version, which frees its name. */
@@ -714,6 +794,18 @@ export class SyncEngine {
     return this.#transact(this.#ops.save(actor, ref, version, edits));
   }
 
+  /** Engine's arrange: puts one parent's children of kind in the order keys gives, on a change set at version. */
+  arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): SaveResult {
+    return this.#transact(this.#ops.arrange(actor, ref, version, kind, parent, keys));
+  }
+
   /** Engine's commit: commits a change set at version and moves its head. */
   commit(actor: string, ref: string, version: number, options: CommitOptions = {}): CommitResult {
     return this.#transact(this.#ops.commit(actor, ref, version, options));
@@ -746,7 +838,7 @@ export class SyncEngine {
     return this.#transact(this.#ops.revert(actor, ref, version, toCommit));
   }
 
-  /** Engine's release: points root's release at a tagged commit of root. */
+  /** Engine's release: points root's release at a tagged commit of root, and rewrites the root's released rows. */
   release(actor: string, root: string, commit: string, version: number): Release {
     return this.#transact(this.#ops.release(actor, root, commit, version));
   }
@@ -776,6 +868,11 @@ export class SyncEngine {
     return this.#transact(this.#ops.history(ref));
   }
 
+  /** Engine's entityHistory: lists the commits of root's primary line that changed an entity, newest first. */
+  entityHistory(root: string, kind: string, key: string): EntityChange[] {
+    return this.#transact(this.#ops.entityHistory(root, kind, key));
+  }
+
   /** Engine's discard: soft-deletes a ref at version. */
   discard(actor: string, ref: string, version: number): void {
     return this.#transact(this.#ops.discard(actor, ref, version));
@@ -789,11 +886,13 @@ export class SyncEngine {
 
 /**
  * One graph's operations, written once for both drivers. Each operation
- * checks its actor and its ids, and save the kinds its edits name, before
- * any transaction begins, and returns its transaction as steps that yield
- * each storage call; Engine and SyncEngine run the steps in one transaction
- * of their storage. The entity keys of save's deletes and unsets and of a
- * merge's or a rebase's resolutions are checked inside the transaction.
+ * checks its actor and its ids, save the kinds its edits name, arrange its
+ * kind, its parent and its keys, and entityHistory its kind and its key,
+ * before any transaction begins, and
+ * returns its transaction as steps that yield each storage call; Engine and
+ * SyncEngine run the steps in one transaction of their storage. The entity
+ * keys of save's deletes and unsets and of a merge's or a rebase's
+ * resolutions are checked inside the transaction.
  */
 class Operations {
   readonly core: VersionGraph;
@@ -803,12 +902,14 @@ class Operations {
   readonly snapshotEvery: number;
   readonly #kinds: KindRoles[];
   readonly #byName: Map<string, KindRoles>;
+  /** Whether any kind keeps a released table. */
+  readonly #keepsReleased: boolean;
 
   constructor(core: VersionGraph, descriptor: string | Descriptor, options: EngineOptions) {
     const text = typeof descriptor === "string" ? descriptor : JSON.stringify(descriptor);
     core.run("validate", `{"descriptor":${text},"tree":{}}`);
     const parsed = JSON.parse(text) as {
-      kinds: { kind: string; key: string; id: string; tombstone: string; version: string }[];
+      kinds: { kind: string; key: string; id: string; tombstone: string; version: string; releasedTable?: string }[];
     };
     this.core = core;
     this.descriptor = text;
@@ -818,7 +919,9 @@ class Operations {
       id: k.id,
       tombstone: k.tombstone,
       version: k.version,
+      released: typeof k.releasedTable === "string" && k.releasedTable !== "",
     }));
+    this.#keepsReleased = this.#kinds.some((k) => k.released);
     this.#byName = new Map(this.#kinds.map((k) => [k.name, k]));
     this.schemaEpoch = options.schemaEpoch ?? 0;
     this.walkCeiling = options.walkCeiling !== undefined && options.walkCeiling > 0 ? options.walkCeiling : DefaultWalkCeiling;
@@ -871,6 +974,7 @@ class Operations {
         }
         deletes ||= (edits[k.name]?.delete?.length ?? 0) > 0;
       }
+      this.#checkSaved(saved);
       if (deletes) {
         const { tree: composed } = yield* this.#compose(tx, r);
         const byKey = this.#index(composed);
@@ -889,6 +993,40 @@ class Operations {
           }
         }
       }
+      const moved = yield* tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
+      return { ref: moved, saved };
+    });
+  }
+
+  arrange(
+    actor: string,
+    ref: string,
+    version: number,
+    kind: string,
+    parent: string | null | undefined,
+    keys: readonly string[],
+  ): Body<SaveResult> {
+    actor = actorID(actor);
+    ref = id("id", ref);
+    this.#kind(kind);
+    // No parent is the rows of the kind that have none, which the core
+    // reads from an absent member.
+    const parentMember =
+      parent === undefined || parent === null || parent === "" ? "" : `,"parent":${JSON.stringify(id("id", parent))}`;
+    const wanted = JSON.stringify(keys.map((key) => id("entity key", key)));
+    return this.#transaction(function* (tx) {
+      const saved: Tree = {};
+      const r = yield* this.#readDraft(tx, ref, version);
+      const { tree: composed } = yield* this.#compose(tx, r);
+      const arranged = this.#run(
+        "arrange",
+        `{"descriptor":${this.descriptor},"tree":${treeJson(composed)},"kind":${JSON.stringify(kind)}${parentMember},"keys":${wanted}}`,
+      );
+      for (const row of arranged.get("rows") as JsonValue[]) {
+        const stored = yield* this.#writeRow(tx, kind, r, stringifyJson(row), false, actor);
+        (saved[kind] ??= []).push(stored);
+      }
+      // The ref's version moves even when every child was in order already.
       const moved = yield* tx.updateRef({ id: r.id, version: r.version, head: null, base: null, seal: false, actor });
       return { ref: moved, saved };
     });
@@ -1019,8 +1157,77 @@ class Operations {
         throw new NotTaggedError();
       }
       yield* this.#ensureSnapshot(tx, c);
-      return yield* tx.writeRelease({ root, commit: c.id, version, actor });
+      const before = yield* this.#releasedBefore(tx, root);
+      const release = yield* tx.writeRelease({ root, commit: c.id, version, actor });
+      yield* this.#writeReleased(tx, before, c);
+      return release;
     });
+  }
+
+  /**
+   * Reads the commit root's release names before a release moves it, null
+   * for a root never released, when a kind keeps a released table; the
+   * engine reads nothing otherwise.
+   */
+  *#releasedBefore(tx: Calls, root: string): Steps<string | null> {
+    if (!this.#keepsReleased) {
+      return null;
+    }
+    try {
+      return (yield* tx.readRelease(root)).commit;
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Rewrites the released tables' rows of a commit's root for a release
+   * that moved the root's pointer from before to commit.
+   */
+  *#writeReleased(tx: Calls, before: string | null, commit: Commit): Steps<void> {
+    if (!this.#keepsReleased) {
+      return;
+    }
+    // A first release, and a release of the commit already released, write
+    // the whole tree over whatever the tables hold of the root.
+    const replace = before === null || before === commit.id;
+    const from = replace ? {} : yield* this.#materialize(tx, before);
+    const to = yield* this.#materialize(tx, commit.id);
+    const changes = this.#diff(from, to);
+    for (const k of this.#kinds) {
+      if (!k.released) {
+        continue;
+      }
+      const upsert: string[] = [];
+      const deleted: string[] = [];
+      for (const change of changes) {
+        if (change.kind !== k.name) {
+          continue;
+        }
+        if (change.operation === "DELETE") {
+          deleted.push(change.entityKey);
+        } else if (change.row === undefined) {
+          throw new Error(`engine: the released ${k.name} ${change.entityKey} has no row`);
+        } else {
+          upsert.push(change.row);
+        }
+      }
+      if (!replace && upsert.length === 0 && deleted.length === 0) {
+        continue;
+      }
+      yield* tx.writeReleased(k.name, {
+        root: commit.root,
+        commit: commit.id,
+        // release refused an untagged commit before it came here.
+        sequence: commit.sequence!,
+        replace,
+        upsert,
+        delete: deleted,
+      });
+    }
   }
 
   released(root: string): Body<ReleasedResult> {
@@ -1067,6 +1274,34 @@ class Operations {
         return [];
       }
       return yield* tx.refCommits(r.id, r.head, this.walkCeiling);
+    });
+  }
+
+  entityHistory(root: string, kind: string, key: string): Body<EntityChange[]> {
+    root = id("id", root);
+    this.#kind(kind);
+    key = id("entity key", key);
+    return this.#transaction(function* (tx) {
+      const changes: EntityChange[] = [];
+      for (const line of yield* tx.primaryRefs(root)) {
+        if (line.head === null) {
+          continue;
+        }
+        const commits = yield* tx.refCommits(line.id, line.head, this.walkCeiling);
+        const patches = yield* tx.entityPatches(
+          commits.map((c) => c.id),
+          kind,
+          key,
+        );
+        const operations = new Map(patches.map((p) => [p.commit, p.operation]));
+        for (const commit of commits) {
+          const operation = operations.get(commit.id);
+          if (operation !== undefined) {
+            changes.push({ commit, operation });
+          }
+        }
+      }
+      return changes;
     });
   }
 
@@ -1345,6 +1580,22 @@ class Operations {
   }
 
   /** tree in the core's order: rows by their order column, then by entity key. */
+  /**
+   * Holds the rows a save wrote to the core's rules for a row, as a compose
+   * of the ref would later: an order key that is not one is the core's
+   * invalid_row now, and the save writes nothing, rather than a row that
+   * makes every later compose, arrange and commit of the ref fail. An
+   * entity saved twice is checked as its last row.
+   */
+  #checkSaved(saved: Tree): void {
+    if (Object.keys(saved).length === 0) return;
+    const tree: Tree = {};
+    for (const [kind, rows] of this.#index(saved)) {
+      tree[kind] = [...rows.values()];
+    }
+    this.#order(tree);
+  }
+
   #order(tree: Tree): Tree {
     const output = this.#run("compose", `{"descriptor":${this.descriptor},"base":${treeJson(tree)},"overlay":{}}`);
     return decodeTree(output.get("tree")!);

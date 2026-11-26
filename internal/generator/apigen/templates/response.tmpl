@@ -13,11 +13,23 @@ import (
 
 {{ if .HasFileDownloads -}}
 // FileDownload is what an implementation returns for a FileDownload result
-// (D81): the file's body, its filename, and headers beside it.
+// (D81, D141): the file's body, its filename, its media type and
+// validators when it names them, and headers beside them.
 type FileDownload = runtimeresponse.FileDownload
 
-// RespondFileDownload answers a FileDownload result: the file with
-// contentType and the Content-Disposition of its filename, or
+// FileSpec is what a FileDownload result's schema says of its answer: the
+// media types, the filename, the disposition, the Cache-Control and the
+// sandbox (D141).
+type FileSpec = runtimeresponse.FileSpec
+
+// RespondFile answers a FileDownload result as its spec says: the file, or
+// a 304 when the request's validators match the file's.
+func RespondFile(w http.ResponseWriter, r *http.Request, spec FileSpec, file *FileDownload) {
+	runtimeresponse.ServeFile(w, r, spec, file)
+}
+
+// RespondFileDownload answers a FileDownload result as an attachment: the
+// file with contentType and the Content-Disposition of its filename, or
 // defaultFilename when it names none.
 func RespondFileDownload(w http.ResponseWriter, r *http.Request, contentType, defaultFilename string, file *FileDownload) {
 	runtimeresponse.File(w, r, contentType, defaultFilename, file)

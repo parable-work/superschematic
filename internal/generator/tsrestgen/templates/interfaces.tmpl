@@ -8,7 +8,8 @@
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
 {{- if .HasDownloads }}
 // An operation whose result is a FileDownload (D81) returns the file, its
-// body and filename, which the router answers in place of the envelope.
+// body and filename, which the router answers in place of the envelope,
+// and may return its contentType, etag and lastModified (D141).
 {{- end }}
 {{- if .ImplementsPages }}
 // A @paginated operation (D60) takes the page asked for as args.page and

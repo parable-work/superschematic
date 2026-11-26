@@ -3,6 +3,7 @@ package graphdesc_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -238,8 +239,16 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 			t.Errorf("kind %s: descriptor columns %v, table columns %v", kind.Kind, described, created)
 			continue
 		}
+		checkReleasedTable(t, kind, tables, sqlTypes)
 		for column, class := range kind.Columns {
-			sqlType := sqlTypes[column]
+			// A string order column is collated bytewise (D137), and no
+			// other column is. The collation changes how the column
+			// sorts, not what Postgres renders, so the class reads the
+			// type without it.
+			sqlType, collated := strings.CutSuffix(sqlTypes[column], " "+sqlgen.OrderKeyCollation)
+			if orderKey := column == kind.Order && kind.OrderIsKey(); collated != orderKey {
+				t.Errorf("kind %s column %s: stored as %s; a string order column, and no other, is %s", kind.Kind, column, sqlTypes[column], sqlgen.OrderKeyCollation)
+			}
 			element := strings.TrimSuffix(strings.TrimSuffix(class, "[]"), "[]")
 			switch {
 			case strings.HasSuffix(class, "[][]"):
@@ -257,6 +266,51 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 				}
 			}
 		}
+	}
+}
+
+// checkReleasedTable holds a kind's released table (D139) to what a storage
+// adapter writes into it: a row id of its own, the kind's root and entity
+// key columns, the commit and the sequence of the release, and the kind's
+// content columns, the descriptor's columns less its role and excluded
+// ones, each stored as the kind's table stores it, a string order column's
+// collation (D137) included.
+func checkReleasedTable(t *testing.T, kind graphdesc.Kind, tables map[string]sqlgen.Table, memberTypes map[string]string) {
+	t.Helper()
+	if kind.ReleasedTable == "" {
+		return
+	}
+	released, ok := tables[kind.ReleasedTable]
+	if !ok {
+		t.Errorf("kind %s: no released table %s", kind.Kind, kind.ReleasedTable)
+		return
+	}
+	notContent := map[string]bool{kind.Key: true, kind.ID: true, kind.Ref: true, kind.Root: true, kind.Tombstone: true, kind.Version: true}
+	if kind.Author != "" {
+		notContent[kind.Author] = true
+	}
+	for _, column := range kind.Excluded {
+		notContent[column] = true
+	}
+	want := map[string]string{"id": memberTypes[kind.ID], kind.Root: memberTypes[kind.Root], kind.Key: memberTypes[kind.Key], "commit_id": memberTypes[kind.ID], "sequence": "BIGINT"}
+	for column := range kind.Columns {
+		if !notContent[column] {
+			want[column] = memberTypes[column]
+		}
+	}
+	got := map[string]string{}
+	for _, column := range released.Columns {
+		got[column.Name] = column.Type
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("kind %s: released table %s has columns %v, want %v", kind.Kind, kind.ReleasedTable, got, want)
+	}
+	unique := false
+	for _, index := range released.Indexes {
+		unique = unique || (index.Unique && reflect.DeepEqual(index.Columns, []string{kind.Root, kind.Key}))
+	}
+	if !unique {
+		t.Errorf("kind %s: released table %s has no unique index on (%s, %s), the slot a release writes", kind.Kind, kind.ReleasedTable, kind.Root, kind.Key)
 	}
 }
 

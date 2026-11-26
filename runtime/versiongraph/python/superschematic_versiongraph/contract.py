@@ -44,6 +44,10 @@ __all__ = [
     "TreeInput",
     "ContentHashOutput",
     "ValidateOutput",
+    "OrderKeysInput",
+    "OrderKeysOutput",
+    "ArrangeInput",
+    "ArrangeOutput",
     "OperationName",
     "ErrorCode",
     "ErrorBody",
@@ -165,11 +169,14 @@ class KindDescriptor(_KindDescriptorRequired, total=False):
     root: str
     """The column holding the graph root's key, which a storage adapter writes
     on every row. The core does not read it."""
+    releasedTable: str
+    """The table that holds the released tree's rows of the kind, which a
+    storage adapter rewrites at each release. The core does not read it."""
     author: str
     """The column naming who wrote the row; conflicts report it."""
     parent: ParentEdge
     order: str
-    """An integer column that orders siblings."""
+    """The column that orders siblings: an integer, or a string order key."""
     singleton: bool
     """At most one live row. Default false."""
     units: Dict[str, Unit]
@@ -368,7 +375,52 @@ class ValidateOutput(TypedDict):
     """Empty for a valid tree."""
 
 
-OperationName = Literal["compose", "merge", "diff", "content_hash", "validate"]
+class _OrderKeysInputRequired(TypedDict):
+    count: int
+    """How many keys to make, from 0 to 1000000."""
+
+
+class OrderKeysInput(_OrderKeysInputRequired, total=False):
+    """The input of order_keys. A bound that is absent or None is the start
+    or the end."""
+
+    before: str
+    """The key the new keys sort above."""
+    after: str
+    """The key the new keys sort below."""
+
+
+class OrderKeysOutput(TypedDict):
+    keys: List[str]
+    """The keys, lowest first: evenly spread, each as short as it can be."""
+
+
+class _ArrangeInputRequired(TypedDict):
+    descriptor: Descriptor
+    tree: Tree
+    kind: str
+    """A kind whose order is a string key."""
+    keys: List[str]
+    """The entity key of every live child of the parent, in the order wanted."""
+
+
+class ArrangeInput(_ArrangeInputRequired, total=False):
+    """The input of arrange: one parent's live children of a kind, in the
+    order wanted."""
+
+    parent: str
+    """The parent's entity key; absent or None for the rows that have no parent."""
+
+
+class ArrangeOutput(TypedDict):
+    rows: List[Row]
+    """The rows that need a new order key, each as an engine writes it, in
+    the order wanted."""
+
+
+OperationName = Literal[
+    "compose", "merge", "diff", "content_hash", "validate", "order_keys", "arrange"
+]
 """The core's operations, as the vectors and the C ABI (``vg_<op>``) name them."""
 
 ErrorCode = Literal[
@@ -381,6 +433,9 @@ ErrorCode = Literal[
     "order_out_of_range",
     "invalid_resolution",
     "unmatched_resolution",
+    "no_order_key",
+    "order_not_a_key",
+    "invalid_arrangement",
     "internal",
 ]
 

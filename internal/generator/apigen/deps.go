@@ -98,6 +98,12 @@ type DepsBucket struct {
 
 	// Field is the Deps field that holds the bucket.
 	Field string
+
+	// ContentAddressed is the Bucket service's contentAddressed (D142):
+	// Deps then holds a content bucket over it, which puts at most
+	// MaxBytes.
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // DepsCall is a Go SDK client in Deps.

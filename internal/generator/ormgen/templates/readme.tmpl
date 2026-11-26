@@ -18,7 +18,7 @@ Generated at: {{ .Timestamp }}
 - `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`{{ if .Rules.Preconditions }}, and `WithPreconditions`{{ end }}
 {{- end }}
 {{- range .Repositories }}
-- `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository
+- `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository{{ if .Released }}, read-only: the released rows of {{ .ReleasedOf }}{{ end }}
 {{- end }}
 {{- if .VersionGraphs }}
 {{- range .VersionGraphs }}
@@ -60,6 +60,14 @@ Tables that implement Mergeable expose `MergeInto`, which folds one row into
 another: it repoints every relation of the schema that references the row
 merged away, deletes the rows a unique index would then refuse, and deletes
 that row.
+{{- end }}
+{{- with .ReleasedRepositories }}
+
+The repository of a version graph member's released rows
+({{ range $i, $repo := . }}{{ if $i }}, {{ end }}`{{ $repo.TypeName }}`{{ end }}) is read-only: it exposes `GetOne`, `GetManyByIDs`,
+`FindOne`, `FindMany` and `FindPage` and no write, and has no `*Update`
+type. The graph's `Release` owns those rows and rewrites them at each
+release (D139); a raw SQL write of them (`Tx.Exec`) is not refused.
 {{- end }}
 
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`

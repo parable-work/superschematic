@@ -793,7 +793,7 @@ func TestTSWriterRoundTripsVersionGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"@versionGraph({ schemaEpoch: 1, snapshotEvery: 3 })",
+		"@versionGraph({ schemaEpoch: 1, snapshotEvery: 3, enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })",
 		`@graphMember({ graph: Recipe, order: "position" })`,
 		`@graphMember({ graph: Recipe, parent: { key: "stepKey", of: Step } })`,
 		`@graphMember({ graph: Recipe, parent: { key: "replyTo", of: Note } })`,

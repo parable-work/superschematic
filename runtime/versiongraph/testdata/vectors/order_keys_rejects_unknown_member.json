@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_rejects_unknown_member",
+  "op": "order_keys",
+  "input": {
+    "between": "V",
+    "count": 1
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "order_keys: unknown member \"between\""
+    }
+  }
+}

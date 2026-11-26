@@ -13,8 +13,8 @@ use serde_json::Value;
 use crate::canonical;
 use crate::core::{Change, Conflict, Core, Finding, Resolution, Tree};
 use crate::storage::{
-    Commit, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite, RowWrite,
-    SnapshotEntry, Storage, Tx,
+    Commit, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite, ReleasedWrite,
+    RowWrite, SnapshotEntry, Storage, Tx,
 };
 use crate::Error;
 
@@ -136,8 +136,21 @@ pub(crate) struct KindRoles {
     pub id: String,
     pub tombstone: String,
     pub version: String,
+    /// Set for a kind that keeps the released tree's rows in a table of its
+    /// own (D139), which a release rewrites.
+    #[serde(default, rename = "releasedTable")]
+    pub released_table: Option<String>,
     #[serde(default)]
     pub columns: BTreeMap<String, String>,
+}
+
+impl KindRoles {
+    /// Whether the kind keeps a released table.
+    fn keeps_released(&self) -> bool {
+        self.released_table
+            .as_deref()
+            .is_some_and(|table| !table.is_empty())
+    }
 }
 
 /// One kind's edits of a ref. `upsert` writes each row as the ref's row of
@@ -198,6 +211,14 @@ pub struct TreeResult {
     pub tree: Tree,
     pub content_hash: String,
     pub findings: Vec<Finding>,
+}
+
+/// One commit that changed an entity, and what it did to it: `operation`
+/// is `ADD`, `UPDATE` or `DELETE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityChange {
+    pub commit: Commit,
+    pub operation: String,
 }
 
 /// A root's release pointer and the tree of the commit it names.
@@ -436,6 +457,7 @@ impl Engine {
             }
             deletes = deletes || !kind_edits.delete.is_empty();
         }
+        self.check_saved(&saved)?;
         if deletes {
             let (composed, _, _) = self.compose_ref(tx, &r).await?;
             let by_key = self.index(&composed)?;
@@ -467,6 +489,31 @@ impl Engine {
             })
             .await?;
         Ok(SaveResult { ref_, saved })
+    }
+
+    /// Puts one parent's children of `kind` in the order `keys` gives, on a
+    /// change set at `version` (D137). `keys` are the entity keys of every
+    /// live child of `parent` in the ref's tree, in the order wanted; no
+    /// parent is the rows of the kind that have none. The longest run of
+    /// children already in order keeps its order keys, and each other child
+    /// takes a new one between its neighbors', written as the ref's row of
+    /// it. It returns the ref at its new version and the rows written, in
+    /// the order wanted. The kind's order is a string key: the core refuses
+    /// another with `order_not_a_key`, and a list that is not exactly the
+    /// parent's live children with `invalid_arrangement`. It refuses a
+    /// sealed ref, and a primary line with [`Error::PrimaryMergeOnly`].
+    pub async fn arrange(
+        &self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        kind: &str,
+        parent: Option<&str>,
+        keys: &[String],
+    ) -> Result<SaveResult, Error> {
+        self.on(&*self.storage)
+            .arrange(actor, ref_id, version, kind, parent, keys)
+            .await
     }
 
     /// Composes a change set at `version`, diffs it against its last commit
@@ -630,6 +677,14 @@ impl Engine {
     /// release of an earlier tagged commit, and the pointer's history is the
     /// release log. An untagged commit is [`Error::NotTagged`]; another
     /// root's is [`Error::RootMismatch`].
+    ///
+    /// For each kind that keeps a released table (D139) it rewrites the
+    /// root's rows there in the same transaction, from the diff between the
+    /// tree of the commit released before and this one's: an added or
+    /// changed entity is written with this commit and its sequence, and a
+    /// deleted one removed. A root's first release writes the whole tree,
+    /// and so does a release of the commit already released, which rebuilds
+    /// the root's rows.
     pub async fn release(
         &self,
         actor: &str,
@@ -671,11 +726,94 @@ impl Engine {
         self.on(&*self.storage).history(ref_id).await
     }
 
+    /// Lists the commits of `root`'s primary line that changed the entity
+    /// `key` of `kind`, newest first, each with what it did to the entity
+    /// (D138). It reads the line's commits and the entity's patches among
+    /// them, and no tree. A root with several primary lines lists each
+    /// line's in the order the lines were created; one with none, or an
+    /// entity no commit changed, lists nothing. It walks at most the
+    /// engine's ceiling of commits a line.
+    pub async fn entity_history(
+        &self,
+        root: &str,
+        kind: &str,
+        key: &str,
+    ) -> Result<Vec<EntityChange>, Error> {
+        self.on(&*self.storage)
+            .entity_history(root, kind, key)
+            .await
+    }
+
     /// Soft-deletes a ref at `version`, which frees its name.
     pub async fn discard(&self, actor: &str, ref_id: &str, version: i64) -> Result<(), Error> {
         self.on(&*self.storage)
             .discard(actor, ref_id, version)
             .await
+    }
+
+    /// Whether any kind keeps a released table.
+    fn keeps_released(&self) -> bool {
+        self.kinds.iter().any(KindRoles::keeps_released)
+    }
+
+    /// Reads the commit `root`'s release names before a release moves it,
+    /// `None` for a root never released, when a kind keeps a released table;
+    /// the engine reads nothing otherwise.
+    async fn released_before(&self, tx: &mut dyn Tx, root: &str) -> Result<Option<String>, Error> {
+        if !self.keeps_released() {
+            return Ok(None);
+        }
+        match tx.read_release(root).await {
+            Ok(held) => Ok(Some(held.commit)),
+            Err(Error::NotFound) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Rewrites the released tables' rows of a commit's root, for a release
+    /// that moved the root's pointer from `before` to `commit`, whose
+    /// sequence is `sequence`.
+    async fn write_released(
+        &self,
+        tx: &mut dyn Tx,
+        before: Option<&str>,
+        commit: &Commit,
+        sequence: i64,
+    ) -> Result<(), Error> {
+        if !self.keeps_released() {
+            return Ok(());
+        }
+        // A first release, and a release of the commit already released,
+        // write the whole tree over whatever the tables hold of the root.
+        let replace = before.is_none_or(|before| before == commit.id);
+        let from = if replace {
+            Tree::new()
+        } else {
+            self.materialize_tree(tx, before).await?
+        };
+        let to = self.materialize_tree(tx, Some(&commit.id)).await?;
+        let changes = self.core.diff(&from, &to)?;
+        for k in self.kinds.iter().filter(|k| k.keeps_released()) {
+            let mut write = ReleasedWrite {
+                root: commit.root.clone(),
+                commit: commit.id.clone(),
+                sequence,
+                replace,
+                ..ReleasedWrite::default()
+            };
+            for change in changes.iter().filter(|change| change.kind == k.name) {
+                if change.operation == "DELETE" {
+                    write.delete.push(change.entity_key.clone());
+                } else {
+                    write.upsert.push(change.row.clone().unwrap_or(Value::Null));
+                }
+            }
+            if !replace && write.delete.is_empty() && write.upsert.is_empty() {
+                continue;
+            }
+            tx.write_released(&k.name, write).await?;
+        }
+        Ok(())
     }
 
     /// Reads a ref. With `expected` set it locks the ref's row and refuses a
@@ -921,6 +1059,23 @@ impl Engine {
         let own = self.own_rows(tx, &r.id).await?;
         let (tree, findings) = self.core.compose(&base, &own)?;
         Ok((tree, findings, own))
+    }
+
+    /// Holds the rows a save wrote to the core's rules for a row, as a
+    /// compose of the ref would later: an order key that is not one is the
+    /// core's `invalid_row` now, and the save writes nothing, rather than a
+    /// row that makes every later compose, arrange and commit of the ref
+    /// fail. An entity saved twice is checked as its last row.
+    fn check_saved(&self, saved: &Tree) -> Result<(), Error> {
+        if saved.is_empty() {
+            return Ok(());
+        }
+        let tree: Tree = self
+            .index(saved)?
+            .into_iter()
+            .map(|(kind, rows)| (kind, rows.into_values().collect()))
+            .collect();
+        self.order(&tree).map(|_| ())
     }
 
     /// The tree in the core's order: rows by their order column, then by
@@ -1345,6 +1500,55 @@ impl<'a> EngineOn<'a> {
         finish(tx, result).await
     }
 
+    /// [`Engine::arrange`], over the borrowed storage.
+    pub async fn arrange(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        kind: &str,
+        parent: Option<&str>,
+        keys: &[String],
+    ) -> Result<SaveResult, Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        self.engine.kind(kind)?;
+        let parent = parent.map(|parent| id("parent", parent)).transpose()?;
+        let keys = keys
+            .iter()
+            .map(|key| id("entity key", key))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let r = self.engine.read_draft(tx, &ref_id, version).await?;
+            let (composed, _, _) = self.engine.compose_ref(tx, &r).await?;
+            let arranged = self
+                .engine
+                .core
+                .arrange(&composed, kind, parent.as_deref(), &keys)?;
+            let mut saved = Tree::new();
+            for row in arranged {
+                let stored = self
+                    .engine
+                    .write_row(tx, kind, &r, row, false, &actor)
+                    .await?;
+                saved.entry(kind.to_owned()).or_default().push(stored);
+            }
+            let ref_ = tx
+                .update_ref(RefUpdate {
+                    id: r.id.clone(),
+                    version: r.version,
+                    actor: actor.clone(),
+                    ..RefUpdate::default()
+                })
+                .await?;
+            Ok(SaveResult { ref_, saved })
+        }
+        .await;
+        finish(tx, result).await
+    }
+
     /// [`Engine::commit`], over the borrowed storage.
     pub async fn commit(
         self,
@@ -1494,17 +1698,23 @@ impl<'a> EngineOn<'a> {
             if c.root != root {
                 return Err(Error::RootMismatch);
             }
-            if c.sequence.is_none() {
+            let Some(sequence) = c.sequence else {
                 return Err(Error::NotTagged);
-            }
+            };
             self.engine.ensure_snapshot(tx, &c.id, c.snapshot).await?;
-            tx.write_release(ReleaseWrite {
-                root,
-                commit: c.id,
-                version,
-                actor,
-            })
-            .await
+            let before = self.engine.released_before(tx, &root).await?;
+            let release = tx
+                .write_release(ReleaseWrite {
+                    root,
+                    commit: c.id.clone(),
+                    version,
+                    actor,
+                })
+                .await?;
+            self.engine
+                .write_released(tx, before.as_deref(), &c, sequence)
+                .await?;
+            Ok(release)
         }
         .await;
         finish(tx, result).await
@@ -1585,6 +1795,46 @@ impl<'a> EngineOn<'a> {
                 None => Ok(Vec::new()),
                 Some(head) => tx.ref_commits(&r.id, head, self.engine.walk_ceiling).await,
             }
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::entity_history`], over the borrowed storage.
+    pub async fn entity_history(
+        self,
+        root: &str,
+        kind: &str,
+        key: &str,
+    ) -> Result<Vec<EntityChange>, Error> {
+        let root = id("root", root)?;
+        self.engine.kind(kind)?;
+        let key = id("entity key", key)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let mut changes = Vec::new();
+            for line in tx.primary_refs(&root).await? {
+                let Some(head) = &line.head else {
+                    continue;
+                };
+                let commits = tx
+                    .ref_commits(&line.id, head, self.engine.walk_ceiling)
+                    .await?;
+                let ids: Vec<String> = commits.iter().map(|c| c.id.clone()).collect();
+                let mut operations: HashMap<String, String> = tx
+                    .entity_patches(&ids, kind, &key)
+                    .await?
+                    .into_iter()
+                    .map(|p| (p.commit, p.operation))
+                    .collect();
+                for commit in commits {
+                    if let Some(operation) = operations.remove(&commit.id) {
+                        changes.push(EntityChange { commit, operation });
+                    }
+                }
+            }
+            Ok(changes)
         }
         .await;
         finish(tx, result).await

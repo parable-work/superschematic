@@ -7,7 +7,8 @@
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
 // An operation whose result is a FileDownload (D81) returns the file, its
-// body and filename, which the router answers in place of the envelope.
+// body and filename, which the router answers in place of the envelope,
+// and may return its contentType, etag and lastModified (D141).
 
 import type { FileDownload, OperationResult, RequestContext } from '@superschematic/http-runtime';
 import type {
@@ -58,7 +59,7 @@ export interface CartImplementation {
    * line's unit price.
    *
    * GET /api/carts/{cartId}/export
-   * Answers a file (text/csv; charset=utf-8): a FileDownload, its body and its filename, cart.csv when it names none.
+   * Answers a file (text/csv; charset=utf-8), attachment: a FileDownload, its body and its filename, cart.csv when it names none. An etag or a lastModified beside them answers a matching request 304.
    * Requires a principal holding one of: carts.read.
    */
   exportCart(args: ExportCartArgs, ctx: RequestContext): Promise<FileDownload>;

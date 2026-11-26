@@ -158,6 +158,19 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 			// are its dist/ (D103).
 			testpaths.BuildRulesPackage(t, bunPath, paths)
 		}
+		if len(tsOutput.VersionGraphs) > 0 {
+			// A graph's facade imports the version-graph package, whose
+			// declarations and wasm module are its dist/ (D19, D138): a
+			// test never builds it in place.
+			for _, file := range []string{"facade.d.ts", "superschematic_versiongraph.wasm"} {
+				if _, err := os.Stat(filepath.Join(paths.VersionGraphTypeScript, "dist", file)); err != nil {
+					requireOrSkipTSTooling(t, fmt.Sprintf("build %s (bun install && bun run build) for the version-graph facade: %v", paths.VersionGraphTypeScript, err))
+				}
+			}
+			if err := tsgen.SetVersionGraphLibSpec(tsOutput, paths, typesDir); err != nil {
+				t.Fatalf("set version-graph spec for %s: %v", tc.name, err)
+			}
+		}
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)
 		}

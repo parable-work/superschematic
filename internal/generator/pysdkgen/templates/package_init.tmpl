@@ -6,6 +6,7 @@ __version__ = "{{.Version}}"
 
 from .client import (
     ClientConfig,
+    ClientIdentity,
     DownloadedFile,
     EncryptedRequestOptions,
     FilePart,
@@ -20,6 +21,7 @@ from .errors import (
     APIError,
     AuthenticationError,
     AuthorizationError,
+    ClientTooOldError,
     NetworkError,
     RateLimitError,
     SDKError,
@@ -34,6 +36,7 @@ __all__ = [
     "__version__",
     "{{.SDKClassName}}",
     "ClientConfig",
+    "ClientIdentity",
     "PublicEncryptionKey",
     "ServiceCredential",
     "EncryptedRequestOptions",
@@ -44,6 +47,7 @@ __all__ = [
     "AuthenticationError",
     "AuthorizationError",
     "RateLimitError",
+    "ClientTooOldError",
     "ValidationError",
     "NetworkError",
 {{- if .HasPagedEndpoints}}

@@ -16,6 +16,7 @@ import (
 	types "example.com/acme/types/go/shop-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/clientversion"
 	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
@@ -64,6 +65,14 @@ type Config struct {
 	// each replica's requests in its own process, and while the store is
 	// unavailable each replica counts in process.
 	RateLimitStore memorystore.Store
+
+	// MinClientVersions is the oldest version of each client the API
+	// serves (D143): a request under /api whose X-Client-Version names a
+	// listed client at a lower version is answered 426 client_too_old.
+	// Optional: the zero value lists none and serves every client. An API
+	// whose config says clientVersions reads it from MIN_CLIENT_VERSIONS,
+	// which its EnvConfig holds.
+	MinClientVersions clientversion.Minimums
 
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
@@ -149,6 +158,9 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
+		// A client too old for the API is turned away before any other
+		// step (D143); with no minimum this adds no step.
+		r.Use(cfg.MinClientVersions.Middleware)
 		runtimerouting.Register(r, publicAPIRoutes(cfg))
 		runtimerouting.RegisterGroup(
 			r,

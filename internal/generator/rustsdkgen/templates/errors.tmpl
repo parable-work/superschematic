@@ -27,6 +27,15 @@ pub enum SDKError {
     Contract(String),
 }
 
+/// What a 426 `client_too_old` carries (D143): the client and the version
+/// the SDK sent, and the oldest version of the client the API serves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientTooOld {
+    pub client: String,
+    pub version: String,
+    pub minimum: String,
+}
+
 /// What an error response says beyond its status, message and code.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ApiProblem {
@@ -121,6 +130,33 @@ impl SDKError {
     /// sent them.
     pub fn validation_errors(&self) -> Option<&Value> {
         self.problem()?.validation_errors.as_ref()
+    }
+
+    /// What a 426 `client_too_old` says (D143): the API serves this client
+    /// from `minimum` on, and the SDK's `client` named an older version.
+    /// `None` for every other error. The application should tell its user
+    /// to upgrade.
+    pub fn client_too_old(&self) -> Option<ClientTooOld> {
+        let Self::Api { status_code: 426, code, problem, .. } = self else {
+            return None;
+        };
+        if code.as_deref() != Some("client_too_old") {
+            return None;
+        }
+        let detail = |key: &str| {
+            problem
+                .details
+                .as_ref()
+                .and_then(|details| details.get(key))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        Some(ClientTooOld {
+            client: detail("client"),
+            version: detail("version"),
+            minimum: detail("minimum"),
+        })
     }
 
     /// The server rejected the caller's credentials or permissions

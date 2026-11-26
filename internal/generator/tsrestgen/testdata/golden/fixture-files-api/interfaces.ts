@@ -7,7 +7,8 @@
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
 // An operation whose result is a FileDownload (D81) returns the file, its
-// body and filename, which the router answers in place of the envelope.
+// body and filename, which the router answers in place of the envelope,
+// and may return its contentType, etag and lastModified (D141).
 
 import type { FileDownload, OperationResult, RequestContext } from '@superschematic/http-runtime';
 import type {
@@ -38,6 +39,11 @@ export interface OriginalStatementArgs {
   accountId: IdentityUUID;
 }
 
+/** Arguments of statements.previewStatement (GET /api/statements/{accountId}/preview). */
+export interface PreviewStatementArgs {
+  accountId: IdentityUUID;
+}
+
 export interface StatementsImplementation {
   /**
    * Imports a statement's lines; the whole request is at most 1 MiB.
@@ -50,16 +56,24 @@ export interface StatementsImplementation {
    * The lines an account's statements held, as CSV.
    *
    * GET /api/statements/{accountId}/export
-   * Answers a file (text/csv; charset=utf-8): a FileDownload, its body and its filename, statement.csv when it names none.
+   * Answers a file (text/csv; charset=utf-8), attachment: a FileDownload, its body and its filename, statement.csv when it names none. An etag or a lastModified beside them answers a matching request 304.
    */
   exportStatement(args: ExportStatementArgs, ctx: RequestContext): Promise<FileDownload>;
   /**
    * The last statement an account imported, as it was sent and named.
    *
    * GET /api/statements/{accountId}/original
-   * Answers a file (application/octet-stream): a FileDownload, its body and its filename.
+   * Answers a file (application/octet-stream), attachment: a FileDownload, its body and its filename. An etag or a lastModified beside them answers a matching request 304.
    */
   originalStatement(args: OriginalStatementArgs, ctx: RequestContext): Promise<FileDownload>;
+  /**
+   * The last statement as a page shows it (D141): its text, or the page
+   * an OFX import renders, inline, revalidated and sandboxed.
+   *
+   * GET /api/statements/{accountId}/preview
+   * Answers a file (text/plain; charset=utf-8, or text/html; charset=utf-8), inline: a FileDownload, its body and its filename, statement.txt when it names none, and its contentType when it is not the first. An etag or a lastModified beside them answers a matching request 304.
+   */
+  previewStatement(args: PreviewStatementArgs, ctx: RequestContext): Promise<FileDownload>;
 }
 
 /** Every implementation the router needs, keyed by operation class. */

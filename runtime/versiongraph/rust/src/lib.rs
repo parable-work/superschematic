@@ -1,10 +1,12 @@
 //! The version-graph core: compose, merge, diff, hash and validate trees of
-//! versioned rows.
+//! versioned rows, and make the order keys that place a row among its
+//! siblings.
 //!
 //! Every operation takes one JSON document and returns one. A graph
 //! descriptor says, per entity kind, which row columns are the entity key,
 //! row id, ref, tombstone, version and author, how a kind nests under
 //! another, which column orders siblings, and how each content column merges.
+//! `order_keys` alone takes no descriptor.
 //! Rows are JSON objects keyed by column name, as Postgres `to_jsonb` renders
 //! them. The core is pure: no IO, clock or randomness. The Go binding calls it
 //! through the C ABI in `ffi` (the default `ffi` feature), and the browser
@@ -23,6 +25,7 @@ pub mod ffi;
 mod finding;
 mod hash;
 mod merge;
+mod order;
 mod tree;
 mod validate;
 
@@ -39,15 +42,19 @@ pub enum Op {
     Diff,
     ContentHash,
     Validate,
+    OrderKeys,
+    Arrange,
 }
 
 impl Op {
-    pub const ALL: [Op; 5] = [
+    pub const ALL: [Op; 7] = [
         Op::Compose,
         Op::Merge,
         Op::Diff,
         Op::ContentHash,
         Op::Validate,
+        Op::OrderKeys,
+        Op::Arrange,
     ];
 
     /// The operation's name, as the vectors spell it.
@@ -58,6 +65,8 @@ impl Op {
             Op::Diff => "diff",
             Op::ContentHash => "content_hash",
             Op::Validate => "validate",
+            Op::OrderKeys => "order_keys",
+            Op::Arrange => "arrange",
         }
     }
 
@@ -114,6 +123,21 @@ pub fn run(op: Op, input: &[u8]) -> Result<Value, Error> {
             let graph = descriptor::Graph::from_value(take(&mut m, "descriptor"))?;
             let tree = tree::parse(&graph, "tree", take(&mut m, "tree"))?;
             Ok(validate::validate(&graph, &tree))
+        }
+        Op::OrderKeys => {
+            let m = members(op, input, &["count"], &["before", "after"])?;
+            order::order_keys(m)
+        }
+        Op::Arrange => {
+            let mut m = members(
+                op,
+                input,
+                &["descriptor", "tree", "kind", "keys"],
+                &["parent"],
+            )?;
+            let graph = descriptor::Graph::from_value(take(&mut m, "descriptor"))?;
+            let tree = checked(&graph, "tree", take(&mut m, "tree"))?;
+            order::arrange(&graph, &tree, &m["kind"], m.get("parent"), &m["keys"])
         }
     }
 }

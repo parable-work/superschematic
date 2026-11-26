@@ -630,7 +630,9 @@ the method the files in `args.files`, beside `args.input` without the file
 fields. Its body cap is `@bodyLimit`, or without one the files' limits
 beside `bodyLimitBytes`. An operation whose result is a `FileDownload`
 returns `{ body, filename }`, and the router answers the file with its
-`Content-Type` and `Content-Disposition`.
+`Content-Type` and `Content-Disposition`, or 304 to a request that holds
+the `etag` or the `lastModified` it returns beside them
+([A file a page shows](/superschematic/guides/api-routes/#a-file-a-page-shows)).
 
 The router's options by operation, `bodyLimits`, `rateLimits`,
 `timeouts` and `manualRoutes`, are keyed by the operation's name, or by

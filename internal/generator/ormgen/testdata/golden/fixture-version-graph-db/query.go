@@ -928,6 +928,468 @@ type NoteHistoryOptions struct {
 	Offset int
 }
 
+// PartFields specifies which Part fields to select
+type PartFields struct {
+	Id           bool
+	ParentKey    bool
+	Rank         bool
+	Heading      bool
+	EntityKey    bool
+	DeletedOnRef bool
+	Version      bool
+	// Recipe selects the recipe_id foreign key field
+	Recipe bool
+	// RecipeNested selects fields for the related Recipe
+	RecipeNested RecipeFields
+	// Ref selects the ref_id foreign key field
+	Ref bool
+	// RefNested selects fields for the related RecipeRef
+	RefNested RecipeRefFields
+}
+
+// ToStringSlice converts PartFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f PartFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Recipe {
+		fields = append(fields, "recipe_id")
+	}
+	if f.ParentKey {
+		fields = append(fields, "parent_key")
+	}
+	if f.Rank {
+		fields = append(fields, "rank")
+	}
+	if f.Heading {
+		fields = append(fields, "heading")
+	}
+	if f.EntityKey {
+		fields = append(fields, "entity_key")
+	}
+	if f.Ref {
+		fields = append(fields, "ref_id")
+	}
+	if f.DeletedOnRef {
+		fields = append(fields, "deleted_on_ref")
+	}
+	if f.Version {
+		fields = append(fields, "_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f PartFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.RecipeNested.IsZero() {
+		return false
+	}
+	if !f.RefNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a PartFields with all fields selected
+func (PartFields) All() PartFields {
+	return PartFields{
+		Id:           true,
+		ParentKey:    true,
+		Rank:         true,
+		Heading:      true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+		Recipe:       true,
+		Ref:          true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (PartFields) Minimal() PartFields {
+	return PartFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (PartFields) WithoutAudit() PartFields {
+	return PartFields{
+		Id:           true,
+		ParentKey:    true,
+		Rank:         true,
+		Heading:      true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+	}
+}
+
+// PartOrderByField represents a field that can be used for ordering
+type PartOrderByField string
+
+const (
+	PartOrderById           PartOrderByField = "id"
+	PartOrderByParentKey    PartOrderByField = "parent_key"
+	PartOrderByRank         PartOrderByField = "rank"
+	PartOrderByHeading      PartOrderByField = "heading"
+	PartOrderByEntityKey    PartOrderByField = "entity_key"
+	PartOrderByDeletedOnRef PartOrderByField = "deleted_on_ref"
+	PartOrderByVersion      PartOrderByField = "_version"
+)
+
+// PartOrderBy specifies ordering for Part queries
+type PartOrderBy struct {
+	Field PartOrderByField
+	Desc  bool
+}
+
+// PartGetOptions contains options for Part GetOne operations
+type PartGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields PartFields
+}
+
+// PartFindOptions contains options for Part Find operations
+type PartFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields PartFields
+	// OrderBy specifies sorting order
+	OrderBy []PartOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// PartSortField is a field FindPage orders Part rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type PartSortField string
+
+const (
+	PartSortById        PartSortField = "id"
+	PartSortByParentKey PartSortField = "parentKey"
+	PartSortByRank      PartSortField = "rank"
+	PartSortByHeading   PartSortField = "heading"
+	PartSortByEntityKey PartSortField = "entityKey"
+)
+
+// PartSort is the order FindPage reads Part rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type PartSort struct {
+	Field PartSortField
+	Desc  bool
+}
+
+// ParsePartSort reads a sort as a page request writes it, "parentKey" or
+// "-parentKey": an error for a field Part cannot be sorted by.
+func ParsePartSort(text string) (PartSort, error) {
+	parsed := PartSort{Field: PartSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case PartSortById, PartSortByParentKey, PartSortByRank, PartSortByHeading, PartSortByEntityKey:
+		return parsed, nil
+	}
+	return PartSort{}, fmt.Errorf("orm: Part sorts by id, parentKey, rank, heading and entityKey, not %q", text)
+}
+
+// PartUniqueKey names a unique key of Part that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type PartUniqueKey string
+
+const (
+	PartUniqueById           PartUniqueKey = "id"
+	PartUniqueByEntityKeyRef PartUniqueKey = "entityKey,ref"
+)
+
+// PartPageKey is the position of a Part row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type PartPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *PartPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Part key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// partPageKeyOf is row's key: its id.
+func partPageKeyOf(row *types.Part) *PartPageKey {
+	key := &PartPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// PartPageOptions are FindPage's options.
+type PartPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields PartFields
+	// Sort is the order the rows are read in.
+	Sort PartSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *PartPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// PartPage is a page of Part rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type PartPage struct {
+	Rows []*types.Part
+	Next *PartPageKey
+}
+
+// PartHistoryOptions contains options for Part version history reads.
+type PartHistoryOptions struct {
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+}
+
+// PartReleasedFields specifies which PartReleased fields to select
+type PartReleasedFields struct {
+	Id        bool
+	EntityKey bool
+	ParentKey bool
+	Rank      bool
+	Heading   bool
+	Sequence  bool
+	// Recipe selects the recipe_id foreign key field
+	Recipe bool
+	// RecipeNested selects fields for the related Recipe
+	RecipeNested RecipeFields
+	// Commit selects the commit_id foreign key field
+	Commit bool
+	// CommitNested selects fields for the related RecipeCommit
+	CommitNested RecipeCommitFields
+}
+
+// ToStringSlice converts PartReleasedFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f PartReleasedFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Recipe {
+		fields = append(fields, "recipe_id")
+	}
+	if f.EntityKey {
+		fields = append(fields, "entity_key")
+	}
+	if f.ParentKey {
+		fields = append(fields, "parent_key")
+	}
+	if f.Rank {
+		fields = append(fields, "rank")
+	}
+	if f.Heading {
+		fields = append(fields, "heading")
+	}
+	if f.Commit {
+		fields = append(fields, "commit_id")
+	}
+	if f.Sequence {
+		fields = append(fields, "sequence")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f PartReleasedFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.RecipeNested.IsZero() {
+		return false
+	}
+	if !f.CommitNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a PartReleasedFields with all fields selected
+func (PartReleasedFields) All() PartReleasedFields {
+	return PartReleasedFields{
+		Id:        true,
+		EntityKey: true,
+		ParentKey: true,
+		Rank:      true,
+		Heading:   true,
+		Sequence:  true,
+		Recipe:    true,
+		Commit:    true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (PartReleasedFields) Minimal() PartReleasedFields {
+	return PartReleasedFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (PartReleasedFields) WithoutAudit() PartReleasedFields {
+	return PartReleasedFields{
+		Id:        true,
+		EntityKey: true,
+		ParentKey: true,
+		Rank:      true,
+		Heading:   true,
+		Sequence:  true,
+	}
+}
+
+// PartReleasedOrderByField represents a field that can be used for ordering
+type PartReleasedOrderByField string
+
+const (
+	PartReleasedOrderById        PartReleasedOrderByField = "id"
+	PartReleasedOrderByEntityKey PartReleasedOrderByField = "entity_key"
+	PartReleasedOrderByParentKey PartReleasedOrderByField = "parent_key"
+	PartReleasedOrderByRank      PartReleasedOrderByField = "rank"
+	PartReleasedOrderByHeading   PartReleasedOrderByField = "heading"
+	PartReleasedOrderBySequence  PartReleasedOrderByField = "sequence"
+)
+
+// PartReleasedOrderBy specifies ordering for PartReleased queries
+type PartReleasedOrderBy struct {
+	Field PartReleasedOrderByField
+	Desc  bool
+}
+
+// PartReleasedGetOptions contains options for PartReleased GetOne operations
+type PartReleasedGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields PartReleasedFields
+}
+
+// PartReleasedFindOptions contains options for PartReleased Find operations
+type PartReleasedFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields PartReleasedFields
+	// OrderBy specifies sorting order
+	OrderBy []PartReleasedOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// PartReleasedSortField is a field FindPage orders PartReleased rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type PartReleasedSortField string
+
+const (
+	PartReleasedSortById        PartReleasedSortField = "id"
+	PartReleasedSortByEntityKey PartReleasedSortField = "entityKey"
+	PartReleasedSortByParentKey PartReleasedSortField = "parentKey"
+	PartReleasedSortByRank      PartReleasedSortField = "rank"
+	PartReleasedSortByHeading   PartReleasedSortField = "heading"
+	PartReleasedSortBySequence  PartReleasedSortField = "sequence"
+)
+
+// PartReleasedSort is the order FindPage reads PartReleased rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type PartReleasedSort struct {
+	Field PartReleasedSortField
+	Desc  bool
+}
+
+// ParsePartReleasedSort reads a sort as a page request writes it, "entityKey" or
+// "-entityKey": an error for a field PartReleased cannot be sorted by.
+func ParsePartReleasedSort(text string) (PartReleasedSort, error) {
+	parsed := PartReleasedSort{Field: PartReleasedSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case PartReleasedSortById, PartReleasedSortByEntityKey, PartReleasedSortByParentKey, PartReleasedSortByRank, PartReleasedSortByHeading, PartReleasedSortBySequence:
+		return parsed, nil
+	}
+	return PartReleasedSort{}, fmt.Errorf("orm: PartReleased sorts by id, entityKey, parentKey, rank, heading and sequence, not %q", text)
+}
+
+// PartReleasedPageKey is the position of a PartReleased row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type PartReleasedPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *PartReleasedPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the PartReleased key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// partReleasedPageKeyOf is row's key: its id.
+func partReleasedPageKeyOf(row *types.PartReleased) *PartReleasedPageKey {
+	key := &PartReleasedPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// PartReleasedPageOptions are FindPage's options.
+type PartReleasedPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields PartReleasedFields
+	// Sort is the order the rows are read in.
+	Sort PartReleasedSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *PartReleasedPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// PartReleasedPage is a page of PartReleased rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type PartReleasedPage struct {
+	Rows []*types.PartReleased
+	Next *PartReleasedPageKey
+}
+
 // RecipeFields specifies which Recipe fields to select
 type RecipeFields struct {
 	Id        bool
@@ -4634,6 +5096,1012 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 	return conditions
 }
 
+// PartFilter provides filtering for Part queries
+type PartFilter struct {
+	Id           *UUIDFilter
+	ParentKey    *UUIDFilter
+	Rank         *StringFilter
+	Heading      *StringFilter
+	EntityKey    *UUIDFilter
+	DeletedOnRef *BoolFilter
+	Version      *Int64Filter
+	// RecipeID allows filtering by foreign key
+	RecipeID *UUIDFilter
+	// RefID allows filtering by foreign key
+	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []PartFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []PartFilter
+}
+
+// PartUpdate provides fields that can be updated
+type PartUpdate struct {
+	ParentKey        *types.IdentityUUID
+	ParentKeySetNull bool
+	Rank             *string
+	Heading          *string
+	EntityKey        *types.IdentityUUID
+	DeletedOnRef     *bool
+	// RecipeID allows updating the foreign key for recipe
+	RecipeID *types.IdentityUUID
+	// RefID allows updating the foreign key for ref
+	RefID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewPartSnapshotUpdate maps every mutable field from a complete
+// Part value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewPartSnapshotUpdate(input *types.Part) *PartUpdate {
+	update := &PartUpdate{}
+	if input == nil {
+		return update
+	}
+	if input.ParentKey == nil {
+		update.ParentKeySetNull = true
+	} else {
+		update.ParentKey = input.ParentKey
+	}
+	update.Rank = &input.Rank
+	update.Heading = &input.Heading
+	update.EntityKey = input.EntityKey
+	update.DeletedOnRef = &input.DeletedOnRef
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *PartUpdate) ApplyTo(row *types.Part) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.ParentKeySetNull {
+		row.ParentKey = nil
+	} else if u.ParentKey != nil {
+		row.ParentKey = u.ParentKey
+	}
+	if u.Rank != nil {
+		row.Rank = *u.Rank
+	}
+	if u.Heading != nil {
+		row.Heading = *u.Heading
+	}
+	if u.EntityKey != nil {
+		row.EntityKey = u.EntityKey
+	}
+	if u.DeletedOnRef != nil {
+		row.DeletedOnRef = *u.DeletedOnRef
+	}
+	if u.RecipeID != nil {
+		row.Recipe.Id = u.RecipeID
+	}
+	if u.RefID != nil {
+		row.Ref.Id = u.RefID
+	}
+}
+
+// PartFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func PartFilterConditions(filter *PartFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a PartFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *PartFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *PartFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `part.id IS NULL`)
+			} else {
+				conditions = append(conditions, `part.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.ParentKey != nil {
+		if f.ParentKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.parent_key = $%d`, paramNum))
+			*args = append(*args, f.ParentKey.Eq.ToUUID())
+		}
+		if f.ParentKey.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.parent_key IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.ParentKey.Ne.ToUUID())
+		}
+		if len(f.ParentKey.In) > 0 {
+			placeholders := make([]string, len(f.ParentKey.In))
+			for i, id := range f.ParentKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.parent_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ParentKey.NotIn) > 0 {
+			placeholders := make([]string, len(f.ParentKey.NotIn))
+			for i, id := range f.ParentKey.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.parent_key IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ParentKey.IsNull != nil {
+			if *f.ParentKey.IsNull {
+				conditions = append(conditions, `part.parent_key IS NULL`)
+			} else {
+				conditions = append(conditions, `part.parent_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.Rank != nil {
+		if f.Rank.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.rank = $%d`, paramNum))
+			*args = append(*args, *f.Rank.Eq)
+		}
+		if f.Rank.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.rank IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Rank.Ne)
+		}
+		if len(f.Rank.In) > 0 {
+			placeholders := make([]string, len(f.Rank.In))
+			for i, value := range f.Rank.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.rank IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Rank.NotIn) > 0 {
+			placeholders := make([]string, len(f.Rank.NotIn))
+			for i, value := range f.Rank.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.rank IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Rank.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.rank ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Rank.ILike+"%")
+		}
+		if f.Rank.IsNull != nil {
+			if *f.Rank.IsNull {
+				conditions = append(conditions, `part.rank IS NULL`)
+			} else {
+				conditions = append(conditions, `part.rank IS NOT NULL`)
+			}
+		}
+	}
+	if f.Heading != nil {
+		if f.Heading.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.heading = $%d`, paramNum))
+			*args = append(*args, *f.Heading.Eq)
+		}
+		if f.Heading.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.heading IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Heading.Ne)
+		}
+		if len(f.Heading.In) > 0 {
+			placeholders := make([]string, len(f.Heading.In))
+			for i, value := range f.Heading.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.heading IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Heading.NotIn) > 0 {
+			placeholders := make([]string, len(f.Heading.NotIn))
+			for i, value := range f.Heading.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.heading IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Heading.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.heading ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Heading.ILike+"%")
+		}
+		if f.Heading.IsNull != nil {
+			if *f.Heading.IsNull {
+				conditions = append(conditions, `part.heading IS NULL`)
+			} else {
+				conditions = append(conditions, `part.heading IS NOT NULL`)
+			}
+		}
+	}
+	if f.EntityKey != nil {
+		if f.EntityKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.entity_key = $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Eq.ToUUID())
+		}
+		if f.EntityKey.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.entity_key IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Ne.ToUUID())
+		}
+		if len(f.EntityKey.In) > 0 {
+			placeholders := make([]string, len(f.EntityKey.In))
+			for i, id := range f.EntityKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.entity_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.EntityKey.NotIn) > 0 {
+			placeholders := make([]string, len(f.EntityKey.NotIn))
+			for i, id := range f.EntityKey.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.entity_key IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKey.IsNull != nil {
+			if *f.EntityKey.IsNull {
+				conditions = append(conditions, `part.entity_key IS NULL`)
+			} else {
+				conditions = append(conditions, `part.entity_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.deleted_on_ref IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Ne)
+		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.DeletedOnRef.NotIn) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.NotIn))
+			for i, value := range f.DeletedOnRef.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.deleted_on_ref IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `part.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `part.deleted_on_ref IS NOT NULL`)
+			}
+		}
+	}
+	if f.Version != nil {
+		if f.Version.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version = $%d`, paramNum))
+			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
+		}
+		if f.Version.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version > $%d`, paramNum))
+			*args = append(*args, *f.Version.Gt)
+		}
+		if f.Version.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version >= $%d`, paramNum))
+			*args = append(*args, *f.Version.Gte)
+		}
+		if f.Version.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version < $%d`, paramNum))
+			*args = append(*args, *f.Version.Lt)
+		}
+		if f.Version.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version <= $%d`, paramNum))
+			*args = append(*args, *f.Version.Lte)
+		}
+		if f.Version.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version >= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part._version <= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `part._version IS NULL`)
+			} else {
+				conditions = append(conditions, `part._version IS NOT NULL`)
+			}
+		}
+	}
+	if f.RecipeID != nil {
+		if f.RecipeID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.recipe_id = $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Eq.ToUUID())
+		}
+		if f.RecipeID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.recipe_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Ne.ToUUID())
+		}
+		if len(f.RecipeID.In) > 0 {
+			placeholders := make([]string, len(f.RecipeID.In))
+			for i, id := range f.RecipeID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.recipe_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RecipeID.NotIn) > 0 {
+			placeholders := make([]string, len(f.RecipeID.NotIn))
+			for i, id := range f.RecipeID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.recipe_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RecipeID.IsNull != nil {
+			if *f.RecipeID.IsNull {
+				conditions = append(conditions, `part.recipe_id IS NULL`)
+			} else {
+				conditions = append(conditions, `part.recipe_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.RefID != nil {
+		if f.RefID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.ref_id = $%d`, paramNum))
+			*args = append(*args, f.RefID.Eq.ToUUID())
+		}
+		if f.RefID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part.ref_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.RefID.Ne.ToUUID())
+		}
+		if len(f.RefID.In) > 0 {
+			placeholders := make([]string, len(f.RefID.In))
+			for i, id := range f.RefID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part.ref_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RefID.NotIn) > 0 {
+			placeholders := make([]string, len(f.RefID.NotIn))
+			for i, id := range f.RefID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part.ref_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RefID.IsNull != nil {
+			if *f.RefID.IsNull {
+				conditions = append(conditions, `part.ref_id IS NULL`)
+			} else {
+				conditions = append(conditions, `part.ref_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`part.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`part.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// PartReleasedFilter provides filtering for PartReleased queries
+type PartReleasedFilter struct {
+	Id        *UUIDFilter
+	EntityKey *UUIDFilter
+	ParentKey *UUIDFilter
+	Rank      *StringFilter
+	Heading   *StringFilter
+	Sequence  *Int64Filter
+	// RecipeID allows filtering by foreign key
+	RecipeID *UUIDFilter
+	// CommitID allows filtering by foreign key
+	CommitID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Commit *RecipeCommitFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []PartReleasedFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []PartReleasedFilter
+}
+
+// PartReleasedFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func PartReleasedFilterConditions(filter *PartReleasedFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a PartReleasedFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *PartReleasedFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *PartReleasedFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `part_released.id IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.EntityKey != nil {
+		if f.EntityKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.entity_key = $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Eq.ToUUID())
+		}
+		if f.EntityKey.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.entity_key IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Ne.ToUUID())
+		}
+		if len(f.EntityKey.In) > 0 {
+			placeholders := make([]string, len(f.EntityKey.In))
+			for i, id := range f.EntityKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.entity_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.EntityKey.NotIn) > 0 {
+			placeholders := make([]string, len(f.EntityKey.NotIn))
+			for i, id := range f.EntityKey.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.entity_key IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKey.IsNull != nil {
+			if *f.EntityKey.IsNull {
+				conditions = append(conditions, `part_released.entity_key IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.entity_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.ParentKey != nil {
+		if f.ParentKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.parent_key = $%d`, paramNum))
+			*args = append(*args, f.ParentKey.Eq.ToUUID())
+		}
+		if f.ParentKey.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.parent_key IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.ParentKey.Ne.ToUUID())
+		}
+		if len(f.ParentKey.In) > 0 {
+			placeholders := make([]string, len(f.ParentKey.In))
+			for i, id := range f.ParentKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.parent_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ParentKey.NotIn) > 0 {
+			placeholders := make([]string, len(f.ParentKey.NotIn))
+			for i, id := range f.ParentKey.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.parent_key IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ParentKey.IsNull != nil {
+			if *f.ParentKey.IsNull {
+				conditions = append(conditions, `part_released.parent_key IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.parent_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.Rank != nil {
+		if f.Rank.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.rank = $%d`, paramNum))
+			*args = append(*args, *f.Rank.Eq)
+		}
+		if f.Rank.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.rank IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Rank.Ne)
+		}
+		if len(f.Rank.In) > 0 {
+			placeholders := make([]string, len(f.Rank.In))
+			for i, value := range f.Rank.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.rank IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Rank.NotIn) > 0 {
+			placeholders := make([]string, len(f.Rank.NotIn))
+			for i, value := range f.Rank.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.rank IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Rank.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.rank ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Rank.ILike+"%")
+		}
+		if f.Rank.IsNull != nil {
+			if *f.Rank.IsNull {
+				conditions = append(conditions, `part_released.rank IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.rank IS NOT NULL`)
+			}
+		}
+	}
+	if f.Heading != nil {
+		if f.Heading.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.heading = $%d`, paramNum))
+			*args = append(*args, *f.Heading.Eq)
+		}
+		if f.Heading.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.heading IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Heading.Ne)
+		}
+		if len(f.Heading.In) > 0 {
+			placeholders := make([]string, len(f.Heading.In))
+			for i, value := range f.Heading.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.heading IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Heading.NotIn) > 0 {
+			placeholders := make([]string, len(f.Heading.NotIn))
+			for i, value := range f.Heading.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.heading IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Heading.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.heading ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Heading.ILike+"%")
+		}
+		if f.Heading.IsNull != nil {
+			if *f.Heading.IsNull {
+				conditions = append(conditions, `part_released.heading IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.heading IS NOT NULL`)
+			}
+		}
+	}
+	if f.Sequence != nil {
+		if f.Sequence.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" = $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Eq)
+		}
+		if f.Sequence.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Ne)
+		}
+		if f.Sequence.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" > $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Gt)
+		}
+		if f.Sequence.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" >= $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Gte)
+		}
+		if f.Sequence.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" < $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Lt)
+		}
+		if f.Sequence.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" <= $%d`, paramNum))
+			*args = append(*args, *f.Sequence.Lte)
+		}
+		if f.Sequence.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" >= $%d`, paramNum))
+			*args = append(*args, f.Sequence.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" <= $%d`, paramNum))
+			*args = append(*args, f.Sequence.Between.Max)
+		}
+		if len(f.Sequence.In) > 0 {
+			placeholders := make([]string, len(f.Sequence.In))
+			for i, value := range f.Sequence.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released."sequence" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Sequence.NotIn) > 0 {
+			placeholders := make([]string, len(f.Sequence.NotIn))
+			for i, value := range f.Sequence.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released."sequence" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Sequence.IsNull != nil {
+			if *f.Sequence.IsNull {
+				conditions = append(conditions, `part_released."sequence" IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released."sequence" IS NOT NULL`)
+			}
+		}
+	}
+	if f.RecipeID != nil {
+		if f.RecipeID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.recipe_id = $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Eq.ToUUID())
+		}
+		if f.RecipeID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.recipe_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Ne.ToUUID())
+		}
+		if len(f.RecipeID.In) > 0 {
+			placeholders := make([]string, len(f.RecipeID.In))
+			for i, id := range f.RecipeID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.recipe_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RecipeID.NotIn) > 0 {
+			placeholders := make([]string, len(f.RecipeID.NotIn))
+			for i, id := range f.RecipeID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.recipe_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RecipeID.IsNull != nil {
+			if *f.RecipeID.IsNull {
+				conditions = append(conditions, `part_released.recipe_id IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.recipe_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.CommitID != nil {
+		if f.CommitID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.commit_id = $%d`, paramNum))
+			*args = append(*args, f.CommitID.Eq.ToUUID())
+		}
+		if f.CommitID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`part_released.commit_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.CommitID.Ne.ToUUID())
+		}
+		if len(f.CommitID.In) > 0 {
+			placeholders := make([]string, len(f.CommitID.In))
+			for i, id := range f.CommitID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`part_released.commit_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CommitID.NotIn) > 0 {
+			placeholders := make([]string, len(f.CommitID.NotIn))
+			for i, id := range f.CommitID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(part_released.commit_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CommitID.IsNull != nil {
+			if *f.CommitID.IsNull {
+				conditions = append(conditions, `part_released.commit_id IS NULL`)
+			} else {
+				conditions = append(conditions, `part_released.commit_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`part_released.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Commit != nil {
+		before := len(*args)
+		through := f.Commit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`part_released.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
 // RecipeFilter provides filtering for Recipe queries
 type RecipeFilter struct {
 	Id        *UUIDFilter
@@ -4649,6 +6117,12 @@ type RecipeFilter struct {
 	// ReferencedByNoteRecipe filters on the presence or absence of a
 	// Note whose recipe points at this row.
 	ReferencedByNoteRecipe *ReferencedByFilter
+	// ReferencedByPartRecipe filters on the presence or absence of a
+	// Part whose recipe points at this row.
+	ReferencedByPartRecipe *ReferencedByFilter
+	// ReferencedByPartReleasedRecipe filters on the presence or absence of a
+	// PartReleased whose recipe points at this row.
+	ReferencedByPartReleasedRecipe *ReferencedByFilter
 	// ReferencedByRecipeCommitRoot filters on the presence or absence of a
 	// RecipeCommit whose root points at this row.
 	ReferencedByRecipeCommitRoot *ReferencedByFilter
@@ -4942,6 +6416,22 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
+	if f.ReferencedByPartRecipe != nil {
+		probe := `SELECT 1 FROM part WHERE part.recipe_id = recipe.id`
+		if f.ReferencedByPartRecipe.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByPartReleasedRecipe != nil {
+		probe := `SELECT 1 FROM part_released WHERE part_released.recipe_id = recipe.id`
+		if f.ReferencedByPartReleasedRecipe.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
 	if f.ReferencedByRecipeCommitRoot != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.root_id = recipe.id`
 		if f.ReferencedByRecipeCommitRoot.Exists {
@@ -5056,6 +6546,9 @@ type RecipeCommitFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose parentCommit is null is not kept.
 	ParentCommit *RecipeCommitFilter
+	// ReferencedByPartReleasedCommit filters on the presence or absence of a
+	// PartReleased whose commit points at this row.
+	ReferencedByPartReleasedCommit *ReferencedByFilter
 	// ReferencedByRecipeCommitParentCommit filters on the presence or absence of a
 	// RecipeCommit whose parentCommit points at this row.
 	ReferencedByRecipeCommitParentCommit *ReferencedByFilter
@@ -5691,6 +7184,14 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 		}
 		conditions = append(conditions, fmt.Sprintf(`recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
 	}
+	if f.ReferencedByPartReleasedCommit != nil {
+		probe := `SELECT 1 FROM part_released WHERE part_released.commit_id = recipe_commit.id`
+		if f.ReferencedByPartReleasedCommit.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
 	if f.ReferencedByRecipeCommitParentCommit != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id`
 		if f.ReferencedByRecipeCommitParentCommit.Exists {
@@ -6276,6 +7777,9 @@ type RecipeRefFilter struct {
 	// ReferencedByNoteRef filters on the presence or absence of a
 	// Note whose ref points at this row.
 	ReferencedByNoteRef *ReferencedByFilter
+	// ReferencedByPartRef filters on the presence or absence of a
+	// Part whose ref points at this row.
+	ReferencedByPartRef *ReferencedByFilter
 	// ReferencedByRecipeCommitRef filters on the presence or absence of a
 	// RecipeCommit whose ref points at this row.
 	ReferencedByRecipeCommitRef *ReferencedByFilter
@@ -7038,6 +8542,14 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 	if f.ReferencedByNoteRef != nil {
 		probe := `SELECT 1 FROM note WHERE note.ref_id = recipe_ref.id`
 		if f.ReferencedByNoteRef.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByPartRef != nil {
+		probe := `SELECT 1 FROM part WHERE part.ref_id = recipe_ref.id`
+		if f.ReferencedByPartRef.Exists {
 			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))

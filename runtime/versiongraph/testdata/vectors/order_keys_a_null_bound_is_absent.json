@@ -1,0 +1,15 @@
+{
+  "name": "order_keys_a_null_bound_is_absent",
+  "op": "order_keys",
+  "input": {
+    "after": null,
+    "before": null,
+    "count": 2
+  },
+  "expect": {
+    "keys": [
+      "K",
+      "f"
+    ]
+  }
+}

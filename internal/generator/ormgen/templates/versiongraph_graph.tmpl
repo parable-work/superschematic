@@ -165,6 +165,13 @@ type {{ .Name }}Change struct {
 	Row       json.RawMessage
 }
 
+// {{ .Name }}EntityChange is one commit that changed an entity, and what it
+// did to it.
+type {{ .Name }}EntityChange struct {
+	Commit    *types.{{ .CommitType }}
+	Operation types.{{ .Name }}PatchOperation
+}
+
 // CreatePrimary creates a primary line of root: a ref with no parent.
 func (g *{{ .Name }}Graph) CreatePrimary(ctx context.Context, root {{ .UUIDGoType }}, name string) (*types.{{ .RefType }}, error) {
 	var result *types.{{ .RefType }}
@@ -221,6 +228,55 @@ func (g *{{ .Name }}Graph) Save(ctx context.Context, ref {{ .UUIDGoType }}, vers
 		return nil, err
 	}
 	return result, nil
+}
+
+// Arrange puts one parent's children of kind in the order keys gives, on a
+// change set at version. keys are the entity keys of every live child of
+// parent in the ref's tree, in the order wanted; a nil parent is none, the
+// rows of the kind that have no parent. The longest run of children already
+// in order keeps its order keys and each other child takes a new one, as
+// the ref's row of it, so a move writes the rows that moved and no others.
+// It returns the ref at its new _version and the rows written. The kind's
+// order is a string key: another is refused with the core's code
+// order_not_a_key, and a list that is not exactly the parent's live
+// children with invalid_arrangement. It refuses a sealed ref, and a primary
+// line with ErrPrimaryMergeOnly.
+func (g *{{ .Name }}Graph) Arrange(ctx context.Context, ref {{ .UUIDGoType }}, version int64, kind types.{{ .Name }}EntityKind, parent *{{ .UUIDGoType }}, keys []{{ .UUIDGoType }}) (*{{ .Name }}SaveResult, error) {
+	result := &{{ .Name }}SaveResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		parentKey := ""
+		if parent != nil {
+			parentKey = uuidText(*parent)
+		}
+		wanted := make([]string, len(keys))
+		for i, key := range keys {
+			wanted[i] = uuidText(key)
+		}
+		saved, err := e.Arrange(ctx, actor, uuidText(ref), version, string(kind), parentKey, wanted)
+		if err != nil {
+			return err
+		}
+		tree, err := g.tree(&engine.TreeResult{Tree: saved.Saved})
+		if err != nil {
+			return err
+		}
+		result.Saved = *tree
+		result.Ref, err = g.ref(ctx, tx, saved.Ref.ID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OrderKeys makes count order keys that sort strictly between before and
+// after, the start and the end when empty: evenly spread, each as short as
+// it can be. A row saved with one of them as its order reads between the
+// rows that hold the bounds. The version-graph core makes them, so every
+// language makes the same keys. It reads no database.
+func (g *{{ .Name }}Graph) OrderKeys(before, after string, count int) ([]string, error) {
+	return engine.OrderKeys(before, after, count)
 }
 
 // Commit composes a change set at version, diffs it against its last commit
@@ -427,6 +483,31 @@ func (g *{{ .Name }}Graph) History(ctx context.Context, ref {{ .UUIDGoType }}) (
 				return err
 			}
 			result = append(result, commit)
+		}
+		return nil
+	})
+	return result, err
+}
+
+// EntityHistory lists the commits of root's primary line that changed the
+// entity key of kind, newest first, each with what it did to the entity:
+// the commit that added it, each that updated it, one that deleted it. It
+// reads the line's commits and the entity's patches among them, and no
+// tree. An entity no commit changed, and a root with no primary line, list
+// nothing.
+func (g *{{ .Name }}Graph) EntityHistory(ctx context.Context, root {{ .UUIDGoType }}, kind types.{{ .Name }}EntityKind, key {{ .UUIDGoType }}) ([]{{ .Name }}EntityChange, error) {
+	var result []{{ .Name }}EntityChange
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		changes, err := e.EntityHistory(ctx, uuidText(root), string(kind), uuidText(key))
+		if err != nil {
+			return err
+		}
+		for _, change := range changes {
+			commit, err := g.commitRow(ctx, tx, change.Commit.ID)
+			if err != nil {
+				return err
+			}
+			result = append(result, {{ .Name }}EntityChange{Commit: commit, Operation: types.{{ .Name }}PatchOperation(change.Operation)})
 		}
 		return nil
 	})

@@ -1,5 +1,6 @@
 // The shared SQLite vectors (runtime/versiongraph/testdata/sqlite): the
-// layout's statements, a database the TypeScript adapter wrote, as SQL text,
+// layout's statements and the released table's, a database the TypeScript
+// adapter wrote, as SQL text,
 // and what that database reads back as. Every language's SQLite adapter is
 // held to them, so a file one adapter writes reads the same in another's.
 //
@@ -38,6 +39,8 @@ import {
   defaultTableName,
   SqliteAdapter,
   sqliteLayout,
+  sqliteReleasedLayout,
+  sqliteReleasedTable,
   sqliteTables,
   type SqliteClient,
   type SqliteValue,
@@ -45,7 +48,7 @@ import {
 
 const vectors = new URL("../../testdata/sqlite/", import.meta.url);
 
-/** layout.json: sqliteLayout() under the default names. */
+/** layout.json: sqliteLayout() and sqliteReleasedLayout() under the default names. */
 export const layoutFile = new URL("layout.json", vectors);
 
 /** typescript.sql: the database the script writes, as SQL text. */
@@ -179,7 +182,10 @@ const row = (columns: Record<string, unknown>): string => JSON.stringify(columns
  * descriptor whose utensil lacks its name: a primary line, a change set with
  * a utensil, a tagged merge and a release. Then with the fixture's, after
  * the utensil gained its name: a second change set that names it and adds
- * another, and a second tagged merge, which the release does not move to.
+ * another, and a second tagged merge, which the release does not move to;
+ * and, last, a part, whose order is a string key and whose kind keeps its
+ * released rows, committed and merged as a third tagged commit, which the
+ * release moves to, writing the part's released row.
  */
 export function writeDatabase(client: SqliteClient): void {
   withSeededIDs(() => {
@@ -260,7 +266,7 @@ export function writeDatabase(client: SqliteClient): void {
     today = h.commit(cook, today.id, today.version, { message: "today" }).ref;
     const served = merged(h.merge(cook, today.id, lunch.id, lunch.version, [], { message: "lunch", tag: true }));
     lunch = served.ref;
-    h.release(cook, bread, served.commit.id, 0);
+    const menuRelease = h.release(cook, bread, served.commit.id, 0);
 
     // After it: the fixture's descriptor, which declares the name.
     const gainedMenu = new SqliteAdapter(descriptor, { graph: "menu", clock });
@@ -270,7 +276,15 @@ export function writeDatabase(client: SqliteClient): void {
       utensil: { upsert: [row({ entity_key: "Knife", name: "Bread knife" }), row({ entity_key: "Board", name: "Bread board" })] },
     }).ref;
     dinner = i.commit(ann, dinner.id, dinner.version, { message: "dinner" }).ref;
-    merged(i.merge(ann, dinner.id, lunch.id, lunch.version, [], { message: "supper", tag: true }));
+    lunch = merged(i.merge(ann, dinner.id, lunch.id, lunch.version, [], { message: "supper", tag: true })).ref;
+    // A kind ordered by a string key, which keeps its released rows: the
+    // release that moves to its commit writes the part's released row.
+    dinner = i.save(ann, dinner.id, dinner.version, {
+      part: { upsert: [row({ entity_key: "Intro", rank: "V", heading: "Before you start" })] },
+    }).ref;
+    dinner = i.commit(ann, dinner.id, dinner.version, { message: "intro" }).ref;
+    const intro = merged(i.merge(ann, dinner.id, lunch.id, lunch.version, [], { message: "intro", tag: true }));
+    i.release(ann, bread, intro.commit.id, menuRelease.version);
   });
 }
 
@@ -301,19 +315,21 @@ function literal(value: SqliteValue | undefined, where: string): string {
 }
 
 /**
- * The database as SQL text: the layout's statements, then one INSERT per row
- * of each table, the tables in the layout's order and each table's rows by
- * primary key (id, or history_id in a history table) in byte order. One
- * statement per line, each ending in a semicolon.
+ * The database as SQL text: the layout's statements and the released
+ * table's, then one INSERT per row of each table, the tables in the layout's
+ * order with the released table last, and each table's rows by primary key
+ * (id, or history_id in a history table, or graph, kind, root_id and
+ * entity_key in the released table) in byte order. One statement per line,
+ * each ending in a semicolon.
  */
 export function dumpDatabase(client: SqliteClient): string {
-  const lines = sqliteLayout().map((statement) => statement + ";");
-  for (const local of sqliteTables) {
+  const lines = [...sqliteLayout(), ...sqliteReleasedLayout()].map((statement) => statement + ";");
+  for (const local of [...sqliteTables, sqliteReleasedTable]) {
     const name = defaultTableName(local);
     const columns = client
       .all("SELECT name FROM pragma_table_info(?1) ORDER BY cid", [name])
       .map((r) => r["name"] as string);
-    const key = local.endsWith("_history") ? "history_id" : "id";
+    const key = local === sqliteReleasedTable ? "graph, kind, root_id, entity_key" : local.endsWith("_history") ? "history_id" : "id";
     for (const r of client.all(`SELECT * FROM ${quote(name)} ORDER BY ${key}`)) {
       const values = columns.map((column) => literal(r[column], `${name}.${column}`));
       lines.push(`INSERT INTO ${quote(name)} (${columns.join(", ")}) VALUES (${values.join(", ")});`);
@@ -538,9 +554,9 @@ export function readVectors(client: SqliteClient): string {
   return pretty({ graphs: graphs.map((graph) => readGraph(client, graph)) }) + "\n";
 }
 
-/** layout.json's text: sqliteLayout() under the default names. */
+/** layout.json's text: sqliteLayout(), and sqliteReleasedLayout() as released, under the default names. */
 export function layoutText(): string {
-  return pretty({ statements: sqliteLayout() }) + "\n";
+  return pretty({ statements: sqliteLayout(), released: sqliteReleasedLayout() }) + "\n";
 }
 
 /** Rewrites the vectors: the layout, and the script's database and its reads, through clients open opens. */

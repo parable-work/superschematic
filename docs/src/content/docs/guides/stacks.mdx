@@ -322,6 +322,16 @@ sets it ([Service callers](/superschematic/guides/auth-and-permissions/#service-
 Rust API crate's `config::load_env_config()` read them too, through the
 HTTP runtimes' readers.
 
+An API whose config says `clientVersions: true` has one more field,
+`MIN_CLIENT_VERSIONS`, the oldest version of each client it serves
+([Client SDKs](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+It is optional, no edge derives it, and an environment sets it in the
+server's `env` as it sets an `@envVars` field:
+`env: { MIN_CLIENT_VERSIONS: "cli=0.5.0,desktop=2.1.0" }`. A server that
+serves several such APIs has the one field. `values-schema.json` lists
+it, not required, and the build refuses an `@envVars` field of that
+name on such an API.
+
 The API package also gets `deps.go`, with what the implementation is built
 from and the signature of its constructor:
 

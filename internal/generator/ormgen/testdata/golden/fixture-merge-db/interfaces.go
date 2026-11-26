@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyAddressRepositoryInterface is the reads of AddressRepositoryInterface (D150).
+type ReadOnlyAddressRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *AddressGetOptions) (*types.Address, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Address, error)
+	FindOne(ctx context.Context, filter *AddressFilter, opts *AddressFindOptions) (*types.Address, error)
+	FindMany(ctx context.Context, filter *AddressFilter, opts *AddressFindOptions) ([]*types.Address, int, error)
+	FindPage(ctx context.Context, filter *AddressFilter, opts *AddressPageOptions) (*AddressPage, error)
+}
+
 // AddressRepositoryInterface defines the contract for Address data access.
 type AddressRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *AddressGetOptions) (*types.Address, error)
@@ -28,6 +37,15 @@ type AddressRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *AddressFilter) (int, error)
 }
 
+// ReadOnlyBoardRepositoryInterface is the reads of BoardRepositoryInterface (D150).
+type ReadOnlyBoardRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *BoardGetOptions) (*types.Board, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Board, error)
+	FindOne(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) (*types.Board, error)
+	FindMany(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, int, error)
+	FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error)
+}
+
 // BoardRepositoryInterface defines the contract for Board data access.
 type BoardRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *BoardGetOptions) (*types.Board, error)
@@ -44,6 +62,15 @@ type BoardRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *BoardFilter, update *BoardUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *BoardFilter) (int, error)
+}
+
+// ReadOnlyCustomerRepositoryInterface is the reads of CustomerRepositoryInterface (D150).
+type ReadOnlyCustomerRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerGetOptions) (*types.Customer, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Customer, error)
+	FindOne(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) (*types.Customer, error)
+	FindMany(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) ([]*types.Customer, int, error)
+	FindPage(ctx context.Context, filter *CustomerFilter, opts *CustomerPageOptions) (*CustomerPage, error)
 }
 
 // CustomerRepositoryInterface defines the contract for Customer data access.
@@ -66,6 +93,15 @@ type CustomerRepositoryInterface interface {
 	Status() CustomerStatusOperations
 }
 
+// ReadOnlyCustomerProfileRepositoryInterface is the reads of CustomerProfileRepositoryInterface (D150).
+type ReadOnlyCustomerProfileRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerProfileGetOptions) (*types.CustomerProfile, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.CustomerProfile, error)
+	FindOne(ctx context.Context, filter *CustomerProfileFilter, opts *CustomerProfileFindOptions) (*types.CustomerProfile, error)
+	FindMany(ctx context.Context, filter *CustomerProfileFilter, opts *CustomerProfileFindOptions) ([]*types.CustomerProfile, int, error)
+	FindPage(ctx context.Context, filter *CustomerProfileFilter, opts *CustomerProfilePageOptions) (*CustomerProfilePage, error)
+}
+
 // CustomerProfileRepositoryInterface defines the contract for CustomerProfile data access.
 type CustomerProfileRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *CustomerProfileGetOptions) (*types.CustomerProfile, error)
@@ -82,6 +118,15 @@ type CustomerProfileRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *CustomerProfileFilter, update *CustomerProfileUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *CustomerProfileFilter) (int, error)
+}
+
+// ReadOnlyDocumentRepositoryInterface is the reads of DocumentRepositoryInterface (D150).
+type ReadOnlyDocumentRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *DocumentGetOptions) (*types.Document, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Document, error)
+	FindOne(ctx context.Context, filter *DocumentFilter, opts *DocumentFindOptions) (*types.Document, error)
+	FindMany(ctx context.Context, filter *DocumentFilter, opts *DocumentFindOptions) ([]*types.Document, int, error)
+	FindPage(ctx context.Context, filter *DocumentFilter, opts *DocumentPageOptions) (*DocumentPage, error)
 }
 
 // DocumentRepositoryInterface defines the contract for Document data access.
@@ -102,6 +147,15 @@ type DocumentRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *DocumentFilter) (int, error)
 }
 
+// ReadOnlyDocumentLabelRepositoryInterface is the reads of DocumentLabelRepositoryInterface (D150).
+type ReadOnlyDocumentLabelRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *DocumentLabelGetOptions) (*types.DocumentLabel, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.DocumentLabel, error)
+	FindOne(ctx context.Context, filter *DocumentLabelFilter, opts *DocumentLabelFindOptions) (*types.DocumentLabel, error)
+	FindMany(ctx context.Context, filter *DocumentLabelFilter, opts *DocumentLabelFindOptions) ([]*types.DocumentLabel, int, error)
+	FindPage(ctx context.Context, filter *DocumentLabelFilter, opts *DocumentLabelPageOptions) (*DocumentLabelPage, error)
+}
+
 // DocumentLabelRepositoryInterface defines the contract for DocumentLabel data access.
 type DocumentLabelRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *DocumentLabelGetOptions) (*types.DocumentLabel, error)
@@ -118,6 +172,15 @@ type DocumentLabelRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *DocumentLabelFilter, update *DocumentLabelUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *DocumentLabelFilter) (int, error)
+}
+
+// ReadOnlyLabelRepositoryInterface is the reads of LabelRepositoryInterface (D150).
+type ReadOnlyLabelRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelGetOptions) (*types.Label, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Label, error)
+	FindOne(ctx context.Context, filter *LabelFilter, opts *LabelFindOptions) (*types.Label, error)
+	FindMany(ctx context.Context, filter *LabelFilter, opts *LabelFindOptions) ([]*types.Label, int, error)
+	FindPage(ctx context.Context, filter *LabelFilter, opts *LabelPageOptions) (*LabelPage, error)
 }
 
 // LabelRepositoryInterface defines the contract for Label data access.
@@ -140,6 +203,15 @@ type LabelRepositoryInterface interface {
 	MergeInto(ctx context.Context, from, into types.IdentityUUID) (*MergeResult, error)
 }
 
+// ReadOnlyLabelCodeRepositoryInterface is the reads of LabelCodeRepositoryInterface (D150).
+type ReadOnlyLabelCodeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelCodeGetOptions) (*types.LabelCode, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelCode, error)
+	FindOne(ctx context.Context, filter *LabelCodeFilter, opts *LabelCodeFindOptions) (*types.LabelCode, error)
+	FindMany(ctx context.Context, filter *LabelCodeFilter, opts *LabelCodeFindOptions) ([]*types.LabelCode, int, error)
+	FindPage(ctx context.Context, filter *LabelCodeFilter, opts *LabelCodePageOptions) (*LabelCodePage, error)
+}
+
 // LabelCodeRepositoryInterface defines the contract for LabelCode data access.
 type LabelCodeRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelCodeGetOptions) (*types.LabelCode, error)
@@ -156,6 +228,15 @@ type LabelCodeRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *LabelCodeFilter, update *LabelCodeUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *LabelCodeFilter) (int, error)
+}
+
+// ReadOnlyLabelNoteRepositoryInterface is the reads of LabelNoteRepositoryInterface (D150).
+type ReadOnlyLabelNoteRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelNoteGetOptions) (*types.LabelNote, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelNote, error)
+	FindOne(ctx context.Context, filter *LabelNoteFilter, opts *LabelNoteFindOptions) (*types.LabelNote, error)
+	FindMany(ctx context.Context, filter *LabelNoteFilter, opts *LabelNoteFindOptions) ([]*types.LabelNote, int, error)
+	FindPage(ctx context.Context, filter *LabelNoteFilter, opts *LabelNotePageOptions) (*LabelNotePage, error)
 }
 
 // LabelNoteRepositoryInterface defines the contract for LabelNote data access.
@@ -176,6 +257,15 @@ type LabelNoteRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *LabelNoteFilter) (int, error)
 }
 
+// ReadOnlyLabelPairRepositoryInterface is the reads of LabelPairRepositoryInterface (D150).
+type ReadOnlyLabelPairRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelPairGetOptions) (*types.LabelPair, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelPair, error)
+	FindOne(ctx context.Context, filter *LabelPairFilter, opts *LabelPairFindOptions) (*types.LabelPair, error)
+	FindMany(ctx context.Context, filter *LabelPairFilter, opts *LabelPairFindOptions) ([]*types.LabelPair, int, error)
+	FindPage(ctx context.Context, filter *LabelPairFilter, opts *LabelPairPageOptions) (*LabelPairPage, error)
+}
+
 // LabelPairRepositoryInterface defines the contract for LabelPair data access.
 type LabelPairRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelPairGetOptions) (*types.LabelPair, error)
@@ -192,6 +282,15 @@ type LabelPairRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *LabelPairFilter, update *LabelPairUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *LabelPairFilter) (int, error)
+}
+
+// ReadOnlyLabelSlotRepositoryInterface is the reads of LabelSlotRepositoryInterface (D150).
+type ReadOnlyLabelSlotRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *LabelSlotGetOptions) (*types.LabelSlot, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelSlot, error)
+	FindOne(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotFindOptions) (*types.LabelSlot, error)
+	FindMany(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotFindOptions) ([]*types.LabelSlot, int, error)
+	FindPage(ctx context.Context, filter *LabelSlotFilter, opts *LabelSlotPageOptions) (*LabelSlotPage, error)
 }
 
 // LabelSlotRepositoryInterface defines the contract for LabelSlot data access.
@@ -212,6 +311,15 @@ type LabelSlotRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *LabelSlotFilter) (int, error)
 }
 
+// ReadOnlyPurchaseRepositoryInterface is the reads of PurchaseRepositoryInterface (D150).
+type ReadOnlyPurchaseRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *PurchaseGetOptions) (*types.Purchase, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Purchase, error)
+	FindOne(ctx context.Context, filter *PurchaseFilter, opts *PurchaseFindOptions) (*types.Purchase, error)
+	FindMany(ctx context.Context, filter *PurchaseFilter, opts *PurchaseFindOptions) ([]*types.Purchase, int, error)
+	FindPage(ctx context.Context, filter *PurchaseFilter, opts *PurchasePageOptions) (*PurchasePage, error)
+}
+
 // PurchaseRepositoryInterface defines the contract for Purchase data access.
 type PurchaseRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *PurchaseGetOptions) (*types.Purchase, error)
@@ -228,6 +336,15 @@ type PurchaseRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *PurchaseFilter, update *PurchaseUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *PurchaseFilter) (int, error)
+}
+
+// ReadOnlySubscriptionRepositoryInterface is the reads of SubscriptionRepositoryInterface (D150).
+type ReadOnlySubscriptionRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *SubscriptionGetOptions) (*types.Subscription, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Subscription, error)
+	FindOne(ctx context.Context, filter *SubscriptionFilter, opts *SubscriptionFindOptions) (*types.Subscription, error)
+	FindMany(ctx context.Context, filter *SubscriptionFilter, opts *SubscriptionFindOptions) ([]*types.Subscription, int, error)
+	FindPage(ctx context.Context, filter *SubscriptionFilter, opts *SubscriptionPageOptions) (*SubscriptionPage, error)
 }
 
 // SubscriptionRepositoryInterface defines the contract for Subscription data access.
@@ -249,25 +366,84 @@ type SubscriptionRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// ReadOnlyDatabaseInterface is the reads of a database (D150): each
+// repository's reads, the raw reads and a read-only transaction. It has no
+// write, so a write through it does not compile.
+type ReadOnlyDatabaseInterface interface {
+	GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
+	GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface
+	GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface
+	GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface
+	GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface
+	GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface
+	GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface
+	GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface
+	GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface
+	GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface
+	GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	Ping(ctx context.Context) error
+}
+
+// ReadOnlyTxInterface is the reads of a transaction (D150): each
+// repository's reads and the raw read.
+type ReadOnlyTxInterface interface {
+	GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
+	GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface
+	GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface
+	GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface
+	GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface
+	GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface
+	GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface
+	GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface
+	GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface
+	GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface
+	GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
+	ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error
+	HasReadReplica() bool
+	ReadReplica() DatabaseInterface
+	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
 	GetAddressRepository() AddressRepositoryInterface
+	GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface
 	GetBoardRepository() BoardRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
 	GetCustomerRepository() CustomerRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
 	GetCustomerProfileRepository() CustomerProfileRepositoryInterface
+	GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface
 	GetDocumentRepository() DocumentRepositoryInterface
+	GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface
 	GetDocumentLabelRepository() DocumentLabelRepositoryInterface
+	GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface
 	GetLabelRepository() LabelRepositoryInterface
+	GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface
 	GetLabelCodeRepository() LabelCodeRepositoryInterface
+	GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface
 	GetLabelNoteRepository() LabelNoteRepositoryInterface
+	GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface
 	GetLabelPairRepository() LabelPairRepositoryInterface
+	GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface
 	GetLabelSlotRepository() LabelSlotRepositoryInterface
+	GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface
 	GetPurchaseRepository() PurchaseRepositoryInterface
+	GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface
 	GetSubscriptionRepository() SubscriptionRepositoryInterface
+	GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -276,18 +452,31 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetAddressRepository() AddressRepositoryInterface
+	GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface
 	GetBoardRepository() BoardRepositoryInterface
+	GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface
 	GetCustomerRepository() CustomerRepositoryInterface
+	GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface
 	GetCustomerProfileRepository() CustomerProfileRepositoryInterface
+	GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface
 	GetDocumentRepository() DocumentRepositoryInterface
+	GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface
 	GetDocumentLabelRepository() DocumentLabelRepositoryInterface
+	GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface
 	GetLabelRepository() LabelRepositoryInterface
+	GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface
 	GetLabelCodeRepository() LabelCodeRepositoryInterface
+	GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface
 	GetLabelNoteRepository() LabelNoteRepositoryInterface
+	GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface
 	GetLabelPairRepository() LabelPairRepositoryInterface
+	GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface
 	GetLabelSlotRepository() LabelSlotRepositoryInterface
+	GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface
 	GetPurchaseRepository() PurchaseRepositoryInterface
+	GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface
 	GetSubscriptionRepository() SubscriptionRepositoryInterface
+	GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -369,9 +558,30 @@ func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(
 	return fn(db.tx)
 }
 
+// ReadOnlyTransaction executes the callback with a deterministic no-op
+// transaction.
+func (db *NoOpDatabase) ReadOnlyTransaction(_ context.Context, fn func(ReadOnlyTxInterface) error) error {
+	return fn(db.tx)
+}
+
 // Transaction executes the callback with the same no-op transaction.
 func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(tx)
+}
+
+// HasReadReplica is false for no-op database.
+func (db *NoOpDatabase) HasReadReplica() bool {
+	return false
+}
+
+// ReadReplica returns the no-op database itself.
+func (db *NoOpDatabase) ReadReplica() DatabaseInterface {
+	return db
+}
+
+// ReadOnly returns the no-op database's reads.
+func (db *NoOpDatabase) ReadOnly() ReadOnlyDatabaseInterface {
+	return db
 }
 
 // Ping always succeeds for no-op database.
@@ -381,6 +591,16 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+
+// Query returns no rows for no-op database.
+func (db *NoOpDatabase) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// QueryRow returns a row whose Scan is pgx.ErrNoRows for no-op database.
+func (db *NoOpDatabase) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return noOpRow{}
+}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -402,11 +622,24 @@ func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
+// noOpRow is a row a read did not find.
+type noOpRow struct{}
+
+func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
 func (db *NoOpDatabase) GetAddressRepository() AddressRepositoryInterface {
 	return db.Address
 }
 
+func (db *NoOpDatabase) GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface {
+	return db.Address
+}
+
 func (tx *NoOpTx) GetAddressRepository() AddressRepositoryInterface {
+	return tx.Address
+}
+
+func (tx *NoOpTx) GetAddressReadOnlyRepository() ReadOnlyAddressRepositoryInterface {
 	return tx.Address
 }
 
@@ -480,7 +713,15 @@ func (db *NoOpDatabase) GetBoardRepository() BoardRepositoryInterface {
 	return db.Board
 }
 
+func (db *NoOpDatabase) GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface {
+	return db.Board
+}
+
 func (tx *NoOpTx) GetBoardRepository() BoardRepositoryInterface {
+	return tx.Board
+}
+
+func (tx *NoOpTx) GetBoardReadOnlyRepository() ReadOnlyBoardRepositoryInterface {
 	return tx.Board
 }
 
@@ -554,7 +795,15 @@ func (db *NoOpDatabase) GetCustomerRepository() CustomerRepositoryInterface {
 	return db.Customer
 }
 
+func (db *NoOpDatabase) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
+	return db.Customer
+}
+
 func (tx *NoOpTx) GetCustomerRepository() CustomerRepositoryInterface {
+	return tx.Customer
+}
+
+func (tx *NoOpTx) GetCustomerReadOnlyRepository() ReadOnlyCustomerRepositoryInterface {
 	return tx.Customer
 }
 
@@ -647,7 +896,15 @@ func (db *NoOpDatabase) GetCustomerProfileRepository() CustomerProfileRepository
 	return db.CustomerProfile
 }
 
+func (db *NoOpDatabase) GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface {
+	return db.CustomerProfile
+}
+
 func (tx *NoOpTx) GetCustomerProfileRepository() CustomerProfileRepositoryInterface {
+	return tx.CustomerProfile
+}
+
+func (tx *NoOpTx) GetCustomerProfileReadOnlyRepository() ReadOnlyCustomerProfileRepositoryInterface {
 	return tx.CustomerProfile
 }
 
@@ -721,7 +978,15 @@ func (db *NoOpDatabase) GetDocumentRepository() DocumentRepositoryInterface {
 	return db.Document
 }
 
+func (db *NoOpDatabase) GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface {
+	return db.Document
+}
+
 func (tx *NoOpTx) GetDocumentRepository() DocumentRepositoryInterface {
+	return tx.Document
+}
+
+func (tx *NoOpTx) GetDocumentReadOnlyRepository() ReadOnlyDocumentRepositoryInterface {
 	return tx.Document
 }
 
@@ -795,7 +1060,15 @@ func (db *NoOpDatabase) GetDocumentLabelRepository() DocumentLabelRepositoryInte
 	return db.DocumentLabel
 }
 
+func (db *NoOpDatabase) GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface {
+	return db.DocumentLabel
+}
+
 func (tx *NoOpTx) GetDocumentLabelRepository() DocumentLabelRepositoryInterface {
+	return tx.DocumentLabel
+}
+
+func (tx *NoOpTx) GetDocumentLabelReadOnlyRepository() ReadOnlyDocumentLabelRepositoryInterface {
 	return tx.DocumentLabel
 }
 
@@ -869,7 +1142,15 @@ func (db *NoOpDatabase) GetLabelRepository() LabelRepositoryInterface {
 	return db.Label
 }
 
+func (db *NoOpDatabase) GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface {
+	return db.Label
+}
+
 func (tx *NoOpTx) GetLabelRepository() LabelRepositoryInterface {
+	return tx.Label
+}
+
+func (tx *NoOpTx) GetLabelReadOnlyRepository() ReadOnlyLabelRepositoryInterface {
 	return tx.Label
 }
 
@@ -951,7 +1232,15 @@ func (db *NoOpDatabase) GetLabelCodeRepository() LabelCodeRepositoryInterface {
 	return db.LabelCode
 }
 
+func (db *NoOpDatabase) GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface {
+	return db.LabelCode
+}
+
 func (tx *NoOpTx) GetLabelCodeRepository() LabelCodeRepositoryInterface {
+	return tx.LabelCode
+}
+
+func (tx *NoOpTx) GetLabelCodeReadOnlyRepository() ReadOnlyLabelCodeRepositoryInterface {
 	return tx.LabelCode
 }
 
@@ -1025,7 +1314,15 @@ func (db *NoOpDatabase) GetLabelNoteRepository() LabelNoteRepositoryInterface {
 	return db.LabelNote
 }
 
+func (db *NoOpDatabase) GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface {
+	return db.LabelNote
+}
+
 func (tx *NoOpTx) GetLabelNoteRepository() LabelNoteRepositoryInterface {
+	return tx.LabelNote
+}
+
+func (tx *NoOpTx) GetLabelNoteReadOnlyRepository() ReadOnlyLabelNoteRepositoryInterface {
 	return tx.LabelNote
 }
 
@@ -1099,7 +1396,15 @@ func (db *NoOpDatabase) GetLabelPairRepository() LabelPairRepositoryInterface {
 	return db.LabelPair
 }
 
+func (db *NoOpDatabase) GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface {
+	return db.LabelPair
+}
+
 func (tx *NoOpTx) GetLabelPairRepository() LabelPairRepositoryInterface {
+	return tx.LabelPair
+}
+
+func (tx *NoOpTx) GetLabelPairReadOnlyRepository() ReadOnlyLabelPairRepositoryInterface {
 	return tx.LabelPair
 }
 
@@ -1173,7 +1478,15 @@ func (db *NoOpDatabase) GetLabelSlotRepository() LabelSlotRepositoryInterface {
 	return db.LabelSlot
 }
 
+func (db *NoOpDatabase) GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface {
+	return db.LabelSlot
+}
+
 func (tx *NoOpTx) GetLabelSlotRepository() LabelSlotRepositoryInterface {
+	return tx.LabelSlot
+}
+
+func (tx *NoOpTx) GetLabelSlotReadOnlyRepository() ReadOnlyLabelSlotRepositoryInterface {
 	return tx.LabelSlot
 }
 
@@ -1247,7 +1560,15 @@ func (db *NoOpDatabase) GetPurchaseRepository() PurchaseRepositoryInterface {
 	return db.Purchase
 }
 
+func (db *NoOpDatabase) GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface {
+	return db.Purchase
+}
+
 func (tx *NoOpTx) GetPurchaseRepository() PurchaseRepositoryInterface {
+	return tx.Purchase
+}
+
+func (tx *NoOpTx) GetPurchaseReadOnlyRepository() ReadOnlyPurchaseRepositoryInterface {
 	return tx.Purchase
 }
 
@@ -1321,7 +1642,15 @@ func (db *NoOpDatabase) GetSubscriptionRepository() SubscriptionRepositoryInterf
 	return db.Subscription
 }
 
+func (db *NoOpDatabase) GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface {
+	return db.Subscription
+}
+
 func (tx *NoOpTx) GetSubscriptionRepository() SubscriptionRepositoryInterface {
+	return tx.Subscription
+}
+
+func (tx *NoOpTx) GetSubscriptionReadOnlyRepository() ReadOnlySubscriptionRepositoryInterface {
 	return tx.Subscription
 }
 
@@ -1396,34 +1725,64 @@ func (r *NoOpSubscriptionRepository) HardDeleteOne(_ context.Context, _ types.Id
 }
 
 var (
-	_ DatabaseInterface                  = (*Database)(nil)
-	_ DatabaseInterface                  = (*NoOpDatabase)(nil)
-	_ TxInterface                        = (*Tx)(nil)
-	_ TxInterface                        = (*NoOpTx)(nil)
-	_ AddressRepositoryInterface         = (*AddressRepository)(nil)
-	_ AddressRepositoryInterface         = (*NoOpAddressRepository)(nil)
-	_ BoardRepositoryInterface           = (*BoardRepository)(nil)
-	_ BoardRepositoryInterface           = (*NoOpBoardRepository)(nil)
-	_ CustomerRepositoryInterface        = (*CustomerRepository)(nil)
-	_ CustomerRepositoryInterface        = (*NoOpCustomerRepository)(nil)
-	_ CustomerProfileRepositoryInterface = (*CustomerProfileRepository)(nil)
-	_ CustomerProfileRepositoryInterface = (*NoOpCustomerProfileRepository)(nil)
-	_ DocumentRepositoryInterface        = (*DocumentRepository)(nil)
-	_ DocumentRepositoryInterface        = (*NoOpDocumentRepository)(nil)
-	_ DocumentLabelRepositoryInterface   = (*DocumentLabelRepository)(nil)
-	_ DocumentLabelRepositoryInterface   = (*NoOpDocumentLabelRepository)(nil)
-	_ LabelRepositoryInterface           = (*LabelRepository)(nil)
-	_ LabelRepositoryInterface           = (*NoOpLabelRepository)(nil)
-	_ LabelCodeRepositoryInterface       = (*LabelCodeRepository)(nil)
-	_ LabelCodeRepositoryInterface       = (*NoOpLabelCodeRepository)(nil)
-	_ LabelNoteRepositoryInterface       = (*LabelNoteRepository)(nil)
-	_ LabelNoteRepositoryInterface       = (*NoOpLabelNoteRepository)(nil)
-	_ LabelPairRepositoryInterface       = (*LabelPairRepository)(nil)
-	_ LabelPairRepositoryInterface       = (*NoOpLabelPairRepository)(nil)
-	_ LabelSlotRepositoryInterface       = (*LabelSlotRepository)(nil)
-	_ LabelSlotRepositoryInterface       = (*NoOpLabelSlotRepository)(nil)
-	_ PurchaseRepositoryInterface        = (*PurchaseRepository)(nil)
-	_ PurchaseRepositoryInterface        = (*NoOpPurchaseRepository)(nil)
-	_ SubscriptionRepositoryInterface    = (*SubscriptionRepository)(nil)
-	_ SubscriptionRepositoryInterface    = (*NoOpSubscriptionRepository)(nil)
+	_ DatabaseInterface                          = (*Database)(nil)
+	_ DatabaseInterface                          = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                  = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ TxInterface                                = (*Tx)(nil)
+	_ TxInterface                                = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                        = (*Tx)(nil)
+	_ ReadOnlyTxInterface                        = (*NoOpTx)(nil)
+	_ AddressRepositoryInterface                 = (*AddressRepository)(nil)
+	_ AddressRepositoryInterface                 = (*NoOpAddressRepository)(nil)
+	_ ReadOnlyAddressRepositoryInterface         = (*AddressRepository)(nil)
+	_ ReadOnlyAddressRepositoryInterface         = (*NoOpAddressRepository)(nil)
+	_ BoardRepositoryInterface                   = (*BoardRepository)(nil)
+	_ BoardRepositoryInterface                   = (*NoOpBoardRepository)(nil)
+	_ ReadOnlyBoardRepositoryInterface           = (*BoardRepository)(nil)
+	_ ReadOnlyBoardRepositoryInterface           = (*NoOpBoardRepository)(nil)
+	_ CustomerRepositoryInterface                = (*CustomerRepository)(nil)
+	_ CustomerRepositoryInterface                = (*NoOpCustomerRepository)(nil)
+	_ ReadOnlyCustomerRepositoryInterface        = (*CustomerRepository)(nil)
+	_ ReadOnlyCustomerRepositoryInterface        = (*NoOpCustomerRepository)(nil)
+	_ CustomerProfileRepositoryInterface         = (*CustomerProfileRepository)(nil)
+	_ CustomerProfileRepositoryInterface         = (*NoOpCustomerProfileRepository)(nil)
+	_ ReadOnlyCustomerProfileRepositoryInterface = (*CustomerProfileRepository)(nil)
+	_ ReadOnlyCustomerProfileRepositoryInterface = (*NoOpCustomerProfileRepository)(nil)
+	_ DocumentRepositoryInterface                = (*DocumentRepository)(nil)
+	_ DocumentRepositoryInterface                = (*NoOpDocumentRepository)(nil)
+	_ ReadOnlyDocumentRepositoryInterface        = (*DocumentRepository)(nil)
+	_ ReadOnlyDocumentRepositoryInterface        = (*NoOpDocumentRepository)(nil)
+	_ DocumentLabelRepositoryInterface           = (*DocumentLabelRepository)(nil)
+	_ DocumentLabelRepositoryInterface           = (*NoOpDocumentLabelRepository)(nil)
+	_ ReadOnlyDocumentLabelRepositoryInterface   = (*DocumentLabelRepository)(nil)
+	_ ReadOnlyDocumentLabelRepositoryInterface   = (*NoOpDocumentLabelRepository)(nil)
+	_ LabelRepositoryInterface                   = (*LabelRepository)(nil)
+	_ LabelRepositoryInterface                   = (*NoOpLabelRepository)(nil)
+	_ ReadOnlyLabelRepositoryInterface           = (*LabelRepository)(nil)
+	_ ReadOnlyLabelRepositoryInterface           = (*NoOpLabelRepository)(nil)
+	_ LabelCodeRepositoryInterface               = (*LabelCodeRepository)(nil)
+	_ LabelCodeRepositoryInterface               = (*NoOpLabelCodeRepository)(nil)
+	_ ReadOnlyLabelCodeRepositoryInterface       = (*LabelCodeRepository)(nil)
+	_ ReadOnlyLabelCodeRepositoryInterface       = (*NoOpLabelCodeRepository)(nil)
+	_ LabelNoteRepositoryInterface               = (*LabelNoteRepository)(nil)
+	_ LabelNoteRepositoryInterface               = (*NoOpLabelNoteRepository)(nil)
+	_ ReadOnlyLabelNoteRepositoryInterface       = (*LabelNoteRepository)(nil)
+	_ ReadOnlyLabelNoteRepositoryInterface       = (*NoOpLabelNoteRepository)(nil)
+	_ LabelPairRepositoryInterface               = (*LabelPairRepository)(nil)
+	_ LabelPairRepositoryInterface               = (*NoOpLabelPairRepository)(nil)
+	_ ReadOnlyLabelPairRepositoryInterface       = (*LabelPairRepository)(nil)
+	_ ReadOnlyLabelPairRepositoryInterface       = (*NoOpLabelPairRepository)(nil)
+	_ LabelSlotRepositoryInterface               = (*LabelSlotRepository)(nil)
+	_ LabelSlotRepositoryInterface               = (*NoOpLabelSlotRepository)(nil)
+	_ ReadOnlyLabelSlotRepositoryInterface       = (*LabelSlotRepository)(nil)
+	_ ReadOnlyLabelSlotRepositoryInterface       = (*NoOpLabelSlotRepository)(nil)
+	_ PurchaseRepositoryInterface                = (*PurchaseRepository)(nil)
+	_ PurchaseRepositoryInterface                = (*NoOpPurchaseRepository)(nil)
+	_ ReadOnlyPurchaseRepositoryInterface        = (*PurchaseRepository)(nil)
+	_ ReadOnlyPurchaseRepositoryInterface        = (*NoOpPurchaseRepository)(nil)
+	_ SubscriptionRepositoryInterface            = (*SubscriptionRepository)(nil)
+	_ SubscriptionRepositoryInterface            = (*NoOpSubscriptionRepository)(nil)
+	_ ReadOnlySubscriptionRepositoryInterface    = (*SubscriptionRepository)(nil)
+	_ ReadOnlySubscriptionRepositoryInterface    = (*NoOpSubscriptionRepository)(nil)
 )
