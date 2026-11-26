@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build the engine and the work-queue package from this checkout, link them
-# into the example, type-check the example and run its end-to-end test on
-# Node.js and on Bun.
+# Build the engine, the work-queue package and development mode's handler
+# from this checkout, link them into the example, type-check the example and
+# run its end-to-end tests on Node.js and on Bun.
 #
 #   examples/engine-jobs/scripts/check.sh
 #
@@ -9,22 +9,28 @@
 # setup runs it), bun, Node.js 24, and cargo, which builds the engine's
 # Node-API addon (scripts/engine-napi.sh) when the engine's native/ holds
 # none: the Rust engine (D58), which @superschematic/engine loads. An addon
-# already there is used as it is, the test addon CI builds included.
+# already there is used as it is, the test addon CI builds included. cargo
+# and the wasm32-unknown-unknown target build development mode's handler
+# (runtime/rules-handler/typescript), the behaviors' core for WebAssembly.
 # Installs the runtimes' pinned dependencies from the npm registry (bun
 # install --frozen-lockfile).
 #
-# The test (test/jobs.test.ts) serves the example on a free port with
+# The test test/jobs.test.ts serves the example on a free port with
 # @hono/node-server, under each runtime, on a clock it moves, and drives it
-# over HTTP with the example's worker. The CI typescript job runs this
-# script after the work-queue package's own tests.
+# over HTTP with the example's worker. test/jobs.dev.test.ts serves the
+# schemas of schemas/dev on development mode (D117), the handler over a
+# SQLite database in memory on a clock it moves, and drives its routes the
+# same way, a claim being a read and Lease's acquire (D104) and a batch's
+# jobs stamped by Blueprint on the core (D149). The CI typescript job runs
+# this script after the work-queue package's own tests.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-echo "==> build the HTTP runtime, the engine and the work-queue package"
-for runtime in http engine engine-workqueue; do
+echo "==> build the HTTP runtime, the engine, the work-queue package and development mode's handler"
+for runtime in http engine engine-workqueue rules-handler; do
   (cd "$REPO_ROOT/runtime/$runtime/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 done
 if ! compgen -G "$REPO_ROOT/runtime/engine/typescript/native/superschematic-engine.*.node" >/dev/null; then

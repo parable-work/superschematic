@@ -9,8 +9,11 @@ directive. A worker that stops beating is missed, and the jobs it held go
 back in the queue. A batch stamps a job per step, each waiting on the one
 before, and the engine's runner settles the batch when its steps finish.
 The workers are the work-queue package's `QueueWorker` on the engine's
-typed client. The docs site's work-queues guide
-(`docs/src/content/docs/guides/work-queues.mdx`) quotes it;
+typed client. The same runner runs on development mode, the behaviors'
+core's handler (D117), where a claim is a read and a lease (D104) and a
+batch's steps are stamped by Blueprint on the core (D149). The docs
+site's work-queues guide (`docs/src/content/docs/guides/work-queues.mdx`)
+quotes it;
 `runtime/engine-workqueue/README.md` is the reference.
 
 | Path | What it is |
@@ -23,8 +26,11 @@ typed client. The docs site's work-queues guide
 | `src/main.ts` | Runs the server on port 8788 (`PORT`) over `jobs.db` (`JOBS_DB`), and starts the runner |
 | `src/worker.ts` | `jobWorker`, a worker process's `QueueWorker` over an `EngineClient`: it beats the worker instance of its principal, claims the next job of its topic, and runs a handler that reports usage and returns its result; an operator's `cancel` directive stops the handler and fails the job |
 | `test/jobs.test.ts` | End to end over a listening server on a clock the test moves: a worker finishes the most urgent job, a held job refuses another worker, a cancel fails a running job, a worker cut off from the engine is missed and loses its job to another and its stale token is refused, and a batch runs its steps in order, retries a transient failure and settles, or fails with a step |
-| `scripts/link.sh` | Links the engine, the work-queue package and the packages the example imports into `node_modules` |
-| `scripts/check.sh` | Builds the runtimes, the engine and the work-queue package, links them, type-checks, and runs the test on Node.js and Bun |
+| `schemas/dev/*.schema.json` | The same `Job`, `Worker` and `Batch` for development mode (D117), where Links, Search and Queue are no behaviors: a job's batch is a relation, and Blueprint runs on the behaviors' core (D149) |
+| `src/dev.ts` | The schemas on development mode: `@superschematic/rules-handler` over one SQLite connection on a clock the caller gives, the policy of `src/auth.ts` written as data, and the claim, a read and Lease's `acquire` (D104), with what differs from the engine |
+| `test/jobs.dev.test.ts` | The same flows on development mode, through the handler's routes, on a clock the test moves, a batch's jobs stamped by Blueprint on the core |
+| `scripts/link.sh` | Links the engine, the work-queue package, development mode's handler and the packages the example imports into `node_modules` |
+| `scripts/check.sh` | Builds the runtimes, the engine, the work-queue package and development mode's handler, links them, type-checks, and runs both tests on Node.js and Bun |
 
 ## Run it
 
@@ -34,12 +40,13 @@ From the repository root, after `make setup`:
 examples/engine-jobs/scripts/check.sh
 ```
 
-It builds the HTTP runtime, the engine and the work-queue package, and the
-engine's Node-API addon with cargo when the engine has none
-(`scripts/engine-napi.sh`: the engine and the work-queue behaviors are
-Rust, D58, which the package loads), links them into `node_modules`, type-checks the
-example, and runs `test/jobs.test.ts` with `node --test` and with
-`bun test`, each serving the example on a free port. The `typescript` job
+It builds the HTTP runtime, the engine, the work-queue package and
+development mode's handler, and the engine's Node-API addon with cargo
+when the engine has none (`scripts/engine-napi.sh`: the engine and the
+work-queue behaviors are Rust, D58, which the package loads), links them
+into `node_modules`, type-checks the example, and runs `test/jobs.test.ts`
+and `test/jobs.dev.test.ts` with `node --test` and with `bun test`, the
+first serving the example on a free port. The `typescript` job
 in `.github/workflows/ci.yml` runs it after the work-queue package's own
 tests, and so does `make ts`.
 
@@ -88,6 +95,60 @@ curl -X POST http://127.0.0.1:8788/api/namespaces/default/schemas/jobs/instances
   -H 'authorization: Bearer operator-token' -H 'content-type: application/json' \
   -d '{"name": "cancel"}'
 ```
+
+## On development mode
+
+The same job runner runs on development mode, the handler of the
+behaviors' core (D117), which `test/jobs.dev.test.ts` drives. Its schemas
+are `schemas/dev`, since three of the engine's behaviors are schema
+features on the core (D103):
+
+- **Links** is a relation: a job's `batch` points at its Batch, held as
+  `batchId`.
+- **Search** is a list's text filter. `filter[title][contains]=index`
+  matches a title anywhere, case aside. Development mode serves no
+  `searchText`, no weights and no ranking yet.
+- **Queue** is a claim (`claim` in `src/dev.ts`): a read of the queued
+  jobs of a topic, most urgent first, and Lease's `acquire` on the first
+  that no blocker holds (D104). The holder then moves the job to
+  `running` with the lease's token and reserves its CPU seconds. A
+  claimer that loses the race meets `held_by_another` and reads on.
+
+`check.sh` builds `@superschematic/rules-handler`
+(`runtime/rules-handler/typescript`, the handler built for WebAssembly)
+and links it. The test opens it over a SQLite database in memory,
+`bun:sqlite` under Bun and `node:sqlite` under Node.js, on a clock it
+moves, and calls `dev.runDue()` for the runner. To try it by hand:
+
+```ts
+import { Database } from 'bun:sqlite';
+import { claim, devClient, finish, openJobsDev } from './src/dev.ts';
+
+const dev = await openJobsDev(new Database('jobs-dev.db', { create: true }), Date.now);
+const operator = devClient(dev, 'operator');
+await operator.call('POST', '/schemas/Batch/instances', { data: { title: 'Nightly crawl', topic: 'search' } });
+const job = await claim(devClient(dev, 'worker-1'), 'search');
+```
+
+What differs from the engine, as `src/dev.ts` lists it:
+
+- The types are `Job`, `Worker` and `Batch`. A row is its own fields
+  beside its behaviors', each named after its behavior (`workflowStatus`,
+  `leaseToken`, `blueprintChildren`); the engine answers `data` and
+  `behaviors` apart.
+- A job's `Dependencies` gates `running`, so a step a batch stamped does
+  not start before the steps it comes after. The engine's Queue skipped a
+  blocked job at its claim; the read here shows `dependenciesBlocked`.
+- A job keeps no `result` field. A table's Retries takes no
+  `resultField`, and a worker writes a job only through the work's
+  operations, since the policy as data cannot tell an update from a
+  create: the result is the successful attempt's `detail`.
+- Search is a filter of `title`, since no field holds the result.
+- A Batch's create stamps its jobs in its own write, as the engine's did,
+  each with a key the core draws, and `blueprintChildren` lists the jobs
+  that point at it, which a read computes.
+- The caller is whoever the `X-Superschematic-Subject` and
+  `X-Superschematic-Permissions` headers say, and the policy is data.
 
 ## Callers
 
