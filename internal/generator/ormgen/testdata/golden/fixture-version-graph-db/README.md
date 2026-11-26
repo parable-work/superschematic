@@ -48,8 +48,11 @@ Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
 `FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,
 and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
 `GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
-a table with soft deletes and hard-deletes one without. Tables with soft
-deletes additionally expose `HardDeleteOne`.
+a table with soft deletes and hard-deletes one without. They also expose
+`GetVersions`, which reads many `VersionKey` versions in one query, and
+`GetVersionsWithFields`, which reads only the fields a `*Fields` selects.
+Each keeps the order of its keys and returns nil for a missing version or a
+delete. Tables with soft deletes additionally expose `HardDeleteOne`.
 
 The repository of a version graph member's released rows
 (`PartReleased`) is read-only: it exposes `GetOne`, `GetManyByIDs`,
