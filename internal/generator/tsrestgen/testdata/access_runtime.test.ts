@@ -339,6 +339,28 @@ describe('the access of fixture-access-api', () => {
     expect((await ok('GET', `/api/contracts/${contractA.id}`, token)).terms).toBe('[secret]');
   });
 
+  test('the grants and the access log list through the routes the build serves over views of them', async () => {
+    const ACCESS_ADMIN = `${ADMIN_ID}:access.admin`;
+    expect(await status('GET', '/api/access/grants', OWNER)).toBe(403);
+    expect(await status('GET', '/api/access/log', OWNER)).toBe(403);
+    // Every grant, the ended and the revoked among them, without its
+    // token's hash, which GrantView leaves out.
+    const grants = await items('/api/access/grants', ACCESS_ADMIN);
+    expect(grants.map(grant => grant.holder).sort()).toEqual([uuid(0xc1), uuid(0xc2), uuid(0xc3), uuid(0xc4)].sort());
+    expect(grants.filter(grant => 'tokenHash' in grant)).toEqual([]);
+    expect(grants.find(grant => grant.holder === uuid(0xc2))).toMatchObject({ holderKind: 'party', role: 'tenant', targetType: 'Contract', targetId: contractA.id });
+    expect(grants.find(grant => grant.holder === uuid(0xc2)).revokedAt).not.toBeNull();
+    expect(grants.find(grant => grant.holder === uuid(0xc1)).revokedAt).toBeNull();
+    // The access log lists every row the table holds: the reveal and the
+    // party's calls among them.
+    const log = await items('/api/access/log', ACCESS_ADMIN);
+    expect(log.map(row => row.id).sort()).toEqual((await logRows()).map(row => row.id).sort());
+    expect(log.filter(row => row.kind === 'reveal')).toEqual([
+      expect.objectContaining({ principal: ADMIN_ID, principalKind: 'user', operation: 'getContract', targetType: 'Contract', targetId: contractA.id, field: 'terms' }),
+    ]);
+    expect(log.filter(row => row.kind === 'grantCall' && row.principal === uuid(0xc1)).length).toBeGreaterThan(0);
+  });
+
   test("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused", async () => {
     const calendar = calendarRoutes({ orm, authenticate: request => callers({ headers: request.headers } as RequestContext) });
     await orm.asSystem().role.createOne({ name: 'calendarFeed', permissions: ['documents.calendar'] } as never);

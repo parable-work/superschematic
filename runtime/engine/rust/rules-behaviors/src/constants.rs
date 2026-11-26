@@ -199,6 +199,16 @@ impl ConstantsConfig {
             .get("oneWay")
             .and_then(Value::as_object)
             .unwrap_or(&empty);
+        // fields may be left out beside oneWay, a table whose one rule is a
+        // field that only moves forward; a config with neither (a permission
+        // alone) keeps nothing.
+        if fields.is_empty() && moves.is_empty() {
+            return Err(
+                "fields: Constants keeps no field: name one in fields, or in oneWay one that moves one way"
+                    .to_owned()
+                    .into(),
+            );
+        }
         let mut one_way: Vec<ConstantsOneWay> = Vec::new();
         for (field, direction) in moves {
             let Some(found) = target.fields().iter().find(|known| known.name == *field) else {
@@ -466,9 +476,13 @@ fn config_issues(raw: &Value) -> Issues {
             format!("unknown key {}", schema::quoted(key)),
         );
     }
-    match config.get("fields") {
-        None => issues.push("", "required", "must have required property 'fields'"),
-        Some(fields) => fields_issues(fields, &mut issues),
+    // fields is left out beside a table's oneWay, and the config names one
+    // member at least.
+    if config.is_empty() {
+        issues.push("", "minProperties", "must NOT have fewer than 1 properties");
+    }
+    if let Some(fields) = config.get("fields") {
+        fields_issues(fields, &mut issues);
     }
     if let Some(permission) = config.get("permission") {
         schema::text_issues("/permission", permission, &mut issues);

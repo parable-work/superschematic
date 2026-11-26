@@ -602,7 +602,9 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings go to WithWarnings's function or print to
-// [WarningWriter], errors fail the load. Each @stateMachine's transitions
+// [WarningWriter], errors fail the load. A class of a DB schema with no key
+// that only @jsonField fields, and other such classes, hold is a JSON
+// shape, not a table (inferJSONShapes). Each @stateMachine's transitions
 // are put in the order of its enum's members first (D118,
 // orderStateMachines). The fields the sound uses of its tables' behaviors
 // own join their tables first (behaviorfields.ExpandFields), so the
@@ -632,6 +634,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	if reg == nil {
 		reg = registry.New(vin.Naming.OrDefault())
 	}
+	// A class with no key that only @jsonField fields hold is a JSON
+	// shape, not a table, before anything models the tables.
+	inferJSONShapes(schema)
 	// A @stateMachine's transitions take the order of its enum's members
 	// (D118), so the pass and the generators read one order from every
 	// form.

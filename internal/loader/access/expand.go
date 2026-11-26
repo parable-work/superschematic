@@ -189,9 +189,10 @@ func hasField(td *ir.TypeDef, name string) bool {
 
 // ExpandExternal adds the audience columns to each @audience table of
 // another service the schema reads (a DB dependency's, which a @source
-// view names), as the dependency's own load adds them, so a view may hold
-// them. The access tables' fields are its own load's alone: a view of
-// them reads the dependency's expansion.
+// view names), and the fields of its @accessGrants and @accessLog
+// classes, as the dependency's own load adds them, so a view may hold
+// them: an API's list of the grants or of the access log is a
+// @tableOperation over such a view.
 func ExpandExternal(types map[string]*ir.TypeDef) {
 	for _, td := range types {
 		if td == nil {

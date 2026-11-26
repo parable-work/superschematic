@@ -2021,6 +2021,35 @@ their paths. A table no path reaches has no rows for it. A row it creates
 must be one it reaches: a create under another target is the 403
 `forbidden`, and the transaction keeps nothing.
 
+An API's `@source` view of the grants class holds the fields the build
+fills, as a view of any table holds its columns, so a settings page's list
+of the grants is a `@tableOperation`. It lists every grant, the ended and
+the revoked among them; leave `tokenHash` out of the view. A view of the
+access log lists it the same way.
+
+```ts
+@source(Grant)
+export abstract class GrantView {
+  id: Identity.UUID;
+  holder: Identity.UUID;
+  role: string;
+  targetType: string;
+  targetId: Identity.UUID;
+  endsAt: Nullable<Temporal.DateTime>;
+  revokedAt: Nullable<Temporal.DateTime>;
+}
+
+export class Access extends Authenticated {
+  @rest(HttpMethod.GET, "access/grants")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listGrants(): GrantView[] {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
 ### Reveal
 
 An `Encrypted<T>` field reads masked, `[secret]`, unless a view marks it
@@ -2115,7 +2144,7 @@ composes Recurrence.
 | the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
 | grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
-| a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
+| a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
 | a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |
 | a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
 

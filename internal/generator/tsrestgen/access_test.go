@@ -21,7 +21,8 @@ import (
 // accessAPI is the API whose operations the build serves from the tables
 // of fixture-access-db (D156): folders and documents that hold an
 // audience, contracts whose requests a row rule reaches through three
-// relations, the grants that let a party reach rows, and the access log.
+// relations, the grants that let a party reach rows, and the access log,
+// which an administrator lists through views of the two tables.
 const accessAPI = "fixture-access-api"
 
 // accessDB is fixture-access-api's database, its one DB dependency.
@@ -103,6 +104,7 @@ var accessCases = []string{
 	"a party with a grant reaches only the rows its role's paths allow",
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
+	"the grants and the access log list through the routes the build serves over views of them",
 }
 
 // TestGeneratedAccessEndToEnd serves fixture-access-api's generated router
