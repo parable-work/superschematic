@@ -10,8 +10,9 @@ pulumi extensions.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/smoke-db` | DB, Postgres alone: the user model and its seeded `member` role (D50, D88), `LineItem` with a three-dimension vector column and an hnsw index (D84), the keyed queue `DrainLineItem`, one message waiting and one claim per line item (`serialize`, D80), the declared query `lineItemTotals` (D86), verified into `queries.lock`, and three tables with a behavior each (D151): `FollowUp` (Timers, a deadline five seconds after its create), `CheckIn` (Schedules, a wake-up five seconds on) and `Alert` (Reactions, raised when its level changes to high) |
-| `schemas/services/smoke-api` | API over `smoke-db`, served in TypeScript: approval-gated registration with cookie sessions, the first registrant the administrator, and user administration; line items written with their name's embedding, the declared query, `nearest`, and an enqueue in a transaction; the worker `DrainLineItems`, and an enqueue due five seconds on; the behavior workers `FollowUpTimers`, `CheckInWakeUps` and `AlertReactions`, and the routes that make and read their rows; and the job `SyncAllLinkedAccounts`, whose deployable, `smoke-api-sync-all-linked-accounts`, is longer than a GCP service account's id, so gcp names it short (D97) |
+| `schemas/services/smoke-db` | DB, Postgres alone: the user model and its seeded `member` role (D50, D88), `LineItem` with a three-dimension vector column and an hnsw index (D84), the keyed queue `DrainLineItem`, one message waiting and one claim per line item (`serialize`, D80), the declared query `lineItemTotals` (D86), verified into `queries.lock`, and three tables with a behavior each (D151): `FollowUp` (Timers, a deadline five seconds after its create), `CheckIn` (Schedules, a wake-up five seconds on) and `Alert` (Reactions, raised when its level changes to high); `LineItem`'s files (`@attachments`, at most 1 MiB) and its references to other line items (`@references`), and the queue `FileReleased` a file's delete enqueues on (D154) |
+| `schemas/services/smoke-api` | API over `smoke-db`, served in TypeScript: approval-gated registration with cookie sessions, the first registrant the administrator, and user administration; line items written with their name's embedding, the declared query, `nearest`, and an enqueue in a transaction; the worker `DrainLineItems`, and an enqueue due five seconds on; the behavior workers `FollowUpTimers`, `CheckInWakeUps` and `AlertReactions`, and the routes that make and read their rows; a line item's file upload, its completion, its filing onto another line item and a line item's backlinks, and the worker `ReleaseFiles` (D154); and the job `SyncAllLinkedAccounts`, whose deployable, `smoke-api-sync-all-linked-accounts`, is longer than a GCP service account's id, so gcp names it short (D97) |
+| `schemas/services/smoke-files` | Bucket: the files a line item holds, which a client uploads straight to through URLs `smoke-api` signs; on Cloudflare an R2 bucket, on gcp a Cloud Storage bucket, under `stack dev` the emulator's |
 | `schemas/services/smoke-web` | Site: a page that says where `smoke-api` is on its origin and who is signed in, with no SDK in its bundle |
 | `schemas/services/smoke-stack` | Stack: `smoke-api` and the site on one origin (`origins`, D91); `Dev` on the local target, `Gcp` on gcp and `Cloudflare` on cloudflare, whose project, region, account and Hyperdrive config are placeholders that resolve offline |
 | `typescript/smoke-api` | `smoke-api`'s implementation; `embed.ts` stands in for an embedding model |
@@ -50,7 +51,12 @@ through the site's origin as the site's page would make them:
    follow-up its Timers deadline makes due; a check-in whose Schedules run
    reaches its handler; and an alert its Reactions raises when its level
    changes (D151);
-8. sign-out.
+8. a file uploaded straight to the bucket through the URL `smoke-api`
+   signs, a `PUT` to R2's S3 API on Cloudflare; its completion, which reads
+   the bytes back and holds them to their SHA-256; and the file filed onto
+   another line item with no second upload, which then lists the first
+   among its backlinks (D154);
+9. sign-out.
 
 It prints each sign-in's time and the time from the enqueue to the
 drain: on Cloudflare a sign-in hashes with the identity runtime's own

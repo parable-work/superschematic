@@ -345,6 +345,34 @@ export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooM
 // applies as a repository does, and the refusal of a write a party's or an
 // agent run's grants do not reach.
 export { AccessRefusedError, audienceConditions, type AudienceDefinition } from './orm.js';
+// References and attachments on any row (D154): orm.references and
+// orm.attachments, the definitions a DB's ./orm entry gives them, and the
+// Comments attachment block of a file.
+export {
+  RowFeatureError,
+  attachmentBlock,
+  previewObjectOf,
+  type Attachment,
+  type AttachmentBlock,
+  type Attachments,
+  type AttachmentsDefinition,
+  type AttachmentsHolderDefinition,
+  type AttachmentsMembers,
+  type Backlink,
+  type Backlinks,
+  type CommentsSourceDefinition,
+  type FileRef,
+  type ProcessingState,
+  type Reference,
+  type ReferenceTargetDefinition,
+  type References,
+  type ReferencesHolderDefinition,
+  type ReferencesMembers,
+  type RowRef,
+  type RowReferencesDefinition,
+  type RowTableDefinition,
+  type Upload,
+} from './rowfeatures.js';
 // Grants and the access log (D156): the authenticator of a grant's token,
 // the making, revoking and reading of grants, and the log's writer.
 export {

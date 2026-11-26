@@ -1584,7 +1584,12 @@
                   "blocks": [
                     "code",
                     "attachment"
-                  ]
+                  ],
+                  "attachments": {
+                    "schemes": [
+                      "javascript"
+                    ]
+                  }
                 },
                 "anchor": "type"
               }
@@ -1611,16 +1616,16 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+              "message": "type Doc: behavior Comments config: /attachments/schemes/0: must NOT be valid",
               "details": {
                 "issues": [
                   {
                     "use": "Comments",
                     "index": 0,
                     "behavior": "Comments",
-                    "kind": "rule",
-                    "path": "/config",
-                    "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                    "kind": "schema",
+                    "path": "/config/attachments/schemes/0",
+                    "message": "must NOT be valid"
                   }
                 ]
               }
@@ -1900,17 +1905,23 @@
           },
           "expect": {
             "refused": {
-              "code": "invalid_argument",
-              "status": 400,
-              "class": "OperationParamsError",
-              "message": "operation post of behavior Comments: /blocks/0: is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Comments vetoes post of Doc d1: block 0 is a attachment block, which Comments on Doc does not allow (it allows code, ref)",
               "details": {
-                "issues": [
-                  {
-                    "path": "/blocks/0",
-                    "message": "is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
-                  }
-                ]
+                "behavior": "Comments",
+                "action": "post",
+                "reason": "block 0 is a attachment block, which Comments on Doc does not allow (it allows code, ref)",
+                "vetoCode": "block_not_allowed",
+                "vetoDetails": {
+                  "block": 0,
+                  "kind": "attachment",
+                  "allowed": [
+                    "code",
+                    "ref"
+                  ]
+                }
               }
             },
             "row": {

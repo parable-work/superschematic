@@ -96,6 +96,14 @@ type ORMInfo struct {
 	// HTTP runtime's adapter reads; nil for a database with none.
 	Rules      *behaviorlayout.Layout
 	RulesConst string
+
+	// References and Attachments are the database's references and
+	// attachments documents (D154, rowrefs.go), as JSON, which orm.ts
+	// embeds as the definition's references and attachments and the
+	// runtime's orm.references and orm.attachments read; "" for a database
+	// with none.
+	References  string
+	Attachments string
 }
 
 // HearsChanges reports whether a table of the layout keeps a change queue
@@ -427,7 +435,7 @@ func RepositoryMember(typeName string) string { return lowerFirst(typeName) }
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries"}
+var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries", "references", "attachments"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
 // no table. output holds the types the rows' members take theirs from, and
@@ -491,7 +499,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	// generated, so no relation reaches it either.
 	owned := map[string]bool{}
 	for _, t := range tables {
-		if td := schema.Types[t.Type]; td != nil && td.BehaviorTable != nil {
+		if td := schema.Types[t.Type]; td != nil && (td.BehaviorTable != nil || td.RowTable != nil) {
 			owned[t.Type] = true
 		}
 	}
@@ -619,6 +627,13 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	}
 	out.Views = views
 	if out.Queries, err = typeScriptQueries(schema, opts, types, known); err != nil {
+		return nil, err
+	}
+	members := map[string]string{}
+	for _, table := range out.Tables {
+		members[table.Type] = table.Member
+	}
+	if out.References, out.Attachments, err = rowFeaturesOf(schema, tables, members); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -935,6 +950,12 @@ func (o *ORMInfo) RuntimeTypes() []string {
 	}
 	if o.Rules != nil {
 		used["RulesLayout"] = true
+	}
+	if o.References != "" {
+		used["ReferencesMembers"] = true
+	}
+	if o.Attachments != "" {
+		used["AttachmentsMembers"] = true
 	}
 	for _, q := range o.Queries {
 		if q.Page != nil {

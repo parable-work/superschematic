@@ -180,6 +180,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// provider per environment (core_providers.go, D159).
 	specs = append(specs, providersDecorator())
 
+	// A table's references to rows of any table, and the files it holds in
+	// a bucket (core_rowrefs.go, D154).
+	specs = append(specs, rowFeatureDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

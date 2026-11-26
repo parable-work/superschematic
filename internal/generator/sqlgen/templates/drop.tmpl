@@ -42,6 +42,18 @@ DROP TRIGGER IF EXISTS {{ quote $guard.TriggerName }} ON {{ $guard.QuotedTable }
 DROP FUNCTION IF EXISTS {{ quote $guard.FunctionName }}();
 {{- end }}
 {{- end }}
+{{- if or .ReferencesClears .AttachmentsReleases }}
+
+-- Drop the triggers and functions of references and attachments
+{{- range $release := .AttachmentsReleases }}
+DROP TRIGGER IF EXISTS {{ quote $release.TriggerName }} ON {{ $release.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $release.FunctionName }}();
+{{- end }}
+{{- range $clear := .ReferencesClears }}
+DROP TRIGGER IF EXISTS {{ quote $clear.TriggerName }} ON {{ $clear.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $clear.FunctionName }}();
+{{- end }}
+{{- end }}
 {{- if .AudienceTriggers }}
 
 -- Drop the triggers and functions that keep an @audience table's
