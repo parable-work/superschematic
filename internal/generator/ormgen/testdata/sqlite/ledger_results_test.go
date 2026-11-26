@@ -355,7 +355,9 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 		return &types.Entry{Id: keyPtr(n), Account: types.Account{Id: keyPtr(bank)}, ExternalId: external, AmountCents: types.GenericInt64(amount), BookedOn: "2026-10-27", Tags: []string{}}
 	}
 	amounts := EntryFields{AmountCents: true}
-	sync := func() []*types.Entry { return []*types.Entry{line(30, "x1", 650), line(31, "x2", 700), line(32, "x3", 800)} }
+	sync := func() []*types.Entry {
+		return []*types.Entry{line(30, "x1", 650), line(31, "x2", 700), line(32, "x3", 800)}
+	}
 	many, err := entries.UpsertMany(ctx, sync(), EntryUniqueByAccountExternalId, amounts, &UpsertOptions{Batch: 2})
 	call("upsertEntries", many, err)
 	changed := sync()
