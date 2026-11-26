@@ -1657,8 +1657,8 @@ What a rule does not say yet:
   a 404 and cannot create; give it the override permission.
 - On a Go server, a member that holds text, and a path. The Go handlers
   compare the caller with a member of the row that holds an id; the
-  operation stays one you implement, with a warning. The TypeScript
-  server serves both.
+  operation stays one you implement, with a warning. The TypeScript and
+  Rust servers serve both (D181).
 
 A row rule is the generated handler's. An operation you write by hand,
 an ORM call in a worker and SQL of your own reach every row, as before.
@@ -2009,13 +2009,54 @@ buildRouter(implementations, {
 });
 ```
 
+### In the Rust server
+
+The Rust server serves the same access on Postgres (D181). Its runtime's
+`Principal` has the same kind, `acting_for`, grants and credential, and
+the identity service's principal names the API key it called with.
+
+A table operation's repositories keep to the route's caller, and a route
+with no caller sees the rows everyone may. Rust has no ambient caller, so
+a hand-written implementation opens its repositories for one:
+
+```rust
+let repositories = Repositories::new(&client)?
+    .acting(orm::routes::acting(ctx.principal.as_ref()))
+    .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+```
+
+Repositories opened without `with_access`, and `as_system()`, read every
+row, as a job does. `audience_conditions(definition, audience, caller,
+args, write)` in `orm` is the predicate a read across tables applies.
+
+The grants and the access log are in the runtime's `access` module:
+
+| TypeScript | Rust |
+| --- | --- |
+| `issueGrant`, `revokeGrant`, `activeGrants` | `issue_grant`, `revoke_grant`, `active_grants` |
+| `grantAuthenticator({ orm, inner })` | `GrantAuthenticator::new(tables)?.with_inner(inner)` |
+| `accessLog: accessLogOf(orm)` | `Logged::new(authenticator, Arc::new(access_log_of(&tables)?.unwrap()))` |
+
+`Logged` wraps the authenticator the server's `Handlers` take, and records
+a call once the router has its caller, before its permissions are
+checked. A row rule's path and `@decrypted({ permission })` are served by
+the generated table operations, as in TypeScript.
+
+The Rust outputs refuse, at build time, the platform features they do not
+serve yet: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
+`@references`, `@attachments`, `@searchable`, `@party`, `@conversations`,
+`@runRequests` and `@agents` on a table of a DB service with Rust types,
+and on a Rust server `@providers` slots, `@autonomy` and a table that
+composes Recurrence.
+
 ### What access does not do yet
 
 | Not built | Until then |
 | --- | --- |
 | the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
 | a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
-| the Go and Rust servers' and repositories' audience, grants, reveal and access log | the TypeScript server serves them |
+| the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
+| grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
 | a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |

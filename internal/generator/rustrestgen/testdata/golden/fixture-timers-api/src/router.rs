@@ -59,18 +59,22 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tickets.write"])
+        .operation("statusTransition")
         .apply(post(handle_ticket_status_transition));
     router = router.route("/api/ticket/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tickets.write"])
+        .operation("timersFireTimer")
         .apply(post(handle_ticket_timers_fire_timer));
     router = router.route("/api/ticket/{id}/timers/fire-timer", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tickets.write"])
+        .operation("timersResetTimer")
         .apply(post(handle_ticket_timers_reset_timer));
     router = router.route("/api/ticket/{id}/timers/reset-timer", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tickets.write"])
+        .operation("timersSnoozeTimer")
         .apply(post(handle_ticket_timers_snooze_timer));
     router = router.route("/api/ticket/{id}/timers/snooze-timer", route);
     router

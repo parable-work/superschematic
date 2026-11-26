@@ -365,16 +365,19 @@ const repositoryMethodsParagraph = "Repositories expose `GetOne`, `GetManyByIDs`
 	"`FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,\n" +
 	"and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,\n" +
 	"`GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes\n" +
-	"a table with soft deletes and hard-deletes one without. Tables with soft\n" +
-	"deletes additionally expose `HardDeleteOne`.\n\n"
+	"a table with soft deletes and hard-deletes one without. They also expose\n" +
+	"`GetVersions`, which reads many `VersionKey` versions in one query, and\n" +
+	"`GetVersionsWithFields`, which reads only the fields a `*Fields` selects.\n" +
+	"Each keeps the order of its keys and returns nil for a missing version or a\n" +
+	"delete. Tables with soft deletes additionally expose `HardDeleteOne`.\n\n"
 
 // optimisticMethodsSentence follows repositoryMethodsParagraph's last
 // sentence, in the same paragraph, when a table is @optimistic: such a table
 // has the fenced methods and no history.
 const optimisticMethodsSentence = "deletes additionally expose `HardDeleteOne`.\n" +
 	"Optimistic tables expose `UpdateOneIfVersion` and `DeleteOneIfVersion` too,\n" +
-	"but keep no history, so they have no `GetVersion`, `ListVersions`, or\n" +
-	"`GetAsOf`.\n\n"
+	"but keep no history, so they have no `GetVersion`, `GetVersions`,\n" +
+	"`ListVersions`, or `GetAsOf`.\n\n"
 
 // TestREADMEListsVersionFencedMethods: the README names the methods a
 // versioned table adds, in the same words for every schema, and says what an

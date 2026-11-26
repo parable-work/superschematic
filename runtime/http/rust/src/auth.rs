@@ -11,23 +11,49 @@
 //! `Implementations` takes an [`Authenticator`]. A project with its own
 //! permission vocabulary (a root permission, roles resolved elsewhere)
 //! overrides [`Authenticator::permits`].
+//!
+//! Every caller is one principal, of a kind (D156): a user, signed in by a
+//! session or an API key; a party, a row of an app table that holds a
+//! grant; an agent run; or a runtime provider calling as itself (D159). A
+//! principal says whom it acts for, the grants it calls through and the
+//! credential it called with, as the TypeScript runtime's `Principal` does.
 
 use crate::ApiError;
 use async_trait::async_trait;
 use http::header::AUTHORIZATION;
 use http::request::Parts;
-use http::HeaderMap;
+use http::{HeaderMap, Method};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// The caller an [`Authenticator`] established for a request.
 #[derive(Clone, Default, PartialEq)]
 pub struct Principal {
-    /// Stable subject identifier: a user id, a service identity, an API key's owner.
+    /// Stable subject identifier: a user id, an API key's owner, a party's
+    /// or an agent run's id. A calling service is the request's
+    /// `ServiceCaller`, not a principal (D37).
     pub subject: String,
     pub permissions: Vec<String>,
     /// Verified claims for the implementation's own checks; never echoed.
     pub claims: Map<String, Value>,
+    /// What the principal is (D156): a user unless an authenticator says
+    /// otherwise, as every authenticator's was before D156.
+    pub kind: PrincipalKind,
+    /// Whom the principal acts for (D156): the user an agent run serves,
+    /// the party it answers. An audience admits a row an agent run or whom
+    /// it acts for may see, and the access log records both. `None` for a
+    /// principal that acts for itself.
+    pub acting_for: Option<ActingFor>,
+    /// The grants a party or an agent run calls through (D156): each one's
+    /// target and the relation paths its role reaches from it. A principal
+    /// with grants reaches, of a table, only the rows one of them reaches.
+    /// `None` for a user, who reaches rows through roles and row rules.
+    pub grants: Option<Vec<GrantReach>>,
+    /// The credential the call came with, for the access log (D114, D156):
+    /// an API key's or a grant's id; `None` for a session.
+    pub credential: Option<Credential>,
 }
 
 impl Principal {
@@ -38,8 +64,36 @@ impl Principal {
         Self {
             subject: subject.into(),
             permissions: permissions.into_iter().map(Into::into).collect(),
-            claims: Map::new(),
+            ..Self::default()
         }
+    }
+
+    /// The principal as one of `kind` (D156).
+    #[must_use]
+    pub fn of_kind(mut self, kind: PrincipalKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// The principal acting for `acting_for` (D156).
+    #[must_use]
+    pub fn acting_for(mut self, acting_for: ActingFor) -> Self {
+        self.acting_for = Some(acting_for);
+        self
+    }
+
+    /// The principal calling through `grants` (D156).
+    #[must_use]
+    pub fn with_grants(mut self, grants: Vec<GrantReach>) -> Self {
+        self.grants = Some(grants);
+        self
+    }
+
+    /// The principal that called with `credential` (D114, D156).
+    #[must_use]
+    pub fn with_credential(mut self, credential: Credential) -> Self {
+        self.credential = Some(credential);
+        self
     }
 }
 
@@ -51,8 +105,108 @@ impl fmt::Debug for Principal {
             .field("subject", &self.subject)
             .field("permissions", &self.permissions)
             .field("claims", &self.claims.keys().collect::<Vec<_>>())
+            .field("kind", &self.kind)
+            .field("acting_for", &self.acting_for)
+            .field("grants", &self.grants)
+            .field("credential", &self.credential)
             .finish()
     }
+}
+
+/// The kinds of principal (D156): a user, a party, an agent run, or a
+/// runtime provider (D159), which acts as itself with the narrow role its
+/// package declares. Their wire names are the TypeScript runtime's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrincipalKind {
+    /// A user, signed in by a session or an API key.
+    #[default]
+    User,
+    /// A row of an app table that holds a grant.
+    Party,
+    /// An agent run.
+    Agent,
+    /// A runtime provider calling as itself (D159).
+    Extension,
+}
+
+impl PrincipalKind {
+    /// The kind's wire name: `user`, `party`, `agent` or `extension`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrincipalKind::User => "user",
+            PrincipalKind::Party => "party",
+            PrincipalKind::Agent => "agent",
+            PrincipalKind::Extension => "extension",
+        }
+    }
+}
+
+impl fmt::Display for PrincipalKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Whom a principal acts for (D156): its kind and its subject. The
+/// engine's principal names the subject alone (D77), and passes as this
+/// one, so an absent kind reads as user, as the principal's own does.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActingFor {
+    /// What it is, a user unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<PrincipalKind>,
+    /// Its subject.
+    pub subject: String,
+}
+
+impl ActingFor {
+    /// The user whose id is `subject`.
+    pub fn user(subject: impl Into<String>) -> Self {
+        Self {
+            kind: Some(PrincipalKind::User),
+            subject: subject.into(),
+        }
+    }
+}
+
+/// What one grant reaches (D156): its target row, by its table's type and
+/// its key, and the relation paths its role reaches other rows by, by
+/// table: `{"Request": ["unit.contract"]}` reaches a request whose unit's
+/// contract is the target. The target's own table reaches the target, and
+/// a path `*` every row of its table.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantReach {
+    /// The grant's id.
+    pub id: String,
+    /// The target's table type.
+    pub target_type: String,
+    /// The target's key, in its wire form.
+    pub target_id: String,
+    /// The paths the grant's role reaches rows by, by table type.
+    #[serde(default)]
+    pub reaches: BTreeMap<String, Vec<String>>,
+}
+
+/// The credential a call came with (D114, D156), which the access log
+/// records: an API key's id or a grant's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Credential {
+    /// What it is.
+    pub kind: CredentialKind,
+    /// Its id.
+    pub id: String,
+}
+
+/// What a credential is (D156).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CredentialKind {
+    /// An API key (D114).
+    ApiKey,
+    /// A grant's token (D156).
+    Grant,
 }
 
 /// Establishes the caller of a request to a route that needs one: a route
@@ -73,6 +227,23 @@ pub trait Authenticator: Send + Sync + 'static {
     /// [`has_any_permission`]: dotted-path coverage, no root permission.
     fn permits(&self, held: &[String], required: &[String]) -> bool {
         has_any_permission(held, required)
+    }
+
+    /// Told of each call of the operation `operation` once its caller is
+    /// established, and before its permissions are checked, so a refused
+    /// call is told too (D156): what records a call in the access log
+    /// (`access::Logged`). The router tells it on a route that needs a
+    /// caller whose controls name the operation; `principal` is `None` for
+    /// a request that carries none. An `Err` answers the request with it.
+    /// The default does nothing.
+    async fn called(
+        &self,
+        principal: Option<&Principal>,
+        operation: &str,
+        method: &Method,
+    ) -> Result<(), ApiError> {
+        let _ = (principal, operation, method);
+        Ok(())
     }
 }
 

@@ -62,30 +62,37 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesCancelSchedule")
         .apply(post(handle_problem_schedules_cancel_schedule));
     router = router.route("/api/problem/{id}/schedules/cancel-schedule", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesListSchedules")
         .apply(post(handle_problem_schedules_list_schedules));
     router = router.route("/api/problem/{id}/schedules/list-schedules", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesPauseSchedule")
         .apply(post(handle_problem_schedules_pause_schedule));
     router = router.route("/api/problem/{id}/schedules/pause-schedule", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesReportRun")
         .apply(post(handle_problem_schedules_report_run));
     router = router.route("/api/problem/{id}/schedules/report-run", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesResumeSchedule")
         .apply(post(handle_problem_schedules_resume_schedule));
     router = router.route("/api/problem/{id}/schedules/resume-schedule", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("schedulesSetSchedule")
         .apply(post(handle_problem_schedules_set_schedule));
     router = router.route("/api/problem/{id}/schedules/set-schedule", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_problem_status_transition));
     router = router.route("/api/problem/{id}/status/transition", route);
     router

@@ -66,50 +66,62 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("poolPick")
         .apply(post(handle_account_pool_pick));
     router = router.route("/api/account/pool/pick", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetCheckReserve")
         .apply(post(handle_account_budget_check_reserve));
     router = router.route("/api/account/{id}/budget/check-reserve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetObserve")
         .apply(post(handle_account_budget_observe));
     router = router.route("/api/account/{id}/budget/observe", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetRecordUsage")
         .apply(post(handle_account_budget_record_usage));
     router = router.route("/api/account/{id}/budget/record-usage", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetRecordUsageFor")
         .apply(post(handle_account_budget_record_usage_for));
     router = router.route("/api/account/{id}/budget/record-usage-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetReserve")
         .apply(post(handle_account_budget_reserve));
     router = router.route("/api/account/{id}/budget/reserve", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetReserveFor")
         .apply(post(handle_account_budget_reserve_for));
     router = router.route("/api/account/{id}/budget/reserve-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSetLimit")
         .apply(post(handle_account_budget_set_limit));
     router = router.route("/api/account/{id}/budget/set-limit", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSettle")
         .apply(post(handle_account_budget_settle));
     router = router.route("/api/account/{id}/budget/settle", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("budgetSettleFor")
         .apply(post(handle_account_budget_settle_for));
     router = router.route("/api/account/{id}/budget/settle-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("poolMarkOut")
         .apply(post(handle_account_pool_mark_out));
     router = router.route("/api/account/{id}/pool/mark-out", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("poolReportRoom")
         .apply(post(handle_account_pool_report_room));
     router = router.route("/api/account/{id}/pool/report-room", route);
     router

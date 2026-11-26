@@ -63,6 +63,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("listReservations")
         .apply(get(handle_ledger_list_reservations));
     router = router.route("/api/ledger/reservations", route);
     let route = RouteControls::under(transport)
@@ -72,16 +73,19 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let route = RouteControls::under(transport)
         .require_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &["stock.reserve"])
+        .operation("reserveStock")
         .apply(post(handle_stock_reserve_stock));
     router = router.route("/api/stock/reservations", route);
     let route = RouteControls::under(transport)
         .identify_service(Arc::clone(&state.implementations.service_authenticator))
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("getReservation")
         .apply(get(handle_stock_get_reservation));
     router = router.route("/api/stock/reservations/{id}", route);
     let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &["stock.write"])
+        .operation("releaseReservation")
         .apply(post(handle_stock_release_reservation));
     router = router.route("/api/stock/reservations/{id}/release", route);
     let route = RouteControls::under(transport)
@@ -95,6 +99,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &[])
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("syncMyStock")
         .apply(post(handle_sync_sync_my_stock));
     router = router.route("/api/sync/stock/mine", route);
     router

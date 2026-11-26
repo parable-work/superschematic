@@ -7,8 +7,7 @@ export default defineConfig({
     types: {
       [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true },
-      [TargetLanguage.Python]: { enabled: true },
-      [TargetLanguage.Rust]: { enabled: true }
+      [TargetLanguage.Python]: { enabled: true }
     },
     sql: { dialects: ["postgres", "sqlite"] }
   }
