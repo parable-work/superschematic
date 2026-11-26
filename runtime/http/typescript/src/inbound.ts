@@ -187,7 +187,7 @@ export interface Inbound {
   settle(as: Principal, message: string): Promise<void>;
   /** A party's messages on every channel, newest first; as reads the party's row. */
   timeline(as: Principal, party: PartyRef, options?: { readonly limit?: number }): Promise<MessageRow[]>;
-  /** A message and its files' names. */
+  /** A message's row, or null. */
   message(id: string): Promise<MessageRow | null>;
   /** The @runRequests queue over pool as a worker claims it, each message handed to handle: the agent dispatcher's (D158), or an app's own. */
   runWorker(pool: QueuePool, handle: (request: RunRequest) => Promise<void>): WorkerQueue;
