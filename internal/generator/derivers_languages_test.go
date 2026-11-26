@@ -28,6 +28,19 @@ func TestDeriverLanguageRefusals(t *testing.T) {
 		t.Errorf("a Go API's deriver of engine types = %v, want it refused", err)
 	}
 
+	// A Go API's deriver of a table whose rows keep to an audience (D180).
+	if err := refuseGoHeldDerivers(api, tables); err != nil {
+		t.Errorf("a Go API's deriver of a plain table: %v", err)
+	}
+	held := []apigen.DeriverInfo{{Name: "FillArticles", Tables: true, Schemas: []apigen.DerivedSchema{
+		{Name: "Invoice", Type: &ir.TypeDef{Name: "Invoice"}},
+		{Name: "Article", Type: &ir.TypeDef{Name: "Article", Audience: &ir.AudienceDef{Owner: "owner"}}},
+	}}}
+	err = refuseGoHeldDerivers(api, held)
+	if err == nil || !strings.Contains(err.Error(), "shop-cart declares deriver FillArticles, which fills the derived fields of Article, and Article keeps its rows to an audience (@audience); a Go API's deriver does not fill such a table yet, since the Go behaviors' core reads its effective audience as one UUID and fails every pull (D146, D180)") {
+		t.Errorf("a Go API's deriver of a held table = %v, want it refused", err)
+	}
+
 	if err := refuseRustMixedDerivers(api, nil, tables); err != nil {
 		t.Errorf("a Rust API's derivers of tables: %v", err)
 	}

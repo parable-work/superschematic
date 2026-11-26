@@ -1288,6 +1288,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 	}
 	// Deps.go declares the derivers of tables, typed by the database's Go
 	// types (D146).
+	if err := refuseGoHeldDerivers(r.Schema, output.TableDerivers); err != nil {
+		return nil, err
+	}
 	if len(output.TableDerivers) > 0 {
 		fieldTypes := func(table string) (map[string]string, error) {
 			db, err := r.LoadDependency(deps.Database)
