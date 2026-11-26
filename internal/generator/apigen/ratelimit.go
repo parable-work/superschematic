@@ -105,6 +105,23 @@ type GoImport struct {
 	Path  string
 }
 
+// HasClientRateLimit reports that a route counts a per-client @rateLimit
+// (the client's address, or the name authentication gave it) and the API's
+// config names no rateLimitStore (D75): Config then takes ClientRateLimits,
+// the counts that the replicas share, and each such route counts in it.
+// Nil, the default, counts each replica alone.
+func (o *APIOutput) HasClientRateLimit() bool {
+	if o.Deps.RateLimitStore != "" {
+		return false
+	}
+	for _, endpoint := range o.RoutedEndpoints() {
+		if endpoint.RateLimit != nil && !endpoint.PrincipalRateLimited() {
+			return true
+		}
+	}
+	return false
+}
+
 // summarizeRateLimits sets HasPrincipalRateLimit and the imports of the
 // routes' principal readers, and refuses a key that is neither the core's
 // nor an extension's, and a principal key on a route with no caller.

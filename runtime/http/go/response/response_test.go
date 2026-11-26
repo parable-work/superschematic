@@ -664,6 +664,12 @@ func TestLoggedInputRefusal(t *testing.T) {
 			refusal: &bodyargs.InputRefusal{Detail: bodyargs.BodyRequired},
 			want:    `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Request body is required","code":"bad_request","requestId":"test-req-id"}`,
 		},
+		{
+			refusal: &bodyargs.InputRefusal{Detail: bodyargs.BodyMismatch, Reason: "unknown fields: plan", Errors: errors, Type: "Order"},
+			want: `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Request body does not match the declared input",` +
+				`"code":"bad_request","requestId":"test-req-id","details":{"location":"body","reason":"unknown fields: plan","type":"Order"},` +
+				`"errors":{"plan":[{"validator":"unknown","message":"unknown field"}]}}`,
+		},
 	} {
 		w := httptest.NewRecorder()
 		LoggedInputRefusal(w, requestWithLogger("POST", "/api/widgets", logger), tc.refusal)

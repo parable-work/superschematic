@@ -72,6 +72,9 @@ type Param struct {
 	Reference *Reference
 	// Search marks the operation's search argument (SearchQuery, D62).
 	Search bool
+	// QueryParameter marks a @query parameter, as against an argument of
+	// a GET operation, which travels in the query string too.
+	QueryParameter bool
 	// Sort is the operation's sort argument (SortBy, D60 amended), nil for
 	// every other. It stays among the endpoint's QueryParams, so the SDKs
 	// and the tool documents send it as the optional query argument it
@@ -169,6 +172,13 @@ type EndpointInfo struct {
 	// is a @webhook and its type is neither @strictJSON nor
 	// @denyUnknownFields. Every other input refuses such a key (D42).
 	InputAllowsUnknownFields bool
+	// InputClosed reports whether the input's type is @strictJSON or
+	// @denyUnknownFields, a closed contract whose undeclared keys every
+	// router refuses, whatever go_api.undeclared_input_keys says.
+	InputClosed bool
+	// InputStrictJSON reports whether the input's type is @strictJSON, whose
+	// own decoder refuses an undeclared key.
+	InputStrictJSON bool
 
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
@@ -634,6 +644,33 @@ func (o *APIOutput) HasBodyArgs() bool {
 		}
 	}
 	return false
+}
+
+// RenamesQueryListValidators reports whether routes.go renames the
+// validators of the errors bodyargs.QueryList records: a route decodes a
+// list in the query string and the naming file's go_api.validator_names
+// renames a validator.
+func (o *APIOutput) RenamesQueryListValidators() bool {
+	if len(o.Naming.GoAPI.ValidatorNames) == 0 {
+		return false
+	}
+	for _, endpoint := range o.HandlerEndpoints() {
+		if len(endpoint.QueryListArgs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// RouteValidatorNames are the renames of go_api.validator_names in key
+// order, which routes.go writes as routeValidatorNames.
+func (o *APIOutput) RouteValidatorNames() [][2]string {
+	var out [][2]string
+	for from, to := range o.Naming.GoAPI.ValidatorNames {
+		out = append(out, [2]string{from, to})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
 }
 
 // RoutesNeedScalars gates the scalar Go module's import in routes.go, as
@@ -1276,6 +1313,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 
 		switch {
 		case arg.IsQuery:
+			param.QueryParameter = true
 			queryParams = append(queryParams, param)
 		case op.RestPath != "" && embeddedParams[arg.Name]:
 			pathParams = append(pathParams, param)
@@ -1330,10 +1368,13 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	inputAllowsUnknownFields := false
+	inputClosed, inputStrictJSON := false, false
 	behaviorPreconditions := false
 	if inputType != "" {
 		if typeDef, ok := types.findTypeDef(inputType); ok {
 			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+			inputClosed = typeDef.StrictJSON || typeDef.DenyUnknownFields
+			inputStrictJSON = typeDef.StrictJSON
 			behaviorPreconditions = carriesBehaviorPreconditions(op, typeDef)
 		}
 	}
@@ -1375,6 +1416,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		HasInput:                     hasInput,
 		InputRequired:                inputRequired,
 		InputAllowsUnknownFields:     inputAllowsUnknownFields,
+		InputClosed:                  inputClosed,
+		InputStrictJSON:              inputStrictJSON,
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,

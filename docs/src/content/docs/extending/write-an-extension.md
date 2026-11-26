@@ -545,6 +545,12 @@ step, and `routeMiddlewaresAfterDecrypt` runs after the payload decryptor
 and before the timeout. `routesConfigFields` adds the `Config` fields they
 read, in every API, public or not, and `routesDeclarations` adds the
 functions, types and values of `routes.go` they call.
+`routesConfigPrepare` opens `RegisterRoutes`, before it validates
+`cfg`: statements that fill a core field from the provider's fields.
+`routeUploadBody` and `routeQueryList` replace the core's reading of an
+upload route's body and of one list in the query string when they are
+not empty: the first declares `input` and `files`, the second the list's
+variable.
 
 ## Policy on what the core writes
 
