@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -428,9 +429,10 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			behaviors = &ormBehaviors{Owned: []string{}, NoUpsert: l.Deadlines != nil}
 			for _, use := range l.Uses {
 				// A create that writes a sub-table's or a shared table's
-				// rows (Numbering's counts, D103's step 4) is no upsert's
+				// rows (Numbering's counts, D103's step 4), or another
+				// table's (Blueprint's children, D149), is no upsert's
 				// insert.
-				if len(use.Tables) > 0 || len(use.Shared) > 0 {
+				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
 				}
 			}

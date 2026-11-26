@@ -10,6 +10,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -556,9 +557,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				table.NoUpserts = table.Deadlines
 				for _, use := range layout.Uses {
 					// A create that writes a sub-table's or a shared
-					// table's rows (Numbering's counts, D103's step 4) is
-					// no upsert's insert.
-					if len(use.Tables) > 0 || len(use.Shared) > 0 {
+					// table's rows (Numbering's counts, D103's step 4), or
+					// another table's (Blueprint's children, D149), is no
+					// upsert's insert.
+					if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 						table.NoUpserts = true
 					}
 				}

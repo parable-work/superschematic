@@ -665,8 +665,9 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			where, rename = "the table implements", "rename the field or type whose name it takes"
 		}
 		// A create that writes a sub-table's or a shared table's rows
-		// (Numbering's counts, D103's step 4) is no upsert's insert.
-		if len(use.Tables) > 0 || len(use.Shared) > 0 {
+		// (Numbering's counts, D103's step 4), or another table's
+		// (Blueprint's children, D149), is no upsert's insert.
+		if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 			repo.NoUpsert = true
 		}
 		goName := codegen.ToPascalCase(member)

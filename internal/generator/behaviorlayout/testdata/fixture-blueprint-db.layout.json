@@ -1,0 +1,371 @@
+{
+  "types": {
+    "Batch": {
+      "type": "Batch",
+      "table": "batch",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "topic",
+          "column": "topic",
+          "type": "string"
+        },
+        {
+          "field": "flags",
+          "column": "flags",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Blueprint",
+          "behavior": "Blueprint",
+          "member": "blueprint",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Batch",
+        "uses": [
+          {
+            "behavior": "Blueprint",
+            "config": {
+              "copyFields": [
+                "topic"
+              ],
+              "keyField": "step",
+              "parentLink": "batch",
+              "schema": "Job",
+              "steps": {
+                "audit": {
+                  "after": [
+                    "index"
+                  ],
+                  "data": {
+                    "title": "Audit the index"
+                  },
+                  "when": {
+                    "field": "flags",
+                    "includes": "audit"
+                  }
+                },
+                "fetch": {
+                  "data": {
+                    "title": "Fetch the sources"
+                  }
+                },
+                "index": {
+                  "after": [
+                    "fetch"
+                  ],
+                  "data": {
+                    "title": "Index what was fetched"
+                  }
+                },
+                "report": {
+                  "after": [
+                    "audit"
+                  ],
+                  "data": {
+                    "title": "Report what was indexed"
+                  }
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "outcomes": {
+                "failed": "failure"
+              },
+              "states": [
+                "running",
+                "done",
+                "failed"
+              ],
+              "transitions": [
+                {
+                  "from": "running",
+                  "to": "done"
+                },
+                {
+                  "from": "running",
+                  "to": "failed"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "topic",
+            "type": "string"
+          },
+          {
+            "name": "flags",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Job": {
+      "type": "Job",
+      "table": "job",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "step",
+          "column": "step",
+          "type": "string"
+        },
+        {
+          "field": "topic",
+          "column": "topic",
+          "type": "string"
+        },
+        {
+          "field": "batchId",
+          "column": "batch_id",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Constants",
+          "behavior": "Constants",
+          "member": "constants",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "Dependencies",
+          "behavior": "Dependencies",
+          "member": "dependencies",
+          "fields": [],
+          "operations": [
+            {
+              "name": "addBlocker",
+              "writes": true
+            },
+            {
+              "name": "removeBlocker",
+              "writes": true
+            },
+            {
+              "name": "listBlockers",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "blockers",
+              "table": "job_dependencies_blockers",
+              "row": "job_id",
+              "key": {
+                "name": "number",
+                "field": "number",
+                "column": "number",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "blockerType",
+                  "field": "blockerType",
+                  "column": "blocker_type",
+                  "type": "string"
+                },
+                {
+                  "name": "blockerKey",
+                  "field": "blockerKey",
+                  "column": "blocker_key",
+                  "type": "string"
+                },
+                {
+                  "name": "addedBy",
+                  "field": "addedBy",
+                  "column": "added_by",
+                  "type": "string"
+                },
+                {
+                  "name": "addedAt",
+                  "field": "addedAt",
+                  "column": "added_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Job",
+        "uses": [
+          {
+            "behavior": "Constants",
+            "config": {
+              "fields": [
+                "step",
+                "topic"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Dependencies",
+            "config": {
+              "gatedStates": [
+                "running",
+                "done"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "outcomes": {
+                "failed": "failure"
+              },
+              "states": [
+                "queued",
+                "running",
+                "done",
+                "failed"
+              ],
+              "transitions": [
+                {
+                  "from": "queued",
+                  "to": "running"
+                },
+                {
+                  "from": "running",
+                  "to": "done"
+                },
+                {
+                  "from": "running",
+                  "to": "failed"
+                },
+                {
+                  "from": "queued",
+                  "to": "failed"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "step",
+            "type": "string"
+          },
+          {
+            "name": "topic",
+            "type": "string"
+          },
+          {
+            "name": "batchId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "batch",
+              "type": "Batch"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

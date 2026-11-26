@@ -267,7 +267,9 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // table's Workflow (checkSchedulesConfig, D104), a Pool use's order to
 // the table's fields (checkPoolConfig, D104), and a Rollups or
 // Dependencies use's tables, relations and fields to its database
-// (checkRollupsConfig, checkDependenciesConfig, D104's step 4), and a
+// (checkRollupsConfig, checkDependenciesConfig, D104's step 4), a
+// Blueprint use's child table, relation, fields and template to its
+// database (checkBlueprintConfig, D149), and a
 // Comments use's members to what the behaviors' core runs
 // (checkCommentsConfig, D103's step 4), and a Derived or Provenance use's
 // fields, inputs, sources, states and gates to the table and its Workflow
@@ -371,6 +373,10 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case dependenciesBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkDependenciesConfig(schema, td, ref, r)
+				}
+			case blueprintBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkBlueprintConfig(schema, td, ref, r)
 				}
 			case commentsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
