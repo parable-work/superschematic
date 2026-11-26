@@ -1227,7 +1227,12 @@ without a build, and runs the operation with the migration runner, from
 On the `local` target it reaches the database at the URL the environment
 resolves, on the Postgres container `stack dev` runs; run it from another
 terminal, and when the database does not answer it says to start `stack
-dev`.
+dev`. A database on SQLite is its file under the environment's state
+directory, which `stack dev` creates, and a file that is not there yet is
+refused. On SQLite and D1 the document carries SQLite's statements (D68):
+a `retry` or a `drop` of IDs is one statement that changes each of them
+or none, and a `backfill` under `replace` takes one row of each key, as
+Postgres's does.
 
 On a cloud target it runs on the deployed run's database through the
 target's queue runner, and refuses a target that has none and a run that
@@ -1256,11 +1261,12 @@ holds in `HYPERDRIVE_ORIGIN_<DB>` (`HYPERDRIVE_ORIGIN_FINANCES_DB` for
 reads the database's Hyperdrive config with `CLOUDFLARE_API_TOKEN`, and
 refuses a connection string whose host, port, database or user is not
 the config's, and a shell that holds none, naming the variable. The log
-says which database it ran on, never the result.
+says which database it ran on, never the result. A queue on D1 runs on
+this machine too, on the run's D1 database at the uuid the last deploy's
+outputs hold, through Cloudflare's API with `CLOUDFLARE_API_TOKEN`, as the
+deploy's migrations do.
 
-It refuses a queue no DB service of the stack declares, and a queue whose
-database the environment places on another dialect than Postgres, on
-which no queue is claimed.
+It refuses a queue no DB service of the stack declares.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
