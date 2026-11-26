@@ -279,6 +279,10 @@ type EnumInfo struct {
 	Name   string
 	Doc    string
 	Values []codegen.EnumValueInfo
+	// TextMethods writes Title() and Action(), the `title:` and `action:`
+	// lines of each member's comment: go.enum_text_methods = "on" and a
+	// member with such a line (D165).
+	TextMethods bool
 }
 
 // ModuleOutput contains all generated code for a types module.
@@ -479,7 +483,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		allDependencyModulePaths(opts.ModulePath, slices.Concat(output.ModuleDependencies, output.IndirectModuleDependencies), opts.DependencyModules),
 	)
 
-	output.Enums = convertEnums(codegen.ExtractEnums(schema))
+	output.Enums = convertEnums(codegen.ExtractEnums(schema), opts.Naming.Go.WritesEnumTextMethods())
 
 	output.Unions = convertUnions(codegen.ExtractUnions(schema))
 	for _, def := range codegen.ExtractCompositeDefaults(schema) {
@@ -789,13 +793,14 @@ func scalarLibParseTarget(scalar ScalarInfo) string {
 	return ""
 }
 
-func convertEnums(enums []codegen.EnumInfo) []EnumInfo {
+func convertEnums(enums []codegen.EnumInfo, textMethods bool) []EnumInfo {
 	converted := make([]EnumInfo, len(enums))
 	for i, e := range enums {
 		converted[i] = EnumInfo{
-			Name:   e.Name,
-			Doc:    e.Doc(),
-			Values: e.Values,
+			Name:        e.Name,
+			Doc:         e.Doc(),
+			Values:      e.Values,
+			TextMethods: textMethods && codegen.EnumValuesHaveText(e.Values),
 		}
 	}
 	return converted

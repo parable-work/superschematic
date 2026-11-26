@@ -1071,6 +1071,29 @@ An explicit nested selection keeps its depth under either value, and
 under `own` it always reads the target's id, which the read matches the
 rows by. Any other value fails the load.
 
+### `go.enum_text_methods`
+
+Default: `off`
+
+`on` gives a Go enum whose members' comments carry a `title:` or an
+`action:` line the methods `Title()` and `Action()`. Each returns the
+text after its key on the member's first such line, trimmed, or `""` for
+a member without one, so code reads a member's words from the generated
+enum and keeps no copy of them:
+
+```ts
+export enum UploadProblem {
+  // title: The upload was refused
+  // action: Pick a smaller file and try again.
+  TOO_LARGE = "UP-001",
+}
+```
+
+The key matches in any case. The member's comment keeps the lines. An
+enum with no such line gets neither method. The member's `@title` tag
+(D48) is a separate label, which the methods do not read. `off` writes
+neither method. Any other value fails the load.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

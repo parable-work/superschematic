@@ -27,6 +27,7 @@ optional_zero = "keep"
 env_number_scalars = "strconv"
 orm_relation_filter_suffix = "Where"
 orm_default_selection = "own"
+enum_text_methods = "on"
 `), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ orm_default_selection = "own"
 	want.EnvNumberScalars = GoEnvStrconv
 	want.ORMRelationFilterSuffix = "Where"
 	want.ORMDefaultSelection = GoSelectOwn
+	want.EnumTextMethods = GoOn
 	if n.Go != want {
 		t.Errorf("[go] = %+v, want %+v", n.Go, want)
 	}
@@ -51,6 +53,7 @@ orm_default_selection = "own"
 func TestParseRefusesAValueTheGoTableDoesNotTake(t *testing.T) {
 	for _, tc := range []struct{ file, want string }{
 		{"[go]\nlimit_constants = \"yes\"\n", `go.limit_constants is "yes": use "on" or "off"`},
+		{"[go]\nenum_text_methods = \"yes\"\n", `go.enum_text_methods is "yes": use "on" or "off"`},
 		{"[go]\noptional_zero = \"pointers\"\n", `go.optional_zero is "pointers": use "omit" or "keep"`},
 		{"[go]\nenv_number_scalars = \"atoi\"\n", `go.env_number_scalars is "atoi": use "parse" or "strconv"`},
 		{"[go]\norm_default_selection = \"none\"\n", `go.orm_default_selection is "none": use "all" or "own"`},
