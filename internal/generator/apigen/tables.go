@@ -626,6 +626,9 @@ func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperat
 	filter := "orm." + to.Type + "Filter"
 	var named []string
 	for _, name := range to.By {
+		if strings.Contains(name, ".") {
+			return nil, unserved("its row rule names the path %s, and the Go server holds a rule to the row's own members so far (D156)", name)
+		}
 		column := result.column(name)
 		if column == nil {
 			return nil, fmt.Errorf("apigen: operation %s: its row rule names %s, which is no member of %s; the loader holds a @tableOperation's rule to its table (D108)", owner, name, to.Type)

@@ -340,6 +340,30 @@ export type { Revealable } from './secret.js';
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
 export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormOf } from './orm.js';
+// Per-record access (D156): the predicate that keeps a read of an
+// @audience table to what a caller sees, which a read across tables
+// applies as a repository does, and the refusal of a write a party's or an
+// agent run's grants do not reach.
+export { AccessRefusedError, audienceConditions, type AudienceDefinition } from './orm.js';
+// Grants and the access log (D156): the authenticator of a grant's token,
+// the making, revoking and reading of grants, and the log's writer.
+export {
+  GRANT_TOKEN_PREFIX,
+  accessLogOf,
+  activeGrants,
+  grantAuthenticator,
+  grantEnded,
+  grantTokenHash,
+  issueGrant,
+  reachesOf,
+  revokeGrant,
+  type AccessLog,
+  type AccessLogEntry,
+  type ActiveGrantsFilter,
+  type GrantAuthenticatorOptions,
+  type GrantRow,
+  type IssueGrantInput,
+} from './access.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

@@ -339,6 +339,10 @@ type Trigger struct {
 	// SQLite the declaration's first trigger holds it. Empty for every
 	// other trigger.
 	Backfill string `json:"backfill,omitempty"`
+	// BackfillNote is what a plan says of the step that runs Backfill, when
+	// the trigger's backfill is not @enqueueOnChange's: an @audience
+	// table's, which resolves every row's audience (D156).
+	BackfillNote string `json:"backfillNote,omitempty"`
 	// Refuses is set on a trigger that fails a write it does not allow, as
 	// a @stateMachine's guard (D118) and a @fenced counter's trigger (D119)
 	// do. A plan creates such a trigger on a table the previous model has

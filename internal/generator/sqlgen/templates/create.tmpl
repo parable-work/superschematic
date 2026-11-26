@@ -205,6 +205,25 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $fence.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if .AudienceTriggers }}
+
+-- Create the functions and triggers that keep an @audience table's
+-- effective audience: the row's audience resolved, through its parent for
+-- inherit, whatever writes the row, and again for each child that inherits
+-- when a parent's changes
+{{- range $audience := .AudienceTriggers }}
+
+{{ $audience.FunctionSQL }};
+
+{{ $audience.Trigger.SQL }};
+{{- end }}
+{{- range $cascade := .AudienceCascades }}
+
+{{ $cascade.FunctionSQL }};
+
+{{ $cascade.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Create projection views: read-only relations over the tables above. A

@@ -693,7 +693,16 @@ export const virtual: PropertyDecorator = noopPropertyDecorator;
  * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
  * so: whatever the view holds, a response sends.
  */
-export const decrypted: PropertyDecorator = noopPropertyDecorator;
+export function decrypted(target: object, propertyKey: string | symbol): void;
+/**
+ * Reveal is its own permission (D156): a caller without `permission` gets
+ * the field masked, and each value a generated operation opens is recorded
+ * in the access log.
+ */
+export function decrypted(options: { readonly permission: string }): PropertyDecorator;
+export function decrypted(_target: object, _propertyKey?: string | symbol): void | PropertyDecorator {
+  if (_propertyKey === undefined) return noopPropertyDecorator;
+}
 /** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 /**
