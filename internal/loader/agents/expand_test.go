@@ -178,3 +178,81 @@ func copyDir(t *testing.T, from, to string) {
 		t.Fatal(err)
 	}
 }
+
+// TestAgentOrchestrationExampleLoads: examples/agent-orchestration's schemas
+// load (D158): work-db holds every part of the orchestration, work-api runs
+// the dispatcher on a worker of its request queue beside the notifier's,
+// its operations carry their autonomy, and the API uses the agents feature
+// (a sandbox and a model) and the notifications feature (a channel).
+func TestAgentOrchestrationExampleLoads(t *testing.T) {
+	services := filepath.Join("..", "..", "..", "examples", "agent-orchestration", "schemas", "services")
+	reg := registry.New(naming.Default())
+	db, err := loader.LoadService(filepath.Join(services, "work-db"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load work-db: %v", err)
+	}
+	for _, part := range ir.AgentParts {
+		if db.AgentsTable(part) == nil {
+			t.Errorf("work-db declares no %s", part)
+		}
+	}
+	api, err := loader.LoadService(filepath.Join(services, "work-api"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load work-api: %v", err)
+	}
+	workers := map[string]*ir.Worker{}
+	for _, w := range api.Workers {
+		workers[w.Name] = w
+	}
+	if w := workers["Dispatch"]; w == nil || w.Queue != "AgentRunRequest" {
+		t.Errorf("Dispatch is %+v", w)
+	}
+	classes := map[string]string{}
+	for _, set := range api.OperationSets {
+		for _, op := range set.Operations {
+			if op.Autonomy != nil {
+				classes[op.Name] = op.Autonomy.Class
+			}
+		}
+	}
+	if classes["payInvoice"] != ir.AgentClassMoneyMovement || classes["getTask"] != ir.AgentClassRead {
+		t.Errorf("the operations' autonomy is %v", classes)
+	}
+	used := reg.RuntimeFeaturesUsed(registry.RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{db.Name: db}})
+	var got []string
+	for _, use := range used {
+		got = append(got, use.Feature+":"+use.Interface)
+	}
+	slices.Sort(got)
+	if want := []string{"agents:model", "agents:sandbox", "notifications:channel"}; !slices.Equal(got, want) {
+		t.Errorf("work-api uses %v, want %v", got, want)
+	}
+}
+
+// TestAutonomyRefusesMoneyWithoutAsking (D158): an operation that moves
+// money and says it runs on its own is the load's refusal.
+func TestAutonomyRefusesMoneyWithoutAsking(t *testing.T) {
+	services := filepath.Join("..", "..", "..", "examples", "agent-orchestration", "schemas", "services")
+	base, err := os.ReadFile(filepath.Join(services, "work-api", "src", "work.schema.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := `@autonomy("moneyMovement")`
+	if !strings.Contains(string(base), from) {
+		t.Fatalf("the example has no %s", from)
+	}
+	dir, err := os.MkdirTemp(services, "tmp-work-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	copyDir(t, filepath.Join(services, "work-api"), dir)
+	text := strings.Replace(string(base), from, `@autonomy("moneyMovement", "auto")`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "src", "work.schema.ts"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = loader.LoadService(dir, loader.WithRegistry(registry.New(naming.Default())))
+	if err == nil || !strings.Contains(err.Error(), "an agent may only ask to move money") {
+		t.Fatalf("load = %v, want the refusal of money that moves on its own", err)
+	}
+}

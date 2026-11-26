@@ -35,7 +35,8 @@ export {
 } from "./decorators";
 export type {
   AppOptions,
-  AutonomyConfig,
+  AutonomyClass,
+  AutonomyMode,
   BehaviorWorkerOptions,
   BodyLimitConfig,
   DeriverOptions,

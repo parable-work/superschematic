@@ -181,24 +181,23 @@ export function mcp(_config: MCPConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
-/** What an operation is to an agent's autonomy policy (D158). */
-export interface AutonomyConfig {
-  /**
-   * The class a policy row may name in place of the operation: read,
-   * internalWrite, messageParty or moneyMovement.
-   */
-  readonly class: "read" | "internalWrite" | "messageParty" | "moneyMovement";
-  /**
-   * The autonomy an agent has over it when no policy row names it: auto
-   * and internalWrite default to auto, messageParty and moneyMovement to
-   * ask. An operation that moves money is ask and nothing else: the build
-   * refuses another.
-   */
-  readonly mode?: "auto" | "tell" | "ask";
-}
+/**
+ * The class a policy row may name an operation by (D158): it reads, writes
+ * the app's rows, messages a party, or moves money.
+ */
+export type AutonomyClass = "read" | "internalWrite" | "messageParty" | "moneyMovement";
 
-/** Says what the operation is to an agent's autonomy policy (D158). */
-export function autonomy(_config: AutonomyConfig): MethodDecorator {
+/** The autonomy an agent has over an operation (D158). */
+export type AutonomyMode = "auto" | "tell" | "ask";
+
+/**
+ * Says what the operation is to an agent's autonomy policy (D158): its
+ * class, and the autonomy an agent has over it when no policy row names
+ * it. A read and an internal write default to auto, a message to a party
+ * and a money movement to ask. An operation that moves money is ask and
+ * nothing else: the build refuses another mode.
+ */
+export function autonomy(_class: AutonomyClass, _mode?: AutonomyMode): MethodDecorator {
   return noopMethodDecorator;
 }
 

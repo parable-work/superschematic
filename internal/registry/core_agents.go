@@ -10,7 +10,7 @@ import (
 
 // agentDecorators returns the decorators of the agent orchestration
 // (D158): @agents("<part>") on each DB class that is one of its tables,
-// from @superschematic/db, and @autonomy({ class, mode? }) on an API
+// from @superschematic/db, and @autonomy(class, mode?) on an API
 // operation, from @superschematic/api, which says what the operation is to
 // an agent's autonomy policy. An operation that moves money is ask and
 // nothing else: Apply refuses another mode, so the load refuses it.
@@ -52,33 +52,24 @@ func agentDecorators() []DecoratorSpec {
 	}
 }
 
-// autonomyOf reads @autonomy({ class, mode? }) on the operation named op.
+// autonomyOf reads @autonomy(class, mode?) on the operation named op: the
+// class a policy row may name it by, and its mode when no row names it.
 func autonomyOf(op string, args []any) (*ir.OperationAutonomy, error) {
-	shape := fmt.Sprintf("@autonomy({ class, mode? }), class one of %s and mode one of %s", strings.Join(ir.AgentClasses, ", "), strings.Join(ir.AutonomyModes, ", "))
-	if len(args) != 1 {
-		return nil, fmt.Errorf("@autonomy on %s takes one options object: %s", op, shape)
-	}
-	obj, ok := args[0].(map[string]any)
-	if !ok {
-		return nil, ArgErrorf(0, "@autonomy on %s takes an options object: %s", op, shape)
+	shape := fmt.Sprintf("@autonomy(class, mode?), class one of %s and mode one of %s", strings.Join(ir.AgentClasses, ", "), strings.Join(ir.AutonomyModes, ", "))
+	if len(args) < 1 || len(args) > 2 {
+		return nil, fmt.Errorf("@autonomy on %s takes a class and an optional mode: %s", op, shape)
 	}
 	out := &ir.OperationAutonomy{}
-	for _, key := range sortedKeys(obj) {
-		text, ok := obj[key].(string)
-		if !ok {
-			return nil, ArgErrorf(0, "@autonomy on %s: %s is a string; got %v", op, key, obj[key])
+	for i, arg := range args {
+		text, ok := arg.(string)
+		if !ok || text == "" {
+			return nil, ArgErrorf(i, "@autonomy on %s: %v is no string: %s", op, arg, shape)
 		}
-		switch key {
-		case "class":
+		if i == 0 {
 			out.Class = text
-		case "mode":
+		} else {
 			out.Mode = text
-		default:
-			return nil, ArgErrorf(0, "@autonomy on %s has no option %q; it takes class and mode", op, key)
 		}
-	}
-	if out.Class == "" {
-		return nil, ArgErrorf(0, "@autonomy on %s needs a class: %s", op, shape)
 	}
 	if err := ir.ValidateOperationAutonomy(out); err != nil {
 		return nil, ArgErrorf(0, "@autonomy on %s: %s", op, err)

@@ -109,14 +109,15 @@ func TestAutonomyDecorator(t *testing.T) {
 		want *ir.OperationAutonomy
 		err  string
 	}{
-		"a class":                    {args: []any{map[string]any{"class": "read"}}, want: &ir.OperationAutonomy{Class: "read"}},
-		"money that asks":            {args: []any{map[string]any{"class": "moneyMovement", "mode": "ask"}}, want: &ir.OperationAutonomy{Class: "moneyMovement", Mode: "ask"}},
-		"money with no mode":         {args: []any{map[string]any{"class": "moneyMovement"}}, want: &ir.OperationAutonomy{Class: "moneyMovement"}},
-		"money that runs on its own": {args: []any{map[string]any{"class": "moneyMovement", "mode": "auto"}}, err: "an agent may only ask to move money"},
-		"money that tells":           {args: []any{map[string]any{"class": "moneyMovement", "mode": "tell"}}, err: "an agent may only ask to move money"},
-		"no such class":              {args: []any{map[string]any{"class": "spend"}}, err: `class "spend" is none of`},
-		"no class":                   {args: []any{map[string]any{"mode": "ask"}}, err: "needs a class"},
-		"an unknown option":          {args: []any{map[string]any{"class": "read", "why": "x"}}, err: `no option "why"`},
+		"a class":                    {args: []any{"read"}, want: &ir.OperationAutonomy{Class: "read"}},
+		"money that asks":            {args: []any{"moneyMovement", "ask"}, want: &ir.OperationAutonomy{Class: "moneyMovement", Mode: "ask"}},
+		"money with no mode":         {args: []any{"moneyMovement"}, want: &ir.OperationAutonomy{Class: "moneyMovement"}},
+		"money that runs on its own": {args: []any{"moneyMovement", "auto"}, err: "an agent may only ask to move money"},
+		"money that tells":           {args: []any{"moneyMovement", "tell"}, err: "an agent may only ask to move money"},
+		"no such class":              {args: []any{"spend"}, err: `class "spend" is none of`},
+		"no class":                   {args: []any{}, err: "takes a class"},
+		"no such mode":               {args: []any{"read", "sometimes"}, err: `mode "sometimes" is none of`},
+		"an object":                  {args: []any{map[string]any{"class": "read"}}, err: "is no string"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := autonomyOf("payInvoice", tc.args)

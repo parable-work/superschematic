@@ -167,9 +167,9 @@ takes own fields only, on the engine and on a table.
   own to design.
 
 **D77** (L 10239). Vectors over messages; Search's every-schema search on
-namespace operations; `readable()` asked per operation; an agent
-dispatcher as a stack worker (D153 built the notifier, in TypeScript); a
-conversation UI. Comments runs on
+namespace operations; `readable()` asked per operation; the notifier and
+the agent dispatcher in Go and Rust (D153 built the notifier and D158 the
+dispatcher, each a queue's worker, in TypeScript); a conversation UI. Comments runs on
 the core now (D103's status lists what its port left).
 
 **D78** (L 10885). Go and TypeScript apps; the Topcoat asset bundle in the
@@ -367,8 +367,10 @@ engine type, where `finished` is refused until it is designed.
 
 **D114** (L 17971). A key's use log beyond `lastUsedAt`; a hint of the
 token in the list; rotation as one call; rate limits per key; a key bound
-to an origin or an address; confirmation of a tool call made with a key;
-keys on Topcoat's account and administration pages; a test of the
+to an origin or an address; confirmation of a tool call made with a key,
+past an agent run's (D158 asks before a run's call its autonomy policy
+holds, the run's token a grant); keys on Topcoat's account and
+administration pages; a test of the
 engine's own server authenticating a key.
 
 **D118** (L 18532). A 409 for a guard's refusal that names the two
@@ -1981,9 +1983,9 @@ Left:
 - Provider packages in build-all's dependency graph (D136) and in its
   build cache key, so a change to one's manifest rebuilds the APIs that
   list it and the stacks that deploy them.
-- The features: notifications (D153) register `channel`, attachments
-  (D154) `files`, agents (D158) `sandbox` and `model`, and credentials
-  for agent runs `credentials`, each with its `Uses`.
+- The features: attachments (D154) `files`, and credentials for agent
+  runs `credentials`, each with its `Uses`. Notifications (D153) register
+  `channel`, and agents (D158) `sandbox` and `model`.
 - Health: D153 skips an adapter whose `health` fails and alerts on the
   others; nothing calls `health` on a schedule yet.
 - A secret setting of a slot an environment leaves unset is still a
@@ -2345,3 +2347,95 @@ Left:
   Cloudflare` run, which is the maintainer's.
 - The schema writer writing `@event`, `@notifier` and `@channelIdentities`
   back.
+
+## D158. Agents are rows, a dispatcher on a queue starts each run in a fresh sandbox with a token that is a grant per target row acting for its principal, autonomy is rows per operation whose ask binds an approval to the parameters' hash, budgets pause, and switches cancel through the sandbox (D77, D93, D104, D114, D153, D156, D159 amended)
+
+D77 named an agent dispatcher and never built it. An agent called the MCP
+endpoint as a user, with that user's session or key: it reached whatever
+the user reached, ran whatever the user could, and nothing metered it,
+asked a person before it moved money, or stopped it. Section 8 of the
+platform plan asks for agents as rows, a fresh sandbox per run, a token its
+task bounds, autonomy per operation, budgets and stop switches.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The orchestration's tables are classes the database declares, one per part with `@agents("<part>")`: `definitions` (`@versioned`), `runs`, `requests` (a `@queue`), `policies`, `approvals` and `controls`, every one required. The loader adds each part's field a class does not declare, and holds one it declares to the part's scalar (the runs' `status` excepted), so the runs may compose Lease and Retries over a Workflow `status`, and the controls a Budget over `budgetLimit`. Postgres alone. | Tables the loader adds unasked, which every database would carry. A class the loader fills only when it is empty, as D153's notifier parts are, which leaves no room for the behaviors D104 meters and retries with. |
+| Each agent is its own principal: its runs act with its definition's `role`, never a user's. A run's principal is `kind: "agent"` with the run's id as its subject, so a row's audience admits the run or whom it acts for (D156). The run records the definition's `_version`. | A principal per agent, whose token would outlive a run. |
+| The run's token is a D156 grant per target row, held by the run (`holderKind: "agent"`), its role the agent's, ending at the definition's `limits.maxSeconds` and revoked when the run ends. `agents.authenticator()` resolves it through `grantAuthenticator`, then reads every active grant of the run and the run's row: a run that ended is a 401, `actingFor` is whom the run acts for, and the permissions are the role's narrowed to those that principal holds (each the two share, the narrower of a pair). | A token with its own claims, which a revocation could not end. The agent's role alone, under which an agent answering a party could do what the party may not. |
+| The dispatcher is a worker of the requests queue (`agents.workerQueue(pool)`, `agents.handle`). A start writes the run, takes its Lease (D104) as the dispatcher's behavior caller, mints the token and starts a sandbox instance (D159) with the definition, the token as a secret, the agent routes' URL and the credential references. A `watch` message, a delayed enqueue (D80), polls the instance and heartbeats the lease until it ends; the run then ends: token revoked, cost metered, transcript written, lease released. A start that fails is recorded with Retries, whose backoff sets when the start is tried again; exhausted, the run fails. On Workers the queue drains as any `@worker`'s does, at each Cron firing and on a wake for a message due within the minute (D92, D151): no process waits on an instance. | A long-running supervisor per run, which Workers has no place for. The queue's own claim lease and attempts in place of Lease and Retries, which the plan names and which give a run a fencing token and per-class backoff. |
+| The model turn runs in the app, not the sandbox: the instance posts its tool results to `<endpoint>/turn`, where the definition's model provider completes the turn with the run's tools, records the usage on the run and the budget, and writes the transcript. The instance calls tools at `<endpoint>/mcp` with its token, and runs the sandbox's own tools (a fetch, a browser) in process. `runAgentInstance` in `./providers` is that side. | The model called from the sandbox, which needs a model key in every instance and a budget the app cannot see. |
+| Credentials are references in the definition. The instance resolves each with `useCredential` into the runner that uses it and reports the reference, provider, target and time to `<endpoint>/credential`, which the run's `credentialUses` keeps. The app passes the broker's own settings to the instance through `sandboxSpec`. | Resolving in the app and passing values to the instance, which puts them in the app's memory and the spec's log. |
+| Triggers are request messages. A notifier route's recipient may be `{ agent }`, which enqueues a request about the event's record in the routing transaction (`createNotifier({ agents })`). `agents.request(tx, ...)` enqueues one for an assignment, a schedule or a principal. A party's inbound message (D157) is `{ trigger: "inbound", party, message, grant }`, which names no agent: the definition whose `inbound` is set takes it, its scope the grant's target, acting for the party. | A queue per trigger. Inbound messages through the notifier's reply path, which runs a sender's own verbs. |
+| Autonomy is rows: per agent or every agent, per operation or class (`read`, `internalWrite`, `messageParty`, `moneyMovement`), `auto`, `tell` or `ask`. The most specific row wins; with none, the tool's mode or the operation's `@autonomy`, then the class's default (auto for a read and an internal write, ask otherwise). A money movement is ask whatever a row says: `@autonomy("moneyMovement", mode)` with another mode is the load's refusal, and `setPolicy` refuses such a row. | Autonomy in the schema alone, which ground rule 1 turns down. A mode the runtime merely defaults, which a row could set to auto. |
+| `ask` writes an approval holding the exact parameters and the SHA-256 of the operation and them as canonical JSON (`paramsHash`), raises `approval.requested` on it as urgent, and the call answers `428 approval_required`. Anyone holding the approval's permission (`agents.approve` unless the row names one) decides it, on any channel: `replyActions` are D153's reply actions `approve` and `deny`, and `agents.approve` is the API's. The same call then runs once and spends it. A call of the operation with other parameters supersedes the run's open approvals of it and asks again. `mcpGate`, a new `callGate` of `mountMcp`, holds a generated API's tools to the same policy for a run's token: D93's confirmation for calls a key or a token makes (D114). | A confirmation token the agent carries, which an agent could ask for and redeem itself. An approval of the operation alone, which a changed amount would reuse. |
+| Budgets are the Budget behavior on the controls (D104): each turn's tokens and each instance's wall seconds count on the agent's row, whose meter's scope is every agent's budget row. `agent.budgetWarning` is raised as usage crosses the row's `warnAt` percent. At the agent's cap the agent pauses (`pausedReason: budget`) and its runs are cancelled; at every agent's cap a scheduled run is refused and a principal's run waits on an `agents.overBudget` approval, which `agents.budgets` decides. A limit changes only through `setBudget`, as a principal holding the Budget's `limitPermission`. | A meter of the dispatcher's own, beside the behavior the plan names. |
+| `pause(principal, agent or null)` sets the control row and cancels each run in flight through its sandbox provider; its token is revoked and an assigned row goes back to its queue (`onReturn`). A paused agent's request is recorded as a run refused `paused`. | Letting runs in flight finish, which a stop switch is for stopping. |
+| `ask_principal` posts the question in a target row's thread (its Comments, or the app's `thread`) and enqueues a `followUp` message due at the deadline; a thread no one but the run answered gets the app's `followUp` row. | A wait inside the run, which holds an instance for a day. |
+| A tool marked `untrusted` (the app's or the sandbox's) has its results marked untrusted in every turn after it and counted on the run; an inbound message is the run's task, marked untrusted too. Every tool runs as the run's principal, whose grants were fixed when the run started: no tool widens a run's scope. | Filtering instructions out of outside text, which no filter does reliably. |
+| Administering agents is permissions: `agents.define`, `agents.credentials` (changing a definition's references), `agents.autonomy`, `agents.budgets`, `agents.pause` and `agents.approve`. A principal of kind agent holds none of them, whatever its role says. | An admin flag, which ground rule 2 turns down. |
+
+Settled. A transcript is redacted as each entry is written (the run's
+token, bearer tokens and `options.redact`), kept on the run row while the
+run runs and in the bucket after, `agent-runs/<run>.json`, for 30 days
+(`transcriptRetentionDays`); `prune`, which the dispatcher's worker runs
+with its queue's, deletes the object and stamps `transcriptPrunedAt`. The
+run row is history and stays. Only the dispatcher starts a run: a request
+whose `requestedBy` is an agent run is refused (`agents_cannot_request`),
+so no run starts another with a reach of its own choosing; an agent that
+hands work on asks a principal, whose request starts the next run.
+
+The run-request queue is the class marked `@agents("requests")`: in the
+example and the fixture `AgentRunRequest`, table
+`agent_run_request_queue`, generated as `agentRunRequestQueue`. A message
+is `{ step?, agent?, trigger?, subjectTable?, subjectKey?, targets?,
+event?, input?, requestedBy?, actingFor?, party?, message?, grant?, run?,
+ask? }`. Section 7's inbound message is `{ trigger: "inbound", party:
+{ table, key }, message, grant }`, `message` its row as `{ table, key }`
+or its text as `{ body }`, and `agents.request(tx, message)` enqueues it.
+
+Built: `ir/agents.go`, `@agents`, `@autonomy` and the agents feature
+(`internal/registry/core_agents.go`), the loader's filling
+(`internal/loader/agents`) and checks (`internal/loader/verify/agents.go`),
+the definition's part in orm.ts, `@superschematic/db`'s `agents` and
+`@superschematic/api`'s `autonomy`; `runtime/http/typescript/src/agents.ts`
+(`createAgents`, in `./postgres`), `runAgentInstance`
+(`src/providers/agent-runner.ts`), the notifier's `{ agent }` recipient and
+`agents` option, and `mountMcp`'s `callGate`; the guide's "Agent runs";
+`examples/agent-orchestration`. The tests: the registry's, the loader's
+(`TestAgentsFixtureLoads`, `TestAgentsRefusals`,
+`TestAgentOrchestrationExampleLoads`,
+`TestAutonomyRefusesMoneyWithoutAsking`), the runtime's `agents.test.ts`,
+and `TestAgentRunsEndToEnd`, which runs the plan's "done when" on Postgres
+with the local-process sandbox running `runAgentInstance` under Bun and the
+model stub: a run a schedule's deadline starts reads only its target and
+the rows its role reaches; its MCP search returns only rows within its
+scope; an ask waits for an approval given by SMS, then runs; a changed
+amount asks again; a budget cap pauses the agent, and every agent's stops
+scheduled runs and asks before a principal's; pausing every agent cancels
+a run in flight and returns its assigned row; the transcript, the run row,
+the approvals and the logs hold no credential value; an inbound message is
+data and its run acts for its party; an unanswered question makes a
+follow-up row; Retries starts a failed instance again while the run holds
+its Lease; and administration is permissions.
+
+Left:
+
+- Wire section 7's inbound trigger (D157, built in parallel): its inbound
+  path enqueues `{ trigger: "inbound", party, message, grant }` on the
+  requests queue once its PR is on this base.
+- Go and Rust: the dispatcher, the run's authenticator, autonomy and the
+  runner; SQLite and D1.
+- The generated server building the dispatcher into its `Deps`, mounting
+  the agent routes and filling the requests queue's `@worker` with
+  `agents.handle`; an app wires them (`examples/agent-orchestration/server`).
+- `@autonomy` in the generated MCP tool records (`mcptools`), so
+  `mcpGate` reads a generated tool's class; it reads an internal write now.
+- A real container platform's sandbox provider and one model API's
+  provider (D159's left), and the live Workers run (`smoke.sh
+  Cloudflare`), which is the maintainer's. The dispatcher's module reaches
+  Postgres through Hyperdrive as the notifier's does.
+- A reply interpreter that is a model (D153's left), through an agent run.
+- A party the run acts for narrowing the role's relation paths to its
+  grant's; today the run's scope is the grant's target and the agent's
+  role's paths.
+- The schema writer writing `@agents` and `@autonomy` back.

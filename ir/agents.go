@@ -117,7 +117,7 @@ var AgentTriggers = []string{AgentTriggerRoute, AgentTriggerAssigned, AgentTrigg
 // (D158): the class of operation it is to an agent's autonomy policy, and
 // the autonomy an agent has over it when no policy row names it.
 //
-// In TypeScript: @autonomy({ class, mode? })
+// In TypeScript: @autonomy(class, mode?)
 type OperationAutonomy struct {
 	// Class is one of AgentClasses.
 	Class string `json:"class" yaml:"class"`
@@ -165,10 +165,11 @@ func (s *Schema) AgentsTable(part string) *TypeDef {
 	return nil
 }
 
-// UsesAgents reports whether the schema uses the agent orchestration: a DB
-// schema that declares an @agents class, or an API with an operation an
-// @autonomy declares. An API over such a database needs a sandbox provider
-// and a model provider (D159's coverage).
+// UsesAgents reports whether the schema uses the agent orchestration: it
+// declares an @agents class. An API over such a database needs a sandbox
+// provider and a model provider (D159's coverage). An operation's
+// @autonomy alone uses nothing: it says what the operation is to an agent
+// that calls it.
 func (s *Schema) UsesAgents() bool {
 	if s == nil {
 		return false
