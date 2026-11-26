@@ -420,6 +420,44 @@ export {
   type CalendarSourceDefinition,
   type IssueCalendarFeedInput,
 } from './calendar.js';
+// Events, notifications and channels (D153): the notifier that raises a
+// table's events in the caller's transaction, routes them by rows, holds
+// each recipient to the record's audience, delivers through the channel
+// adapters an environment configures, and runs a reply as its sender; and
+// password reset over the email channel (D81).
+export {
+  CODE_ATTEMPTS,
+  CODE_TTL_SECONDS,
+  DEFAULT_DELIVERY_RETENTION_DAYS,
+  DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+  HEALTH_TTL_MS,
+  INAPP,
+  NotifierError,
+  createNotifier,
+  normaliseAddress,
+  passwordReset,
+  quietDelaySeconds,
+  sameId,
+  type AddIdentityInput,
+  type ChannelIdentityRow,
+  type EscalationStep,
+  type NoticeRow,
+  type NoticeWork,
+  type Notifier,
+  type NotifierOptions,
+  type PasswordResetOptions,
+  type RaiseInput,
+  type RaisedEvent,
+  type RecipientRef,
+  type RecipientSpec,
+  type RenderedNotice,
+  type ReplyAction,
+  type ReplyContext,
+  type ReplyInput,
+  type ReplyOutcome,
+  type Urgency,
+} from './notify.js';
+export type { EventDefinition } from './orm.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';
