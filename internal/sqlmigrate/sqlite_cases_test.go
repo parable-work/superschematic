@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/loader/access"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -79,6 +80,15 @@ var sqliteOnlyCases = []planCase{
 		fieldNamed(s, "Order", "note").Required = true
 		dropField(s, "Order", "code")
 	}},
+	// A table gains an audience (D156, D182): the plan adds its five
+	// columns, and the triggers that resolve it, the update's backfilling
+	// every row the table holds, so a customer whose audience is private by
+	// default is its own alone, its effective audience a JSON array of its
+	// id.
+	{name: "add-audience", after: func(s *ir.Schema) {
+		typeNamed(s, "Customer").Audience = &ir.AudienceDef{Owner: "id", Default: ir.AudiencePrivate}
+		access.Expand(s)
+	}, rows: resolvedAudiences},
 	// A table that other tables reference, renamed and rebuilt: order
 	// references it with ON DELETE RESTRICT, which dropping the old table
 	// would refuse with foreign keys on.
@@ -264,6 +274,17 @@ type extraRows struct {
 	checks []seedCheck
 }
 
+// resolvedAudiences checks the audience a plan's backfill resolved (D182):
+// every customer, private by default, is its own alone once the plan's
+// contract created the update's trigger, which backfills; after the expand
+// steps alone the columns are there and nothing is resolved yet.
+var resolvedAudiences = extraRows{
+	checks: []seedCheck{
+		{Name: "each customer is its own alone",
+			SQL: `SELECT count(*) > 0 AND count(*) = sum("audience" = 'private' AND "effective_agents" = 'followRole' AND ("effective_audience" = json_array("id") OR NOT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = 'trg_customer_audience_update'))) FROM "customer"`},
+	},
+}
+
 var (
 	numberRef  = ir.TypeRef{Name: "number"}
 	booleanRef = ir.TypeRef{Name: "boolean"}
@@ -355,7 +376,7 @@ func sqliteTypesSchema() *ir.Schema {
 func sqliteModelFixtures(t *testing.T) map[string]*ir.Schema {
 	t.Helper()
 	fixtures := map[string]*ir.Schema{"types-db": sqliteTypesSchema()}
-	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db", "fixture-state-machine-db", "fixture-fenced-db"} {
+	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db", "fixture-state-machine-db", "fixture-fenced-db", "fixture-access-db", "fixture-references-db"} {
 		fixtures[name] = planCase{base: sqlgenFixtures + "/" + name}.load(t, nil)
 	}
 	fixtures["shop-db"] = planCase{}.load(t, sqliteShop)

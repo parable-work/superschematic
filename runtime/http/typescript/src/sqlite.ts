@@ -7,6 +7,12 @@ import type { SqlDatabase, SqlExecResult, SqlMeta, SqlPreparedStatement, SqlResu
 export { ClaimLostError } from './queue-core.js';
 export type { EnqueueOptions, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
+// The generated repositories over the file (D182), as ./d1 exports them, and
+// the field keys' reader, which needs node:crypto, as Bun has it: under
+// Bun, createOrm(db, { fieldKeys: parseFieldKeys(secret) }) opens a
+// database's Encrypted<T> fields.
+export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
+export { FieldKeyring, parseFieldKeys } from './fieldcrypt.js';
 
 /*
 SqlDatabase over a SQLite file through bun:sqlite (D64, section 18.13 of
@@ -29,6 +35,8 @@ the last row id and its duration, as D1's meta does.
 
 /** A SqlDatabase over an open SQLite file, which close closes. */
 export interface SqliteDatabase extends SqlDatabase {
+  /** It runs BEGIN and SAVEPOINT, which D1 does not, so the repositories run their transactions on it (D182). */
+  readonly beginsTransactions: true;
   /** The file it opened. */
   readonly path: string;
   /** Closes the connection; the database answers no statement after. */
@@ -122,6 +130,9 @@ class SqliteStatement implements SqlPreparedStatement {
 }
 
 class SqliteConnection implements SqliteDatabase {
+  // It runs BEGIN and SAVEPOINT, so the repositories run their transactions
+  // on it (sqliteOrmPool, D182).
+  readonly beginsTransactions = true as const;
   private readonly db: Database;
   private readonly statements = new Map<string, Statement>();
   private closed = false;

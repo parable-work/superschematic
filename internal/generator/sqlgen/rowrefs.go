@@ -32,8 +32,8 @@ import (
 //
 // Both are statement triggers over the statement's deleted rows
 // (REFERENCING OLD TABLE), so a delete of many rows runs each delete and
-// insert once. Both are in the Postgres dialect alone: the loader refuses
-// either declaration in a service that lists sqlite.
+// insert once. SQLite's forms, row triggers (D182), are in
+// rowrefs_sqlite.go.
 
 // The suffixes of the functions, after the table; each trigger's name is
 // its function's after trg_.

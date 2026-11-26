@@ -41,6 +41,10 @@
     "./orm": {
       "types": "./orm.ts",
       "import": "./orm.ts"
+    },
+    "./orm/sqlite": {
+      "types": "./orm-sqlite.ts",
+      "import": "./orm-sqlite.ts"
     }
   },
   "scripts": {

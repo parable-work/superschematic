@@ -90,6 +90,9 @@ type apiFixture struct {
 	// is written; the zero value for an API whose generated code reads
 	// none of it.
 	depsInfo DepsInfo
+	// sqlite generates the database packages for a DB service that lists
+	// the sqlite dialect beside postgres: their orm-sqlite.ts too (D182).
+	sqlite bool
 }
 
 // fixtureAPI is fixture-api with its fixture-db dependency.
@@ -124,11 +127,12 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		name   string
 		schema *ir.Schema
 		deps   map[string]*ir.Schema
+		sqlite bool
 	}
 	var typesCases []typesCase
 	depPackages := map[string]string{}
 	for _, name := range sortedKeys(fixture.deps) {
-		typesCases = append(typesCases, typesCase{name: name, schema: fixture.deps[name]})
+		typesCases = append(typesCases, typesCase{name: name, schema: fixture.deps[name], sqlite: fixture.sqlite})
 		depPackages[name] = names.NpmTypesPackage(name)
 	}
 	if fixture.authDB != nil && fixture.deps[fixture.authDB.Name] == nil {
@@ -144,6 +148,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 			DependencyPackages: depPackages,
 			Registry:           fixture.registry,
 			Clock:              fixedClock,
+			SQLite:             tc.sqlite,
 		})
 		if err != nil {
 			t.Fatalf("tsgen.Generate %s: %v", tc.name, err)

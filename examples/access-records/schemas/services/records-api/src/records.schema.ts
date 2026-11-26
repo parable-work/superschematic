@@ -1,5 +1,6 @@
 import { Identity } from "superscalar";
-import { Nullable, Validate } from "@superschematic/schema";
+import { Nullable, Secret, Validate } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
 import {
   Authenticated,
   HttpMethod,
@@ -12,6 +13,13 @@ import {
   tableOperation
 } from "@superschematic/api";
 import { Agreement, Page, Ticket, Workspace } from "@schemas/records-db";
+
+// The keys of records-db's Encrypted<T> fields, which its config names
+// (D85): the API's config, so each environment sets the one secret.
+@envVars
+export abstract class FieldKeys {
+  RECORDS_DB_FIELD_KEYS: Secret<string>;
+}
 
 // A workspace, with who may see it.
 @source(Workspace)

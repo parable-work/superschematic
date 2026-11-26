@@ -445,12 +445,13 @@ type Options struct {
 
 	// SQLite is whether the DB service lists the sqlite dialect, whose
 	// statements each queue in queues.ts then carries beside Postgres's
-	// (D53, amended).
+	// (D53, amended), and whose repositories orm-sqlite.ts holds (D182).
 	SQLite bool
 
 	// NoPostgres is whether the DB service lists no postgres dialect: its
-	// package then writes no orm.ts, whose repositories run on Postgres
-	// alone (D79).
+	// orm.ts then holds the repositories' types alone, and orm-sqlite.ts,
+	// for a service that lists sqlite, their definitions (D182); a service
+	// that lists neither writes no orm.ts.
 	NoPostgres bool
 
 	// Actor is the DB service's system actor and whether an update needs
@@ -561,7 +562,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if output.Queues, err = TypeScriptQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
-	if !opts.NoPostgres {
+	if !opts.NoPostgres || opts.SQLite {
 		// A projection's row is the ORM's type alone (D90): its fields'
 		// types are written as a table's are, and no ./types entry holds it.
 		projections := convertTypes(codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleProjection), output.Scalars, enumLookup, unionNames)
