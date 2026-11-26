@@ -143,6 +143,11 @@ func New(n naming.Naming) *Registry {
 	if err := r.RegisterAuthProvider(sessionauth.Provider{}); err != nil {
 		panic("registry: core auth provider: " + err.Error())
 	}
+	// The core's runtime features (D159): notifications need a channel
+	// adapter (D153).
+	if err := r.RegisterRuntimeFeature(notificationsFeature()); err != nil {
+		panic("registry: core runtime features: " + err.Error())
+	}
 	return r
 }
 

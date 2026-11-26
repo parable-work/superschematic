@@ -280,6 +280,16 @@ type TypeDef struct {
 	// @attachments table (D154). Nil for every other type. See [RowTable].
 	RowTable *RowTable `json:"rowTable,omitempty" yaml:"rowTable,omitempty" jsonschema:"-"`
 
+	// Events are the @event declarations of a DB table (D153): the events
+	// its rows raise, which the notifier routes. See [EventDef].
+	Events []*EventDef `json:"events,omitempty" yaml:"events,omitempty"`
+
+	// Notifier marks a DB class that is one of the notifier's tables
+	// (D153), and ChannelIdentities the one that is the table of channel
+	// identities; the loader fills their fields. Nil for every other type.
+	Notifier          *NotifierDef          `json:"notifier,omitempty" yaml:"notifier,omitempty"`
+	ChannelIdentities *ChannelIdentitiesDef `json:"channelIdentities,omitempty" yaml:"channelIdentities,omitempty"`
+
 	// CalendarSources are the @calendarSource declarations of a DB table
 	// (D152): the dates of its rows, or the occurrences of its Recurrence,
 	// that the calendar read and feed merge across tables. See

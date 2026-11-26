@@ -199,6 +199,16 @@ type ORMTable struct {
 	// the runtime's calendar read and feed merge; nil for a table with none.
 	Calendar []ORMCalendarSource
 
+	// Notifier is the part of the notifier the table is (D153): inbox,
+	// deliveries, routes, preferences, subscriptions, channelTrust or
+	// replies, or channelIdentities for the table of channel identities;
+	// empty for any other table.
+	Notifier string
+
+	// Events are the table's @event declarations (D153), which the
+	// notifier raises and routes; nil for a table with none.
+	TableEvents []ORMEvent
+
 	// Searchable is a @searchable table's SearchableDefinition (D155), as
 	// JSON, which the runtime's search and indexing read; empty for a
 	// table that is not @searchable.
@@ -542,6 +552,8 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				return nil, err
 			}
 			table.Calendar = calendar
+			table.Notifier = notifierPartOf(td)
+			table.TableEvents = eventsOf(td)
 			if table.Searchable, err = searchableOf(schema, td, tables); err != nil {
 				return nil, err
 			}
@@ -1303,4 +1315,41 @@ func (o *ORMInfo) NearestSettingDefinitions() []string {
 		out[i] = def + " }"
 	}
 	return out
+}
+
+// ORMEvent is one @event of a table as the generated repository's
+// definition carries it (D153): its kind, the members its payload carries,
+// the member a notice is titled by, and its default urgency.
+type ORMEvent struct {
+	Kind    string
+	Payload []string
+	Title   string
+	Urgency string
+}
+
+// eventsOf is td's events, each with its default urgency.
+func eventsOf(td *ir.TypeDef) []ORMEvent {
+	var out []ORMEvent
+	for _, event := range td.Events {
+		if event == nil {
+			continue
+		}
+		urgency := event.Urgency
+		if urgency == "" {
+			urgency = ir.UrgencyNormal
+		}
+		out = append(out, ORMEvent{Kind: event.Kind, Payload: event.Payload, Title: event.Title, Urgency: urgency})
+	}
+	return out
+}
+
+// notifierPartOf is what td is to the notifier (D153), or "".
+func notifierPartOf(td *ir.TypeDef) string {
+	switch {
+	case td.ChannelIdentities != nil:
+		return "channelIdentities"
+	case td.Notifier != nil:
+		return td.Notifier.Part
+	}
+	return ""
 }

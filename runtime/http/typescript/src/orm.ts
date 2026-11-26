@@ -438,6 +438,18 @@ export interface TableDefinition {
   readonly calendar?: readonly CalendarSourceDefinition[];
   /** A @searchable table's index (D155), which the search across tables ranks and indexSearch builds; absent for a table that is not @searchable. */
   readonly searchable?: SearchableDefinition;
+  /** What the table is to the notifier (D153): one of its parts, or the table of channel identities; absent for any other table. */
+  readonly notifier?: 'inbox' | 'deliveries' | 'routes' | 'preferences' | 'subscriptions' | 'channelTrust' | 'replies' | 'channelIdentities';
+  /** The table's @event declarations (D153), which the notifier raises and routes; absent for a table with none. */
+  readonly events?: readonly EventDefinition[];
+}
+
+/** One @event of a table (D153): its kind, its default urgency, the member a notice is titled by and the members its payload carries. */
+export interface EventDefinition {
+  readonly kind: string;
+  readonly urgency: 'urgent' | 'normal' | 'digest' | 'record';
+  readonly title?: string;
+  readonly payload?: readonly string[];
 }
 
 /**

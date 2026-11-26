@@ -25,7 +25,7 @@ depends on none of them.
 | the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | the interfaces in the Go and Rust runtimes |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
 | `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated server that links the packages and builds `Providers` in its `Deps` |
-| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused | the features themselves: notifications, attachments and agents register as they are built |
+| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](../notifications/)) | the other features: attachments and agents register as they are built |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)

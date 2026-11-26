@@ -14,7 +14,14 @@ message, due again a minute on. A change is claimed, one row's in the order
 they were written, and run through the repository (runChange) the same way:
 the core runs the behaviors that hear the write on the row as it is now, so
 a raw SQL write, or a repository's bulk or hard write, is heard after its
-commit. The worker's main runs each queue with runWorker; the queue's
+commit. A table whose behaviors emit events (D104) has an
+event queue too, whose messages the core's commands write in their
+transactions: an event is claimed, one row's in the order they were
+written, and handed to the project's Workers method of its use and kind
+with the database's repositories in a transaction that first spends the
+claim (runEvent), as the worker, so the method's writes and the
+completion commit together or not at all, and its rejection fails the
+message. The worker's main runs each queue with runWorker; the queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
 the queue's backoff, and dead once its retries are spent. nextDue tells a
@@ -25,21 +32,28 @@ import type { Pool } from 'pg';
 import type { Logger } from '@superschematic/http-runtime';
 import { postgresQueue, type CoreCaller } from '@superschematic/http-runtime/postgres';
 import type { WorkerQueue } from '@superschematic/http-runtime/worker';
-import { filingChangeQueue, filingDeadlineQueue } from '@schemas/fixture-recurrence-db-types/queues';
-import type { FixtureRecurrenceDbOrm } from '@schemas/fixture-recurrence-db-types/orm';
+import { filingChangeQueue, filingDeadlineQueue, filingEventQueue } from '@schemas/fixture-recurrence-db-types/queues';
+import type { FixtureRecurrenceDbOrm, FixtureRecurrenceDbTx } from '@schemas/fixture-recurrence-db-types/orm';
+import type { FilingEvent } from '@schemas/fixture-recurrence-db-types';
+import type { FilingRecurrenceMissedPayload, FilingRecurrenceOpenedPayload, FilingRecurrenceRemindedPayload } from '@schemas/fixture-recurrence-api-types/types';
+import type { Workers } from './deps';
 
 /** The caller FilingDeadlines' commands run as (D103). */
 const filingDeadlinesCaller: CoreCaller = { subject: 'fixture-recurrence-api/FilingDeadlines', permissions: ['filings.work', 'filings.manage'] };
 
 /**
- * The queues of the behavior worker FilingDeadlines (D103): fixture-recurrence-db's
- * Filing's deadlines and changes, deadlines first, each run through the
- * behaviors' core in one transaction with its message's completion, as
- * filingDeadlinesCaller. The worker's main runs each with runWorker.
+ * The queues of the behavior worker FilingDeadlines (D103, D104): fixture-recurrence-db's
+ * Filing's deadlines, changes and events, deadlines first, each deadline and change run
+ * through the behaviors' core in one transaction with its message's
+ * completion, as filingDeadlinesCaller, and each event handed to the method of
+ * workers its use and kind name (filingDeadlinesEvent), with the repositories in
+ * the transaction that spends its claim, as the worker. The worker's main
+ * runs each with runWorker.
  */
-export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, logger?: Logger): WorkerQueue[] {
+export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, workers: Workers, logger?: Logger): WorkerQueue[] {
   const deadlines = postgresQueue(pool, filingDeadlineQueue);
   const changes = postgresQueue(pool, filingChangeQueue);
+  const events = postgresQueue(pool, filingEventQueue);
   return [
     {
       name: deadlines.name,
@@ -83,5 +97,48 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, l
       prune: limit => changes.prune(limit),
       nextDue: () => changes.nextDue(),
     },
+    {
+      name: events.name,
+      leaseSeconds: events.leaseSeconds,
+      claim: async (n, leaseSeconds) =>
+        (await events.claim(n, leaseSeconds)).map(claim => ({
+          id: claim.id,
+          token: claim.token,
+          attempt: claim.attempt,
+          handle: async (signal: AbortSignal) => {
+            const run = await orm
+              .withBehaviorCaller(filingDeadlinesCaller)
+              .transaction(tx => tx.filing.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => filingDeadlinesEvent(workers, tx, claim.message, signal)));
+            if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
+          },
+        })),
+      extend: (id, token, leaseSeconds) => events.extend(id, token, leaseSeconds),
+      // The handler completes its message in the transaction that runs it.
+      complete: async () => {},
+      fail: (id, token, cause) => events.fail(id, token, cause),
+      release: (id, token) => events.release(id, token),
+      prune: limit => events.prune(limit),
+      nextDue: () => events.nextDue(),
+    },
   ];
+}
+
+/**
+ * Hands an event of Filing's event queue to the method of workers its use
+ * and kind name (D104): its row's key as the queue reads it, which every
+ * repository method takes, its time in epoch milliseconds and its payload,
+ * as the method's types say. An event no method takes rejects, failing its
+ * message, which is dead after its retries, for an operator.
+ */
+async function filingDeadlinesEvent(workers: Workers, tx: FixtureRecurrenceDbTx, message: FilingEvent, signal: AbortSignal): Promise<void> {
+  if (message.useId === 'Recurrence' && message.kind === 'opened') {
+    return workers.filingDeadlinesRecurrenceOpened({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceOpenedPayload }, tx, signal);
+  }
+  if (message.useId === 'Recurrence' && message.kind === 'reminded') {
+    return workers.filingDeadlinesRecurrenceReminded({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceRemindedPayload }, tx, signal);
+  }
+  if (message.useId === 'Recurrence' && message.kind === 'missed') {
+    return workers.filingDeadlinesRecurrenceMissed({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceMissedPayload }, tx, signal);
+  }
+  throw new Error(`behavior worker FilingDeadlines: no Workers method takes event ${message.kind} of ${message.useId} on Filing ${message.rowKey} (D104)`);
 }

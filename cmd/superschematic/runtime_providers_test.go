@@ -10,35 +10,12 @@ import (
 
 	"github.com/parable-work/superschematic/cli"
 	"github.com/parable-work/superschematic/ir"
-	"github.com/parable-work/superschematic/registry"
 )
-
-// noticesFeature stands in for notifications (D153) until section 3
-// registers them (D159): an API whose database has a Notice table uses a
-// channel adapter, as an API whose tables raise events will.
-type noticesFeature struct{}
-
-func (noticesFeature) Name() string { return "noticestest" }
-
-func (noticesFeature) Register(r *registry.Registry) error {
-	return r.RegisterRuntimeFeature(registry.RuntimeFeature{
-		Extension: "noticestest",
-		Name:      "notices",
-		Interface: ir.RuntimeChannel,
-		Uses: func(in registry.RuntimeFeatureInput) bool {
-			for _, db := range in.Databases {
-				if db.Types["Notice"] != nil {
-					return true
-				}
-			}
-			return false
-		},
-	})
-}
 
 // buildRuntimeProviders copies examples/runtime-providers' schemas and
 // provider packages into a project, lets edit change the stack's schema,
-// and builds the stack with the installed binary and the notices feature.
+// and builds the stack with the installed binary, whose core registers
+// notifications (D153) as a feature that needs a channel adapter.
 // It returns the output root and the build's error.
 func buildRuntimeProviders(t *testing.T, edit func(stack string) string) (string, error) {
 	t.Helper()
@@ -81,7 +58,7 @@ func buildRuntimeProviders(t *testing.T, edit func(stack string) string) (string
 	t.Chdir(project)
 	outputRoot := t.TempDir()
 	buf := new(bytes.Buffer)
-	root := cli.New(cli.Config{Name: "superschematic"}, append(extensions(), noticesFeature{})...)
+	root := cli.New(cli.Config{Name: "superschematic"}, extensions()...)
 	root.SetOut(buf)
 	root.SetErr(buf)
 	root.SetIn(strings.NewReader(""))
@@ -134,7 +111,8 @@ func TestRuntimeProvidersExampleStack(t *testing.T) {
 }
 
 // TestRuntimeProvidersExampleRefusals: an environment that runs notes-api,
-// whose database keeps notices, with no channel adapter is refused, as is
+// whose database raises events for the notifier (D153), with no channel
+// adapter is refused, as is
 // one that swaps in sms-relay-b and leaves its account unbound, and one
 // whose slot names a provider of another interface.
 func TestRuntimeProvidersExampleRefusals(t *testing.T) {
@@ -149,7 +127,7 @@ func TestRuntimeProvidersExampleRefusals(t *testing.T) {
         SMS_ACCOUNT: "AC100",
 `, "", 1)
 			},
-			want: "environment Cloudflare runs server notes-api, whose API notes-api uses notices, which needs a channel adapter, and the environment configures none: set SMS to one of sms-relay-a, sms-relay-b in its env (D159)",
+			want: "environment Cloudflare runs server notes-api, whose API notes-api uses notifications, which needs a channel adapter, and the environment configures none: set SMS to one of sms-relay-a, sms-relay-b in its env (D159)",
 		},
 		"a setting left unbound": {
 			edit: func(s string) string { return strings.Replace(s, `        SMS_ACCOUNT: "AC100",`+"\n", "", 1) },

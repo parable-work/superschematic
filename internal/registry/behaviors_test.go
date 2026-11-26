@@ -947,7 +947,7 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	if strings.Join(hearing, ",") != "Reactions,Recurrence,Schedules,Timers" {
 		t.Errorf("the behaviors that hear changes = %v, want Reactions, Recurrence, Schedules and Timers", hearing)
 	}
-	if strings.Join(emitting, ",") != "Pool,Schedules" {
-		t.Errorf("the behaviors that emit events = %v, want Pool and Schedules", emitting)
+	if strings.Join(emitting, ",") != "Pool,Recurrence,Schedules" {
+		t.Errorf("the behaviors that emit events = %v, want Pool, Recurrence (D153) and Schedules", emitting)
 	}
 }

@@ -167,8 +167,9 @@ takes own fields only, on the engine and on a table.
   own to design.
 
 **D77** (L 10239). Vectors over messages; Search's every-schema search on
-namespace operations; `readable()` asked per operation; a notifier and an
-agent dispatcher as stack workers; a conversation UI. Comments runs on
+namespace operations; `readable()` asked per operation; an agent
+dispatcher as a stack worker (D153 built the notifier, in TypeScript); a
+conversation UI. Comments runs on
 the core now (D103's status lists what its port left).
 
 **D78** (L 10885). Go and TypeScript apps; the Topcoat asset bundle in the
@@ -208,8 +209,10 @@ trigger's message: a delay is an enqueue's, in Go, TypeScript and Rust,
 and a trigger enqueues due at once.
 
 **D81** (L 11425).
-- Password reset and email verification, which D50 keeps out of the core
-  until there is a channel to send through.
+- Password reset and email verification in Go and Rust, and routes the
+  identity service serves for them; D153 built both in TypeScript
+  (`passwordReset`, the channel identities' codes) as functions an app
+  mounts.
 - An approve action on Topcoat's user pages (they enable and disable).
 - Files up and down in the Rust server and SDK, which refuse them.
 - An MCP endpoint in the Go server (D93 and D116 keep Go refused).
@@ -2045,7 +2048,9 @@ and needed nothing for this.
 Left:
 
 - Comments' follows, read state and inbox on a table (`markRead`,
-  `follow`, a reader's `unread`, `inbox`, deliveries). The core runs them,
+  `follow`, a reader's `unread`, `inbox`, deliveries). D153 settles that the
+  in-app inbox is the notifier's, which a Comments mention or reply reaches
+  as an event (D153's left). The core runs them,
   and the build leaves them out of a table's operations
   (`registry.tableLeavesOut`), since no adapter answers a reader's own
   fields through the core's read as the caller, and a namespace's
@@ -2129,9 +2134,9 @@ calendar"; `examples/recurring-duties`.
 
 Left:
 
-- Raising events (section 3): an occurrence's open, remind, overdue and
-  missed are deadline fires and state changes today, recorded on the
-  occurrence; each becomes an `@event` once events exist.
+- An event at an occurrence's due time itself: D153 made opened, reminded
+  and missed (the overdue deadline's) events Recurrence emits, and no
+  deadline is armed at the due, so a "due now" event waits for one.
 - `completedBy` converging with references (section 4) once they merge.
 - Replanning a relative recurrence when its target's date changes: today
   the row plans again on its own write, at a fire, or at `setRecurrence`.
@@ -2146,6 +2151,121 @@ Left:
 - The calendar on SQLite and D1.
 - `examples/deploy-smoke` with a Recurrence table, and the live
   `smoke.sh Cloudflare` run, which is the maintainer's.
+
+## D153. A table declares its events, routes and preferences are rows, the notifier holds each recipient to the record's audience when it sends, delivers through the channel adapters an environment configures, and runs a reply as its sender within its channel's trust (D77, D80, D81, D103, D152, D154, D156, D159 amended)
+
+Nothing told anyone that a record changed. D77 named a notifier and never
+built it, D81 kept password reset and email verification out of the core
+until there was a channel, D152 left an occurrence's opening, reminder and
+miss as state no one heard of, and D154 enqueued a cleared reference that
+nothing reported. Section 3 of the platform plan asks for events declared
+on tables, routes as rows, delivery per recipient through channel
+adapters (D159), and replies that are input (ground rule 5).
+
+### Events
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@event<T>({ kind, payload?, title?, urgency?, description? })` from `@superschematic/db` on a DB table, repeated per kind: dotted lower-camel words (`ticket.overdue`), the row's fields its payload carries, the field a notice is titled by, and a default urgency of `urgent`, `normal`, `digest` or `record`. The generated repository's definition carries them (`TableDefinition.events`). | A behavior on the core: an event's routing reads other tables' rows and calls providers, which the pure core does not (D103's test, as D154 and D156 apply it). |
+| A behavior's event is a kind too, its use's member, a dot and the behavior's kind (`recurrence.missed`), which an `@event` may declare to set its urgency and title. Recurrence now emits `opened`, `reminded` and `missed` (its overdue deadline's) from the run that moves an occurrence, in the command's transaction (D104's event queue), and its behavior worker hands each to the project's Workers method, which calls `notifier.fromBehaviorEvent`. | A notifier that reads the occurrences after each fire, which would race the next fire. |
+| `notifier.raise(tx, { table, key, kind, payload?, urgency? })` writes the event as a message of the notifier's dispatch queue, a D80 queue the database declares (`@queue() @notifier("dispatch")`), in the caller's transaction: it commits with the change or not at all, and the enqueue wakes the worker at once on Workers (D151). | Each `@event` table given a D104 event queue of its own, which needs the behaviors' layout for a table with no behavior and a behavior worker per table, all to hand every message to one consumer. A table's change trigger raising events, which cannot tell an assignment from any other write. |
+| A deleted reference (D154) reaches its holder as `reference.cleared`, raised by `notifier.cleared(tx, message)` from the worker of the `cleared` queue. | A second trigger that raises it, a write of the notifier's from another feature's SQL. |
+
+### The notifier's tables and channel identities
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The notifier's state is in classes the database declares and the loader fills, as D156's grants are, one per part with `@notifier("<part>")`: `inbox` (one notice per recipient and event, numbered among the recipient's, the number a reply names), `deliveries`, `routes`, `preferences`, `subscriptions`, `channelTrust`, `replies` and `dispatch`. The inbox, deliveries, routes and dispatch are required. Postgres alone. | Tables the loader adds unasked, which every database would carry. One decorator with every part's table named in it, which hides which class is which. |
+| Channel identities are core tables, a class marked `@channelIdentities()`: the kind of address (`email`, `phone`, `handle`), the address normalised, the principal it resolves to as a reference (`principalKind`, `principalTable`, `principal`), how it was confirmed (`unverified`, `verified` by a code replied with, `entered` by hand), and a pending code's hash, purpose, expiry and attempts. A party (D157) is a row of the same table with `principalKind: party` and its table, with no migration. The lookup (`resolveSender`) answers the verified and entered identities of an address; two principals on one address resolve to no one, so D157 settles whether parties may share one. | A core extension, which password reset (D81) and every reply need from the core. A user foreign key, which a party cannot be. A unique address, which would settle D157's question now. |
+| Notifications are a runtime feature (`registry.RuntimeFeature`, D159) of the core: an API over a database that declares an `@event`, a `@notifier` class or the channel identities needs a `channel` slot in every environment that runs it. | A feature registered by an extension, which every app using the core's notifier would have to link. |
+
+### Routing and sending
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A route is a row: an event kind or `*`, a table, a filter in the repositories' filter syntax, recipients, an urgency in place of the event's, an escalation and whether it is on. A recipient is `{ path }` (a relation path of the record to a field of ids, through to-one relations), `{ principal }`, `{ role }` (the users holding it) or `{ party: { table, key } }`. Editing routes is the permission the app's table operations over the route table require. | Routes in the schema, which ground rule 1 turns down. A permission of the notifier's own, a second gate beside the routes' operations. |
+| Each recipient reads the record through its table's repository as themselves (D156: the audience, and a party's grants), when the event is routed and again when each delivery is sent. One who cannot read it gets no notice and no delivery, and nothing records that they were skipped. | A check at routing alone, which a record made private in between would leak through. A skipped row in the audit, which tells that the record exists. |
+| A preference row maps an event kind and an urgency (each or `*`) to channel kinds in the order a failure falls through, quiet hours, a time zone and a digest rule, for a principal or for everyone (a row of no principal, seed data the app writes). The most specific row wins. Every notice is in the in-app inbox; the channels are beside it. | Preferences per channel slot, which would tie a person's choice to an environment's provider. |
+| `urgent` sends now through quiet hours and, unacknowledged, follows its route's escalation: each step after `afterSeconds` adds channels or recipients. `normal` waits out quiet hours by a delay on its enqueue (D80). `digest` schedules one digest per recipient at the next time its preference's rule dates (`RulesCore.expand`, D152), and the digest carries every digest notice waiting. `record` writes the notice alone. | Escalation on a Timers deadline of the notice: the inbox's fields are the loader's, and Timers on it would put a loader-filled table through the core for one deadline; a delayed message of the dispatch queue is a deadline the same worker already drains. |
+| A delivery is one row per recipient, channel and attempt: `queued`, then `sent`, `delivered` and `read`, or it ends `failed` or `acknowledged`. A send that throws, an address the recipient has no verified identity for, or no report within `deliveryTimeoutSeconds` (300) from an adapter that reports statuses falls through to the recipient's next channel. An adapter with no `status` counts sent as final. | A timeout for every adapter, which would fall through every email. |
+| Before sending, the notifier asks the adapter's `health` (held 60 s). One that fails is skipped, and the notifier raises `channel.down` (urgent, no record), which the routes send on the other channels, once an hour while it stays down. | An alert to a fixed address, which ground rule 1 turns down. |
+| A subscription is a saved query (a table and a filter), a rule, a start and a zone, a recipient and channels; its brief runs the query as its recipient and goes out at each time the rule dates. | A digest of every row, which would leak what the recipient cannot read. |
+
+### Replies
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `notifier.reply({ channel, slot?, from, body, ... })` is the entry point an inbound adapter's route calls with its message (`notifier.inbound(slot, request)` reads an adapter's `@webhook` request and calls it per message). The sender's address, normalised by its kind, resolves through the channel identities to one principal, and the reply runs as it. An unknown sender reaches nothing and answers `unknown`, which D157's triage takes. | A reply authenticated by a token in the message, which an SMS cannot carry. |
+| A reply names its notice by its number (`ack 142`, `done 142`) unless exactly one notice of its sender waits on that channel and address. `ack` acknowledges and stops escalation. Every other verb is a reply action the app gives per event kind: the permission the operation's route requires, `run` and `undo`. It runs in a transaction as the sender (`withCaller`), its behaviors' commands with the sender's permissions, so the same repository write, the same audience and the same permission hold as on the route. | A reply that calls the HTTP route in process, which needs an authenticator that trusts an internal call. |
+| A channel kind's trust is a row: a level and the permissions a reply on it may use of those its sender holds (null for all). A kind with no row is low and runs nothing past an acknowledgement, so SMS, whose sender id can be spoofed, is low unless the app's rows raise it; an identity entered by hand is held to that too. `examples/notifications` seeds SMS low and email standard. | A level the core reads into permissions, a fact ground rule 1 turns down. |
+| Every reply is a row of the replies table: its channel and slot, the sender, the text, what interpreted it (`keyword`), the verb, the notice, the outcome and what undoing it needs. Every action is echoed back on its channel with `UNDO 142`, and `undo 142` undoes the latest action on the notice. | The access log, which records reads. |
+| An address is verified by a six-digit code sent to it and replied with (or given to `confirmIdentity`); five wrong answers spend it. Password reset (D81) is the same code with the purpose `reset`, sent to the address the login names through the email adapter; `complete` checks it, sets the password with the identity service's new `resetPassword`, which ends every session, and verifies the address. `request` answers alike for a login that does not exist. | A reset token in the identity store, a second code store. |
+
+Settled. The in-app inbox is the notifier's, and Comments does not keep
+one of its own beside it: a Comments mention, a reply on a followed thread
+and a message to a principal become events of the conversation's row that
+route into the same inbox (left below), and the core's Comments `inbox`
+operation retires once they do. Comments keeps its read state of a
+conversation, which is a reader's place in a thread, not a notice. A
+delivery that ended is kept 90 days (`deliveryRetentionDays`), then `prune`,
+which the dispatch queue's worker runs with its own, deletes it; notices
+are the recipient's history and replies the audit, and both stay.
+
+Section 8 sends an `ask` approval through this: it raises
+`approval.requested` on the approval row (urgent), a route names the
+principals who hold the approval's permission, and the reply actions
+`approve` and `deny` for that kind run the approval's operation as the
+replier, held to its permission and to the channel's trust.
+
+Built: the IR (`ir/notifications.go`), `@event`, `@notifier`,
+`@channelIdentities` and the notifications feature
+(`internal/registry/core_notifications.go`), the loader's filling
+(`internal/loader/notifications`) and checks
+(`internal/loader/verify/notifications.go`), the definitions in orm.ts
+(`notifier`, `events`), `@superschematic/db`'s decorators, the schema
+file's types; the notifier (`runtime/http/typescript/src/notify.ts`, in
+`./postgres`): `createNotifier`, `raise`, `fromBehaviorEvent`, `cleared`,
+the dispatch queue's handler and `workerQueue`, routing, preferences,
+quiet hours, digests and briefs, deliveries, fall-through, timeouts,
+escalation, health and `channel.down`, `reply`, `inbound`, `statuses`,
+the inbox, identities and their codes, `passwordReset`; the identity
+service's `resetPassword`; Recurrence's events in the core; the mail relay
+of `examples/runtime-providers`, whose notes now raise an event; the
+guide's "Events and notifications"; `examples/notifications`. The tests:
+the registry's, the loader's (`TestNotificationsFixtureLoads`,
+`TestNotificationsRefusals`, `TestNotificationsExampleLoads`), the core's
+Recurrence events, the recurrence API's worker handing them to its Workers
+(`TestGeneratedRecurrenceEndToEnd`), `TestRuntimeProvidersExampleRefusals`
+over the core's feature, and `TestNotificationsEndToEnd`, which runs the
+plan's "done when" on Postgres through the example's SMS and mail relays
+over stand-in services: an urgent event reaches two recipients and skips
+one who cannot read the record, and escalates to email when not
+acknowledged; `ack` and `done 142` change the notice and the record as
+their sender, with the channel and the interpreter in the audit; SMS, low,
+is refused `done`; and password reset sends through the email adapter.
+
+Left:
+
+- Go and Rust: the notifier, `@event` raising, the reply entry point and
+  password reset, and SQLite and D1.
+- Comments raising its mentions and replies into the inbox, and the core's
+  Comments `inbox` operation retired.
+- A generated server that builds the notifier into its `Deps` (with D159's
+  providers), mounts the inbox and the relay routes, and fills a
+  `@worker` of the dispatch queue with `notifier.handle`; an app wires them
+  now (`examples/notifications/server`).
+- An event at an occurrence's due time (D152 arms no deadline there).
+- A schedule that asks every adapter's health on its own; today a send asks.
+- Seed data in the build for the preferences and trust rows, as
+  `@seedRoles` seeds roles; an app writes them now.
+- A reply interpreter other than keywords (a model, D158), which the
+  `interpreter` column names.
+- Quiet hours across a change of the clocks inside the window, which count
+  wall minutes.
+- `examples/deploy-smoke` with a notifier, and the live `smoke.sh
+  Cloudflare` run, which is the maintainer's.
+- The schema writer writing `@event`, `@notifier` and `@channelIdentities`
+  back.
 
 ## D155. A `@searchable` table's rows share one search index in its database, a trigger keeps an index row's access and a queue's worker its text, one query ranks every table with the caller's access checked inside it, and embeddings are an option that re-ranks (D58, D77, D84, D103, D156, D159 amended)
 

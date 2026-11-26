@@ -78,8 +78,8 @@ func generateRecurrenceFixture(t *testing.T) *APIOutput {
 // TestWriteAPIGoldenBehaviorRecurrence pins the package for
 // fixture-recurrence-api: its router mounts Filing's Recurrence operations
 // under recurrence, and behavior-workers.ts exports FilingDeadlines'
-// queues, its deadlines and changes; Recurrence emits no event yet (its
-// changes of state wait for section 3's events). Regenerate with
+// queues, its deadlines, changes and events, which Recurrence emits as it
+// opens, reminds and misses an occurrence (D153). Regenerate with
 // go test ./internal/generator/tsrestgen -run TestWriteAPIGoldenBehaviorRecurrence -update
 func TestWriteAPIGoldenBehaviorRecurrence(t *testing.T) {
 	output := generateRecurrenceFixture(t)
@@ -106,8 +106,9 @@ func TestWriteAPIGoldenBehaviorRecurrence(t *testing.T) {
 
 // TestGenerateRecurrenceOperations: each Recurrence operation of
 // fixture-recurrence-db's Filing calls the repository under its use's
-// member, recurrence; the one behavior worker runs Filing's deadline and
-// change queues and no event queue.
+// member, recurrence; the one behavior worker runs Filing's deadline,
+// change and event queues, and hands each event Recurrence emits (opened,
+// reminded, missed, D153) to a Workers method.
 func TestGenerateRecurrenceOperations(t *testing.T) {
 	output := generateRecurrenceFixture(t)
 	if !output.TableBehaviors || !output.HasBehaviors() || !output.HasBehaviorWorkers() || output.BehaviorsTakePreconditions() {
@@ -131,7 +132,7 @@ func TestGenerateRecurrenceOperations(t *testing.T) {
 		t.Fatalf("behavior workers = %d, want FilingDeadlines alone", len(workers))
 	}
 	w := workers[0]
-	if w.Name != "FilingDeadlines" || w.Behavior.Table != "Filing" || w.Behavior.DeadlineQueue != "FilingDeadline" || w.Behavior.ChangeQueue != "FilingChange" || w.Behavior.EventQueue != "" || w.Emits() {
+	if w.Name != "FilingDeadlines" || w.Behavior.Table != "Filing" || w.Behavior.DeadlineQueue != "FilingDeadline" || w.Behavior.ChangeQueue != "FilingChange" || w.Behavior.EventQueue != "FilingEvent" || !w.Emits() || len(w.Behavior.Events) != 3 {
 		t.Errorf("FilingDeadlines = %s %+v", w.Name, *w.Behavior)
 	}
 	dir := t.TempDir()
@@ -157,14 +158,16 @@ const recurrenceCheck = `import type { Pool } from 'pg';
 import type { FixtureRecurrenceDbOrm } from '@schemas/fixture-recurrence-db-types/orm';
 import type { WorkerQueue } from '@superschematic/http-runtime/worker';
 import { buildRouter, filingDeadlinesQueues, type Implementations } from './index';
+import type { Workers } from './deps';
 
 declare const implementations: Implementations;
 declare const orm: FixtureRecurrenceDbOrm;
 declare const pool: Pool;
+declare const workers: Workers;
 declare const filing: Parameters<FixtureRecurrenceDbOrm['filing']['getOne']>[0];
 
 export const router = buildRouter(implementations, { orm });
-export const queues: WorkerQueue[] = filingDeadlinesQueues(pool, orm);
+export const queues: WorkerQueue[] = filingDeadlinesQueues(pool, orm, workers);
 export const set = orm.filing.recurrence.setRecurrence(filing, { anchor: 'calendar', rule: 'FREQ=YEARLY', start: '2026-10-31T09:00' });
 export const done = orm.filing.recurrence.complete(filing, { completedBy: { table: 'Payment', key: 'p1' } });
 export const listed = orm.filing.recurrence.listOccurrences(filing, { from: 0, to: 1 });
@@ -177,7 +180,7 @@ export const weekly = orm.filing.recurrence.setRecurrence(filing, { anchor: 'wee
 var recurrenceCases = []string{
 	"setRecurrence plans the occurrences up to the horizon, moved off the row calendar holidays, and arms the open, remind and overdue deadlines",
 	"a rule change leaves the open occurrence untouched and replans the ones that have not opened",
-	"the remind deadline fires on the worker and records the reminder",
+	"the remind deadline fires on the worker, records the reminder and emits the opening and the reminder",
 	"complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it",
 	"without filings.manage setRecurrence is 403 and a rule that is no RRULE is 400",
 	"the calendar merges a contract end date and a filing occurrences, each dated as its source says",

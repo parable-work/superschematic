@@ -695,6 +695,25 @@ export class IdentityService {
     await this.store.setPassword(p.id, hash, this.now(), p.sessionId);
   }
 
+  /**
+   * Sets a user's password with no caller (D81): a password reset's, once
+   * the code the notifier sent to the user's address was given back
+   * (passwordReset in ./postgres, D153). It holds the password to the
+   * service's rules, hashes it at the config's cost, and ends every
+   * session of the user. A user that does not exist is not_found.
+   */
+  async resetPassword(userId: string, password: string): Promise<void> {
+    const f = new FieldErrors();
+    checkPasswordField(f, 'password', password);
+    f.throwIfAny();
+    const hash = await hashPassword(password, this.params);
+    try {
+      await this.store.setPassword(userId, hash, this.now(), '');
+    } catch (error) {
+      throw storeProblem(error, 'User');
+    }
+  }
+
   /** Refuses a caller the matcher does not give the administration permission name. */
   private require(p: IdentityPrincipal, name: string): void {
     if (p.id === '') throw unauthenticated(new Error('the caller is not authenticated'));

@@ -311,6 +311,16 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Access}}
   access: {{jsonString .Access}},
 {{- end}}
+{{- if .Notifier}}
+  notifier: {{jsonString .Notifier}},
+{{- end}}
+{{- if .TableEvents}}
+  events: [
+{{- range .TableEvents}}
+    { kind: {{jsonString .Kind}}, urgency: {{jsonString .Urgency}}{{if .Title}}, title: {{jsonString .Title}}{{end}}{{if .Payload}}, payload: [{{range $i, $p := .Payload}}{{if $i}}, {{end}}{{jsonString $p}}{{end}}]{{end}} },
+{{- end}}
+  ],
+{{- end}}
   uniqueKeys: {
 {{- range .UniqueKeys}}
     {{jsonString .Name}}: {{.Definition}},
