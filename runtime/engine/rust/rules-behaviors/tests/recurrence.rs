@@ -577,3 +577,53 @@ fn set_recurrence_holds_its_parameters() {
         );
     }
 }
+
+// The events a run emits (D153): each occurrence it opens, reminds and
+// misses, once, which the notifier raises as recurrence.opened and the rest.
+#[test]
+fn a_run_emits_each_occurrence_it_opens_reminds_and_misses_once() {
+    let mut host = hosting(monthly(), json!({}));
+    changed(call(
+        &mut host,
+        &manager(),
+        T0,
+        "setRecurrence",
+        first_of_month(),
+    ));
+    let april = 1_775_048_400_000;
+    let april_key = "2026-04-01T09:00".to_owned();
+    let fire_events = |host: &mut Host, now: i64| -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (name, outcome) in host.fall_due(now, &runner()) {
+            match outcome {
+                Outcome::Changed(changes) => {
+                    for event in &changes.events {
+                        assert_eq!(event.use_id, "Recurrence");
+                        let key = event.payload["key"].as_str().unwrap_or_default().to_owned();
+                        out.push((event.kind.clone(), key));
+                    }
+                }
+                Outcome::Refused(refusal) => panic!("the fire of {name} was refused: {refusal:?}"),
+            }
+        }
+        out
+    };
+    let opened = fire_events(&mut host, april - 7 * DAY);
+    assert!(
+        opened.contains(&("opened".to_owned(), april_key.clone())),
+        "{opened:?}"
+    );
+    assert_eq!(
+        fire_events(&mut host, april - 2 * DAY),
+        vec![("reminded".to_owned(), april_key.clone())]
+    );
+    let missed = fire_events(&mut host, april + DAY);
+    assert_eq!(
+        missed
+            .iter()
+            .filter(|(kind, key)| kind == "missed" && *key == april_key)
+            .count(),
+        1,
+        "{missed:?}"
+    );
+}

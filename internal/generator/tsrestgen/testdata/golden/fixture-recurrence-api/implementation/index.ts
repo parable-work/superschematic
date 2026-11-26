@@ -3,12 +3,14 @@
 // superschematic wrote this package once, as a scaffold, because it was
 // missing. It never writes it again: the package is yours. Each method
 // answers 501 Not Implemented until you implement it.
+// Each event handler fails every event until you implement it.
 
 import { notImplemented } from '@superschematic/http-runtime';
 import type {
   AuthenticatorFactory,
   Constructor,
   Deps,
+  WorkersConstructor,
 } from '@schemas/fixture-recurrence-api-api';
 
 /** Builds the implementation of fixture-recurrence-api from its dependencies. Its type is the generated Constructor. */
@@ -22,3 +24,22 @@ export const create: Constructor = deps => ({
  * header) with your identity provider and return its Principal.
  */
 export const authenticate: AuthenticatorFactory = () => async () => null;
+
+/**
+ * Builds the workers of fixture-recurrence-api from its dependencies. Its type is the
+ * generated WorkersConstructor. A worker's entrypoint calls one method per
+ * message it claims; the message is done when it resolves, and fails, to be
+ * retried, when it rejects. A message may come again, so a method is
+ * idempotent.
+ */
+export const createWorkers: WorkersConstructor = deps => ({
+  async filingDeadlinesRecurrenceOpened(event, tx) {
+    throw notImplemented('event handler filingDeadlinesRecurrenceOpened');
+  },
+  async filingDeadlinesRecurrenceReminded(event, tx) {
+    throw notImplemented('event handler filingDeadlinesRecurrenceReminded');
+  },
+  async filingDeadlinesRecurrenceMissed(event, tx) {
+    throw notImplemented('event handler filingDeadlinesRecurrenceMissed');
+  },
+});

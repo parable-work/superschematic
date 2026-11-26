@@ -108,6 +108,11 @@ pub const DONE: &str = "done";
 pub const MISSED: &str = "missed";
 pub const SKIPPED: &str = "skipped";
 
+// The events a run emits as it moves an occurrence on (D153).
+pub const EVENT_OPENED: &str = "opened";
+pub const EVENT_REMINDED: &str = "reminded";
+pub const EVENT_MISSED: &str = "missed";
+
 const DAY_MS: i64 = 86_400_000;
 
 /// How many occurrences a plan keeps ahead at most, and a list answers.
@@ -751,6 +756,27 @@ impl Plan {
             match at {
                 Some((at, key)) => cx.arm(name, at, json!({ "key": key }))?,
                 None => cx.clear(name)?,
+            }
+        }
+        self.emit(cx)
+    }
+
+    // emit raises an event for each occurrence the run moved on (D153):
+    // opened, reminded or missed, in key order, each once, since the run
+    // that moves an occurrence is the one that writes the move.
+    fn emit(&self, cx: &Cx<'_, RecurrenceConfig>) -> Hook<()> {
+        for (key, occ) in &self.occs {
+            let before = self.read.get(key);
+            let was = |state: &str| before.is_some_and(|b| b.state == state);
+            let payload = || json!({ "key": occ.key, "due": occ.due, "dueAt": occ.due_at, "overdueAt": occ.overdue_at });
+            if occ.state == OPENED && !was(OPENED) {
+                cx.emit(EVENT_OPENED, payload())?;
+            }
+            if occ.reminded_at.is_some() && before.is_none_or(|b| b.reminded_at.is_none()) {
+                cx.emit(EVENT_REMINDED, payload())?;
+            }
+            if occ.state == MISSED && !was(MISSED) {
+                cx.emit(EVENT_MISSED, payload())?;
             }
         }
         Ok(())
