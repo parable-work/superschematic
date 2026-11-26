@@ -65,7 +65,7 @@ func inferJSONShapes(schema *ir.Schema) []string {
 			}
 			json := true
 			for _, h := range held {
-				if h.owner.Name == name || !(h.field.JsonField || h.owner.JsonField) || h.field.Relation != nil || h.field.HasMany || h.field.ManyToMany {
+				if h.owner.Name == name || (!h.field.JsonField && !h.owner.JsonField) || h.field.Relation != nil || h.field.HasMany || h.field.ManyToMany {
 					json = false
 					break
 				}
