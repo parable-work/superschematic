@@ -50,8 +50,8 @@ export function jobsInbound(pool: pg.Pool, config: Readonly<Record<string, unkno
     providers,
     bucket,
     ...(typeof config.INBOUND_ADDRESS === 'string' ? { inboundAddress: config.INBOUND_ADDRESS } : {}),
-    // Until the agent dispatcher sets ask policies (D158), every send the
-    // permission allows goes.
+    // No agent sends here, so every send the permission allows goes;
+    // examples/agent-orchestration asks the agent's policy (D158).
     approve: () => 'allow',
   });
   return { notifier, inbound };
@@ -102,10 +102,11 @@ export function jobsServer(inbound: Inbound, authenticate: Authenticator): Hono 
 }
 
 /**
- * The handlers of jobs-api's workers. Runs is the stub a run request's
- * consumer is until the agent dispatcher (D158) takes the queue: as the
- * party, through the grant the request names, a report on the granted job
- * with the message's text, the message and its photos filed onto both.
+ * The handlers of jobs-api's workers. Runs takes each run request with no
+ * agent: as the party, through the grant the request names, a report on
+ * the granted job with the message's text, the message and its photos
+ * filed onto both. examples/agent-orchestration hands the same queue to
+ * the agent dispatcher (D158) instead.
  */
 export function jobsWorkers(pool: pg.Pool, notifier: Notifier, inbound: Inbound) {
   const orm = createOrm(pool);
