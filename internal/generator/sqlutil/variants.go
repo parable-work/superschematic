@@ -210,11 +210,8 @@ func keyTerm(d variantDialect, col string, key VariantKeyCheck) string {
 		}
 		return at + " IN (" + strings.Join(quoted, ", ") + ")"
 	}
-	var holds string
-	switch {
-	case key.Kind == "":
-		holds = at + " <> 'null'"
-	default:
+	holds := at + " <> 'null'"
+	if key.Kind != "" {
 		holds = is(kinds)
 	}
 	if len(key.In) > 0 {
@@ -225,9 +222,7 @@ func keyTerm(d variantDialect, col string, key VariantKeyCheck) string {
 		holds = "(" + holds + " AND " + d.textAt(col, key.Key) + " IN (" + strings.Join(values, ", ") + "))"
 	}
 	switch {
-	case key.Kind == "null":
-		return holds
-	case key.Required:
+	case key.Kind == "null", key.Required:
 		return holds
 	case key.Kind == "":
 		return ""
