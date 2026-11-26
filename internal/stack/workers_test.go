@@ -389,7 +389,7 @@ func TestWorkerRefusals(t *testing.T) {
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker on shop-db, and environment Staging places shop-db on shop-db, a sqlite database; a Go API's Deps reach Postgres alone")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker on shop-db, and environment Staging places shop-db on shop-db, a sqlite database; a Go worker claims its queue on Postgres alone (D64, D116)")
 	})
 	t.Run("a queue on a platform where no worker claims", func(t *testing.T) {
 		s, services := workerShop()
