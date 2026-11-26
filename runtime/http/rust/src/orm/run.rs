@@ -465,7 +465,9 @@ impl<C: Client> Runner<'_, C> {
     /// relation of the table to itself refusing a row that would reference
     /// itself, and then deletes `from` as `delete_one` does. On Postgres a
     /// client outside a transaction is refused; on SQLite the savepoint is
-    /// the merge's own transaction when the caller opened none.
+    /// the merge's own transaction when the caller opened none. Opened for
+    /// a caller (D156), it finds only the rows the caller may write: either
+    /// of the two beyond the caller's audience or grants is not found.
     pub(crate) async fn merge_into(
         &self,
         from: &Value,
@@ -484,6 +486,11 @@ impl<C: Client> Runner<'_, C> {
                 message: format!("{} {from} cannot be merged into itself", self.table.name),
             });
         }
+        // A row the caller may not write is not there (D156, D181): each of
+        // the two, as an update of `into` and a delete of `from` would ask,
+        // before a statement repoints a row of another table.
+        self.require_reach(from, true).await?;
+        self.require_reach(into, true).await?;
         // The merge stamps a row deleted, which records who deleted it.
         if merge.requires_user {
             self.plan.merge_user()?;

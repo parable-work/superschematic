@@ -206,7 +206,7 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir)),
+		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
 		"Cargo.lock":            string(lock),
 		"src/lib.rs":            "//! The behavior tables' repositories: see tests/.\n",
 		"create.sql":            sqliteDDL,
@@ -244,7 +244,8 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 }
 
 // ormBehaviorsManifest is the test crate's Cargo.toml, given the types
-// crate's name and its directory.
+// crate's name, its directory and the HTTP runtime's, whose access caller
+// (D156) a case opens the repositories for.
 const ormBehaviorsManifest = `# The repositories of a database whose tables compose behaviors (D103,
 # D116), over its generated Rust types, on both dialects.
 [package]
@@ -258,6 +259,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt"] }
 db = { package = %q, path = %q, features = ["postgres", "sqlite"] }
+superschematic-http-runtime = { path = %q }
 
 # Its own workspace, so no manifest above the test's directory claims it.
 [workspace]

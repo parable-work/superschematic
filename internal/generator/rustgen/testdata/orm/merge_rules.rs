@@ -7,7 +7,8 @@
 //! its unique index holds live rows alone; a code the index over an
 //! expression would refuse is deleted; a note is repointed with who changed
 //! it; the label merged away is deleted softly; a merge of a label into
-//! itself, into a label under it, and of one gone, is refused and writes
+//! itself, into a label under it, of one gone, and by a party whose grant
+//! reaches one of the two labels alone (D156, D181), is refused and writes
 //! nothing; and a customer, whose status is a Workflow, is deleted through
 //! the core once its purchases and its profile are folded.
 
@@ -16,8 +17,12 @@ use db::orm::sqlite::rusqlite;
 use db::orm::*;
 use db::*;
 use serde_json::{json, Value};
+use superschematic_http_runtime::{orm::AccessCaller, GrantReach, PrincipalKind};
 
 const ALICE: &str = "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90";
+
+/// A party a grant names (D156).
+const PARTY: &str = "7a1d4b63-9b6f-4d2c-8e2f-3a7a2c8d9e01";
 
 /// A call of a SQLite repository, which answers at once.
 macro_rules! at_once {
@@ -90,6 +95,31 @@ macro_rules! cases {
         let held = $run!(tags.untyped().find_many(Some(&values(json!({"labelId": {"eq": defect["id"]}}))), &FindOptions::default()))
             .expect("the defect's documents");
         assert_eq!(held.rows.len(), 2, "a refused merge wrote: {:?}", held.rows);
+
+        // Refused as not found, writing nothing, for a caller who may not
+        // write one of the two (D156, D181): a party whose grant reaches
+        // the defect alone, merging it into the bug it does not see, and
+        // one whose grant reaches the bug alone.
+        for (reached, gone) in [(&defect, &bug), (&bug, &defect)] {
+            let party = $orm.acting(Some(ALICE.to_owned())).with_access(AccessCaller {
+                subject: Some(PARTY.to_owned()),
+                kind: PrincipalKind::Party,
+                grants: Some(vec![GrantReach {
+                    id: "g1".to_owned(),
+                    target_type: "Label".to_owned(),
+                    target_id: reached["id"].as_str().unwrap().to_owned(),
+                    reaches: Default::default(),
+                }]),
+                ..AccessCaller::default()
+            });
+            let refused = $run!(party.label().unwrap().merge_into(&key(&defect), &key(&bug)));
+            assert!(matches!(&refused, Err(Error::NotFound(message)) if message.contains(gone["id"].as_str().unwrap())), "{refused:?}");
+        }
+        let held = $run!(tags.untyped().find_many(Some(&values(json!({"labelId": {"eq": defect["id"]}}))), &FindOptions::default()))
+            .expect("the defect's documents");
+        assert_eq!(held.rows.len(), 2, "a merge the caller may not make wrote: {:?}", held.rows);
+        let kept = $run!(labels.untyped().get_one(&defect["id"]));
+        assert!(kept.is_ok(), "a merge the caller may not make deleted the defect: {kept:?}");
 
         let merged = $run!(labels.merge_into(&key(&defect), &key(&bug))).expect("merge defect into bug");
         assert_eq!(
