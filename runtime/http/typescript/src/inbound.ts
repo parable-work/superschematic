@@ -559,7 +559,11 @@ export function createInbound(options: InboundOptions): Inbound {
     const visible = await orm.as(input.as)[member].findOne({ [(orm[member] as RepositoryShape).def.key]: { eq: input.party.key } });
     if (!visible) throw new InboundError(`no party ${input.party.table} ${input.party.key}`);
     const destination = await destinationOf(input.party, input.channel);
-    const conversation = await orm.transaction((tx: any) => conversationOf(tx, input.channel, destination.identity ? String(destination.identity.address) : '', input.party, input.subject));
+    let conversation = await orm.transaction((tx: any) => conversationOf(tx, input.channel, destination.identity ? String(destination.identity.address) : '', input.party, input.subject));
+    // The party's address on the channel is the one it is reached at now.
+    if (destination.identity && conversation.address !== destination.identity.address) {
+      conversation = await conversations().updateOne(conversation.id, { address: destination.identity.address });
+    }
     const base = {
       conversation: conversation.id,
       direction: 'outbound',

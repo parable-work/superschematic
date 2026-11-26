@@ -9,9 +9,9 @@ either: an environment's config picks each one.
 
 | Path | What it is |
 |---|---|
-| `providers/sms-relay-a` | A channel adapter for an SMS relay that takes JSON with a Bearer token and posts back signed delivery statuses and replies |
+| `providers/sms-relay-a` | A channel adapter for an SMS relay that takes JSON with a Bearer token and posts back signed delivery statuses and replies; it fetches a text's photos and reads STOP and START (D157) |
 | `providers/sms-relay-b` | A second SMS channel adapter, for a relay of another shape: form posts under an account with basic authentication, send-only |
-| `providers/mail-relay` | A channel adapter for a mail relay that takes JSON with a Bearer token, send-only; `examples/notifications` sends email and password reset codes through it (D153) |
+| `providers/mail-relay` | A channel adapter for a mail relay that takes JSON with a Bearer token; `examples/notifications` sends email and password reset codes through it (D153), and `examples/parties` reads the mail it received, with its SPF, DKIM and DMARC results, threading headers and attachments (D157) |
 | `providers/vault-broker` | A credential provider over a password manager's service API: items named by secret reference, `vault://<vault>/<item>/<field>`, scoped to the vaults its config names |
 | `providers/local-sandbox` | A sandbox provider that runs each run's instance as a local process: a stub, not an isolation boundary |
 | `providers/stub-model` | A model provider whose answers follow from the turn |

@@ -169,7 +169,10 @@ a recipient and channels; the query runs as its recipient.
 ## Take replies
 
 A relay's `@webhook` route hands its request to the notifier, or an
-inbound pipeline calls `reply` with the sender normalised:
+inbound pipeline calls `reply` with the sender normalised. An app whose
+senders include parties hands it to the inbound path instead, which gives
+a user's reply to the notifier
+([outside parties and inbound messages](../parties/)):
 
 ```ts
 app.post("/webhooks/sms/inbound", async c =>
