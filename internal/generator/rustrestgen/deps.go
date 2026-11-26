@@ -468,11 +468,11 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 
 // DependencyFeatures is what follows the path of the Cargo.toml dependency
 // on the crate name: for the database's Rust types of an API with table
-// operations, the feature of the database's dialect, which the
-// repositories they are served from are behind (D116); empty for any
-// other crate.
+// operations or a deriver of tables, the feature of the database's
+// dialect, which the repositories they are served from, or pulled and
+// settled through, are behind (D116, D146); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasTableDerivers()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -507,7 +507,7 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
-	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {
+	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || (deps.Engine == nil && !slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables }))) {
 		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
 	}
 	if err := o.checkBehaviorDeps(&deps); err != nil {
@@ -613,7 +613,10 @@ func (o *APIOutput) DepsUses() []string {
 		runtime = append(runtime, "Shutdown")
 	}
 	engine := ""
-	if o.HasDerivers() {
+	if o.HasTableDerivers() {
+		// A deriver of tables answers the HTTP runtime's loop (D146).
+		runtime = append(runtime, "deriver::{DerivationAnswer, DerivationItem}")
+	} else if o.HasDerivers() {
 		engine = rustutil.UseLine(o.Deps.Engine.CrateIdent()+"::derive", []string{"DerivationAnswer", "DerivationItem"})
 	}
 	if engine != "" && o.Deps.Engine.CrateIdent() < o.RuntimeCrateIdent {

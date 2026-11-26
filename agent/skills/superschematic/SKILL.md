@@ -832,10 +832,10 @@ Most are load errors; knowing them saves a build round-trip:
   `derived.settleDerivations`, presenting each item's `sourceHash`; both
   take no key. A caller's write of a derived field overrides it until
   `derived.rederive`. Never derive from a `Secret<T>` field. A `@deriver`
-  of a TypeScript API runs that loop as a deployable of the stack (D146):
-  name the tables in `schemas` and implement one method per derived field
-  in `createDerivers`. In another language, run the loop in a worker of
-  your own through the repository.
+  of a TypeScript, Rust or Go API runs that loop as a deployable of the
+  stack (D146): name the tables in `schemas` and implement one method per
+  derived field in `createDerivers` (TypeScript), `create_derivers` (Rust)
+  or `NewDerivers` (Go). A Go API's deriver fills tables alone.
 - When each field must say who set it, or a model's answers must wait
   for a person, implement Provenance beside it: `implements
   Provenance<Ticket, { review: { sources: ["Derived"]; below: 0.8;

@@ -156,6 +156,56 @@ func TestTableDeriverDeployable(t *testing.T) {
 	}
 }
 
+// TestTableDeriverLanguages: a deriver of tables runs on a Rust or a Go
+// API as on a TypeScript one (D146): each is placed on the target's
+// deriver platform in its API's language, with the tables it fills, its
+// API's edges and its decorator's concurrency, and stack.Derivers gives it
+// in that language.
+func TestTableDeriverLanguages(t *testing.T) {
+	for _, lang := range []string{registry.APILanguageRust, registry.APILanguageGo} {
+		t.Run(lang, func(t *testing.T) {
+			s, services := tableDeriverShop()
+			service(services, "shop-orders").Language = lang
+			if lang == registry.APILanguageGo {
+				// An API that names no language is a Go API.
+				service(services, "shop-orders").Language = ""
+			}
+			env := mustResolve(t, assemble(t), s, services, "Staging")
+			d := env.Deployable(triageDeriver)
+			if d == nil {
+				t.Fatalf("no deriver %s among %v", triageDeriver, names(env))
+			}
+			if d.Kind != ir.DeployableDeriver || d.Platform != stacktest.DeriverPlatform || d.Language != lang {
+				t.Errorf("deriver = %s %s on %s in %s, want %s", d.Kind, d.Name, d.Platform, d.Language, lang)
+			}
+			want := ir.ResolvedDeriver{API: "shop-orders", Name: "TriageTickets", Database: "shop-db", Schemas: []string{"Ticket"}, Instances: 1, Concurrency: 4, BatchSize: ir.DefaultDeriverBatchSize}
+			if d.Deriver == nil || fmt.Sprint(*d.Deriver) != fmt.Sprint(want) {
+				t.Errorf("run = %+v, want %+v", d.Deriver, want)
+			}
+			var edges []string
+			for _, e := range env.Edges {
+				if e.From == d.Name {
+					edges = append(edges, e.ID)
+				}
+			}
+			if got, want := strings.Join(edges, "; "), "http:shop-orders-triage-tickets->shop-api; sql:shop-orders-triage-tickets->shop-db"; got != want {
+				t.Errorf("edges = %s\nwant    %s", got, want)
+			}
+			derivers, err := stack.Derivers(stack.Input{Stack: s, Services: services})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, d := range derivers {
+				got = append(got, d.Name+" "+d.Language+" "+strings.Join(d.Deriver.Schemas, ","))
+			}
+			if want := []string{"shop-orders-fill-all " + lang + " Article,Ticket", "shop-orders-triage-tickets " + lang + " Ticket"}; !slices.Equal(got, want) {
+				t.Errorf("derivers = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // TestDeriverSettings: a setting changes the concurrency, turns the
 // deriver off, which runs none, or runs none with instances 0; Preview
 // inherits Staging's.
@@ -261,19 +311,13 @@ func TestDeriverRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidStack, "deriver FillAll of shop-orders fills the derived fields of Article, Ticket, engine types of shop-db, and of Invoice, tables of it")
 	})
-	t.Run("a Rust API's deriver of tables", func(t *testing.T) {
-		s, services := tableDeriverShop()
-		service(services, "shop-orders").Language = registry.APILanguageRust
-		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "deriver TriageTickets of shop-orders fills the derived fields of Ticket, tables of shop-db, and shop-orders is a RUST API; a deriver of tables runs on a TypeScript API, where a table's Derived operations are served; Rust and Go follow (D146)")
-	})
-	t.Run("a Go API", func(t *testing.T) {
+	t.Run("a Go API's deriver of engine types", func(t *testing.T) {
 		s, services := deriverShop()
 		service(services, "shop-orders").Language = ""
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "deriver TriageTickets of shop-orders: shop-orders is a Go API, and a deriver runs on a TypeScript or Rust API; Go follows")
-		if _, err := stack.Derivers(stack.Input{Stack: s, Services: services}); err == nil || !strings.Contains(err.Error(), "a deriver runs on a TypeScript or Rust API; Go follows") {
-			t.Errorf("Derivers = %v, want the Go API's deriver refused", err)
+		mustFail(t, errs, stack.CodeUnrealizable, "deriver TriageTickets of shop-orders fills the derived fields of Ticket, engine types of shop-db, and shop-orders is a Go API; a deriver of engine types runs on a TypeScript or Rust API, and a Go API's deriver fills tables alone (D146); write the API in TypeScript or Rust")
+		if _, err := stack.Derivers(stack.Input{Stack: s, Services: services}); err == nil || !strings.Contains(err.Error(), "a Go API's deriver fills tables alone (D146)") {
+			t.Errorf("Derivers = %v, want the Go API's deriver of engine types refused", err)
 		}
 	})
 	t.Run("an exposed deriver", func(t *testing.T) {

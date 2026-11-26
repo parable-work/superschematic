@@ -422,9 +422,33 @@ func (w *RustWorker) HandlerVar(q rustrestgen.BehaviorQueue) string {
 type RustDeriver struct {
 	rustrestgen.DeriverInfo
 
-	// Engine is the engine of the API's engine database, which Deps holds.
+	// Engine is the engine of the API's engine database, which Deps holds;
+	// nil for a deriver of tables (D146).
 	Engine *RustEngine
+
+	// Database is the database whose repositories a deriver of tables
+	// pulls and settles through, the pool Deps.db holds; nil for a deriver
+	// of engine types.
+	Database *RustDatabase
 }
+
+// DerivedPermissions are the permissions a deriver of tables holds as a
+// behavior caller: each Derived config's permission, which the core asks
+// of a pull and a settle. A table's name, which the engine's permission
+// policy asks of a deriver of engine types, is left out.
+func (d *RustDeriver) DerivedPermissions() []string {
+	var out []string
+	for _, permission := range d.Permissions {
+		if !slices.Contains(d.Schemas, permission) {
+			out = append(out, permission)
+		}
+	}
+	return out
+}
+
+// DeriverOfTables reports whether the entrypoint is a deriver's of tables
+// (D146), which clones its pool into the API's Deps and keeps it.
+func (s *RustServer) DeriverOfTables() bool { return s.Deriver != nil && s.Deriver.Tables }
 
 // RustApp is the app a Rust app's entrypoint runs (D78): its @app class
 // and the struct of its parts, from the API crate's apps.rs; its program,
@@ -1136,7 +1160,15 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			return nil, err
 		}
 	}
-	if s.Deriver != nil {
+	switch {
+	case s.DeriverOfTables():
+		// A deriver of tables pulls and settles through the repositories
+		// of the API's database, on its pool (D146).
+		if s.APIs[0].Database == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s of %s fills the Derived fields of %s through the repositories of its database, and %s connects to none (D146)", in.Stack, in.Server, s.APIs[0].Service, strings.Join(s.Deriver.Schemas, ", "), s.APIs[0].Service)
+		}
+		s.Deriver.Database = s.APIs[0].Database
+	case s.Deriver != nil:
 		if s.APIs[0].Engine == nil {
 			return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine, whose Derived fields it fills (D74)", in.Stack, in.Server, s.APIs[0].Service)
 		}
@@ -1280,8 +1312,10 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// An app's main.rs serves nothing itself either: its program does
 		// (D78).
 		registry = []CargoDependency{{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "rt-multi-thread"] }`, quoteToml(rustTokioVersion))}}
-		if len(s.Engines) > 0 {
-			// engine.rs reads the engine document's JSON.
+		if len(s.Engines) > 0 || s.DeriverOfTables() {
+			// engine.rs reads the engine document's JSON, and a deriver of
+			// tables passes its operations' parameters and results as JSON
+			// (D146).
 			registry = append([]CargoDependency{{"serde_json", quoteToml(rustSerdeJSONVersion)}}, registry...)
 		}
 	}
@@ -1771,12 +1805,21 @@ func (s *RustServer) RuntimeUses() []string {
 // trace export (D67), the claim loop for a worker, and the Shutdown it
 // stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
-	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses := s.bucketUses(runtime)
+	if s.DeriverOfTables() {
+		// The loop of a deriver of tables (D146).
+		uses = append(uses, rustutil.UseLine(runtime+"::deriver", []string{"self", "DerivationAnswer", "DerivationItem", "DeriverOptions"}))
+	}
+	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Files) > 0 {
 		// A database on a SQLite file (D116), which a job and a worker
 		// open as a server does.
 		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
+	}
+	if s.DeriverOfTables() {
+		// The repositories' caller and failures (D146).
+		uses = append(uses, "use "+runtime+"::orm;")
 	}
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
@@ -1968,6 +2011,8 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:
 		main = "runner.rs.tmpl"
+	case s.DeriverOfTables():
+		main = "table_deriver.rs.tmpl"
 	case s.Deriver != nil:
 		main = "deriver.rs.tmpl"
 	case s.App != nil:

@@ -1,0 +1,19 @@
+# derived-go-api and derived-rs-api on the local target (D146): the
+# default server of each, and each of their derivers a deployable of its
+# own in its API's language, which fills the Derived fields of
+# fixture-derived-provenance-db's tables through the database's
+# repositories.
+kind: Stack
+types:
+  Derived:
+    name: Derived
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: derived-go-api, kind: API }
+        - { name: derived-rs-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

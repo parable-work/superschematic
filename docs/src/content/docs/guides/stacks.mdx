@@ -960,8 +960,8 @@ export class TriageTickets {}
 ```
 
 The API's generated `Derivers` type has a method per derived field,
-typed by the field. Your implementation exports `createDerivers` (or
-`create_derivers` in Rust):
+typed by the field. Your implementation exports `createDerivers`, or
+declares `create_derivers` in Rust and `NewDerivers` in Go:
 
 ```ts
 export const createDerivers: DeriversConstructor = deps => ({
@@ -975,6 +975,29 @@ export const createDerivers: DeriversConstructor = deps => ({
 });
 ```
 
+In Go, `Derivers` is a struct of one interface per deriver, and a
+method takes the item's inputs as a struct of the fields they come from
+and answers the field's own type:
+
+```go
+func NewDerivers(deps api.Deps) (api.Derivers, error) {
+	return api.Derivers{TriageTickets: &triage{deps: deps}}, nil
+}
+
+func (t *triage) TicketCategory(ctx context.Context, item deriver.DerivedItem[api.TicketCategoryInputs]) (deriver.DerivedAnswer[shopdb.Category], error) {
+	reply, err := myModel(ctx, item.Model, item.Instruction, item.Inputs, item.Output)
+	if err != nil {
+		return deriver.DerivedAnswer[shopdb.Category]{}, err
+	}
+	return deriver.DerivedAnswer[shopdb.Category]{Value: reply.Category, Confidence: &reply.Confidence}, nil
+}
+```
+
+`deriver` is the Go HTTP runtime's package
+(`runtime/http/go/deriver`). In Rust, `Derivers` holds one trait object
+per deriver, and a method takes a `DerivedItem` of its inputs' struct and
+answers a `DerivedAnswer` of the field's type.
+
 `schemas` names the types by string, and every type of the database that
 composes Derived when it is absent. Nothing in `Derivers` says which
 store a deriver runs over: the methods of a deriver of tables and of one
@@ -983,30 +1006,34 @@ of engine types have the same shape, each typed by its field.
 The deriver is a deployable of its own, `<api>-<deriver>`. It runs as the
 deployable's name, and what it pulls from depends on its schemas:
 
-- **Tables** (D146). A TypeScript API's deriver opens the database's
-  repositories as itself, holding each Derived config's `permission`,
-  and runs the loop over each table's `derived.staleDerivations` and
-  `derived.settleDerivations`: read a page of stale fields, hand each to
-  its method, settle the answers by the hash it pulled. Every answer goes
-  through the behaviors' core, as the table's own operations do. When
-  a pass settles nothing it pulls again after five seconds, and each
-  pull scans the table. An answer of no shape a settle takes fails its
-  own field. A pull or a settle that fails for a reason time cures has
-  its table waited out, a second, doubling to thirty, while the other
-  tables go on; one the core refuses for good, a caller without the
-  permission among them, ends the deriver with the error. The
-  database lists `postgres` first, since the TypeScript repositories run
-  there. A Rust API's deriver of tables is refused until it follows.
+- **Tables** (D146). A TypeScript, Rust or Go API's deriver opens the
+  database's repositories as itself, holding each Derived config's
+  `permission`, and runs its HTTP runtime's loop over each table's
+  `staleDerivations` and `settleDerivations`: read a page of stale
+  fields, hand each to its method, settle the answers by the hash it
+  pulled. Every answer goes through the behaviors' core, as the table's
+  own operations do. A Rust deriver opens the repositories in a
+  transaction of its pool for each pull and each settle. When a pass
+  settles nothing it pulls again after five seconds, and each pull scans
+  the table. An answer of no shape a settle takes fails its own field. A
+  pull or a settle that fails for a reason time cures has its table
+  waited out, a second, doubling to thirty, while the other tables go
+  on; one the core refuses for good, a caller without the permission
+  among them, ends the deriver with the error. The database lists
+  `postgres` first, since the repositories a deriver runs over are
+  Postgres's.
 - **Engine types** (D74). A TypeScript or a Rust API's deriver opens the
   engine and holds each derived type's name and its Derived `permission`,
-  so a `{ rules }` policy needs a rule for it, which the build checks:
+  so a `{ rules }` policy needs a rule for it, which the build checks. A
+  Go API's deriver of engine types is refused:
 
   ```ts
   { subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
   ```
 
 A deriver fills one kind. Over a database that has both, declare a
-deriver for each and name its schemas.
+deriver for each and name its schemas. A Rust API's derivers all fill
+one kind, so put the others on a second API.
 
 An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
 

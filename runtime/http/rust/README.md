@@ -238,6 +238,15 @@ TypeScript runtimes' (D51):
   logs (`"shutting down"`); a second ends the process at once with 143 or
   130, as a generated server's does. `BoxError` is the error a job's or a
   worker's method returns.
+- The `deriver` module, with the `postgres` or `sqlite` feature: a stack
+  deriver's loop over tables that implement Derived (D146), the twin of
+  the TypeScript runtime's `runDeriver`. `run_deriver` takes the tables by
+  name and one call that runs a table's `staleDerivations` or
+  `settleDerivations` through the database's repositories, hands each
+  stale field to the answer, settles the answers, waits five seconds when
+  a pass settles nothing, waits out a table whose pull or settle fails for
+  a reason time cures, and ends with a `DeriverFailure` naming the table
+  on a refusal of the core's other than busy.
 - The `postgres` feature's `queue` module, the twin of the Go ORM's
   `queues.go` and TypeScript's `queue.ts` (D53): a DB's Rust types carry
   each queue's descriptor as JSON, which `QueueDefinition::parse` reads in
