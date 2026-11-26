@@ -117,4 +117,3 @@ func TestBlueprintFixturesLoad(t *testing.T) {
 	}
 	compareExpanded(t, api, "fixture-blueprint-api.expanded.json")
 }
-
