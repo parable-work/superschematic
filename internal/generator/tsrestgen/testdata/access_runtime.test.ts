@@ -262,6 +262,18 @@ describe('the access of fixture-access-api', () => {
     expect(calls[0]).toMatchObject({ principalKind: 'party', operation: 'listRequests' });
   });
 
+  test("a role whose path is * reaches every row of the table, the grant's target among them", async () => {
+    await orm.asSystem().role.createOne({ name: 'auditor', permissions: ['contracts.read'], reaches: ['Contract:*'] } as never);
+    const issued = await issueGrant(orm.asSystem(), { holder: uuid(0xd1), holderKind: 'party', role: 'auditor', targetType: 'Contract', targetId: contractA.id });
+    try {
+      expect(await status('GET', `/api/contracts/${contractA.id}`, issued.token)).toBe(200);
+      expect(await status('GET', `/api/contracts/${contractB.id}`, issued.token)).toBe(200);
+    } finally {
+      // Ended here, so the later reads of the active grants hold none of it.
+      await revokeGrant(orm, issued.grant.id as string);
+    }
+  });
+
   test('an expired or revoked grant is refused on the very next call', async () => {
     const system = orm.asSystem();
     // Revoked.
