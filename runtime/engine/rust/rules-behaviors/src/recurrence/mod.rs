@@ -1,5 +1,5 @@
 //! Recurrence (D152): a rule that turns into dated occurrences. Its
-//! expansion ([`expand`]) is pure and is what every language calls to date
+//! expansion ([`expand()`]) is pure and is what every language calls to date
 //! a rule, through the core's `expand` operation.
 
 pub mod behavior;

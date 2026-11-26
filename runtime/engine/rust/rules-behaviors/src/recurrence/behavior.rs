@@ -10,7 +10,7 @@
 //! recurrence (`recurrence`, an owned field), when its next occurrence
 //! falls due and when it was last done (`nextDueAt`, `lastDoneAt`), and the
 //! `occurrences` sub-table. Its rules say how a rule becomes occurrences
-//! ([`super::expand`]), when an occurrence opens, reminds and is missed,
+//! ([`super::expand()`]), when an occurrence opens, reminds and is missed,
 //! that a rule change replans only what has not opened, that a missed
 //! occurrence never blocks the next, and who may complete, skip or move
 //! one. It recurs: a filing, a renewal, an inspection, a subscription's

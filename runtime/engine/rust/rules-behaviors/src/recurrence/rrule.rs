@@ -1,6 +1,6 @@
 //! An RFC 5545 recurrence rule (3.3.10, `RRULE`) expanded over wall time
 //! (D152), with no time zone: a rule's occurrences are civil date-times,
-//! which [`super::expand`] makes instants in the row's zone.
+//! which [`super::expand()`] makes instants in the row's zone.
 //!
 //! It reads `FREQ` (`YEARLY`, `MONTHLY`, `WEEKLY`, `DAILY` or `HOURLY`),
 //! `INTERVAL`, `COUNT`, `UNTIL` (a wall date or date-time: the caller makes
