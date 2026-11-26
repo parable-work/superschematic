@@ -17,7 +17,7 @@ stop switch ends every run in flight.
 | `@agents("<part>")` on the orchestration's tables, which the build fills | Go and Rust runtimes; SQLite and D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
-| autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | an agent that hands work to another agent |
+| autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
 | an inbound message's trust: a sender entered by hand asks before every write | |
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
