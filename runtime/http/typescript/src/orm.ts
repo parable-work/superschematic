@@ -5,6 +5,7 @@ import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from '.
 import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, sqliteRulesStore, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './pgtext.js';
+import { formatDuration, parseDuration } from './queue-core.js';
 import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
 import { likePattern, searchTerms } from './search.js';
@@ -1387,6 +1388,17 @@ function firstValue(row: Record<string, unknown> | undefined): unknown {
   return undefined;
 }
 
+/** A duration, or a list of them, as SQLite holds it: the scalar core's canonical text (D182). */
+function sqliteDuration(value: unknown, codec: TableColumn): unknown {
+  if (value === undefined || value === null) return null;
+  const one = (v: unknown): string => {
+    if (typeof v !== 'string') throw new Error(`${JSON.stringify(v)} is no duration`);
+    return formatDuration(parseDuration(v));
+  };
+  if (codec.list && Array.isArray(value)) return value.map(v => (v === null || v === undefined ? null : one(v)));
+  return one(value);
+}
+
 /** The alias an upsert returns whether it inserted a row as, sqlutil.UpsertInserted (D89). */
 const UPSERT_INSERTED = '_inserted';
 
@@ -1882,6 +1894,10 @@ class TableRepository {
 
   private encode(value: unknown, column: TableColumn, what: string): unknown {
     try {
+      // A duration on SQLite is the scalar core's canonical text, as the Go
+      // and Rust repositories write it there, not Postgres's INTERVAL text
+      // (D182).
+      if (this.orm.dialect === 'sqlite' && column.interval) return sqliteDuration(value, column);
       return encodeParam(value, column);
     } catch (error) {
       throw new Error(`orm: ${this.def.name}.${column.name}: ${what}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
