@@ -310,7 +310,8 @@ func (o *APIOutput) BehaviorUses() []string {
 	adapter := []string{"postgres", "Caller", "Core", "Host", "Layout"}
 	var runtime, types []string
 	if o.HasBehaviorOperations() {
-		adapter = append(adapter, "Error", "Refusal")
+		// The caller carries its authenticator's assurance (D200).
+		adapter = append(adapter, "Assurance", "Error", "Refusal")
 		runtime = append(runtime, "ApiError", "RequestContext")
 	}
 	if o.HasBehaviorPreconditions() || o.HasTableBehaviorOperations() {
@@ -677,8 +678,9 @@ func (o *APIOutput) SQLiteBehaviorUses() []string {
 	var root, types, uses []string
 	if o.HasBehaviorOperations() {
 		// The operations run on the file's writing connection, and answer
-		// its failure beside the core's.
-		adapter = append(adapter, "Error", "Refusal")
+		// its failure beside the core's; the caller carries its
+		// authenticator's assurance (D200).
+		adapter = append(adapter, "Assurance", "Error", "Refusal")
 		root = append(root, "ApiError", "RequestContext")
 		uses = append(uses,
 			"use "+o.RuntimeCrateIdent+"::orm;",

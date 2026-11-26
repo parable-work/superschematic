@@ -77,6 +77,34 @@ describe('behaviorCaller', () => {
   test('no one on a route without a caller', () => {
     expect(behaviorCaller(context(null))).toEqual({ subject: '' });
   });
+
+  // D200: an agent run reaches the core as its kind, whom it acts for, its
+  // Agent from the dispatcher's agent claim, and its authenticator's
+  // assurance, which an Approvals requirement counts it by.
+  test("an agent run's kind, whom it acts for, its Agent and its assurance", () => {
+    const run = {
+      subject: 'run-7',
+      permissions: ['changes.approve'],
+      kind: 'agent' as const,
+      actingFor: { subject: 'ann' },
+      claims: { run: 'run-7', agent: 'reviewer' },
+      assurance: { signedInAt: 1_000, userVerified: true },
+    };
+    expect(behaviorCaller(context(run))).toEqual({
+      subject: 'run-7',
+      permissions: ['changes.approve'],
+      kind: 'agent',
+      actingFor: 'ann',
+      agent: 'reviewer',
+      assurance: { signedInAt: 1_000, userVerified: true },
+    });
+    expect(behaviorCaller(context({ ...run, actingFor: { kind: 'party' as const, subject: 'acme' } }))).toMatchObject({
+      actingFor: 'acme',
+      actingForKind: 'party',
+    });
+    // A user's agent claim names no Agent.
+    expect(behaviorCaller(context({ subject: 'kim', permissions: [], claims: { agent: 'x' } }))).toEqual({ subject: 'kim', permissions: [] });
+  });
 });
 
 describe('behaviorParams', () => {

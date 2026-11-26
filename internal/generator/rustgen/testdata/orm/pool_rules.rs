@@ -41,6 +41,7 @@ macro_rules! cases {
             subject: OWNER.to_owned(),
             permissions: vec!["accounts.pool".to_owned(), "accounts.observe".to_owned()],
             stands_in: false,
+            ..Default::default()
         });
         let accounts = orm.account().unwrap();
         let account = |name: &str, rank: i64| {

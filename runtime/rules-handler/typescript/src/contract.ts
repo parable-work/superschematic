@@ -30,6 +30,14 @@ export interface Caller {
   permissions?: string[];
   standsIn?: boolean;
   actingFor?: string;
+  /** What the caller is (D156): user, party, agent or extension; absent reads as user. */
+  kind?: string;
+  /** The kind of the subject it acts for; absent reads as user. */
+  actingForKind?: string;
+  /** The Agent whose run the caller is (D158, D200). */
+  agent?: string;
+  /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
+  assurance?: { signedInAt?: number; userVerified?: boolean };
 }
 
 /** A refused request, shaped as the engine's errors are (D58). */

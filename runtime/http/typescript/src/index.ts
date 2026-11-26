@@ -137,7 +137,7 @@ export type {
   TextFilter,
 } from './filter.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
-export type { ActingFor, Authenticator, GrantReach, PermissionMatcher, Principal, PrincipalKind } from './auth.js';
+export type { ActingFor, Assurance, Authenticator, GrantReach, PermissionMatcher, Principal, PrincipalKind } from './auth.js';
 export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
 export type {
   PublicJwk,
@@ -160,7 +160,7 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
-export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions } from './behavior-routes.js';
+export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions, principalCaller } from './behavior-routes.js';
 export type { BehaviorCaller } from './behavior-routes.js';
 export { tableCreate, tableDelete, tableFilter, tableList, tableRead, tableUpdate } from './table-routes.js';
 export type { TableOperation, TableOperationKind, TableRequest } from './table-routes.js';

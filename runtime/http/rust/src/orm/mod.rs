@@ -1093,11 +1093,24 @@ pub struct Caller {
     /// A service standing in for an end user (D37), which holds no
     /// permission.
     pub stands_in: bool,
+    /// What the caller is (D156): `user`, `party`, `agent` or
+    /// `extension`; `None` for a user.
+    pub kind: Option<String>,
+    /// The subject the caller acts for (D77, D156).
+    pub acting_for: Option<String>,
+    /// The kind of the subject it acts for; `None` for a user.
+    pub acting_for_kind: Option<String>,
+    /// The Agent whose run the caller is (D158, D200).
+    pub agent: Option<String>,
+    /// How its authenticator verified it for the call (D200).
+    pub assurance: Option<crate::auth::Assurance>,
 }
 
 impl Caller {
     /// The caller a route's principal is: its subject and the permissions
-    /// it holds, each once; no one, an empty subject, without one.
+    /// it holds, each once, its kind and whom it acts for, each left out for
+    /// a user, its run's Agent and its assurance (D200); no one, an empty
+    /// subject, without one.
     pub fn of(principal: Option<&crate::auth::Principal>) -> Self {
         let Some(principal) = principal else {
             return Self::default();
@@ -1108,10 +1121,22 @@ impl Caller {
                 permissions.push(permission.clone());
             }
         }
+        let named = |kind: crate::auth::PrincipalKind| {
+            (kind != crate::auth::PrincipalKind::User).then(|| kind.as_str().to_owned())
+        };
         Self {
             subject: principal.subject.clone(),
             permissions,
             stands_in: false,
+            kind: named(principal.kind),
+            acting_for: principal.acting_for.as_ref().map(|a| a.subject.clone()),
+            acting_for_kind: principal
+                .acting_for
+                .as_ref()
+                .and_then(|a| a.kind)
+                .and_then(named),
+            agent: principal.agent().map(str::to_owned),
+            assurance: principal.assurance.clone(),
         }
     }
 }
@@ -1491,8 +1516,7 @@ impl Session<'_> {
     fn caller(&self) -> Caller {
         self.caller.clone().unwrap_or_else(|| Caller {
             subject: self.user.clone().unwrap_or_default(),
-            permissions: Vec::new(),
-            stands_in: false,
+            ..Caller::default()
         })
     }
 }
@@ -1624,6 +1648,38 @@ pub fn wire<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    // D200: an agent run reaches the core as its kind, whom it acts for,
+    // its Agent from its agent claim, and its authenticator's assurance; a
+    // user's kind and an agent claim on a user are left out.
+    #[test]
+    fn a_caller_carries_its_kind_whom_it_acts_for_its_agent_and_its_assurance() {
+        let mut run = Principal::new("run-7", ["changes.approve", "changes.approve"])
+            .of_kind(crate::auth::PrincipalKind::Agent)
+            .acting_for(ActingFor::user("ann"))
+            .with_assurance(crate::auth::Assurance {
+                signed_in_at: Some(1_000),
+                user_verified: true,
+            });
+        run.claims.insert("agent".to_owned(), Value::from("reviewer"));
+        let caller = Caller::of(Some(&run));
+        assert_eq!(caller.permissions, ["changes.approve"]);
+        assert_eq!(caller.kind.as_deref(), Some("agent"));
+        assert_eq!(caller.acting_for.as_deref(), Some("ann"));
+        assert_eq!(caller.acting_for_kind, None);
+        assert_eq!(caller.agent.as_deref(), Some("reviewer"));
+        assert_eq!(
+            caller.assurance,
+            Some(crate::auth::Assurance {
+                signed_in_at: Some(1_000),
+                user_verified: true
+            })
+        );
+        let mut user = Principal::new("kim", Vec::<String>::new());
+        user.claims.insert("agent".to_owned(), Value::from("x"));
+        let caller = Caller::of(Some(&user));
+        assert_eq!((caller.kind, caller.agent, caller.acting_for), (None, None, None));
+    }
 
     #[test]
     fn an_audience_admits_a_caller_by_its_id_and_an_agent_run_by_whom_it_acts_for() {
