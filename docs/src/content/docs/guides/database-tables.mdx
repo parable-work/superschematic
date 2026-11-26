@@ -3704,8 +3704,9 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads one page of 500 rows; past it the value is
-  `{ "over": true }` and its gate does not hold.
+  details. A rollup reads the rows that relate to the row 500 at a time,
+  up to 10,000; past that the value is `{ "over": true }` and its gate
+  does not hold.
 - Rollups keeps no column. A read of the row computes its values through
   the core; no repository, route or SDK serves that read yet. Rollups
   joins and leaves a table with rows.
