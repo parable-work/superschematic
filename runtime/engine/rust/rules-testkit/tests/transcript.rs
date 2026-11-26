@@ -413,6 +413,18 @@ const REFUNDS_FLOOR: usize = 52;
 /// `core-payments.json` (D70 on the core, D103's step 4).
 const PAYMENTS_FLOOR: usize = 73;
 
+/// The steps `core-blueprint.transcript.json` holds, of the engine's
+/// `workqueue-blueprint.json`'s 405 (D149): 101 define and publish checks
+/// and 50 commands, creates whose after-change hook creates each child in
+/// the create's change set, its blockers Dependencies' create parameters,
+/// updates, and Dependencies' listBlockers on the children. The rest of the
+/// 254 left out are opens, reads of rows and of the event log, and what the
+/// replay skips: the scenarios whose links pin, the one that composes
+/// Queue, the one whose access policy is the test's own, the defines the
+/// engine refused for what the child schema lacks, and the refusals that
+/// name Links. An adapter's replay holds its own count to this one.
+const BLUEPRINT_FLOOR: usize = 151;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -450,6 +462,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ),
         ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
         ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
+        ("core-blueprint", "workqueue-blueprint", BLUEPRINT_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {

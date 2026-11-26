@@ -90,6 +90,11 @@
 //! `returnFor` on the supply's row, each write taking the supply row's
 //! lock ([`supply::lock_key`]). [`currency`] holds a config's ISO 4217
 //! code to the table superscalar's `Finance.Currency` keeps.
+//! [`Blueprint`], the one behavior D149 ports though it holds no state once
+//! its rows exist: a template of steps whose rows a create makes in another
+//! table, each through that table's own create in the command's change set
+//! ([`superschematic_rules::Cx::create_row`]), blocked after its steps
+//! through the child table's Dependencies.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -116,6 +121,7 @@
 
 mod ajv;
 pub mod approvals;
+pub mod blueprint;
 pub mod budget;
 pub mod calendar;
 pub mod capacity;
@@ -153,6 +159,7 @@ mod values;
 pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
+pub use blueprint::{Blueprint, BlueprintConfig, BlueprintStep, BlueprintWhen};
 pub use budget::{Budget, BudgetConfig, BudgetMeter, BudgetReset, BudgetScope, INTEGER_SEGMENTS};
 pub use calendar::{Calendar, CalendarConfig};
 pub use comments::{Comments, CommentsConfig};
@@ -199,7 +206,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 25] = [
+pub const NAMES: [&str; 26] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -225,6 +232,7 @@ pub const NAMES: [&str; 25] = [
     holds::NAME,
     calendar::behavior::NAME,
     payments::NAME,
+    blueprint::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -232,7 +240,7 @@ pub const NAMES: [&str; 25] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 25] = [
+pub const DECLARATIONS: [&str; 26] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -258,6 +266,7 @@ pub const DECLARATIONS: [&str; 25] = [
     holds::DECLARATION,
     calendar::behavior::DECLARATION,
     payments::DECLARATION,
+    blueprint::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -295,6 +304,7 @@ pub fn core() -> Core {
         .with(Holds)
         .with(Calendar)
         .with(Payments)
+        .with(Blueprint)
 }
 
 #[cfg(test)]
