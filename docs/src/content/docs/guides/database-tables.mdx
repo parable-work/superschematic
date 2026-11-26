@@ -595,8 +595,38 @@ model that fails leaves the text order.
 | a vector costs 8 bytes a dimension a row, a model call per changed text and one per search | a 1536-dimension model is about 12 GB a million rows; a search reads at most 200 vectors |
 | leaving out the option switches embeddings off | no call is made and no search re-ranks; `reindexSearch` embeds every row again after a change of model |
 
-Search across tables is Postgres alone: the build refuses `@searchable` in
-a service that lists `sqlite`.
+### On SQLite and D1
+
+A database that lists `sqlite` keeps the same `search_index`, its audience
+a JSON array of ids, and its words in an FTS5 table beside it,
+`search_index_fts`, which triggers on the index keep in the statement that
+writes an index row (D186). The `@searchable` tables' triggers are row
+triggers, one after each insert, update and delete, which delete, copy and
+enqueue as Postgres's do. `searchTables`, `indexSearch`, `reindexSearch`,
+`searchRoutes` and `callSearchTool` take the `./orm/sqlite` entry's ORM and
+come from the runtime's `./d1` entry, which a Worker bundles:
+
+```ts
+import { indexSearch, searchTables } from "@superschematic/http-runtime/d1";
+import { createOrm } from "@acme/work-db-types/orm/sqlite";
+
+const orm = createOrm(env.DB, { rules: initSync(rulesWasm) });
+await indexSearch(orm, message);
+const { items, total } = await searchTables(orm, principal, { q: "walnut desk" });
+```
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| each word is a phrase of the words FTS5's `unicode61` tokenizer finds in it, folded to lower case, with no diacritic removed and none stemmed; a row holds every word | the words Postgres's `simple` configuration reads |
+| hits rank by `bm25`, the title weighed 1, the body 0.4, the conversation 0.2 and the files 0.1, then table and key | Postgres's four weight classes, in FTS5's ranking; the two rank alike in order, not in score |
+| access is checked inside the query: the audience through `json_each` over the index row's copy, a grant's reach by an `EXISTS` back to each table | the same exact totals and pages as on Postgres |
+| `indexSearch` writes an index row with the row's access columns read by the write itself | D1 holds no transaction open, so an audience change between its reads and its write is still copied as it stands |
+| embeddings are refused: a search with `vector` is a 400, and `embeddings` in the options throws | vectors are stored and compared on Postgres alone |
+| the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
+
+The build refuses the Go types in a service that lists `sqlite` and
+declares `@searchable`, and the Rust types refuse `@searchable` on every
+dialect.
 
 ## Pages
 
@@ -2154,7 +2184,8 @@ to the caller's audience and grants, and `orm.references` and
 | on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
 | no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
 | `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
-| a table that composes behaviors is read, and a write of it is refused, as are upserts and `mergeInto` | the behaviors' core, an upsert's inserted flag and a merge's plan run on Postgres alone so far |
+| a table that composes behaviors writes its rows and runs its operations, deadlines and changes through the core (D186): on `openSqlite`'s file a change set applies in a savepoint of the transaction, on D1 in one batch | the batch is D1's one atomic unit: a row, its sub-table rows, its deadline and event messages and a worker's spent claim land together, and the batch first checks each read made under a lock, so a command a write raced runs again |
+| upserts and `mergeInto` are refused | an upsert's inserted flag and a merge's plan run on Postgres alone so far |
 | a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
 
 ### Relations in a read
@@ -3530,6 +3561,22 @@ permissions, and every other route refuses it. Its `detail` is `full`
 shows only what its owner chose. A feed lasts a year unless its issue says
 otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
 another, and `DELETE /api/calendar/feeds/<id>` revokes it.
+
+On SQLite and D1 the `./orm/sqlite` entry's repositories run Recurrence
+through the core as Postgres's do (D186): the `occurrences` sub-table, its
+times as RFC 3339 text, the four deadlines on the table's deadline queue
+and its events. `readCalendar`, the feed and its routes come from the
+runtime's `./d1` entry too, and hold each row to its audience and the
+caller's grants as on Postgres. On D1, which holds no transaction open,
+each change set is one batch: a plan's occurrences and the deadlines it
+arms land together or not at all, and a deadline's fire spends its
+worker's claim in the batch that writes the occurrence, so a claim another
+worker holds spends and writes nothing. A Worker passes the core's module
+(`createOrm(env.DB, { rules: initSync(rulesWasm) })`); under Bun the rules
+package loads its own. The generated behavior worker claims through the
+Postgres queue client alone so far: over SQLite a worker runs the
+repository's `runDeadline` and `runChange` over `sqliteQueue`'s claims.
+
 ### A pool of members
 
 A table implements `Pool` as it implements Schedules (D104): each row is a

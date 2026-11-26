@@ -2118,7 +2118,6 @@ Left:
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
   weekend days per holiday calendar; a recurrence set at create.
-- The calendar on SQLite and D1.
 - `examples/deploy-smoke` with a Recurrence table, and the live
   `smoke.sh Cloudflare` run, which is the maintainer's.
 
@@ -2195,7 +2194,7 @@ Left:
   the repository's: search holds audience, grants and per-table
   permissions, as the calendar does.
 - `unaccent`, prefixes and a query syntax; a search by vector alone.
-- SQLite and D1.
+- Embeddings on SQLite and D1, which D186 refuses there.
 - A wake for the indexing queue (D151's change-queue wake).
 - A search across the databases of an environment.
 - `examples/deploy-smoke` with a `@searchable` table, and the live
@@ -2646,10 +2645,69 @@ Left:
   `Deps.orm` built from `createOrm(db)` of `./orm/sqlite`, which lifts
   tsrestgen's refusal of a table operation there (D106); an app passes
   `orm` in the router's options now.
-- The behaviors' core, upserts and merges in the SQLite repositories.
+- Upserts and merges in the SQLite repositories.
 - `Encrypted<T>` fields on D1, which need a cipher a Worker has.
 - An atomic write of several statements on D1, through its batch.
 - A cleared message that names a holder the same delete statement
   deleted, which a row trigger cannot tell.
-- The calendar, search, the notifier's queues, parties and agents on
-  SQLite and D1 (D186, D189), on these shapes.
+- The notifier's queues, parties and agents on SQLite and D1 (D189), on
+  these shapes. D186 serves the behaviors' core, Recurrence, the calendar
+  and search there.
+
+## D186. The SQLite repositories run the behaviors' core in their transactions, a change set on D1 is one batch, Recurrence and the calendar run there as on Postgres, and search's words are an FTS5 table its index's triggers keep (D152, D155, D182 amended)
+
+D182 built the TypeScript repositories on SQLite and D1 and refused a write
+of a table that composes behaviors there, and the loader refused
+`@searchable` on the sqlite dialect, so neither Recurrence (D152) nor
+search (D155) ran on SQLite or D1, and the calendar's read of occurrences
+was written in Postgres's words. This entry serves the three, in
+TypeScript, as the second of the SQLite workstreams; the notifier's queues,
+parties and agents follow (D189).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table that composes behaviors runs every write, operation, deadline and change through the core on SQLite, in the repository's transaction, as on Postgres: the pool's transaction client hands the adapter its store (`OrmQueryable.rulesStore`). On `openSqlite`'s file the transaction is `BEGIN IMMEDIATE`, which holds the file's write lock until it ends, so every lock a rule takes is held already (`locks: 'held'`), and a change set applies in a savepoint, each fenced statement checked by `changes()`, which counts the statement's own rows and not its triggers'. | `sqliteRulesStore`'s batch on the file too, which would nest a transaction in the repository's. A meta's changes, which counts every trigger's row (bun:sqlite's `total_changes` difference). |
+| On D1 the store is `sqliteRulesStore`'s, each value bound as the repositories bind it (`SqliteRulesStoreOptions.bind`): the core's reads run one by one, and its change set in one batch, which D1 runs atomically. The batch is what keeps a behavior's write consistent with its deadline rows: the row, its sub-table rows, its deadline and event messages and the claim a worker spends land together or not at all, and the batch first checks each read made under a lock (`locks: 'fenced'`), so a command another write raced runs again over it. Writes a repository makes beside a command (a stamp, a read back) are D182's: each its own statement. | Refusing behaviors on D1 until it holds a transaction open. One batch per repository call, which takes no read between its statements. |
+| A command's events on SQLite take ids in ascending order, made by the adapter, so a row's events are claimed in the order written: the table's default stamps their `created_at` to the millisecond they share, and the queue's claim holds a row's line by `created_at` then `id`. Postgres keeps the order with `clock_timestamp()`. | A claim ordered by `rowid` on SQLite, which would change the queue statements every language runs. |
+| The `./orm/sqlite` entry's `createOrm` passes the rules package's core (`withRulesCore`) when the database composes behaviors, made from its bundled module on first use; a Worker passes its own (`{ rules: initSync(wasmModule) }`), as its bundle carries the module. | A core per call. |
+| Upserts and merges stay refused on SQLite. | An upsert there reads whether the key's row is held before its statement (D116), which D1 runs as two statements with no transaction between. |
+| The calendar's read of occurrences writes its statement in the ORM's dialect (`ormDialect`, a symbol each ORM and transaction holds) and reads a due time as a Date, its RFC 3339 text or epoch milliseconds. Everything else of the calendar and its feed already went through the repositories and the grants, which run on SQLite (D182). | A dialect member of the ORM, which a table's member could take. |
+| On SQLite the search index is the same table, its audience a JSON array (D182), and its words an FTS5 table beside it, `search_index_fts` (`title`, `body`, `comments`, `files`, a `ref`, and the row's table and key unindexed), tokenized by `unicode61` with no diacritic removed, as Postgres's `simple` configuration reads words. Three triggers on the index keep it in the statement that writes an index row, finding a row's words by its `ref`, an `r` and the hex of its table and key, one token. The migration model carries the FTS5 table and its triggers as a piece of SQL of its own (`search_index_fts`), after every object; the index's GIN indexes are Postgres's alone. | An external-content FTS5 table keyed by the index's rowid, which a VACUUM may renumber, the index's key being a UUID. A virtual table in the migration model, which has no form of one yet. The words in the index table itself, which an FTS5 table can hold only unindexed beside them. |
+| Each `@searchable` table and sub-table has row triggers under the Postgres triggers' names, one after each insert, update and delete, every statement guarded by its own WHERE: a delete, a soft delete and a change of key delete the index row, an audience change is copied into it, and an insert, a restore or a change of a watched column enqueues the row with the queue's SQLite conflict, as Postgres's function does. | One trigger per write with a WHEN, which would split each step the function holds. |
+| `searchTables` on SQLite matches each word as a quoted FTS5 phrase in the four texts, every one required, and ranks by `bm25` with Postgres's weights (1, 0.4, 0.2, 0.1), then table and key; a hit's `matched` is the first text that holds every word and its snippet FTS5's of that text. Access is checked inside the query as on Postgres: the audience through `json_each` over the index row's copy (`sqlutil.SQLiteAudienceContains`, the definition's `indexAudience`), a grant's reach by an `EXISTS` back to each table with its repository's SQLite conditions, and a table no grant reaches left out. | Ranking parity with `ts_rank_cd`'s scores, which the two engines do not share; their order by weight is the same. |
+| `indexSearch` on SQLite reads the row and its texts and writes the index row with the row's access columns read by the write itself (`INSERT ... SELECT` from the row), so on D1, which holds no transaction open, an audience change between the reads and the write is copied as it stands, and a row deleted between them writes none. | A share lock, which SQLite has no form of. |
+| Embeddings stay a Postgres option: a search on SQLite with a `vector` is refused as a bad request (`TypeError`), and `embeddings` in the options of a search or an indexing throws. | Storing vectors as JSON and comparing them in the runtime, which would read every hit's vector. |
+| The loader serves `@searchable` on the sqlite dialect and refuses the Go types there (`refuseSQLiteReaders`); the Rust types refuse it on every dialect. Recurrence and `@calendarSource` were not refused on SQLite: Recurrence is the core's in every language, and the calendar is a read of the TypeScript runtime, whose Rust types refuse it on every dialect. The generated server's refusals over a database that lists sqlite first now name what is left: `Deps.orm`, built over a pg pool alone, and the behavior worker's claims, which go through the Postgres queue client. | Lifting those, which is D182's left item of the generated server over SQLite. |
+| D1 is proved under the pinned workerd by the fixture `d1-orm`, which now runs three databases' generated `orm-sqlite.ts` and `sqlite/create.sql` (`TestTheWorkerdD1FixtureIsCurrent`): fixture-references-db's, fixture-recurrence-db's and fixture-search-db's, with the rules module embedded. Its stand-in's batch runs in one of the Durable Object's transactions, as D1 runs a batch. workerd's SQLite has FTS5. | A fixture per database. |
+
+Built: the stores (`runtime/http/typescript/src/orm-sqlite.ts`,
+`sqliteRulesStore`'s bind in `rules.ts`) and the event ids; `ormDialect`
+and the calendar's read (`calendar.ts`); search on SQLite
+(`search-tables.ts`); the `./d1` entry's exports of the calendar, search,
+grants and `withRulesCore`; `orm_sqlite.tmpl`'s core and the SQLite
+search definition (`tsgen/orm_sqlite.go`); the SQLite triggers and FTS5
+piece (`internal/generator/sqlgen/searchable_sqlite.go`,
+`internal/sqlmigrate/sqlite_model.go`); the loader's check
+(`verify/searchable.go`, `verify/sqlite_features.go`); the guides' SQLite
+sections of search and of recurrence. fixture-search-db lists sqlite. The
+tests: `TestGeneratedRecurrenceEndToEndOnSQLite`, every case of D152's
+end-to-end test on bun:sqlite, the worker's handlers over `sqliteQueue`;
+`TestSearchTablesEndToEndOnSQLite`, D155's cases on bun:sqlite with the
+refusal of embeddings and `reindexSearch`; the references test on SQLite,
+its tickets and posts through the core; `TestSearchTriggersOnSQLite`; the
+SQLite model golden of fixture-search-db and its round trip and
+convergence; and the workerd fixture `d1-orm`, which runs a ticket's
+Comments, a filing's plan, its remind deadline from a claim, a lost claim,
+the calendar, and search with its audience, deletes, conversation and
+scope, over D1's stand-in.
+
+Left:
+
+- Upserts and merges in the SQLite repositories (D182's).
+- The generated TypeScript server and behavior worker over a database
+  that lists sqlite first: `Deps.orm` from `createOrm(db)` and the
+  worker's queues over `sqliteQueue` (D182's).
+- A drain of the behavior queues and the indexing queue on Workers over
+  D1, where no worker claims yet (D151's wake on SQLite and D1).
+- Embeddings on SQLite and D1.
+- Go and Rust on SQLite for search and the calendar (D194+).

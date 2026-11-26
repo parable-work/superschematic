@@ -2200,8 +2200,11 @@ the Rust crate depends on `superschematic-rules-adapter` and
 with behavior operations builds only in a checkout that sets `[paths]
 rules_adapter_rust` and `rules_behaviors_rust`
 ([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
-TypeScript repositories run on Postgres alone, so a database that lists
-`sqlite` first has no behavior operations on a TypeScript server yet. A
+TypeScript repositories run behaviors on SQLite and D1 too (D186), but
+the generated server builds `Deps.orm` over a pg pool alone, so a database
+that lists `sqlite` first has no generated behavior operations on a
+TypeScript server yet: an app passes the router the `./orm/sqlite`
+entry's repositories as `orm`. A
 Rust server there runs them in a transaction of the SQLite file's writing
 connection (D116), and a write that waits past the busy timeout for it is
 a 503 the caller may try again.
@@ -2511,7 +2514,9 @@ them runs until a worker does. An API that serves
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
-the TypeScript repositories run behaviors on Postgres alone. On
+the generated worker claims through the Postgres queue client alone; there
+a worker runs the `./orm/sqlite` entry's `runDeadline` and `runChange`
+over `sqliteQueue`'s claims (D186). On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow
