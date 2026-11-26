@@ -19,6 +19,6 @@ export default defineConfig({
     types: {
       [TargetLanguage.TypeScript]: { enabled: true }
     },
-    api: { enabled: true }
+    api: { enabled: true, language: "TYPESCRIPT" }
   }
 });
