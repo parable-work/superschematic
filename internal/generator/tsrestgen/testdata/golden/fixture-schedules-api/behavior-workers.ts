@@ -108,7 +108,7 @@ export function problemWakeUpsQueues(pool: Pool, orm: FixtureSchedulesDbOrm, wor
           handle: async (signal: AbortSignal) => {
             const run = await orm
               .withBehaviorCaller(problemWakeUpsCaller)
-              .transaction(tx => tx.problem.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => problemWakeUpsEvent(workers, tx, claim.message, signal)));
+              .transaction(tx => tx.problem.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => problemWakeUpsEvent(workers, tx as FixtureSchedulesDbTx, claim.message, signal)));
             if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
           },
         })),

@@ -678,6 +678,10 @@ type BatchFilter struct {
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
+	// Jobs keeps the rows that some Job row the filter
+	// finds points at by its batch (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Jobs *JobFilter
 	// ReferencedByJobBatch filters on the presence or absence of a
 	// Job whose batch points at this row.
 	ReferencedByJobBatch *ReferencedByFilter
@@ -1069,6 +1073,16 @@ func (f *BatchFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `batch._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Jobs != nil {
+		before := len(*args)
+		through := f.Jobs.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`batch.id IN (SELECT job.batch_id FROM job%s)`, where))
 	}
 	if f.ReferencedByJobBatch != nil {
 		probe := `SELECT 1 FROM job WHERE job.batch_id = batch.id`

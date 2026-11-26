@@ -69,24 +69,28 @@ By making a contribution to this project, I certify that:
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
-| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack}` |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack,memory-store}` |
 | [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
 | [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
-| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
+| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code; its Cargo workspace also holds the behaviors' core and the crates of development and runtime mode |
 | [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
+| [`runtime/engine-commerce/`](runtime/engine-commerce/) | `@superschematic/engine-commerce` and its crate: the engine's `Stock`, `Calendar`, `Holds` and `Payments` |
+| [`runtime/rules/`](runtime/rules/) | The behaviors' core (D103): for Go, a cgo binding and the adapter every Go caller runs it through; for TypeScript, `@superschematic/rules`, the Rust core built for WebAssembly |
+| [`runtime/rules-handler/`](runtime/rules-handler/) | `@superschematic/rules-handler`: development mode's request handler for a TypeScript server (D117) |
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
 | [`docs/`](docs/) | The docs site, the open decisions and the design documents |
+| [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, the engine's addon, release archives and tags, and the scrub check |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has thirteen Go modules: the root (the compiler), `ir`,
+The repository has fourteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
 `runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
 behaviors' core's binding and adapter, D103),

@@ -19,7 +19,7 @@ person who sent it.
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
 | urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
-| deliveries that fall through, time out and escalate | |
+| deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
 | verifying an address by a code, and password reset by email | |
 

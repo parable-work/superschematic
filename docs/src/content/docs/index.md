@@ -6,11 +6,11 @@ description: A schema compiler. You write one schema per service; it generates S
 superschematic is a schema compiler. You write one schema per service in
 TypeScript, JSON or YAML. The compiler loads it into a Schema IR and runs
 the generators that the schema's kind and its `outputs` block select: SQL
-DDL, a Go ORM, a REST server (Go chi, Rust axum or TypeScript Hono),
-OpenAPI, types in Go, TypeScript, Python and Rust, and SDKs in those same
-four languages.
+DDL, a Go ORM and TypeScript repositories, a REST server (Go chi, Rust
+axum or TypeScript Hono), OpenAPI, types in Go, TypeScript, Python and
+Rust, and SDKs in those same four languages.
 
-Scalar types (email, UUID, URL, cron, and about forty more) come from
+Scalar types (email, UUID, URL, cron, and about fifty more) come from
 [superscalar](https://github.com/parable-work/superscalar). An email address
 parses the same way in generated Go, TypeScript, Python and Rust.
 
@@ -21,10 +21,12 @@ schema source (.schema.ts | .schema.json | .schema.yaml)
      -> orm/         Go repositories
      -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
                      or a TypeScript Hono router package
-     -> types/       Go, TypeScript, Python, Rust
+     -> types/       Go, TypeScript, Python, Rust; a Postgres DB's
+                     TypeScript package holds its repositories
      -> sdk/         TypeScript, Go, Python, Rust clients
      -> stack/       one environment.json per environment of a Stack service
-     -> server/      a Go entrypoint and Dockerfile per server that stack runs
+     -> server/      a Go, Rust or TypeScript entrypoint and Dockerfile per
+                     server, job and worker the stack runs
 ```
 
 Status: pre-release. The first tag is `v0.1.0-alpha.1`. Until it is cut,
@@ -34,21 +36,22 @@ consumed at a commit. APIs an extension depends on (`registry`, `loader`,
 
 ## What the core knows
 
-The core registers four schema kinds (DB, API, General, Stack), one auth provider
-(`session`) and the generic scalar set. A kind, decorator, document,
+The core registers seven schema kinds (DB, API, General, Stack, Bucket,
+Site and MemoryStore), one auth provider (`session`) and the generic
+scalar set. A kind, decorator, document,
 generator, auth provider or command that only one deployment needs lives in
 an extension: a Go package you pass to `cli.New`. The `superschematic`
 binary you install (`cmd/superschematic`) is the core with the official
 extensions linked: the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner. The core with none, `internal/cmd/superschematic-core`,
+target, the embedded target, and the Pulumi provisioner. The core with none, `internal/cmd/superschematic-core`,
 is what the repository's checks build to prove the core works alone.
 
 `examples/acme-schematic` is a complete downstream example. The
 [write an extension](/superschematic/extending/write-an-extension/) guide walks
 the same surfaces. The official extensions, `extensions/gcp`,
-`extensions/cloudflare` and `extensions/pulumi`, are the worked examples of
-a deploy target, a DNS platform and a provisioner; see
-[stack targets](/superschematic/extending/stack-targets/).
+`extensions/cloudflare`, `extensions/embedded` and `extensions/pulumi`,
+are the worked examples of a deploy target, a DNS platform and a
+provisioner; see [stack targets](/superschematic/extending/stack-targets/).
 
 Names of generated packages come from `superschematic.toml` at the schemas
 root. The [naming-file reference](/superschematic/reference/naming/) lists
@@ -65,8 +68,17 @@ versions of its schema
 
 A Stack service declares which services run where, in which
 environments. `superschematic stack dev` runs an environment on your
-machine, and `stack deploy` applies one to Google Cloud
+machine, `stack deploy` applies one to Google Cloud or Cloudflare, and
+`stack build` makes an environment on the embedded target one binary
 ([stacks and deploys](/superschematic/guides/stacks/)).
+
+A build is one of three modes. The same schemas also run with no
+generated code: in [development mode](/superschematic/guides/development-mode/),
+whose rows are JSON so that a publish takes effect at once, and in
+[runtime mode](/superschematic/guides/runtime-mode/), whose publish
+plans and applies the migration while the environment runs. The
+[engine](/superschematic/guides/engine/) serves a schema of composed
+behaviors with no generated code too.
 
 ## Where to start
 
@@ -89,7 +101,13 @@ machine, and `stack deploy` applies one to Google Cloud
    [behaviors](/superschematic/guides/engine-behaviors/) and
    [work queues](/superschematic/guides/work-queues/), and
    [pages with Topcoat](/superschematic/guides/topcoat/), which call a Rust
-   API in-process.
+   API in-process. [Events and notifications](/superschematic/guides/notifications/),
+   [outside parties](/superschematic/guides/parties/),
+   [agent runs](/superschematic/guides/agent-runs/) and
+   [runtime providers](/superschematic/guides/runtime-providers/) cover
+   the TypeScript runtime's platform features, and the
+   [capability map](/superschematic/start/capabilities/) links every guide
+   from what you need.
 
 The tutorial's code is `examples/acme-shop`, and the engine guide's is
 `examples/engine-notes`. CI builds and tests both in the release

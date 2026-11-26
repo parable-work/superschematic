@@ -130,7 +130,7 @@ var symbolPackages = map[string]string{
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
-	"seedRoles":  "@superschematic/db",
+	"seedRoles": "@superschematic/db", "agents": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
@@ -149,7 +149,7 @@ var symbolPackages = map[string]string{
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api", "graphOperations": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
-	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api",
+	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api", "autonomy": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 	// @superschematic/stack

@@ -49,6 +49,13 @@ engine on one schema of the database. D16 and D58 in
 [the decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)
 record the design and the alternatives not taken.
 
+[Development mode](/superschematic/guides/development-mode/) also runs a
+schema with no generated code, on the behaviors' core rather than the
+engine, with no compatibility rule, and `examples/engine-notes` runs there
+too (`test/notes.dev.test.ts`). It is one of three modes (D117), with
+[runtime mode](/superschematic/guides/runtime-mode/), whose publish plans
+each type's table, and compiled, the build the other guides cover.
+
 ## Set up
 
 Nothing is published yet, so the example links the engine from the
@@ -121,7 +128,8 @@ The engine checks a document with the strict loader of the schema
 runtime's Rust crate, against the core binary's
 [`json-schema`](/superschematic/reference/cli/) output by default, which
 admits the core's behaviors, the
-[work-queue behaviors](/superschematic/guides/work-queues/) included
+[work-queue](/superschematic/guides/work-queues/) and
+[commerce](/superschematic/guides/commerce/) behaviors included
 (those run once the server names them in the engine's `behaviors`
 option).
 A deployment whose binary registers more behaviors passes that binary's
@@ -1665,12 +1673,14 @@ field the file lacks goes live over HTTP, the next start refuses the file.
 - [Engine behaviors](/superschematic/guides/engine-behaviors/): the
   runner, schema-level operations, and the Dependencies, Links, Rollups,
   Search, Reactions, Constants, Variants, Branches, Timers, StateRules,
-  Numbering and Approvals behaviors.
+  Numbering, Approvals, Derived and Provenance behaviors.
 - [Engine pages](/superschematic/guides/topcoat/#engine-pages): a
   Topcoat app's console pages an engine database's types, a panel per
   behavior and every operation as a form, as the signed-in caller.
 - [Work queues](/superschematic/guides/work-queues/): claimable work with
   `@superschematic/engine-workqueue`, and a worker over the client.
+- [Selling and booking](/superschematic/guides/commerce/): stock, time,
+  holds and payments with `@superschematic/engine-commerce`.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md):
   the storage, the routes and statuses, the event stream, the describe and
   tools documents, and the behavior interface.

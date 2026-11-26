@@ -16,9 +16,9 @@ TypeScript, Python and Rust that decode and validate it the same way.
 The schema is the `shop-common` service of `examples/acme-shop`, the
 project the [first project](/superschematic/first-project/) tutorial
 builds out. Every file on this page is quoted from that directory, and
-`examples/acme-shop/scripts/check.sh` builds and tests it on every pull
-request. You can follow along there or copy the files into a project of
-your own.
+`examples/acme-shop/scripts/check.sh` builds and tests it in the release
+candidate run on `main` twice a day. You can follow along there or copy
+the files into a project of your own.
 
 ## Build the CLI
 
@@ -31,9 +31,9 @@ export PATH="$PWD/bin:$PATH"
 superschematic --help
 ```
 
-The binary has the core's fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+The binary has the core's fifteen commands: `init`, `check`, `build`, `build-all`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
-`new`, `stack` and `identity` groups. The [CLI reference](/superschematic/reference/cli/)
+`new`, `migrate`, `queries`, `stack` and `identity` groups. The [CLI reference](/superschematic/reference/cli/)
 lists their flags.
 
 ## Lay out a schemas root
@@ -66,7 +66,7 @@ configuration and one directory per service.
   [superscalar](https://github.com/parable-work/superscalar). It is
   `GenericInt64` in both Go, where it is an `int64`, and TypeScript, where
   it is an alias of `number`. superscalar
-  has about forty scalars (email addresses, UUIDs, slugs, date-times) that
+  has about fifty scalars (email addresses, UUIDs, slugs, date-times) that
   parse and validate the same way in every language.
 - The comment above `Price` becomes its documentation in every generated
   language.
@@ -76,7 +76,9 @@ configuration and one directory per service.
 <Snippet file="schemas/services/shop-common/schema.config.ts" />
 
 `kind` says what the schema describes. A `General` schema holds plain
-types; the other core kinds are `DB` (tables) and `API` (routes).
+types; the other core kinds are `DB` (tables), `API` (routes), `Stack`
+(what runs where), `Bucket`, `Site` and `MemoryStore`
+([How it works](/superschematic/start/how-it-works/#a-kind-decides-what-a-schema-means)).
 `outputs.types` lists the languages to generate types in: Go, TypeScript,
 Python or Rust.
 

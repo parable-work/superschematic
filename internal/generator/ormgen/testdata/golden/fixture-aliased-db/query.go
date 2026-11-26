@@ -791,6 +791,10 @@ type CompanyFilter struct {
 	City    *StringFilter
 	Name    *StringFilter
 	Version *Int64Filter
+	// Contacts keeps the rows that some Contact row the filter
+	// finds points at by its company (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Contacts *ContactFilter
 	// ReferencedByContactCompany filters on the presence or absence of a
 	// Contact whose company points at this row.
 	ReferencedByContactCompany *ReferencedByFilter
@@ -1049,6 +1053,16 @@ func (f *CompanyFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `company._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Contacts != nil {
+		before := len(*args)
+		through := f.Contacts.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`company.id IN (SELECT contact.company_id FROM contact%s)`, where))
 	}
 	if f.ReferencedByContactCompany != nil {
 		probe := `SELECT 1 FROM contact WHERE contact.company_id = company.id`

@@ -222,6 +222,12 @@ type ORMOutput struct {
 	// relative to the output directory; empty omits the directive. It is only
 	// written when Rules is set.
 	RulesReplacePath string
+
+	// Access is the database's per-record access (D156, D180), nil for a
+	// database with no @audience, @accessGrants or @accessLog table: it
+	// writes access.go, and go.mod requires the schema runtime, whose
+	// access package holds the principal.
+	Access *AccessModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -382,6 +388,11 @@ type Repository struct {
 	// relation points at a live row its target's filter finds.
 	PathRelations []PathRelation
 
+	// ManyRelations are the one-to-many relations a filter reaches through
+	// (D108, D180): the filter's <Name> keeps the rows some row of the
+	// relation's source points at, among those its source's filter finds.
+	ManyRelations []ManyRelation
+
 	// EncryptedFields are the table's Encrypted<T> fields (D85), which
 	// encrypted.go seals and opens; GeneratesKey is a table whose create
 	// generates a UUID key the input leaves unset, since each envelope is
@@ -460,6 +471,19 @@ type Repository struct {
 type PathRelation struct {
 	sqlutil.ToOne
 	GoField string
+}
+
+// ManyRelation is a one-to-many relation a filter reaches through (D108,
+// D180): sqlutil's, with its member of the filter, GoField, its name in
+// PascalCase then go.orm_relation_filter_suffix (D163); Probe, the
+// table's key in the foreign keys of the source's rows of the WHERE %s;
+// and SourceLive, the source's live condition, empty for a source with no
+// deletedAt.
+type ManyRelation struct {
+	sqlutil.ToMany
+	GoField    string
+	Probe      string
+	SourceLive string
 }
 
 // UniqueKey is a key UpsertOne may be keyed by: sqlutil's, with the Go
@@ -1092,6 +1116,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		repositories = append(repositories, repo)
 	}
 
+	attachManyRelations(repositories, tables, opts.Naming.Go.ORMRelationFilterSuffix)
 	attachInboundReferences(repositories)
 	markNestedCycles(repositories)
 	rules, err := attachRules(schema, repositories, opts.Registry)
@@ -1130,6 +1155,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 	for _, p := range projections {
 		queueRepositories = append(queueRepositories, Repository{Fields: p.Fields})
+	}
+	access, err := accessOf(schema, tables, repositories, projections)
+	if err != nil {
+		return nil, err
 	}
 
 	hasSoftDeletes := false
@@ -1275,6 +1304,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Projections:              projections,
 		Queries:                  queries,
 		Rules:                    rules,
+		Access:                   access,
 	}
 
 	return output, nil
@@ -1337,7 +1367,7 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}
 	}
-	if output.HasEncryptedFields {
+	if output.RequiresSchemaRuntime() {
 		if output.SchemaRuntimeReplacePath, err = naming.RelPath(outputDir, paths.SchemaRuntimeGo); err != nil {
 			return fmt.Errorf("schema runtime replace path: %w", err)
 		}
@@ -1361,7 +1391,7 @@ func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 	if len(output.VersionGraphs) > 0 {
 		modules = append(modules, output.Naming.VersionGraphGoModule)
 	}
-	if output.HasEncryptedFields {
+	if output.RequiresSchemaRuntime() {
 		modules = append(modules, output.Naming.SchemaRuntimeGoModule)
 	}
 	if output.Rules != nil {

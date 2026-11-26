@@ -777,6 +777,12 @@ func {{ lowerFirst .TypeName }}UUIDPtr(value {{ $.UUIDGoType }}) *{{ $.UUIDGoTyp
 // GetVersion retrieves a historical {{ .TypeName }} value by version. A delete
 // tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *{{ .Name }}) GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error) {
+	{{- if $.HeldByAccess }}
+	// The history of a row the caller does not see is not there (D156).
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	query := `SELECT {{ .HistoryDataCol }} FROM {{ .QuotedHistoryTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2 AND {{ .HistoryOperationCol }} <> 'DELETE'`
 
 	var data []byte
@@ -903,6 +909,12 @@ func (r *{{ .Name }}) readVersions(ctx context.Context, query string, values []*
 
 // ListVersions retrieves historical {{ .TypeName }} values ordered by version.
 func (r *{{ .Name }}) ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	// The history of a row the caller does not see is not there (D156).
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	if opts == nil {
 		opts = &{{ .TypeName }}HistoryOptions{}
 	}
@@ -946,6 +958,12 @@ func (r *{{ .Name }}) ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}
 // It returns ErrNotFound when the row did not exist then: no history row at
 // or before ts, or the latest one is a delete tombstone{{ if .HasSoftDelete }} or a soft-deleted image{{ end }}.
 func (r *{{ .Name }}) GetAsOf(ctx context.Context, id {{ .PrimaryKeyType }}, ts time.Time) (*types.{{ .TypeName }}, error) {
+	{{- if $.HeldByAccess }}
+	// The history of a row the caller does not see is not there (D156).
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	query := `SELECT {{ .HistoryDataCol }}
 FROM (
   SELECT {{ .HistoryOperationCol }}, {{ .HistoryDataCol }}
@@ -1038,6 +1056,11 @@ func (r *{{ .Name }}) PruneHistoryFunctionName() string {
 // A row whose latest history row at ts is a delete tombstone{{ if $.HasSoftDelete }} or a soft-deleted
 // image{{ end }} is left out.
 func (r *{{ $.Name }}) ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context, {{ lowerFirst .FieldName }}ID {{ $.UUIDGoType }}, ts time.Time, opts *{{ $.TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ $.TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if accessHeld(ctx, {{ printf "%q" $.TypeName }}) {
+		return nil, fmt.Errorf("orm: ListAsOfBy{{ toGoName .FieldName }}ID of {{ $.TypeName }}: the table's rows keep to the operation's caller (D156), and the history of rows by their {{ .FieldName }} is read as the system actor alone so far (D180)")
+	}
+	{{- end }}
 	if opts == nil {
 		opts = &{{ $.TypeName }}HistoryOptions{}
 	}
@@ -1177,8 +1200,104 @@ func (r *{{ $.Name }}) batch{{ toGoName $rel.FieldName }}ByIDs(ctx context.Conte
 {{- end }}
 {{- end }}
 
+{{- if .HeldByAccess }}
+
+// accessConditions are the filter's conditions, each value appended to
+// args, its placeholder numbered after offset, then those that keep the
+// rows to what the operation's caller sees, or with write may write
+// (D156, D180): a condition through a relation holds the rows it reads
+// to the caller too.
+func (r *{{ .Name }}) accessConditions(ctx context.Context, filter *{{ .TypeName }}Filter, args *[]any, offset int, write bool) []string {
+	before := len(*args)
+	var conditions []string
+	if filter != nil {
+		filter.scope = accessScopeOf(ctx)
+		conditions = filter.conditions(args, offset)
+	}
+	paramNum := offset + len(*args) - before
+	return append(conditions, accessConditions(ctx, {{ printf "%q" .TypeName }}, args, &paramNum, write)...)
+}
+
+// accessWhere is accessConditions as a WHERE clause, or nothing when there
+// is none.
+func (r *{{ .Name }}) accessWhere(ctx context.Context, filter *{{ .TypeName }}Filter, args *[]any, offset int, write bool) string {
+	conditions := r.accessConditions(ctx, filter, args, offset, write)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// requireReach returns ErrNotFound unless the row whose key is key, as a
+// statement binds it, is one the operation's caller sees, or with write
+// may write (D156): a row the caller does not see is the 404 of one that
+// is not there. Outside an operation, and for the system actor, every row
+// is.
+func (r *{{ .Name }}) requireReach(ctx context.Context, key any, write bool) error {
+	if !accessHeld(ctx, {{ printf "%q" .TypeName }}) {
+		return nil
+	}
+	args := []any{key}
+	paramNum := 1
+	conditions := append([]string{ {{- goRawString .QualifiedKey }} + " = $1"}, accessConditions(ctx, {{ printf "%q" .TypeName }}, &args, &paramNum, write)...)
+	query := "SELECT EXISTS (SELECT 1 FROM " + {{ goRawString .QuotedTableName }} + " WHERE " + strings.Join(conditions, " AND ") + ")"
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, args...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, args...)
+	}
+	var found bool
+	if err := row.Scan(&found); err != nil {
+		return fmt.Errorf("failed to read the access of {{ .TypeName }}: %w", err)
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// requireCreatedKey returns ErrAccessRefused when a party or an agent run
+// made the row whose key is key, as a statement binds it, outside the rows
+// its grants reach (D156): in a transaction, the write rolls back with it.
+func (r *{{ .Name }}) requireCreatedKey(ctx context.Context, key any) error {
+	if !accessGranted(ctx) {
+		return nil
+	}
+	if err := r.requireReach(ctx, key, true); err == ErrNotFound {
+		return fmt.Errorf("{{ .TypeName }}: %w", ErrAccessRefused)
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+{{- if not .Released }}
+
+// requireCreatedReach is requireCreatedKey of row, a row a create returned.
+func (r *{{ .Name }}) requireCreatedReach(ctx context.Context, row *types.{{ .TypeName }}) error {
+	if !accessGranted(ctx) {
+		return nil
+	}
+	{{- if .PrimaryKeyIsPointer }}
+	if row.{{ toGoName .PrimaryKeyField }} == nil {
+		return fmt.Errorf("{{ .TypeName }}: %w", ErrAccessRefused)
+	}
+	return r.requireCreatedKey(ctx, (*row.{{ toGoName .PrimaryKeyField }}){{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
+	{{- else }}
+	return r.requireCreatedKey(ctx, row.{{ toGoName .PrimaryKeyField }}{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
+	{{- end }}
+}
+{{- end }}
+
+{{- end }}
+
 // GetOne retrieves a single {{ .TypeName }} by ID
 func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}GetOptions) (*types.{{ .TypeName }}, error) {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	// Determine if we're using partial field selection
 	var fieldStrings []string
 	usePartialFields := opts != nil && !opts.Fields.IsZero()
@@ -1647,6 +1766,17 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
+	{{- if $.HeldByAccess }}
+
+	// A row the caller does not see is one that is not there (D156).
+	for id := range resultMap {
+		if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err == ErrNotFound {
+			delete(resultMap, id)
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	{{- end }}
 
 	return resultMap, nil
 	{{- end }}
@@ -1708,7 +1838,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 
 	// Build WHERE clause
 	var args []interface{}
-	whereClause := filter.buildWhereClause(&args, 0)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
 
 	{{- if .HasSoftDelete }}
 	// Apply soft-delete filter unless IncludeDeleted is set
@@ -1916,7 +2046,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 
 	// Build WHERE clause
 	var args []interface{}
-	whereClause := filter.buildWhereClause(&args, 0)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
 
 	{{- if .HasSoftDelete }}
 	// Apply soft-delete filter unless IncludeDeleted is set
@@ -1978,7 +2108,7 @@ func (r *{{ .Name }}) findRelated(ctx context.Context, filter *{{ .TypeName }}Fi
 		return nil, fmt.Errorf("no valid fields specified")
 	}
 	var args []interface{}
-	whereClause := filter.buildWhereClause(&args, 0)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
 	{{- if .HasSoftDelete }}
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
@@ -2444,7 +2574,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	// keyset's.
 	{{- end }}
 	var args []interface{}
-	conditions := filter.conditions(&args, 0)
+	conditions := {{ if $.HeldByAccess }}r.accessConditions(ctx, filter, &args, 0, false){{ else }}filter.conditions(&args, 0){{ end }}
 	{{- if .HasSoftDelete }}
 	if !opts.IncludeDeleted {
 		conditions = append(conditions, {{ goRawString .SQL.LiveCondition }})
@@ -2554,10 +2684,17 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	// Set audit fields
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.CreatedBy = &userID
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
 	input.CreatedBy = GetUserID(ctx)
+	{{- end }}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
 	{{- if .IsRequired }}
@@ -2788,6 +2925,12 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	}
 	{{- end }}
 
+	{{- if $.HeldByAccess }}
+	if err := r.requireCreatedReach(ctx, result); err != nil {
+		return nil, err
+	}
+	{{- end }}
+
 	return result, nil
 	{{- end }}
 }
@@ -2976,6 +3119,11 @@ func {{ lowerFirst .TypeName }}UpdateSetsField(update *{{ .TypeName }}Update) bo
 // only if changed, and the second statement of an encrypted field.
 {{- end }}
 func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, onlyIfChanged bool) (*UpsertResult[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertOne", {{ printf "%q" .TypeName }}); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
@@ -2990,10 +3138,17 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	// Set audit fields
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.CreatedBy = &userID
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
 	input.CreatedBy = GetUserID(ctx)
+	{{- end }}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
 	{{- if .IsRequired }}
@@ -3458,6 +3613,11 @@ func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*types.{{ .TypeNa
 // of each encrypted field.
 {{- end }}
 func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertMany", {{ printf "%q" .TypeName }}); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
 	{{- if .GenericJSONListFields }}
 	for i, input := range inputs {
@@ -3470,12 +3630,21 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 	// Set audit fields
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.CreatedBy = &userID
+		}
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
 	for _, input := range inputs {
 		input.CreatedBy = GetUserID(ctx)
 	}
+	{{- end }}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
 	{{- if .IsRequired }}
@@ -3875,12 +4044,21 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	// Set audit fields
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.CreatedBy = &userID
+		}
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
 	for _, input := range inputs {
 		input.CreatedBy = GetUserID(ctx)
 	}
+	{{- end }}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
 	{{- if .IsRequired }}
@@ -4002,6 +4180,11 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 			return nil, err
 		}
 		{{- end }}
+		{{- if $.HeldByAccess }}
+		if err := r.requireCreatedReach(ctx, result); err != nil {
+			return nil, err
+		}
+		{{- end }}
 		results = append(results, result)
 	}
 
@@ -4056,6 +4239,11 @@ func (r *{{ .Name }}) versionMiss(ctx context.Context, id {{ .PrimaryKeyType }})
 }
 
 func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update, expectedVersion *int64) (*types.{{ .TypeName }}, error) {
+	{{- end }}
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return nil, err
+	}
 	{{- end }}
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
@@ -4389,7 +4577,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	}
 
 	// Build WHERE clause
-	whereClause := filter.buildWhereClause(&values, paramNum)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &values, paramNum, true){{ else }}filter.buildWhereClause(&values, paramNum){{ end }}
 
 	{{- if .HasSoftDelete }}
 	if whereClause == "" {
@@ -4427,6 +4615,11 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 
 // DeleteOne soft deletes a single {{ .TypeName }} record by ID
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	if !HasUserID(ctx) {
 		return ErrNoUserInContext
 	}
@@ -4464,6 +4657,11 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 // _version matches expectedVersion. It returns ErrVersionConflict when the row
 // exists at another version and ErrNotFound when it does not exist.
 func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	if !HasUserID(ctx) {
 		return ErrNoUserInContext
 	}
@@ -4504,10 +4702,10 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	// Build WHERE clause
 	{{- if .HasDeletedBy }}
 	values := []interface{}{time.Now(), GetUserID(ctx)}
-	whereClause := filter.buildWhereClause(&values, 2)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &values, 2, true){{ else }}filter.buildWhereClause(&values, 2){{ end }}
 	{{- else }}
 	values := []interface{}{time.Now()}
-	whereClause := filter.buildWhereClause(&values, 1)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &values, 1, true){{ else }}filter.buildWhereClause(&values, 1){{ end }}
 	{{- end }}
 
 	if whereClause == "" {
@@ -4536,6 +4734,11 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 // HardDeleteOne permanently deletes a single {{ .TypeName }} record by ID{{ if .HistoryActorCol }}.
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	{{- if .HistoryActorCol }}
 	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
@@ -4575,6 +4778,11 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 // DeleteOne permanently deletes a single {{ .TypeName }} record by ID{{ if .HistoryActorCol }}.
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	{{- if .HistoryActorCol }}
 	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
@@ -4618,6 +4826,11 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 // the row exists at another version and ErrNotFound when it does not exist.{{ if .HistoryActorCol }}
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	{{- if .HistoryActorCol }}
 	query := historyActorCTE + {{ goRawString .SQL.DeleteIfVersion }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
@@ -4656,7 +4869,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- if .HistoryActorCol }}
 	// Build WHERE clause after the actor, historyActorCTE's $1
 	values := []interface{}{historyActor(ctx)}
-	whereClause := filter.buildWhereClause(&values, 1)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &values, 1, true){{ else }}filter.buildWhereClause(&values, 1){{ end }}
 
 	query := historyActorCTE + fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
@@ -4671,7 +4884,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- else }}
 	// Build WHERE clause
 	var values []interface{}
-	whereClause := filter.buildWhereClause(&values, 0)
+	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &values, 0, true){{ else }}filter.buildWhereClause(&values, 0){{ end }}
 
 	query := fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
@@ -5258,6 +5471,11 @@ func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName
 	{{- else }}
 	id := row.{{ toGoName .PrimaryKeyField }}
 	{{- end }}
+	{{- if $.HeldByAccess }}
+	if err := r.requireCreatedKey(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	return r.GetOne(ctx, id, nil)
 }
 
@@ -5309,10 +5527,17 @@ CreateOne stamps its input.
 {{- define "behaviorStamps" }}
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		row.CreatedBy = &userID
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
 	row.CreatedBy = GetUserID(ctx)
+	{{- end }}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
 	{{- if .IsRequired }}
@@ -5449,6 +5674,11 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*{{ .TypeName }}C
 
 {{ docComment "" (printf "UpdateOne updates a single %s row by ID through the behaviors' core (D103), in a transaction: the own fields update sets, which holds no field a behavior owns, and the row is read back.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .TypeName (or (and .Preconditions " The update presents the preconditions WithPreconditions names (D104).") "")) }}
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	if update == nil {
 		update = &{{ .TypeName }}Update{}
 	}
@@ -5492,6 +5722,11 @@ func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 
 {{ docComment "" (printf "DeleteOne %s a single %s row by ID through the behaviors' core (D103), in a transaction%s.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." $verb .TypeName $how (or (and .Preconditions " The delete presents the preconditions WithPreconditions names (D104).") "")) }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, true); err != nil {
+		return err
+	}
+	{{- end }}
 	{{- if .HasSoftDelete }}
 	if !HasUserID(ctx) {
 		return ErrNoUserInContext
@@ -5543,6 +5778,11 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *{{ .TypeName }}Creat
 // update of the row the key holds (D104).
 func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *{{ .TypeName }}Create, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
 	var none UpsertResult[*types.{{ .TypeName }}]
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertOne", {{ printf "%q" .TypeName }}); err != nil {
+		return none, err
+	}
+	{{- end }}
 	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
 	if !ok {
 		return none, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
@@ -5670,6 +5910,11 @@ func (r *{{ .Name }}) upsertChanged(ctx context.Context, id {{ .PrimaryKeyType }
 
 {{ docComment "" (printf "UpsertMany inserts each input, or, when a row already holds its value of the unique key on, sets each field update names of that row to the value the input would have inserted, and returns each input's row and what it did with it, in the inputs' order (D89). Each insert writes the row with the fields its behaviors own as the core's create gives them (D103), and update names none of them: only their operations change them. The update of each row a key holds runs through the core's update as UpdateOne's does, in the inputs' order, so each use's guards hold it, Constants' and StateRules' among them (D104); a refusal of the core's is the *rules.Refusal UpdateOne returns, and in a transaction of its own nothing of the upsert is written, the other inputs' rows among it. It runs in a transaction of its own when none is open, the core's creates first, then a statement per batch of rows, opts.Batch or as many as Postgres binds the parameters of, which locks each row a key holds and writes nothing of it, then a read of those rows by their keys and the core's update of each, its version moved once. An update that names no field leaves each row that holds a key as it is.%s Two inputs of one batch that hold one key fail the statement, unless update names a field and a row holds the key, which each input's update then updates in turn; a key over an expression, whose rows the statement's cannot be matched to the inputs by, is refused." (or (and .HasSoftDelete " A soft-deleted row that holds a key is left as it is, and UpsertMany returns ErrNotFound.") "")) }}
 func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*{{ .TypeName }}Create, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertMany", {{ printf "%q" .TypeName }}); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
 	if !ok {
 		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))

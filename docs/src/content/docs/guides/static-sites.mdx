@@ -29,12 +29,13 @@ and D55, D82 and D91 in the [decision log](https://github.com/parable-work/super
 | Built | Not built yet |
 | --- | --- |
 | the `Site` kind, its config and its sentinel; the typed browser config, with a client of each API's SDK, and the scaffold | |
-| the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
+| the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go, TypeScript and Rust runtimes' CORS | |
 | `stack dev`: each site built once and served with its config and its fallback, or its dev server run behind a proxy that serves the site and its APIs on one origin, hot reload and all | |
 | the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
 | the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback, and a year's caching for files whose names hold a hex hash of their content | a run against Google Cloud |
 | the cloudflare target: a Worker per site serving the build as static assets, the config and the fallback from a script the extension embeds, and the build's files kept in R2 by their digest | a run against Cloudflare; a year's caching for hashed names |
 | one origin for a site and its APIs (`origins`): `stack dev`'s proxy in front of a dev server or a build, gcp's load balancer routing each API to its Cloud Run service, and the site's Worker forwarding each API through a service binding | a run against either cloud; a site on Cloudflare in front of an API on gcp, which resolves but no environment deploys |
+| the embedded target: the site's build compiled into the binary, on one origin with its APIs ([Build one binary](/superschematic/guides/stacks/#build-one-binary)) | |
 
 ## Declare a site
 
@@ -199,8 +200,8 @@ origin of each site that calls it.
 ## CORS
 
 The generated entrypoint of a server whose API a site calls reads the
-API's CORS field and answers CORS for those origins only, in Go and in
-TypeScript alike:
+API's CORS field and answers CORS for those origins only, in Go,
+TypeScript and Rust alike:
 
 - a preflight from a listed origin is answered 204 with the origin,
   credentials, the `Accept`, `Authorization`, `Content-Type`,
@@ -268,8 +269,8 @@ host's alone, and no CORS answers, so `trustedOrigins` and
   every API it serves, as an exposed server does.
 - **Refusals.** A site the stack does not deploy, a site in two origins,
   an API the site does not call or listed twice (`origin`), and a site on
-  a platform that serves no origin (`unrealizable`). The local, gcp and
-  cloudflare targets serve one.
+  a platform that serves no origin (`unrealizable`). The local, gcp,
+  cloudflare and embedded targets serve one.
 
 ## Run it locally
 

@@ -1,7 +1,8 @@
 import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 import { WorkDb } from "@schemas/work-db";
 
-// The work app's API, served from work-db's tables in TypeScript. Its
+// The work app's API, served from work-db's tables in TypeScript, whose
+// generated server builds the agent dispatcher into its Deps (D183). Its
 // agents run in the runtime-providers example's local-process sandbox,
 // their turns completed by its model stub, their credentials resolved by
 // its vault broker, and their approvals asked for by its SMS relay.

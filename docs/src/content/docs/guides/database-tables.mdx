@@ -10,9 +10,10 @@ import Snippet from '../../../components/Snippet.astro';
 A DB schema declares tables. Its build writes Postgres DDL
 (`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, the row
 types in the languages `outputs.types` lists, and, in its TypeScript
-types, repositories over `pg` ([TypeScript](#typescript)). The Go ORM and
-the TypeScript repositories run the same statements, which the compiler
-writes once. A service whose
+types, repositories over `pg` ([TypeScript](#typescript)), and in its Rust
+types, repositories over Postgres or a SQLite file ([Rust](#rust)). The Go
+ORM and the TypeScript and Rust repositories run the same statements,
+which the compiler writes once. A service whose
 `outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
 (`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
@@ -208,9 +209,12 @@ includes the related row under the relation's field
 A filter reaches through a to-one relation: its member named for the
 relation, `Customer` in Go and `customer` in TypeScript, is the target's
 filter, and keeps the rows whose relation points at a live row that filter
-finds. It is one condition, the foreign key in the keys of the target's
-rows, so a row whose relation is null is not kept, and neither is one
-whose target is soft-deleted. A path goes as deep as the relations do:
+finds; the naming file's
+[`go.orm_relation_filter_suffix`](/superschematic/reference/naming/#goorm_relation_filter_suffix)
+renames the Go member, `CustomerWhere`. It is one condition, the foreign
+key in the keys of the target's rows, so a row whose relation is null is
+not kept, and neither is one whose target is soft-deleted. A path goes
+as deep as the relations do:
 `{ category: { parent: { name: { eq: 'Food' } } } }`. `AnyOf` (`anyOf`)
 keeps the rows any of its filters finds, beside the filter's other
 members, so "the category is X or its parent is X" is one filter:
@@ -644,7 +648,7 @@ the column, then the key, both in the sort's direction, so rows of one
 value read in the order of their keys, and it reads one row more than
 `Limit`, 100 when it is 0. `Rows` holds up to `Limit` rows. When more
 follow, `Next`, an `OrderPageKey`, is the position of the last of them:
-its key alone, under its schema name, `{"id": "…"}`. A key is as long as
+its key alone, under its schema name, `{"id": "..."}`. A key is as long as
 an id whatever the row holds, so a long name never pushes a cursor past
 its 1024 characters, and it is the same in every order. An implementation
 encodes it as the page's cursor and decodes the next request's cursor
@@ -945,6 +949,12 @@ authenticated (D87), with nothing in the implementation:
   `deps.orm`, which the entrypoint opens with no user of its own, acts as
   it, in a transaction too.
 
+A Rust `@tableOperation`'s handler acts as its caller too, but the
+repositories a Rust implementation opens itself act as no one until
+`acting` names a user:
+`Repositories::new(&client)?.acting(orm::routes::acting(ctx.principal.as_ref()))`
+acts as the caller ([Rust](#rust)).
+
 A job, a worker and a manual route's handler serve no caller, so their
 writes act as no one until they name a user. For a write no person makes,
 `orm.AsSystem(ctx)` in Go and `deps.orm.asSystem()` in TypeScript act as
@@ -966,6 +976,26 @@ UUID, as a custom authenticator may give, is no acting user.
 `requireUpdatedBy: true` in the DB service's `outputs.sql` makes an update
 of a table with `updatedBy` need an acting user too, so a nullable
 `updatedBy` is never left as it was by a write that forgot to name one.
+
+## Who may read a row
+
+`@audience`, from `@superschematic/db`, gives each row of a table who may
+see it (D156). The build adds five columns: `audience`, `audienceNamed`
+and `agentAccess`, which a write sets, and `effectiveAudience` and
+`effectiveAgents`, which a trigger resolves before each insert and
+update, through `inheritFrom` from a parent's, whatever writes the row.
+In an operation of a TypeScript server, every read of the table keeps to
+the rows its caller is in the audience of, through the repositories, a
+relation a read includes, a filter through a relation, a projection keyed
+by the table's key and a search, and every write to the same rows. A job,
+a worker and `orm.asSystem()` read every row, and an upsert of an
+`@audience` table in an operation is refused. The audience is Postgres
+alone, and the Go and Rust repositories do not apply it yet.
+[Per-record access](/superschematic/guides/api-routes/#per-record-access)
+covers the options, the grants a party or an agent run reaches rows
+through, reveal and the access log, and
+[Row rules](/superschematic/guides/api-routes/#row-rules) the rows one
+operation reaches.
 
 ## Merging rows
 
@@ -1097,7 +1127,10 @@ repositories run on Postgres alone, so D1 has no merge.
 
 A `Relation<>` points at one table the schema names. Two declarations of
 `@superschematic/db` let a row point at a row of any table, and hold files,
-and let every row list what points at it (D154).
+and let every row list what points at it (D154). They are the database's.
+An API's `RefersTo`, which tells a UI which item a value names, is
+another thing
+([References and search](/superschematic/reference/references-and-search/)).
 
 ```ts
 import { AutoGenerate, Comments, attachments, audience, key, queue, references } from "@superschematic/db";
@@ -1248,9 +1281,11 @@ export const createWorkers: WorkersConstructor = deps => ({
 | a row's files hold at most 1 GiB and 100 files unless set | a row is a record, not a drive; an upload under way counts until it expires, so two at once cannot pass the bound |
 | text is extracted when an upload completes, and a preview is made on a file's first view | search indexes the text whether or not anyone opens the file; most files are never viewed, so a preview made at upload would mostly go unseen |
 
-Extraction and previews are a file processor's (D159), which is not built
-yet: `complete` asks a file's extraction and `download` its preview, and
-`pending` and `processed` are what a processor reads and records.
+Extraction and previews are a file processor's, the `files` interface of
+[Runtime providers](/superschematic/guides/runtime-providers/) (D159),
+which attachments do not call yet: `complete` asks a file's extraction and
+`download` its preview, and `pending` and `processed` are what a processor
+reads and records.
 
 ## State machines
 
@@ -2154,6 +2189,8 @@ text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
 reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
+ORM does. They run on Postgres alone: the Rust repositories run on a
+SQLite file too ([Rust](#rust)).
 ORM does.
 
 ### On SQLite and D1
@@ -2230,8 +2267,10 @@ The Go ORM selects and loads relations through `Fields`, as above: a
 field's flag selects its column, and a relation's `<Field>Nested` selection
 loads the related row. Its default nested selection of a relation is every
 column and every relation in turn, where TypeScript's `true` is the
-target's columns alone. The two send the same statements for the same
-selection.
+target's columns alone; the naming file's
+[`go.orm_default_selection = "own"`](/superschematic/reference/naming/#goorm_default_selection)
+makes it the target's columns, each to-one relation an id-only stub. The
+two send the same statements for the same selection.
 
 ### Reading a projection
 
@@ -2252,6 +2291,39 @@ const list = await deps.orm.transactionListRow.findPage(
 In Go the projection's row is a struct of the ORM's package, and
 `db.TransactionListRow()` reads it over the pool, and
 `orm.TransactionListRowIn(tx)` in a transaction.
+
+## Rust
+
+A DB service whose `outputs.types` lists Rust gets its tables'
+repositories in its types crate's `src/orm.rs` (D116), behind the crate's
+`postgres` and `sqlite` features; a crate built with neither is the types
+alone. For each table it declares the row (`ReviewRow`), what a create and
+an update set (`ReviewCreate`, `ReviewUpdate`) and the filter
+(`ReviewFilter`), and the HTTP runtime's `orm` module runs the statements
+the Go ORM runs:
+
+- `postgres::Repositories::new(&client)` opens them over a tokio-postgres
+  client the caller holds, a connection of its pool or a transaction on
+  one, asynchronously.
+- `sqlite::Repositories::new(&connection)` opens them over a
+  `rusqlite::Connection`, synchronously, for a service whose
+  `outputs.sql.dialects` lists `sqlite`; a write runs in a transaction the
+  caller opened.
+
+Each table's repository has `get_one`, `find_one`, `find_many`,
+`find_page`, `create_one`, `create_many`, `update_one`, `update_many`,
+`upsert_one`, `delete_one`, `hard_delete_one` and `reencrypt`. `acting`
+and `as_system()` name the acting user ([Who wrote a row](#who-wrote-a-row)),
+`with_keys` the keyring of the `Encrypted<T>` fields, and a write's
+`WriteOptions` fences it on `_version` (`expected_version`) or carries a
+behavior's preconditions. A table that composes behaviors writes through
+the core, as in Go and TypeScript, once the naming file's
+[`paths.rules_adapter_rust`](/superschematic/reference/naming/#pathsrules_adapter_rust)
+and `paths.rules_behaviors_rust` name the core's crates; until then a
+create, an update and a delete of its rows are refused. The Rust
+repositories have no `upsert_many`, `nearest` or `merge_into`, no
+relations in a read, and no history readers, projections or declared
+queries.
 
 ## Raw SQL
 
@@ -2343,7 +2415,7 @@ covers the plan, its hazards and the runner.
 
 ## Beyond plain tables
 
-Three reference pages cover what a DB schema can add on top of this guide:
+Four reference pages cover what a DB schema can add on top of this guide:
 
 - [Versioned tables](/superschematic/reference/versioned-tables/): `@versioned`
   keeps every version of a row in a history table, with readers for a
@@ -2357,7 +2429,7 @@ Three reference pages cover what a DB schema can add on top of this guide:
   views over joined tables, with `@projection`, `@join` and `@column`.
 - [Declared queries](/superschematic/reference/declared-queries/): named,
   type-checked SQL with `@query`, verified on Postgres into a lock and run
-  by both ORMs as typed functions.
+  by the Go ORM and the TypeScript repositories as typed functions.
 
 A type of a DB schema that composes a behavior with `@behavior`,
 `@behavior("Workflow", ...)` say, is no table: it is an engine type, whose
@@ -2373,8 +2445,9 @@ or Lease, Retries, Presence and Budget
 ([Rows a worker leases, retries, beats and meters](#rows-a-worker-leases-retries-beats-and-meters)),
 or Seats, or types a field as a Reconcile
 ([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
-or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
-([A pool of members](#a-pool-of-members)), or Rollups and Dependencies
+or Schedules ([A row's schedules](#a-rows-schedules)), or Recurrence
+([A row's recurrence, and the calendar](#a-rows-recurrence-and-the-calendar)),
+or Pool ([A pool of members](#a-pool-of-members)), or Rollups and Dependencies
 ([Values a row's children roll up, and blockers between rows](#values-a-rows-children-roll-up-and-blockers-between-rows)),
 or types a field as a Numbering or implements Revisions
 ([A row's number and its history](#a-rows-number-and-its-history)),
@@ -3564,6 +3637,14 @@ permissions, and every other route refuses it. Its `detail` is `full`
 shows only what its owner chose. A feed lasts a year unless its issue says
 otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
 another, and `DELETE /api/calendar/feeds/<id>` revokes it.
+
+The generated router mounts neither `calendarRoutes` nor the calendar's
+MCP tool: an app wires them itself, as it wires `grantAuthenticator`
+(`examples/recurring-duties`). Recurrence and the calendar are served end
+to end by a TypeScript server on Postgres. The Go and Rust servers do not
+run Recurrence's operations end to end or serve the calendar yet, and the
+calendar has no SQLite or D1 form.
+
 ### A pool of members
 
 A table implements `Pool` as it implements Schedules (D104): each row is a
@@ -4073,14 +4154,16 @@ one thread's replies, by `before`, `after` or `around`;
 `getMessage`, `listReactions` and `listPinned` read. Each refusal is
 the engine's, in its words.
 
-What the engine's Comments does beyond this waits for the core: a reply
-streamed as it is written (`begin`, `appendDraft`, `finish`,
-`interrupt`), read state and follows (`markRead`, `follow`, a
-reader's `unread`), the inbox and deliveries, search across a
-namespace, and `moveAnchor`. The build leaves their
-operations out of the table's and refuses their config members. A
-message records no calling service (`via`) and no subject acted for
-(`for`). Comments can be added to a table with rows, whose
+The core also runs a reply streamed as it is written (`begin`,
+`appendDraft`, `finish`, `interrupt`) and read state and follows
+(`markRead`, `follow`, a reader's `unread`), which
+[development mode](/superschematic/guides/development-mode/) serves and a
+table's generated API leaves out. The inbox and deliveries, search across
+a namespace and `moveAnchor` wait for the core. The build leaves all of
+these operations out of the table's and refuses their config members,
+such as `composeTimeoutMs` and `anchorPermission`. A message records the
+subject its author acted for (`for`, the caller's `actingFor`), and no
+calling service (`via`). Comments can be added to a table with rows, whose
 conversations start empty, and cannot be removed from one. A table whose
 behaviors keep sub-tables has no upserts.
 

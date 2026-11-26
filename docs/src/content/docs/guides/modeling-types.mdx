@@ -251,6 +251,12 @@ failure names the rule it broke:
 
 <Snippet file="go/types_test.go" symbol="ExampleShippingAddress_Validate" />
 
+In Go, the naming file's
+[`go.limit_constants = "on"`](/superschematic/reference/naming/#golimit_constants)
+also writes each bound as a constant beside its type,
+`<Type><Field>MaxLength` and the like, at the bound `Validate` checks, so
+a form or a truncation reads it from the type.
+
 A field, list element or map value whose object type another service
 declares is checked by that service's own generated validator, in every
 language, and its errors sit under the field's path. `shop-orders`'
@@ -273,10 +279,13 @@ An enum is a TypeScript `enum` of string values. Numeric enums are refused.
 <Snippet file="schemas/services/shop-common/src/price.schema.ts" symbol="Currency" />
 
 Go gets `type Currency string` with a constant per member, `IsValid()` and
-`Values()`. TypeScript gets the same `enum`, Python a `str` `Enum` and Rust
-an `enum` with one serde rename per member. A value outside the enum fails
-validation with the `enum` rule, and a DB table's column of the enum has a
-`CHECK` that its members' values hold it to.
+`Values()`, and, with the naming file's
+[`go.enum_text_methods = "on"`](/superschematic/reference/naming/#goenum_text_methods),
+`Title()` and `Action()` from the `title:` and `action:` lines of each
+member's comment. TypeScript gets the same `enum`, Python a `str` `Enum`
+and Rust an `enum` with one serde rename per member. A value outside the
+enum fails validation with the `enum` rule, and a DB table's column of
+the enum has a `CHECK` that its members' values hold it to.
 
 Which member may follow which is a `@stateMachine` on the class that
 holds the field, in a schema of any kind: the types of each language get

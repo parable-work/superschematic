@@ -3499,6 +3499,10 @@ type WorkspaceFilter struct {
 	Id      *UUIDFilter
 	Name    *StringFilter
 	Version *Int64Filter
+	// Accounts keeps the rows that some Account row the filter
+	// finds points at by its workspace (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Accounts *AccountFilter
 	// ReferencedByAccountWorkspace filters on the presence or absence of a
 	// Account whose workspace points at this row.
 	ReferencedByAccountWorkspace *ReferencedByFilter
@@ -3715,6 +3719,16 @@ func (f *WorkspaceFilter) conditions(args *[]interface{}, paramOffset int) []str
 				conditions = append(conditions, `workspace._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Accounts != nil {
+		before := len(*args)
+		through := f.Accounts.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`workspace.id IN (SELECT account.workspace_id FROM account%s)`, where))
 	}
 	if f.ReferencedByAccountWorkspace != nil {
 		probe := `SELECT 1 FROM account WHERE account.workspace_id = workspace.id`
