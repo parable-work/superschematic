@@ -752,6 +752,14 @@ type AccountFilter struct {
 	CreatedBy      *UUIDFilter
 	UpdatedAt      *DateTimeFilter
 	UpdatedBy      *UUIDFilter
+	// EntriesByAccount keeps the rows that some live Entry row the filter
+	// finds points at by its account (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	EntriesByAccount *EntryFilter
+	// EntriesByTransfer keeps the rows that some live Entry row the filter
+	// finds points at by its transfer (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	EntriesByTransfer *EntryFilter
 	// ReferencedByEntryAccount filters on the presence or absence of a
 	// Entry whose account points at this row.
 	ReferencedByEntryAccount *ReferencedByFilter
@@ -1256,6 +1264,28 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `account.updated_by IS NOT NULL`)
 			}
 		}
+	}
+	if f.EntriesByAccount != nil {
+		before := len(*args)
+		through := f.EntriesByAccount.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `entry.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`account.id IN (SELECT entry.account_id FROM entry%s)`, where))
+	}
+	if f.EntriesByTransfer != nil {
+		before := len(*args)
+		through := f.EntriesByTransfer.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `entry.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`account.id IN (SELECT entry.transfer_id FROM entry%s)`, where))
 	}
 	if f.ReferencedByEntryAccount != nil {
 		probe := `SELECT 1 FROM entry WHERE entry.account_id = account.id`

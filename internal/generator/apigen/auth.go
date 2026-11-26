@@ -154,8 +154,8 @@ var AuthSnippets = []string{
 	"moduleRequires", // extra require lines
 	"moduleReplaces", // extra replace lines
 	// caller.tmpl (an API with a Deps database, D87)
-	"callerImports",   // imports the callerPrincipal expression needs, beside the orm import
-	"callerPrincipal", // the Go expression, of type string, of the ID of the principal the auth step put on ctx; "" binds no caller
+	"callerImports",   // imports the callerPrincipal expression needs, beside the orm and runtime session imports
+	"callerPrincipal", // the Go expression, of type runtimesession.Caller (access.Principal), of the principal the auth step put on ctx, whole: its ID, kind, whom it acts for, its grants and its credential (D156, D180); the zero Caller is the anonymous caller
 }
 
 // HasTable reports whether upstream declares a DB table named name carrying

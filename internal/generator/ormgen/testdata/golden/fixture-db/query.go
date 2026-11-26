@@ -732,6 +732,10 @@ type TenantFilter struct {
 	SeatCount *FloatFilter
 	Metadata  *StringFilter
 	Version   *Int64Filter
+	// Users keeps the rows that some live TenantUser row the filter
+	// finds points at by its tenant (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Users *TenantUserFilter
 	// ReferencedByTenantUserTenant filters on the presence or absence of a
 	// TenantUser whose tenant points at this row.
 	ReferencedByTenantUserTenant *ReferencedByFilter
@@ -1385,6 +1389,17 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 				conditions = append(conditions, `tenant._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Users != nil {
+		before := len(*args)
+		through := f.Users.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `tenant_user.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`tenant.id IN (SELECT tenant_user.tenant_id FROM tenant_user%s)`, where))
 	}
 	if f.ReferencedByTenantUserTenant != nil {
 		probe := `SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id`

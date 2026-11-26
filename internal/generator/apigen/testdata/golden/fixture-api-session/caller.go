@@ -11,11 +11,17 @@ import (
 
 // callerContext is ctx acting, for Deps.DB, the ORM of fixture-db, as
 // the caller of the request it serves (D87): the principal the route's auth
-// step put on it, by its ID. Each route runs its operation with it, so a
-// write the implementation makes with the context stamps createdBy,
-// updatedBy and deletedBy with the caller. orm.WithUserID or orm.AsSystem
-// on the context acts as another user; a route with no caller, and a job,
-// a worker or a manual route's handler, acts as no one.
+// step put on it, whole (D156, D180). Each route runs its operation with
+// it, so a write the implementation makes with the context stamps
+// createdBy, updatedBy and deletedBy with the caller.
+// orm.WithUserID or orm.AsSystem on the context acts as another user; a
+// job, a worker or a manual route's handler acts as no one.
 func callerContext(ctx context.Context) context.Context {
-	return orm.WithCaller(ctx, runtimesession.GetPrincipalID(ctx))
+	return orm.WithCaller(ctx, callerPrincipal(ctx).Subject)
+}
+
+// callerPrincipal is the principal the route's auth step put on ctx, whole,
+// as the auth provider names it (its callerPrincipal hook).
+func callerPrincipal(ctx context.Context) runtimesession.Caller {
+	return runtimesession.GetCaller(ctx)
 }

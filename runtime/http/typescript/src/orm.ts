@@ -1507,14 +1507,19 @@ class TableRepository {
     }
     if (sees.grants !== undefined) {
       const branches: string[] = [];
+      // What the branches bind, which a path of every row drops with them.
+      const bound = args.length;
       for (const grant of sees.grants) {
         if (grant.targetType === this.def.name) {
           args.push(this.encode(grant.targetId, this.keyColumn(), 'grant target'));
           branches.push(fill(this.clauses.eq, this.keyColumn().qualified, ++n));
         }
         for (const path of grant.reaches[this.def.name] ?? []) {
-          // Every row of the table.
-          if (path === '*') return out;
+          // Every row of the table: no branch is kept, so none of their values is either.
+          if (path === '*') {
+            args.length = bound;
+            return out;
+          }
           const filter = this.reachFilter(path, grant.targetType, grant.targetId);
           if (filter === undefined) continue;
           const before = args.length;

@@ -1871,10 +1871,9 @@ writes an access-log row.
 
 Left:
 
-- The Go server and repositories: the principal's kinds (through the
-  auth-provider hook `callerPrincipal`, which answers the id alone so
-  far), the audience filter, path row rules, grants, reveal and the
-  access log. Rust's on SQLite (D181). Python's ORM.
+- Python's ORM. Go (D180) and Rust (D181) serve the principal's kinds,
+  the audience filter, path row rules, grants, reveal and the access log
+  on Postgres; Rust's on SQLite is left.
 - A GIN index on `effective_audience` the build writes. (An audience on
   SQLite and D1, in TypeScript: D182.)
 - An audience in a declared query (`@query`), which reads every row.
@@ -1887,8 +1886,10 @@ Left:
 - A generated route and declared query that list the active grants. A
   `@tableOperation` over an API's `@source` view of the grants table
   lists every grant, the ended and the revoked among them.
-- A generated server that wires `accessLogOf` and `grantAuthenticator`
-  itself; an app passes them in the router's options now.
+- A generated TypeScript server that wires `accessLogOf` and
+  `grantAuthenticator` itself; an app passes them in the router's options
+  now. The Go server records its calls in the access log itself (D180);
+  an app wires the grants' authenticator in both.
 - A party's principal across all its active grants, through a channel
   identity (section 7), and the agent run's narrowed token (section 8).
 - A path to a list field of ids in a row rule, and a team as a principal
@@ -2526,6 +2527,49 @@ Left:
   grant's; today the run's scope is the grant's target, the party's row
   and the message's, and the agent's role's paths from them.
 - The schema writer writing `@agents` and `@autonomy` back.
+
+## D180. The Go server and ORM serve per-record access: the principal travels whole from the auth-provider hook to the repositories, one predicate holds every read and write of a table to it, grants and the access log are the ORM's, and the Go outputs refuse the platform features they do not serve yet (D156 amended)
+
+D156 built per-record access in the TypeScript server and repositories and
+left Go's. This entry ports it, and settles what Go's shape asked for.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The principal is `access.Principal` of `runtime/schema/go/access` (its subject, kind, `ActingFor`, `Grants` and `Credential`), which the generated ORM and the HTTP runtime both import; `session.Caller` is the same type. The zero principal is the anonymous caller. | A principal type in each, which a generated API would convert between. The session package's `Principal`, which the ORM cannot import. |
+| The auth-provider hook `callerPrincipal` answers a `runtimesession.Caller`, whole, as D156 said; the core's answer is `session.GetCaller(ctx)`, the principal `ContextWithCaller` put, or a user of the principal's ID. `callerImports` no longer names the session package, which `caller.go` imports itself. A provider of its own returns a `Caller` now. | A second hook beside the ID's, which D156 turned down. |
+| A route binds its caller with `orm.WithPrincipal`, in an ORM with per-record access; `orm.WithCaller(ctx, id)` stays the binding of an ID alone, for an ORM without. `AsSystem` and a context outside any operation read every row. `WithUserID` sets who a write stamps and leaves the reads as they were. | `WithUserID` reading as the user, as the TypeScript `withUser` does: the ORM calls it for every stamp, `AsSystem`'s among them. |
+| One predicate, data the ORM is generated with (`accessTables`: each table's audience columns, key and the relations a path steps through), holds a read or a write of a table to the caller: the audience, and the reach of each grant's role's paths. `AccessConditions(ctx, table, args, offset, write)` exports it for a read across tables. A filter through a relation holds its target the same way, through an unexported scope the repository sets on the filter. | A predicate generated per table, which a path through another table could not reach. A filter method that takes the context, which every filter's callers would change for. |
+| A grant reaches its rows through the same relation steps a row rule's path takes, and every Go filter now reaches through a one-to-many relation by its name (`Parties`), in every ORM: TypeScript's filter has it, and a row rule needs it with or without access. | The step in access ORMs alone, which would leave a row rule's path unserved elsewhere. |
+| The grants are generated in the ORM of a database with an `@accessGrants` table: `IssueGrant`, `RevokeGrant`, `ActiveGrants`, `GrantEnded` and `Database.AuthenticateGrant`, the `access.GrantAuthority` that `session.GrantAuthenticator(authority, inner, now)` reads on every call. A grant's row is read and written through its JSON, whatever pointer shapes the Go types give its members. | A runtime package reading the grant table by name, which would repeat the repository. |
+| The Go server records each call in the access log itself, in a route of an API whose database has an `@accessLog` table, before the permission check, through `session.AccessLogged`; a log that fails answers 500. | An option the app passes, as the TypeScript router takes (D156's left for TypeScript). |
+| A view's field under `@decrypted({ permission })` is masked, `[secret]`, for a caller without it, and each value opened for one with it is recorded in the operation's transaction. A revealed field holds text, and a database without an `@accessLog` table refuses the build, where TypeScript refuses the reveal when it happens. | A mask of another type's zero, which a reader cannot tell from a value. |
+| A path of `*` lets a grant read every row of the table, and the values the branches before it bound go with them. | Leaving them bound: TypeScript's `accessConditions` does, and a statement then binds more values than it names (left below). |
+| The loader refuses, in a Go server, each feature of D152 to D159 that Go does not serve yet, on the tables of the API's database and on the API's own provider slots and operations (`verify/go_features.go`); a Go server is an API whose server is Go and whose Go types are on. The loader checks the database when it reads it for a set or an operation, and the Go server's generation, which reads it always, checks it too (`verify.GoServerDatabaseErr`). Before it, a Go server left out the calendar and Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests`, `@agents`, provider slots and `@autonomy`, and, for D156, read an `@audience` table whole and opened a revealed field for every caller. `fixture-recurrence-api` was such a server, and is served in TypeScript now. | Refusing a DB service's Go types, as D181 refuses Rust's: the DB kind generates the Go ORM always and the build needs the Go types for it (`refuseORMWithoutGoTypes`), so every database with one of these tables would fail `build-all`, whatever language its API is served in. The Go ORM of these tables is their plain repositories, and the triggers and the core keep what each feature writes, whichever ORM writes the row; what would serve a feature wrongly is the Go server. Relaxing the build's requirement of Go types, which would leave a Go worker or job of the database with no ORM. This holds on Postgres, where the Go ORM keeps an audience (above) and triggers keep references and attachments; on SQLite, where neither holds for Go, D182 refuses a database's Go types for `@audience`, `@references` and `@attachments` (`sqlite_features.go`), and the two checks agree. |
+
+Built: `runtime/schema/go/access` and `session`'s `Caller`,
+`GrantAuthenticator`, `AccessLogged` and `RevealEntry`; `access_parity.json`,
+which Go writes and TypeScript checks (the token hash, the reaches, the
+call entries); `ormgen`'s `access.go` and the held repositories
+(`ormgen/access.go`, `templates/access.tmpl`), the one-to-many filter, a
+nullable `createdBy` stamped when a user acts, and a field named `field`
+ordering by `OrderByFieldField`; `apigen`'s caller, path rule, reveal and
+call log; the loader's refusal of a Go server. `TestGoAccessEndToEnd` serves
+`fixture-access-go-api` on Postgres through D156's checks, and
+`TestHeldRepositoriesCompile` builds the held repositories of the history,
+vector, merge, projection and behavior fixtures.
+
+Left:
+
+- A Go table operation that writes a list, `audienceNamed` among them
+  (D106); `fixture-access-go-api` sets a named audience through the ORM.
+- `ListAsOfBy<Field>ID` of a held table, which refuses, and the history of
+  a deleted row, which a held caller cannot read.
+- A held create outside a transaction keeps its row when it is refused, as
+  TypeScript's does; a generated table operation runs in one.
+- TypeScript's `accessConditions` keeps the values of the branches before
+  a `*` path bound.
+- The Go server's calendar, references, search, notifier, parties and
+  agents, which later Go workstreams port (D184 and on).
 
 ## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
 
