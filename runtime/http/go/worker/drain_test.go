@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -409,5 +410,63 @@ func TestADrainWorkerWhoseClaimsFailStops(t *testing.T) {
 	defer cancel()
 	if err := Run(ctx, pooled.queue(time.Minute), Options{Idle: 5 * time.Millisecond}); err != nil {
 		t.Errorf("a pool's worker whose claims fail returns %v when stopped", err)
+	}
+}
+
+// TestRunAllTakesOneSlotForItsQueues (D145): in drain mode the claim loops
+// of one RunAll, a behavior worker's queues, take one slot for them all, of
+// the first queue that has a Slot, and give it back once they stop; one
+// that finds every slot taken runs none of its queues and returns nil at
+// once.
+func TestRunAllTakesOneSlotForItsQueues(t *testing.T) {
+	locks, others := &slots{}, &slots{}
+	first, second, third := newFake(), newFake(), newFake()
+	gate := make(chan struct{})
+	second.add("held", func(context.Context) error { <-gate; return nil })
+	queues := func() []Queue {
+		q1, q2, q3 := first.queue(time.Minute), second.queue(time.Minute), third.queue(time.Minute)
+		// The first queue takes no slot: the second's is the worker's.
+		q2.Slot, q3.Slot = locks.slot, others.slot
+		return []Queue{q1, q2, q3}
+	}
+	opts := Options{Idle: 5 * time.Millisecond, Drain: &Drain{Idle: 40 * time.Millisecond}}
+	stopped := make(chan error, 1)
+	go func() { stopped <- RunAll(context.Background(), queues(), opts) }()
+	waitFor(t, "the held message's claim", func() bool {
+		second.mu.Lock()
+		defer second.mu.Unlock()
+		return second.claimed == 1
+	})
+	if locks.holds() != 1 || len(others.asked) != 0 {
+		t.Errorf("the worker holds %d slots of its second queue and asked %v of its third; it holds one, of the first queue that has a Slot", locks.holds(), others.asked)
+	}
+	// A second start finds the slot taken and runs none of its queues.
+	third.add("m", func(context.Context) error { return nil })
+	began := time.Now()
+	if err := RunAll(context.Background(), queues(), Options{Idle: 5 * time.Millisecond, Drain: &Drain{Idle: time.Minute}}); err != nil {
+		t.Fatalf("the RunAll that found no slot: %v", err)
+	}
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("the RunAll that found no slot took %s", took)
+	}
+	close(gate)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("RunAll = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunAll did not return once its queues were idle")
+	}
+	if locks.holds() != 0 {
+		t.Errorf("%d slots are held after RunAll returned", locks.holds())
+	}
+	if want := []int{1, 1}; !slices.Equal(locks.asked, want) {
+		t.Errorf("the starts asked for one of %v slots, want %v", locks.asked, want)
+	}
+	// The worker that holds the slot claims from every queue, the third
+	// among them.
+	if len(third.completed) != 1 {
+		t.Errorf("the third queue's message: completed %v", third.completed)
 	}
 }

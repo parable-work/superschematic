@@ -5,6 +5,7 @@ import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, wi
 import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './queue.js';
+import { wakeAfterEnqueue } from './queue-wake.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
@@ -2381,7 +2382,20 @@ class TableRepository {
     sets.push(...fenceBumps(this.def.fences, sets));
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
     const { rowCount } = await run(this.runner, fill(this.def.statements.updateMany, sets.join(', '), where), args);
+    this.wakeChanges(rowCount);
     return rowCount;
+  }
+
+  /**
+   * Wakes the worker of the table's change queue after a write past the
+   * behaviors' core of count rows (D145), each of which its trigger wrote a
+   * change of: updateMany's, deleteMany's and hardDeleteOne's. A write
+   * through the core wakes it from the rules adapter. A table no behavior
+   * hears has none.
+   */
+  private wakeChanges(count: number): void {
+    const queue = this.behaviors?.changes?.queue;
+    if (queue !== undefined && count > 0) wakeAfterEnqueue(queue);
   }
 
   async upsertOne(input: Values, on: readonly string[], update: Values, options: UpsertOptions = {}): Promise<Values> {
@@ -2789,6 +2803,7 @@ class TableRepository {
       const args: unknown[] = deletedBy ? [new Date(), this.encode(user, deletedBy, 'deletedBy')] : [new Date()];
       const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
       const { rowCount } = await run(this.runner, fill(s.softDeleteMany, where), args);
+      this.wakeChanges(rowCount);
       return rowCount;
     }
     const args: unknown[] = this.def.historyActor ? [this.actor()] : [];
@@ -2796,6 +2811,7 @@ class TableRepository {
     const text = (this.def.historyActor ? this.orm.historyActorCTE : '') + fill(s.deleteMany, where);
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
+    this.wakeChanges(rowCount);
     return rowCount;
   }
 
@@ -2808,6 +2824,7 @@ class TableRepository {
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
     if (rowCount === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+    this.wakeChanges(rowCount);
   }
 
   async mergeInto(input: { readonly from: unknown; readonly into: unknown }): Promise<MergeResult> {

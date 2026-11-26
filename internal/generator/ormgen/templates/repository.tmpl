@@ -4276,6 +4276,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }
@@ -4389,6 +4396,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }
@@ -4423,6 +4437,11 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	{{- if .ChangeQueue }}
+	// The table's trigger wrote the row's change: it wakes the worker of
+	// {{ .ChangeQueue }} (D145).
+	wakeQueue({{ printf "%q" .ChangeQueue }})
+	{{- end }}
 
 	return nil
 }
@@ -4546,6 +4565,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }

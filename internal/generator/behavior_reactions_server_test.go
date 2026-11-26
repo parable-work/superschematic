@@ -29,6 +29,7 @@ var behaviorReactionsCases = []string{
 	"a raw SQL write of a task's status is heard and moves its project",
 	"a raw SQL write of a task's priority to urgent starts it, which moves its project",
 	"a then whose target has no transition to its state leaves the target as it is and completes the message",
+	"in drain mode each worker takes a slot, drains what a raw write left, and stops of itself, and a command wakes the change queue of each row it writes",
 }
 
 // TestReactionsGoServerAndWorkerOnPostgres builds fixture-reactions-db and
@@ -137,7 +138,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -451,6 +454,93 @@ func TestReactions(t *testing.T) {
 		}
 		if got := status(t, "task", kColumn); got != "done" {
 			t.Fatalf("the task is %s, want still done", got)
+		}
+	})
+
+	t.Run("in drain mode each worker takes a slot, drains what a raw write left, and stops of itself, and a command wakes the change queue of each row it writes", func(t *testing.T) {
+		var mu sync.Mutex
+		var woken []string
+		orm.OnEnqueue(func(queue string) {
+			mu.Lock()
+			defer mu.Unlock()
+			woken = append(woken, queue)
+		})
+		defer orm.OnEnqueue(nil)
+		heard := func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			out := slices.Clone(woken)
+			woken = nil
+			return out
+		}
+		p, pColumn := project(t, "Six")
+		_, kColumn := task(t, "Tide", p)
+		// A create through the core wakes the change queue of the row it
+		// wrote, whose trigger writes the message (D145).
+		if got := heard(); !slices.Contains(got, "TaskChange") {
+			t.Fatalf("the creates woke %v, want TaskChange among them", got)
+		}
+		// mine is how many messages of this case's project and task wait.
+		mine := func() int {
+			var n int
+			if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM project_change_queue WHERE row_key = $1 AND state IN ('ready', 'claimed')) + (SELECT count(*) FROM task_change_queue WHERE row_key = $2 AND state IN ('ready', 'claimed'))", pColumn, kColumn).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		drive(t, func() bool { return mine() == 0 })
+		heard()
+		// A raw write wakes nothing: its trigger alone hears it.
+		if _, err := pool.Exec(ctx, "UPDATE task SET status = 'doing', status_entered_at = now() WHERE id = $1", kColumn); err != nil {
+			t.Fatal(err)
+		}
+		if got := heard(); len(got) != 0 {
+			t.Fatalf("a raw write woke %v", got)
+		}
+		slots := func() int {
+			var n int
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND classid::int IN (hashtext('superschematic.drain.project_change_queue'), hashtext('superschematic.drain.task_change_queue'))").Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		drain := &worker.Drain{Idle: 1500 * time.Millisecond}
+		stopped := make(chan error, 2)
+		for _, queues := range [][]worker.Queue{api.ProjectReactionsQueues(db, zap.NewNop()), api.TaskReactionsQueues(db, zap.NewNop())} {
+			go func() {
+				stopped <- worker.RunAll(ctx, queues, worker.Options{Concurrency: 2, Idle: 50 * time.Millisecond, Drain: drain})
+			}()
+		}
+		held := 0
+		for deadline := time.Now().Add(3 * time.Second); held < 2 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			held = max(held, slots())
+		}
+		if held != 2 {
+			t.Errorf("the two workers held %d slots, want one each", held)
+		}
+		for range 2 {
+			select {
+			case err := <-stopped:
+				if err != nil {
+					t.Fatalf("a worker in drain mode: %v", err)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("a worker in drain mode did not stop of itself once its queues were idle")
+			}
+		}
+		if got := status(t, "project", pColumn); got != "active" {
+			t.Fatalf("the project is %s, want active: the raw write, drained, moves it", got)
+		}
+		if n := mine(); n != 0 {
+			t.Fatalf("%d change messages of the case's rows wait after the workers drained", n)
+		}
+		if n := slots(); n != 0 {
+			t.Fatalf("%d slots are held after the workers stopped", n)
+		}
+		// The task's change moved the project through the core, whose
+		// write of the project woke Project's change queue.
+		if got := heard(); !slices.Contains(got, "ProjectChange") {
+			t.Fatalf("the workers' commands woke %v, want ProjectChange among them", got)
 		}
 	})
 }

@@ -28,7 +28,7 @@ schema's instances into claimable work, are another thing.
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a Go or a TypeScript worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute, and which an enqueue due before the next firing wakes through its Workflow; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; drain mode for a Rust worker and a behavior worker, and a wake from the Rust queue client |
+| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute, and which an enqueue due before the next firing wakes through its Workflow; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a drain worker over a SQLite file, and a wake from an enqueue there or from a raw SQL write |
 | `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
 D53, D68, D80, D88 and D96 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions, and section 8.8 of
@@ -842,9 +842,10 @@ a [delayed message](#enqueue-for-later): one due within five minutes, its
 horizon, it waits for and handles, so a retry or a short delay does not
 wait for the tick.
 
-An enqueue starts it. The Go ORM's `Enqueue<Queue>` and the TypeScript
-`enqueue` send the queue's wake once their statement has run, where the
-environment gives one in `QUEUE_WAKES`:
+An enqueue starts it. The Go ORM's `Enqueue<Queue>`, the TypeScript
+`enqueue` and the Rust runtime's `queue::enqueue` send the queue's wake
+once their statement has run, where the environment gives one in
+`QUEUE_WAKES`:
 
 | | |
 | --- | --- |
@@ -857,9 +858,9 @@ A wake goes out when the statement has run, which is before your
 transaction commits, so the worker may start, find nothing and wait: that
 is what `idle` is for. A transaction that stays open longer than the
 worker's start and its idle time is found by the tick. So is the message
-of a process that exits before its wake has gone out: a Go entrypoint
-waits for the wakes it has sent before it exits, and a TypeScript one,
-which ends its process as soon as its pools have closed, may not.
+of a process that exits before its wake has gone out. A job's entrypoint
+waits for the wakes it sent before it exits, and so does a worker's, but
+for a TypeScript `@worker`'s, which may not.
 
 Two things a wake does not know cost starts and lose nothing. A process
 sends a queue's wake whenever five seconds have passed since its last,
@@ -874,8 +875,9 @@ both. Give the classes different names to keep the starts apart.
 The tick is a Cloud Scheduler job that starts the worker every `tick`,
 five minutes unless set, whatever its queue holds. It is what finds a
 message no wake announces: one an `@enqueueOnChange` trigger wrote, a
-retry due after its backoff, a [delayed message](#enqueue-for-later), one
-a Rust API enqueued, and one whose wake was lost. So the longest a
+raw SQL write of a table a behavior worker hears, a retry due after its
+backoff, a [delayed message](#enqueue-for-later) due past the worker's
+horizon, and one whose wake was lost. So the longest a
 message waits for a worker that is not running is one tick, and the least
 a quiet queue costs is one start per tick, of a job that finds nothing
 and exits after `idle`. For a retry or a delayed message due past the
@@ -899,8 +901,20 @@ instance, and the next wake or tick starts another. Cloud Run retries no
 task. A worker whose every claim fails for its `idle` time, with its
 database down or its queue's table not the one its build expects, logs
 `every claim failed for the idle time` and exits with an error, which
-gives its slot back, instead of retrying until the day is over. A drain worker in Rust does not resolve on gcp yet, and neither
-does a `@behaviorWorker` in drain mode on any target.
+gives its slot back, instead of retrying until the day is over. A worker
+in Go, TypeScript or Rust drains alike.
+
+A `@behaviorWorker` drains too. Its claim loops, one per queue of its
+table, take one slot for them all, named for its first queue, and stop
+together, once none of them held or found a message for `idle`. Its
+queues are filled by the behaviors' core and by its table's trigger,
+not by an enqueue, so the core sends the wakes: once a command's
+statements have run, it wakes the event queue of each event, the
+deadline queue of each deadline it armed due within five minutes, and
+the change queue of each row it wrote, whose trigger writes the
+message. A repository's write past the core, `UpdateMany`, `DeleteMany`
+or `HardDeleteOne`, wakes the change queue too. A raw SQL write and a
+deadline due later are found by the tick.
 
 ## On Cloudflare
 

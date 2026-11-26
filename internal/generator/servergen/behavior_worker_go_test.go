@@ -235,7 +235,7 @@ func TestGoBehaviorWorkerEntrypoint(t *testing.T) {
 	main := planGoBehaviorWorker(t, goTimersAPI(), goBehaviorWorkerGoldenRoot, "timers-stack", "TicketTimers", "fixture-timers-db")
 	for _, want := range []string{
 		"queues := fixturetimersapi.TicketTimersQueues(fixtureTimersDb, logger)",
-		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})",
+		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})",
 		"concurrency, err := worker.Concurrency(2)",
 	} {
 		if !strings.Contains(main, want) {
@@ -260,7 +260,7 @@ func TestGoBehaviorWorkerEntrypointOfJobDeadlines(t *testing.T) {
 	main := planGoBehaviorWorker(t, goAgentsAPI(), goAgentsWorkerGoldenRoot, "agents-stack", "JobDeadlines", "fixture-agents-db")
 	for _, want := range []string{
 		"queues := fixtureagentsapi.JobDeadlinesQueues(fixtureAgentsDb, logger)",
-		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})",
+		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})",
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go holds no %q:\n%s", want, main)

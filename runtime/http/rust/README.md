@@ -296,6 +296,21 @@ TypeScript runtimes' (D51):
   UTC as superscalar's `DateTime` writes it, a `UUID` hyphenated, a list
   from its array, JSON as itself. A column of a type it does not read
   (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
+  `slot(slots)` takes one of a drain worker's session advisory locks of
+  the queue (D145), on a connection it takes out of the pool and closes
+  as the `Slot` drops, and `next_due()` reads how long until the first
+  ready message that waits falls due. An enqueue tells the `wake`
+  module once its statement has run.
+- The `postgres` feature's `wake` module, Go's `wake` package ported
+  (D145): the process's waker reads `QUEUE_WAKES` the first time it is
+  told of an enqueue (`wake::enqueued(queue, delay)`), and POSTs each of
+  the queue's wakes, with the bearer token its token URL answers, at
+  most once per queue in five seconds, in a task of its own; a message
+  due past five minutes sends none, and a wake that fails is a warning
+  and nothing else. `wake::settled()` waits for the wakes sent, which a
+  job and a worker await before they exit. The generated code that runs
+  the behaviors' core hands it to the rules adapter's
+  `Host::with_wake`, which wakes a behavior worker's queues (D151).
 - The `sqlite` feature's half of the `queue` module (D53, amended): a
   descriptor of a database that lists the sqlite dialect also carries
   `sqliteStatements`. `enqueue_sqlite(&tx, &queue, &message)` writes a
@@ -331,7 +346,16 @@ TypeScript runtimes' (D51):
   `pruned`) through `tracing`. It claims through the `WorkerQueue` trait,
   which `PostgresQueue` implements; a queue that does not implement its
   `prune` prunes nothing. With the `otel` feature and export on, each
-  message's handling is a consumer span, `process <queue>`.
+  message's handling is a consumer span, `process <queue>`. With
+  `Options::drain` (`drain_from_env()` reads `WORKER_MODE`,
+  `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`) the worker runs in drain mode
+  (D145): it takes one of the queue's slots first, returning at once when
+  none is free, returns `Ok` once no message was ready or held for the
+  idle time and none falls due within five minutes (`DRAIN_HORIZON`),
+  which it waits for, and returns an error once every claim has failed
+  for the idle time. `Group` runs a behavior worker's queues together:
+  `take_slot` takes one slot for them all, and its loops share one idle
+  clock.
   `SelfCompleting<Q>` wraps a queue whose handler completes each message
   itself, in the transaction that does its work: a behavior worker's
   deadline queue and change queue (D103), whose generated handlers run a

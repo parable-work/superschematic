@@ -27,17 +27,22 @@
 // retention. On SIGTERM or SIGINT it claims no more, lets the running
 // handlers finish for {{ .Worker.GraceSeconds }}s, aborts the rest and gives their messages
 // back, and exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it takes
+// one of WORKER_SLOTS locks named for its first queue as it starts, exiting
+// 0 at once when none is free, and exits 0 once none of its queues held or
+// found a message for WORKER_IDLE_SECONDS and none falls due within five
+// minutes.
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, queueWakesSettled } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 {{- if .SQLiteDatabases }}
 import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
-import { runWorker, workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
+import { runWorkers, workerConcurrency, workerDrain } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 import type { Pool } from 'pg';
 {{- if .Buckets }}
@@ -85,22 +90,21 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
   // through {{ $db.Service }}'s repositories.
   const orm = {{ $db.ORM }}({{ $db.Var }}{{ if $api.ORMFieldKeys }}, { fieldKeys: {{ $api.ORMFieldKeys }} }{{ end }});
   const concurrency = workerConcurrency({{ .Worker.Concurrency }});
+  // In drain mode, which the platform sets (WORKER_MODE), the worker takes
+  // a slot and exits once its queues are empty (D145).
+  const drain = workerDrain();
   const queues = {{ $api.Module }}.{{ .Worker.QueuesFunc }}({{ $db.Var }}, orm, {{ if .Worker.Behavior.Emits }}workers, {{ end }}logger.child({ api: {{ tsQuote $api.Service }} }));
   logger.info('worker started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Worker.Name }}, queues: queues.map(queue => queue.name), concurrency });
-  await Promise.all(
-    queues.map(queue =>
-      runWorker(
-        {
-          ...queue,
-          claim: async (n, leaseSeconds) =>
-            (await queue.claim(n, leaseSeconds)).map(message => ({
-              ...message,
-              handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, message, () => message.handle(handlerSignal)),
-            })),
-        },
-        { signal, concurrency, graceMs: GRACE_MS, logger }
-      )
-    )
+  await runWorkers(
+    queues.map(queue => ({
+      ...queue,
+      claim: async (n, leaseSeconds) =>
+        (await queue.claim(n, leaseSeconds)).map(message => ({
+          ...message,
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, message, () => message.handle(handlerSignal)),
+        })),
+    })),
+    { signal, concurrency, graceMs: GRACE_MS, logger, ...(drain ? { drain } : {}) }
   );
 }
 {{ template "ts-background-main" . }}

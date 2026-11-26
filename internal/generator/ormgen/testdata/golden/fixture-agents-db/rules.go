@@ -1330,9 +1330,11 @@ func behaviorPreconditions(ctx context.Context) rules.Preconditions {
 	return preconditions
 }
 
-// rulesHost is the host the core runs on in tx.
+// rulesHost is the host the core runs on in tx, which wakes the worker of
+// each behavior queue a command gives a message (rules.Host.Wake, D145,
+// D151) through what OnEnqueue was given.
 func rulesHost(tx pgx.Tx) rules.Host {
-	return rules.Host{Layout: RulesLayout, Store: rulespostgres.NewStore(tx)}
+	return rules.Host{Layout: RulesLayout, Store: rulespostgres.NewStore(tx), Wake: wakeQueue}
 }
 
 // behaviorNotFound is err as a repository returns it: the core's not_found

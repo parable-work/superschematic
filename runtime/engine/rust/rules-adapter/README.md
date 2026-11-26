@@ -272,6 +272,17 @@ message in a transaction of the pool and hands the event to the API's
 Workers method of its use and kind with an `EventRun` of that transaction,
 so the method's writes and the completion commit together.
 
+## Wakes
+
+`Host::with_wake(f)` wakes a behavior worker's queues (D145, D151): once
+a command's unit has applied, before the caller's transaction commits, the
+adapter calls `f` once per queue with the `@queue` class of the event
+queue of each event, the deadline queue of each deadline armed due within
+`WAKE_HORIZON_MS` (five minutes) of the command's time, and the change
+queue of each row written, whose trigger writes the message. A generated
+API's host hands it the HTTP runtime's `wake::enqueued`. A host without
+one wakes nothing.
+
 ## Values
 
 A timestamp the core holds as epoch milliseconds (`convert: "epochMillis"`)

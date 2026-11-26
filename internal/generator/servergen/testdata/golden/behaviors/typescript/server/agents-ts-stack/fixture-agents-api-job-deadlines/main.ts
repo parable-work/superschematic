@@ -20,11 +20,16 @@
 // retention. On SIGTERM or SIGINT it claims no more, lets the running
 // handlers finish for 8s, aborts the rest and gives their messages
 // back, and exits 0. When the environment names an OTLP endpoint
-// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67). When
+// the platform runs it in drain mode (WORKER_MODE is drain, D145), it takes
+// one of WORKER_SLOTS locks named for its first queue as it starts, exiting
+// 0 at once when none is free, and exits 0 once none of its queues held or
+// found a message for WORKER_IDLE_SECONDS and none falls due within five
+// minutes.
 
 import { createLogger, type Database } from '@superschematic/http-runtime';
-import { connectPostgres } from '@superschematic/http-runtime/postgres';
-import { runWorker, workerConcurrency } from '@superschematic/http-runtime/worker';
+import { connectPostgres, queueWakesSettled } from '@superschematic/http-runtime/postgres';
+import { runWorkers, workerConcurrency, workerDrain } from '@superschematic/http-runtime/worker';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import type { Pool } from 'pg';
 import * as fixtureAgentsApiApi from '@schemas/fixture-agents-api-api';
@@ -56,22 +61,21 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   // through fixture-agents-db's repositories.
   const orm = createFixtureAgentsDbOrm(fixtureAgentsDbPool);
   const concurrency = workerConcurrency(1);
+  // In drain mode, which the platform sets (WORKER_MODE), the worker takes
+  // a slot and exits once its queues are empty (D145).
+  const drain = workerDrain();
   const queues = fixtureAgentsApiApi.jobDeadlinesQueues(fixtureAgentsDbPool, orm, logger.child({ api: 'fixture-agents-api' }));
   logger.info('worker started', { api: 'fixture-agents-api', class: 'JobDeadlines', queues: queues.map(queue => queue.name), concurrency });
-  await Promise.all(
-    queues.map(queue =>
-      runWorker(
-        {
-          ...queue,
-          claim: async (n, leaseSeconds) =>
-            (await queue.claim(n, leaseSeconds)).map(message => ({
-              ...message,
-              handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, message, () => message.handle(handlerSignal)),
-            })),
-        },
-        { signal, concurrency, graceMs: GRACE_MS, logger }
-      )
-    )
+  await runWorkers(
+    queues.map(queue => ({
+      ...queue,
+      claim: async (n, leaseSeconds) =>
+        (await queue.claim(n, leaseSeconds)).map(message => ({
+          ...message,
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, message, () => message.handle(handlerSignal)),
+        })),
+    })),
+    { signal, concurrency, graceMs: GRACE_MS, logger, ...(drain ? { drain } : {}) }
   );
 }
 
@@ -94,7 +98,9 @@ function main(): void {
   process.on('SIGINT', () => onSignal('SIGINT'));
   const pools: { end(): Promise<void> }[] = [];
   const end = (code: number): void => {
-    void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));
+    // The wakes its enqueues and its commands sent go out before it exits
+    // (D145, D151): only a queue on Postgres sends one.
+    void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
   };
   run(stop.signal, pools).then(
     () => {
