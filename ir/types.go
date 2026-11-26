@@ -266,6 +266,20 @@ type TypeDef struct {
 	AccessGrants *AccessGrantsDef `json:"accessGrants,omitempty" yaml:"accessGrants,omitempty"`
 	AccessLog    *AccessLogDef    `json:"accessLog,omitempty" yaml:"accessLog,omitempty"`
 
+	// RowReferences is the @references declaration of a DB table (D154):
+	// the rows each row points at, in a sub-table the loader adds. Nil for
+	// every other type. See [RowReferencesDef].
+	RowReferences *RowReferencesDef `json:"rowReferences,omitempty" yaml:"rowReferences,omitempty"`
+
+	// Attachments is the @attachments declaration of a DB table (D154):
+	// the files each row holds in a bucket, in a sub-table the loader
+	// adds. Nil for every other type. See [AttachmentsDef].
+	Attachments *AttachmentsDef `json:"attachments,omitempty" yaml:"attachments,omitempty"`
+
+	// RowTable marks the sub-table the loader adds for a @references or an
+	// @attachments table (D154). Nil for every other type. See [RowTable].
+	RowTable *RowTable `json:"rowTable,omitempty" yaml:"rowTable,omitempty" jsonschema:"-"`
+
 	// CalendarSources are the @calendarSource declarations of a DB table
 	// (D152): the dates of its rows, or the occurrences of its Recurrence,
 	// that the calendar read and feed merge across tables. See

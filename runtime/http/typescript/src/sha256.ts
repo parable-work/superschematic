@@ -2,7 +2,9 @@
 SHA-256 (FIPS 180-4), synchronous, for the RFC 7638 thumbprint of a key the
 callers field holds as a PEM (D60): loadCallers is synchronous, WebCrypto's
 digest is not, and nothing here imports from node:, so a Workers bundle of
-the runtime stays clean.
+the runtime stays clean. Sha256 hashes a stream a chunk at a time, as an
+attachment's upload is checked against the hash it declared (D154), which
+WebCrypto's digest, taking its input whole, cannot.
 */
 
 const K = Uint32Array.of(
@@ -20,21 +22,62 @@ function rotr(x: number, n: number): number {
   return (x >>> n) | (x << (32 - n));
 }
 
-/** The SHA-256 digest of data. */
-export function sha256(data: Uint8Array): Uint8Array {
-  const h = Uint32Array.of(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19);
-  // The message, a 1 bit, zeros, and its length in bits as 64 bits, to a
-  // multiple of 64 bytes.
-  const padded = new Uint8Array(Math.ceil((data.length + 9) / 64) * 64);
-  padded.set(data);
-  padded[data.length] = 0x80;
-  const view = new DataView(padded.buffer);
-  const bits = data.length * 8;
-  view.setUint32(padded.length - 8, Math.floor(bits / 2 ** 32));
-  view.setUint32(padded.length - 4, bits >>> 0);
-  const w = new Uint32Array(64);
-  for (let offset = 0; offset < padded.length; offset += 64) {
-    for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4);
+/** A SHA-256 over input given a chunk at a time: update each chunk, then digest once. */
+export class Sha256 {
+  private readonly h = Uint32Array.of(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19);
+  private readonly w = new Uint32Array(64);
+  private readonly block = new Uint8Array(64);
+  private filled = 0;
+  private length = 0;
+  private done = false;
+
+  /** Adds data to the input. */
+  update(data: Uint8Array): this {
+    if (this.done) throw new Error('sha256: update after digest');
+    this.length += data.length;
+    let offset = 0;
+    if (this.filled > 0) {
+      const take = Math.min(64 - this.filled, data.length);
+      this.block.set(data.subarray(0, take), this.filled);
+      this.filled += take;
+      offset = take;
+      if (this.filled < 64) return this;
+      this.compress(this.block, 0);
+      this.filled = 0;
+    }
+    for (; offset + 64 <= data.length; offset += 64) this.compress(data, offset);
+    if (offset < data.length) {
+      this.block.set(data.subarray(offset), 0);
+      this.filled = data.length - offset;
+    }
+    return this;
+  }
+
+  /** The digest of the input: the message, a 1 bit, zeros, and its length in bits as 64 bits, to a multiple of 64 bytes. */
+  digest(): Uint8Array {
+    if (this.done) throw new Error('sha256: digest twice');
+    const bits = this.length * 8;
+    const tail = new Uint8Array(this.filled + 9 > 64 ? 128 : 64);
+    tail.set(this.block.subarray(0, this.filled));
+    tail[this.filled] = 0x80;
+    const view = new DataView(tail.buffer);
+    view.setUint32(tail.length - 8, Math.floor(bits / 2 ** 32));
+    view.setUint32(tail.length - 4, bits >>> 0);
+    for (let offset = 0; offset < tail.length; offset += 64) this.compress(tail, offset);
+    this.done = true;
+    const out = new Uint8Array(32);
+    const outView = new DataView(out.buffer);
+    for (let i = 0; i < 8; i++) outView.setUint32(i * 4, this.h[i]!);
+    return out;
+  }
+
+  private compress(data: Uint8Array, offset: number): void {
+    const w = this.w;
+    const h = this.h;
+    for (let i = 0; i < 16; i++) {
+      const at = offset + i * 4;
+      w[i] = ((data[at]! << 24) | (data[at + 1]! << 16) | (data[at + 2]! << 8) | data[at + 3]!) >>> 0;
+    }
     for (let i = 16; i < 64; i++) {
       const w15 = w[i - 15]!;
       const w2 = w[i - 2]!;
@@ -71,8 +114,49 @@ export function sha256(data: Uint8Array): Uint8Array {
     h[6] = h[6]! + g;
     h[7] = h[7]! + hh;
   }
-  const out = new Uint8Array(32);
-  const outView = new DataView(out.buffer);
-  for (let i = 0; i < 8; i++) outView.setUint32(i * 4, h[i]!);
-  return out;
+}
+
+/** The SHA-256 digest of data. */
+export function sha256(data: Uint8Array): Uint8Array {
+  return new Sha256().update(data).digest();
+}
+
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** A Worker's native streaming digest (workerd's crypto.DigestStream), where the runtime has one. */
+type DigestStreamClass = new (algorithm: string) => WritableStream<Uint8Array> & { readonly digest: Promise<ArrayBuffer> };
+
+/**
+ * The SHA-256 of a stream, in lowercase hex, and its length, read a chunk
+ * at a time (D154): through workerd's native DigestStream on Workers, whose
+ * CPU time a large file would otherwise spend, else through Sha256. It
+ * stops reading past limit bytes, when it gives the length it reached and
+ * no hash.
+ */
+export async function sha256Stream(body: ReadableStream<Uint8Array>, limit = Number.MAX_SAFE_INTEGER): Promise<{ hash: string; size: number }> {
+  const DigestStream = (globalThis.crypto as unknown as { DigestStream?: DigestStreamClass } | undefined)?.DigestStream;
+  const reader = body.getReader();
+  const native = DigestStream ? new DigestStream('SHA-256') : undefined;
+  const writer = native?.getWriter();
+  const portable = native ? undefined : new Sha256();
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => undefined);
+      await writer?.abort().catch(() => undefined);
+      return { hash: '', size };
+    }
+    if (writer) await writer.write(value);
+    else portable!.update(value);
+  }
+  if (writer) {
+    await writer.close();
+    return { hash: hex(new Uint8Array(await native!.digest)), size };
+  }
+  return { hash: hex(portable!.digest()), size };
 }

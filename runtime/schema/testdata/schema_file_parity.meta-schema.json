@@ -108,6 +108,37 @@
       ],
       "type": "object"
     },
+    "AttachmentsDef": {
+      "additionalProperties": false,
+      "properties": {
+        "maxFileBytes": {
+          "default": 0,
+          "type": "integer"
+        },
+        "maxFiles": {
+          "default": 0,
+          "type": "integer"
+        },
+        "maxRowBytes": {
+          "default": 0,
+          "type": "integer"
+        },
+        "mediaTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "released": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "released"
+      ],
+      "type": "object"
+    },
     "AudienceDef": {
       "additionalProperties": false,
       "properties": {
@@ -6567,6 +6598,27 @@
       ],
       "type": "object"
     },
+    "RowReferencesDef": {
+      "additionalProperties": false,
+      "properties": {
+        "cleared": {
+          "default": "",
+          "type": "string"
+        },
+        "maxPerRow": {
+          "default": 0,
+          "type": "integer"
+        },
+        "tables": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "ScalarDef": {
       "additionalProperties": false,
       "properties": {
@@ -7073,6 +7125,9 @@
           "default": false,
           "type": "boolean"
         },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentsDef"
+        },
         "audience": {
           "$ref": "#/$defs/AudienceDef"
         },
@@ -7246,6 +7301,9 @@
             "Query"
           ],
           "type": "string"
+        },
+        "rowReferences": {
+          "$ref": "#/$defs/RowReferencesDef"
         },
         "seedRoles": {
           "default": [],

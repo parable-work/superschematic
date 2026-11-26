@@ -915,6 +915,155 @@ references it: the merge could not tell whether the index holds the
 relation's column, so list the fields its `expression` reads. The repositories run it on
 Postgres, in Go and in TypeScript.
 
+## References and files on any row
+
+A `Relation<>` points at one table the schema names. Two declarations of
+`@superschematic/db` let a row point at a row of any table, and hold files,
+and let every row list what points at it (D154).
+
+```ts
+import { AutoGenerate, Comments, attachments, audience, key, queue, references } from "@superschematic/db";
+
+// One message per reference a target's delete cleared; the build fills its fields.
+@queue()
+export abstract class ReferenceCleared {}
+
+// One message per object a file named, once the file is gone; the build fills its fields.
+@queue()
+export abstract class FileReleased {}
+
+@references<Issue>({ cleared: ReferenceCleared })
+@attachments<Issue>({ released: FileReleased, maxFileBytes: 26214400 })
+export abstract class Issue implements Comments<Issue, { attachments: { schemes: ["attachment"] } }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+}
+
+@audience<Note>({ owner: "owner" })
+@references<Note>({ tables: [Issue, Note], cleared: ReferenceCleared })
+@attachments<Note>({ released: FileReleased, mediaTypes: ["text/*", "image/*", "application/pdf"] })
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  owner: Identity.UUID;
+}
+```
+
+| Option | What it sets |
+| --- | --- |
+| `@references` `tables` | the tables a reference may point at; any table of the database with one key unless set |
+| `@references` `cleared` | the `@queue` class a target's delete enqueues one message on per reference it clears: `holderTable`, `holderKey`, `targetTable`, `targetKey` and `role` |
+| `@references` `maxPerRow` | the most references one row holds; 1000 unless set |
+| `@attachments` `released` | the `@queue` class a file's delete enqueues a message on, naming its object: `objectKey`, `contentHash` and `reason`; required |
+| `@attachments` `maxFileBytes` | the largest file; 100 MiB unless set, and at most 5 GiB, the largest object one signed `PUT` uploads |
+| `@attachments` `maxRowBytes` | the most bytes one row's files hold together, uploads under way among them; 1 GiB unless set |
+| `@attachments` `maxFiles` | the most files one row holds; 100 unless set |
+| `@attachments` `mediaTypes` | the media types a file may have, each `type/subtype` or `type/*`; any unless set |
+
+The build adds a sub-table beside each table that declares one, a child
+of the row that its delete deletes, with no repository of its own:
+
+- `issue_references`: one row per target and role, the target's table by
+  its type's name and its key as the database writes it as text, who
+  added it and when. A row points at one target once per role, and an
+  index on the target serves the reads of what points at a row.
+- `issue_attachments`: one row per file, its name, media type, size,
+  SHA-256, caption, who uploaded it and when, and the name of the object
+  that holds its bytes, which two rows may share. A file processor's
+  extraction and preview state sit beside them (`none`, `pending`, `done`
+  or `failed`).
+
+A target is not a foreign key, since it is a row of any table. A trigger
+on each table a reference may point at stands in for one: after a delete
+statement it deletes the references to the rows it removed, from every
+references sub-table that may hold one, and enqueues a cleared message for
+each, so the row that held it hears of it through the queue's worker. A
+soft delete is an update and clears nothing: a read leaves a deleted row
+out on its own, and a row restored keeps its references. Both declarations
+are Postgres alone.
+
+### References and backlinks
+
+The repositories hold `references` beside the tables:
+
+```ts
+await orm.references.add({ from: { table: "Note", key: note }, to: { table: "Issue", key: issue }, role: "blocks" });
+const held = await orm.references.of({ table: "Note", key: note });
+const { items, hidden } = await orm.references.referencedBy({ table: "Issue", key: issue });
+```
+
+`referencedBy` answers the rows that point at a row across every table:
+those whose references name it, and those whose `Comments` messages hold a
+ref block that names it, so a mention in a thread is a backlink too. Every
+read keeps to what its caller may read, through the target's and each
+holder's own repository, as any read of theirs does
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+A reference to a row the caller cannot read is left out entirely, not
+shown locked. A caller who cannot read the row itself is told it is not
+there, and so is one who adds a reference to such a row. Only the owner of
+a row whose audience is not everyone gets `hidden`, how many rows they
+cannot see point at it; anyone else hears of no rows but the ones they see.
+
+### Files
+
+A browser uploads a file straight to the bucket, through a URL the API
+signs, so its bytes never pass through a Worker's or a server's request:
+
+```ts
+const { attachment, upload } = await orm.attachments.begin(
+  { to: { table: "Issue", key: issue }, name: "plan.pdf", mediaType: "application/pdf", size, sha256 },
+  { bucket: deps.issueFiles }
+);
+// The browser sends PUT upload.url with upload.headers and the bytes.
+const file = await orm.attachments.complete({ table: "Issue", id: attachment.id }, { bucket: deps.issueFiles });
+```
+
+`begin` holds the file to the declaration's bounds with the row's other
+files and the uploads under way, records it `pending`, and signs a `PUT`
+of its media type for an object of its own. `complete` reads the object
+back as it streams, hashing it, through workerd's native digest on
+Workers, and holds it to the size and SHA-256 `begin` declared: a file
+whose bytes differ is removed. An upload never completed is released an
+hour after its URL expires. A bucket's [CORS rules](/superschematic/guides/buckets/#let-a-page-reach-the-bucket)
+must admit `PUT` from the page's origin with the `content-type` header.
+
+A message carries a file as an attachment block, which
+`attachmentBlock(file)` writes: `attachment:<id>`, its name, media type,
+size and SHA-256. `Comments` holds the block to the config's
+`attachments`: its scheme, its media type, then its size.
+
+`file` files a file onto another row, of the same table or another, with
+no second upload: a copy of its row that names the same object, or with
+`move` the file itself. When the file's table keeps references that may
+point at the other row's table, its row then points at the other row,
+with the role `filed`, so the other row lists it among its backlinks.
+
+A file's delete, `detach`, the row's own or a `move`, enqueues its
+object's release. The released queue's worker calls `release`, which
+deletes the object, and its preview's, once no file of any table names
+it:
+
+```ts
+// An API's @worker({ queue: FileReleased }) class ReleaseFiles.
+export const createWorkers: WorkersConstructor = deps => ({
+  async releaseFiles(message) {
+    await deps.orm.asSystem().attachments.release(message, { bucket: deps.issueFiles });
+  },
+});
+```
+
+| Settled | Why |
+| --- | --- |
+| a file is at most 100 MiB unless the declaration says otherwise, and at most 5 GiB | one signed `PUT` uploads up to 5 GiB to R2, S3 and Cloud Storage alike; a larger file needs a multipart upload, which is not built |
+| a row's files hold at most 1 GiB and 100 files unless set | a row is a record, not a drive; an upload under way counts until it expires, so two at once cannot pass the bound |
+| text is extracted when an upload completes, and a preview is made on a file's first view | search indexes the text whether or not anyone opens the file; most files are never viewed, so a preview made at upload would mostly go unseen |
+
+Extraction and previews are a file processor's (D159), which is not built
+yet: `complete` asks a file's extraction and `download` its preview, and
+`pending` and `processed` are what a processor reads and records.
+
 ## State machines
 
 An enum column's `CHECK` says which values the column holds. It does not
@@ -3584,10 +3733,17 @@ const page = await orm.ticket.comments.listMessages(id, { thread: posted.id });
 
 `post` takes a Markdown body of at most `maxBodyLength` code points,
 blocks (`ref`, another row; `action`, a card for what the poster did;
-`code`, a place in code at a revision), mentions, a `thread` to reply
+`code`, a place in code at a revision; `attachment`, a file the
+deployment keeps, held to the config's `attachments`), mentions, a `thread` to reply
 in, a message of it to quote (`quotes`), and a `clientId`, by which a retry
 returns the message it posted. A ref block names a row of a table the
-database's layout holds; whether the caller may read it is the route's.
+database's layout holds; whether the caller may read it is the route's. A
+ref block is a reference of the row too: the row it names lists the
+conversation's row among its backlinks
+([References and files on any row](#references-and-files-on-any-row)). An
+attachment block names a file by a URI whose scheme `attachments.schemes`
+lists (`attachment:<id>` for a file of the row's own `@attachments`), and
+its media type and size are held to the config's too.
 `edit` is its author's, within `editWindowMs` of the message's
 `postedAt` when the config sets one, at most 500 times, and keeps what
 it replaced for `listEdits`. `deleteMessage` keeps the message's place
@@ -3606,7 +3762,7 @@ What the engine's Comments does beyond this waits for the core: a reply
 streamed as it is written (`begin`, `appendDraft`, `finish`,
 `interrupt`), read state and follows (`markRead`, `follow`, a
 reader's `unread`), the inbox and deliveries, search across a
-namespace, attachment blocks and `moveAnchor`. The build leaves their
+namespace, and `moveAnchor`. The build leaves their
 operations out of the table's and refuses their config members. A
 message records no calling service (`via`) and no subject acted for
 (`for`). Comments can be added to a table with rows, whose

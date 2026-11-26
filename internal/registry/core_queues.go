@@ -49,9 +49,9 @@ const queueOptions = "retries, backoff, maxBackoff, lease, retain, key, onDuplic
 // onDuplicate, serialize }) on td. Errors in the object are ArgErrors, so
 // the frontend points at it.
 func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
-	if len(td.Fields) == 0 {
-		return nil, fmt.Errorf("@queue class %s has no fields; a queue's class holds its message's fields", td.Name)
-	}
+	// A class with no fields is the verification pass's to refuse, once
+	// the loader filled the queues a @references or an @attachments
+	// declaration names (D154).
 	def := &ir.QueueDef{}
 	if len(args) > 1 {
 		return nil, fmt.Errorf("@queue takes at most one options object")

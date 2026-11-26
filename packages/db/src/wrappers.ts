@@ -551,10 +551,20 @@ export interface RevisionsOn {
  */
 export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
 
-/** A kind of block a table's Comments takes on a message (D77, D103's step 4): ref, another row; action, a card for what the poster did; code, a place in code at a revision. An attachment block waits for attachments on the core. */
-export type CommentsBlockKind = "ref" | "action" | "code";
+/** A kind of block a table's Comments takes on a message (D77, D103's step 4): ref, another row; action, a card for what the poster did; code, a place in code at a revision; attachment, a file the deployment keeps (D154). */
+export type CommentsBlockKind = "ref" | "action" | "code" | "attachment";
 
-/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, and the permissions that moderate, pin and resolve. Every member is optional. Streamed replies, read state and deliveries, attachments and code anchors wait for the core, so their members are not a table's. */
+/** What an attachment block may describe (D154): the URI schemes its uri may use, the media types it may have, and the largest file. */
+export interface CommentsAttachmentsOn {
+  /** The largest file an attachment block may describe, in bytes; no limit when absent. */
+  readonly maxBytes?: number;
+  /** The media types an attachment may have, each type/subtype or type/* in lower case; any when absent. */
+  readonly mediaTypes?: readonly string[];
+  /** The URI schemes an attachment's uri may use, in lower case: attachment, for a file of the row's Attachments (attachment:<id>); https alone when absent. */
+  readonly schemes?: readonly string[];
+}
+
+/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, what an attachment block may describe, and the permissions that moderate, pin and resolve. Every member is optional. Streamed replies, read state and deliveries, and code anchors wait for the core, so their members are not a table's. */
 export interface CommentsOn {
   /** The longest body a post or an edit gives, in code points: 1 to 40000, 40000 when absent. */
   readonly maxBodyLength?: number;
@@ -562,6 +572,8 @@ export interface CommentsOn {
   readonly editWindowMs?: number;
   /** The block kinds a post or an edit may give, each once; every kind when absent, none when empty. */
   readonly blocks?: readonly CommentsBlockKind[];
+  /** What an attachment block may describe (D154): its uri's scheme, its media type and its size. */
+  readonly attachments?: CommentsAttachmentsOn;
   /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
   readonly moderatePermission?: string;
   /** The permission a caller needs to pin and unpin. Absent, any caller the route lets call them may. */

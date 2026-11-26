@@ -197,22 +197,98 @@ fn the_config_is_the_declaration_files_schema_and_a_member_that_waits_is_refused
         &review(json!({"composeTimeoutMs": 5000, "maxDrafts": 2, "deliverPermission": "notify", "maxAttempts": 3}))
     )
     .is_ok());
-    for (config, member) in [
-        (json!({"anchorPermission": "anchor"}), "anchorPermission"),
-        (json!({"attachments": {"maxBytes": 10}}), "attachments"),
+    let reason = rule(
+        &core(),
+        &review(json!({"anchorPermission": "anchor"})),
+        comments::NAME,
+    );
+    assert!(
+        reason.starts_with("anchorPermission: ") && reason.contains("waits for"),
+        "{reason}"
+    );
+    // Attachment blocks and the config's attachments are a table's since
+    // D154.
+    assert!(define(
+        &core(),
+        &review(json!({"blocks": ["attachment"], "attachments": {"maxBytes": 10, "schemes": ["attachment"]}}))
+    )
+    .is_ok());
+}
+
+#[test]
+fn an_attachment_block_is_held_to_the_configs_attachments_in_the_contracts_order() {
+    let mut host = Host::new(
+        core(),
+        review(
+            json!({"attachments": {"maxBytes": 1000, "mediaTypes": ["image/*", "application/pdf"], "schemes": ["attachment", "https"]}}),
+        ),
+    );
+    let alice = caller("alice", &[]);
+    changed(host.create(&alice, "r1", json!({"title": "Plan"})));
+    let block = |uri: &str, media_type: &str, bytes: i64| json!({"kind": "attachment", "uri": uri, "name": "plan.pdf", "mediaType": media_type, "bytes": bytes, "sha256": "0".repeat(64)});
+    // A file the config allows is posted, its block stored as given.
+    let posted = post(
+        &mut host,
+        "alice",
+        json!({"body": "The plan.", "blocks": [block("attachment:7c1e", "application/pdf", 900)]}),
+    );
+    assert_eq!(posted["blocks"][0]["uri"], json!("attachment:7c1e"));
+    // The scheme first, then the media type, then the size, each the veto
+    // with the member it fails.
+    for (given, member, value, allowed) in [
+        (
+            block("bucket:7c1e", "text/plain", 2000),
+            "uri",
+            json!("bucket"),
+            json!(["attachment", "https"]),
+        ),
+        (
+            block("attachment:7c1e", "text/plain", 2000),
+            "mediaType",
+            json!("text/plain"),
+            json!(["image/*", "application/pdf"]),
+        ),
+        (
+            block("attachment:7c1e", "image/png", 2000),
+            "bytes",
+            json!(2000),
+            json!(1000),
+        ),
     ] {
-        let reason = rule(&core(), &review(config), comments::NAME);
-        assert!(
-            reason.starts_with(&format!("{member}: ")) && reason.contains("waits for"),
-            "{reason}"
+        let (code, details) = veto_of(host.invoke(
+            &alice,
+            "r1",
+            USE,
+            "post",
+            json!({"body": "x", "blocks": [given]}),
+        ));
+        assert_eq!(code, "attachment_not_allowed");
+        assert_eq!(
+            details,
+            json!({"block": 0, "member": member, "value": value, "allowed": allowed})
         );
     }
-    assert!(rule(
-        &core(),
-        &review(json!({"blocks": ["attachment"]})),
-        comments::NAME
-    )
-    .starts_with("blocks lists attachment: "));
+    // An https uri names a host.
+    let error = refused(host.invoke(
+        &alice,
+        "r1",
+        USE,
+        "post",
+        json!({"body": "x", "blocks": [block("https:///plan.pdf", "image/png", 10)]}),
+    ));
+    assert_eq!(
+        error["details"]["issues"][0]["path"],
+        json!("/blocks/0/uri")
+    );
+    // An edit that keeps a block is not held to the config again.
+    let edited = result(host.invoke(
+        &alice,
+        "r1",
+        USE,
+        "edit",
+        json!({"message": 1, "body": "The plan, again.", "blocks": [block("attachment:7c1e", "application/pdf", 900)]}),
+    ));
+    assert_eq!(edited["body"], json!("The plan, again."));
 }
 
 #[test]

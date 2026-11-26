@@ -167,11 +167,10 @@ var tableLeavesOut = map[string]map[string]string{
 // table's generated API does not serve; and the core's own words for what
 // it runs no command for yet.
 const (
-	commentsStreamed    = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
-	commentsReadState   = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
-	commentsDeliveries  = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
-	commentsAnchors     = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
-	commentsAttachments = "an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+	commentsStreamed   = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
+	commentsReadState  = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
+	commentsDeliveries = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+	commentsAnchors    = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
 )
 
 // tableArmsNoDeadlines are the behaviors whose declarations arm deadlines
@@ -211,7 +210,6 @@ var tableRefusesMembers = map[string][]RefusedMember{
 		{"retryBackoffMs", commentsDeliveries},
 		{"deliveryRetentionMs", commentsDeliveries},
 		{"anchorPermission", commentsAnchors},
-		{"attachments", commentsAttachments},
 	},
 }
 
@@ -221,10 +219,6 @@ var tableRefusesMembers = map[string][]RefusedMember{
 func TableRefusesMembers(name string) []RefusedMember {
 	return tableRefusesMembers[name]
 }
-
-// CommentsAttachments is why a table's Comments refuses an attachment
-// block, and a config's blocks that lists one (D103's step 4).
-const CommentsAttachments = commentsAttachments
 
 // TableLeavesOut is why a table's use of the behavior name leaves its
 // operation out, or "" for one the behaviors' core runs: the layout lists

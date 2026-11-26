@@ -323,6 +323,35 @@ const raised = await until('the alert', `alerts/${alert.json?.data?.id}`, data =
 ok("the alert's Reactions rule ran on its change", raised);
 timings.push(['change to reaction', raised]);
 
+// A file uploaded straight to the bucket through the URL smoke-api signs,
+// as a browser would (D154): on Cloudflare a PUT to R2's S3 API, under stack
+// dev to the emulator. Its completion reads the bytes back and holds them
+// to the SHA-256 the upload declared; filed onto another line item, the
+// first line item is that one's backlink.
+const fileBytes = new TextEncoder().encode(`smoke ${run}: a receipt\n`.repeat(64));
+const fileSha = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', fileBytes)), b => b.toString(16).padStart(2, '0')).join('');
+const begun = await member.call('POST', `${api}/line-items/${items.tea}/files`, { name: 'receipt.txt', mediaType: 'text/plain', size: fileBytes.length, sha256: fileSha });
+expect('begin a file upload', begun.status, [200, 201], begun.text);
+const upload = begun.json?.data ?? fail(`begin a file upload answered ${begun.text.slice(0, 200)}`);
+const putStart = performance.now();
+const put = await fetch(upload.url, { method: 'PUT', headers: { 'content-type': upload.contentType }, body: fileBytes });
+if (!put.ok) fail(`the PUT to the bucket's signed URL answered ${put.status}: ${(await put.text()).slice(0, 300)}`);
+const putMs = performance.now() - putStart;
+ok(`uploaded ${fileBytes.length} bytes straight to the bucket`, putMs);
+timings.push(['direct upload', putMs]);
+const completed = await member.call('POST', `${api}/line-items/${items.tea}/files/${upload.fileId}/complete`);
+expect('complete the upload', completed.status, 200, completed.text);
+if (completed.json?.data?.state !== 'ready' || completed.json?.data?.contentHash !== fileSha) fail(`complete the upload answered ${completed.text.slice(0, 300)}`);
+ok("the upload's bytes are the ones it declared", completed.ms);
+timings.push(['complete (read back, hash)', completed.ms]);
+const filed = await member.call('POST', `${api}/line-items/${items.tea}/files/${upload.fileId}/file`, { lineItemId: items.coffee });
+expect('file it onto another line item', filed.status, [200, 201], filed.text);
+if (filed.json?.data?.objectKey !== completed.json?.data?.objectKey) fail(`the filed file names ${filed.json?.data?.objectKey}, want the same object`);
+const backlinks = await member.call('GET', `${api}/line-items/${items.coffee}/backlinks`);
+expect('backlinks', backlinks.status, 200, backlinks.text);
+if (!(backlinks.json?.data ?? []).some((b: { lineItemId: string }) => b.lineItemId === items.tea)) fail(`${prefix}coffee's backlinks are ${backlinks.text.slice(0, 300)}, want ${prefix}tea`);
+ok(`the file filed onto ${prefix}coffee with no second upload, which lists ${prefix}tea among its backlinks`);
+
 const out = await member.call('POST', `${api}/auth/logout`);
 expect('sign out', out.status, [200, 204], out.text);
 const after = await member.call('GET', `${api}/auth/me`);

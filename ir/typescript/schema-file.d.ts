@@ -68,6 +68,14 @@ export interface ArgumentDef {
   validatePattern?: string;
 }
 
+export interface AttachmentsDef {
+  maxFileBytes?: number;
+  maxFiles?: number;
+  maxRowBytes?: number;
+  mediaTypes?: string[];
+  released: string;
+}
+
 export interface AudienceDef {
   agents?: string;
   default?: string;
@@ -712,6 +720,12 @@ export interface RoleSeed {
   permissions: string[];
 }
 
+export interface RowReferencesDef {
+  cleared?: string;
+  maxPerRow?: number;
+  tables?: string[];
+}
+
 export interface ScalarDef {
   caseInsensitive?: boolean;
   comment?: string;
@@ -834,6 +848,7 @@ export interface TypeDef {
   accessGrants?: AccessGrantsDef;
   accessLog?: AccessLogDef;
   allowUnknownFields?: boolean;
+  attachments?: AttachmentsDef;
   audience?: AudienceDef;
   /**
    * The behaviors the type composes, in the order their checks run. A registry
@@ -871,6 +886,7 @@ export interface TypeDef {
   rawHeritage?: RawHeritage;
   rawSql?: RawSQLDef[];
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
+  rowReferences?: RowReferencesDef;
   seedRoles?: RoleSeed[];
   server?: ServerDecl;
   source?: SourceRef;

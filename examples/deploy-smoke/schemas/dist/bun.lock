@@ -70,6 +70,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -96,6 +97,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -122,6 +124,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -148,6 +151,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -174,6 +178,34 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
+        "@opentelemetry/api": "1.9.1",
+        "@opentelemetry/context-async-hooks": "2.12.0",
+        "@opentelemetry/core": "2.12.0",
+        "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+        "@opentelemetry/otlp-transformer": "0.223.0",
+        "@opentelemetry/resources": "2.12.0",
+        "@opentelemetry/sdk-trace": "2.12.0",
+        "@smoke/smoke-api-api": "workspace:*",
+        "@smoke/smoke-api-implementation": "workspace:*",
+        "@smoke/smoke-db-types": "workspace:*",
+        "@superschematic/http-runtime": "*",
+        "@superschematic/rules": "*",
+        "hono": "4.13.8",
+        "pg": "8.23.0",
+      },
+      "devDependencies": {
+        "@types/node": "22.19.9",
+        "@types/pg": "8.23.1",
+        "typescript": "5.9.3",
+      },
+    },
+    "server/smoke-stack/smoke-api-release-files": {
+      "name": "@smoke/smoke-stack-smoke-api-release-files-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -200,6 +232,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@google-cloud/cloud-sql-connector": "1.12.0",
+        "@google-cloud/storage": "8.3.0",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/context-async-hooks": "2.12.0",
         "@opentelemetry/core": "2.12.0",
@@ -517,6 +550,8 @@
     "@smoke/smoke-stack-smoke-api-drain-line-items-server": ["@smoke/smoke-stack-smoke-api-drain-line-items-server@workspace:server/smoke-stack/smoke-api-drain-line-items"],
 
     "@smoke/smoke-stack-smoke-api-follow-up-timers-server": ["@smoke/smoke-stack-smoke-api-follow-up-timers-server@workspace:server/smoke-stack/smoke-api-follow-up-timers"],
+
+    "@smoke/smoke-stack-smoke-api-release-files-server": ["@smoke/smoke-stack-smoke-api-release-files-server@workspace:server/smoke-stack/smoke-api-release-files"],
 
     "@smoke/smoke-stack-smoke-api-server": ["@smoke/smoke-stack-smoke-api-server@workspace:server/smoke-stack/smoke-api"],
 
@@ -941,6 +976,10 @@
     "@smoke/smoke-stack-smoke-api-follow-up-timers-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "@opentelemetry/api", "@opentelemetry/context-async-hooks", "@opentelemetry/core", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/otlp-transformer", "@opentelemetry/resources", "@opentelemetry/sdk-trace", "@redis/client", "pg"] }],
 
     "@smoke/smoke-stack-smoke-api-follow-up-timers-server/@superschematic/rules": ["@superschematic/rules@file:../../../../runtime/rules/typescript", { "devDependencies": { "@types/bun": "1.4.0", "@types/node": "22.19.9", "typescript": "5.9.3" } }],
+
+    "@smoke/smoke-stack-smoke-api-release-files-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "@opentelemetry/api", "@opentelemetry/context-async-hooks", "@opentelemetry/core", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/otlp-transformer", "@opentelemetry/resources", "@opentelemetry/sdk-trace", "@redis/client", "pg"] }],
+
+    "@smoke/smoke-stack-smoke-api-release-files-server/@superschematic/rules": ["@superschematic/rules@file:../../../../runtime/rules/typescript", { "devDependencies": { "@types/bun": "1.4.0", "@types/node": "22.19.9", "typescript": "5.9.3" } }],
 
     "@smoke/smoke-stack-smoke-api-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@redis/client": "5.12.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "@opentelemetry/api", "@opentelemetry/context-async-hooks", "@opentelemetry/core", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/otlp-transformer", "@opentelemetry/resources", "@opentelemetry/sdk-trace", "@redis/client", "pg"] }],
 
