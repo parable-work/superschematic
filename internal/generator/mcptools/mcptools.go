@@ -59,9 +59,11 @@ type Endpoint struct {
 // tools/schema.json resolves, and its _meta with the invocation policy),
 // and the operation whose route
 // a call runs through, by its key in the router's operation table
-// (Route.Key), with where each argument goes in that route's request, and
+// (Route.Key), with where each argument goes in that route's request,
 // whether a call runs only once the person confirms it: its policy is one
-// the build's policy confirms (D93).
+// the build's policy confirms (D93), and what the operation is to an agent
+// run's autonomy policy, its @autonomy (D158, D183), which the runtime's
+// mcpGate reads.
 type Tool struct {
 	Name        string          `json:"name"`
 	Title       string          `json:"title"`
@@ -72,6 +74,10 @@ type Tool struct {
 	Operation   string          `json:"operation"`
 	Arguments   []ToolArgument  `json:"arguments"`
 	Confirm     bool            `json:"confirm,omitempty"`
+	// Autonomy is the operation's @autonomy: its class and its mode when no
+	// policy row names it; nil for an operation that declares none, which
+	// an agent run's gate holds as an internal write.
+	Autonomy *ir.OperationAutonomy `json:"autonomy,omitempty"`
 }
 
 // ToolAnnotations are a tool's MCP annotations: the resolved record of
@@ -199,6 +205,7 @@ func Build(generator, schema string, api *apigen.APIOutput, routeOf func(operati
 		if err != nil {
 			return nil, fmt.Errorf("%s: MCP tool %s of %s: %w", generator, tool.MCP.Handle, schema, err)
 		}
+		routed.Autonomy = autonomyOf(api, tool.OperationID)
 		// A tool whose policy the build's policy confirms runs once the
 		// person confirms the call, whose token comes back in an argument
 		// of its own (D93).
@@ -212,6 +219,18 @@ func Build(generator, schema string, api *apigen.APIOutput, routeOf func(operati
 		info.Tools = append(info.Tools, routed)
 	}
 	return info, nil
+}
+
+// autonomyOf is the @autonomy of the operation whose OpenAPI operation id
+// is operationID (D158), a copy, or nil.
+func autonomyOf(api *apigen.APIOutput, operationID string) *ir.OperationAutonomy {
+	for _, ep := range api.Endpoints {
+		if ep.HandlerName == operationID && ep.Operation != nil && ep.Operation.Autonomy != nil {
+			copied := *ep.Operation.Autonomy
+			return &copied
+		}
+	}
+	return nil
 }
 
 // RouteTool is tool as a router serves it, through route.

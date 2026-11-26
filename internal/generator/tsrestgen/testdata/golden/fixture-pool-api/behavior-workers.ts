@@ -89,7 +89,7 @@ export function accountRechecksQueues(pool: Pool, orm: FixturePoolDbOrm, workers
           handle: async (signal: AbortSignal) => {
             const run = await orm
               .withBehaviorCaller(accountRechecksCaller)
-              .transaction(tx => tx.account.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => accountRechecksEvent(workers, tx, claim.message, signal)));
+              .transaction(tx => tx.account.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => accountRechecksEvent(workers, tx as FixturePoolDbTx, claim.message, signal)));
             if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
           },
         })),

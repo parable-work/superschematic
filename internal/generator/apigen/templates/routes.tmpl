@@ -466,7 +466,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 {{- define "routeMiddlewares" }}
 			{{- $first := authSnippet "routeMiddlewaresFirst" .EndpointInfo }}
 			{{- $afterDecrypt := authSnippet "routeMiddlewaresAfterDecrypt" .EndpointInfo }}
-			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .Idempotent .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers (ne $first "") (ne $afterDecrypt "") }}
+			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .Idempotent .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers (ne $first "") (ne $afterDecrypt "") .Output.Deps.AccessLog }}
 			Middlewares: []runtimerouting.Middleware{
 				{{- $first }}
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
@@ -480,6 +480,11 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- end }}
 				{{- if .Output.HasServiceCallers }}
 				serviceauth.Authenticate(cfg.ServiceAuthenticator),
+				{{- end }}
+				{{- if .Output.Deps.AccessLog }}
+				// The access log records the call before the permission check,
+				// so a refused one is recorded too (D156, D180).
+				accessLogged(cfg.DB, {{ printf "%q" .Name }}),
 				{{- end }}
 				{{- if not .ServiceCallers }}
 				{{- if .RequiredPerms }}

@@ -39,7 +39,7 @@ func TestAgentsFixtureLoads(t *testing.T) {
 	}
 	want := map[string][]string{
 		ir.AgentDefinitions: {"id", "name", "purpose", "instructions", "task", "role", "tools", "credentials", "model", "modelSlot", "sandboxSlot", "command", "limits", "inbound"},
-		ir.AgentRuns:        {"id", "status", "agent", "definitionVersion", "trigger", "triggerTable", "triggerKey", "targets", "grants", "instance", "outcome", "reads", "writes", "messagesSent", "approvals", "untrusted", "cost", "credentialUses", "transcriptObject"},
+		ir.AgentRuns:        {"id", "status", "agent", "definitionVersion", "trigger", "triggerTable", "triggerKey", "trust", "targets", "grants", "instance", "outcome", "reads", "writes", "messagesSent", "approvals", "untrusted", "cost", "credentialUses", "transcriptObject"},
 		ir.AgentRequests:    {"step", "agent", "trigger", "subjectTable", "subjectKey", "party", "message", "grant", "run", "ask"},
 		ir.AgentPolicies:    {"agent", "operation", "operationClass", "mode", "permission"},
 		ir.AgentApprovals:   {"agent", "run", "operation", "params", "paramsHash", "summary", "permission", "state", "decidedBy", "decidedVia"},

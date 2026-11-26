@@ -750,7 +750,12 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
+			dispatched := r.typeScriptDispatcherQueues(services, api)
 			for _, worker := range implemented[api] {
+				if worker.BehaviorWorker == nil && dispatched[worker.Queue] {
+					// The agent dispatcher handles its queues' messages (D183).
+					continue
+				}
 				if worker.BehaviorWorker == nil {
 					methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
 					continue
@@ -758,6 +763,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				for _, event := range worker.Events {
 					methods = append(methods, fmt.Sprintf("    async %s(event, tx, signal) {\n      // handle %s\n    },", tsutil.ToCamelCase(event.Method), handles(worker, event)))
 				}
+			}
+			if len(methods) == 0 {
+				continue
 			}
 			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
 				return err
@@ -909,6 +917,45 @@ func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, 
 		}
 	}
 	return nil
+}
+
+// typeScriptDispatcherQueues are the queues of api's database whose
+// @worker the agent dispatcher runs in TypeScript (D183): its
+// @agents("requests") queue and its @runRequests queue (D157); none for a
+// database that does not use the agent orchestration, or that cannot be
+// read here, whose workers the API's build reads again.
+func (r run) typeScriptDispatcherQueues(services []stack.Service, api string) map[string]bool {
+	out := map[string]bool{}
+	if r.Options.LoadDependency == nil {
+		return out
+	}
+	for _, svc := range services {
+		if svc.Name != api {
+			continue
+		}
+		var dbs []string
+		if svc.AuthDB != nil {
+			dbs = append(dbs, svc.AuthDB.Name)
+		}
+		for _, dep := range svc.Dependencies {
+			if dep.Kind == ir.SchemaKindDB {
+				dbs = append(dbs, dep.Name)
+			}
+		}
+		for _, db := range dbs {
+			schema, err := r.Options.LoadDependency(db)
+			if err != nil || schema == nil {
+				continue
+			}
+			if requests := schema.AgentsTable(ir.AgentRequests); requests != nil {
+				out[requests.Name] = true
+				if runs := schema.RunRequestsQueue(); runs != nil {
+					out[runs.Name] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 // checkTypeScriptExport refuses a TypeScript API whose implementation
@@ -1349,6 +1396,14 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			r.warnScaffoldDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, output.ImplementationDependencies(), "its scaffold depends on now")
 			if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
 				if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+					return nil, nil, err
+				}
+			}
+			// Every entrypoint of an API whose Deps holds the agent
+			// dispatcher builds it with createAgentOptions (D183).
+			if output.HasAgents() {
+				options := []string{"    endpoint: 'https://<this server>/api/agents',", "    // providers, notifier, inbound, tools: the rest of createAgents' options"}
+				if err := r.checkTypeScriptExport(stackName, output.SchemaName, "a database whose agent dispatcher its Deps holds", tsrestgen.AgentOptionsFunc, "AgentOptionsConstructor", options, "8.6"); err != nil {
 					return nil, nil, err
 				}
 			}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AgentsError, createAgents, defaultAutonomy, paramsHash } from './agents.js';
+import { AgentsError, createAgents, defaultAutonomy, effectiveAutonomy, narrowReaches, paramsHash, trustOf } from './agents.js';
 import { Injection, SecretValue, runAgentInstance, type CredentialProvider } from './providers/index.js';
 
 // The agent orchestration's pure parts and the sandbox-side runner (D158).
@@ -20,6 +20,27 @@ describe('autonomy', () => {
     expect(paramsHash('pay_invoice', { invoice: 'i1', amount: 101 })).not.toBe(one);
     expect(paramsHash('refund_invoice', { invoice: 'i1', amount: 100 })).not.toBe(one);
     expect(one).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  test("an entered sender's run asks before anything but a read, whatever the policy says (D183)", () => {
+    expect(trustOf('verified')).toBe('verified');
+    for (const recorded of ['entered', 'pending', null, undefined, 'VERIFIED']) expect(trustOf(recorded)).toBe('entered');
+    expect(effectiveAutonomy('auto', 'internalWrite', 'verified')).toBe('auto');
+    expect(effectiveAutonomy('tell', 'messageParty', null)).toBe('tell');
+    expect(effectiveAutonomy('auto', 'moneyMovement', 'verified')).toBe('ask');
+    expect(effectiveAutonomy('auto', 'read', 'entered')).toBe('auto');
+    expect(effectiveAutonomy('tell', 'read', 'entered')).toBe('tell');
+    for (const cls of ['internalWrite', 'messageParty', 'moneyMovement'] as const) expect(effectiveAutonomy('auto', cls, 'entered')).toBe('ask');
+  });
+
+  test("a party's run reaches through only the paths its grant of the same target reaches (D183)", () => {
+    const role = { TaskNote: ['task'], Invoice: ['task', 'task.project'] };
+    expect(narrowReaches(role, [{ Invoice: ['task'] }])).toEqual({ Invoice: ['task'] });
+    expect(narrowReaches(role, [{ TaskNote: ['task'] }, { Invoice: ['task.project'] }])).toEqual({ TaskNote: ['task'], Invoice: ['task.project'] });
+    // A path the party reaches and the role does not is no path of the run.
+    expect(narrowReaches({ TaskNote: ['task'] }, [{ TaskNote: ['task'], Invoice: ['task'] }])).toEqual({ TaskNote: ['task'] });
+    // No grant of the party names the target: the row alone.
+    expect(narrowReaches(role, [])).toEqual({});
   });
 
   test('createAgents refuses an ORM with no orchestration tables', () => {

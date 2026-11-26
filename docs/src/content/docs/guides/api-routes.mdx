@@ -2067,6 +2067,51 @@ buildRouter(implementations, {
 });
 ```
 
+### In Go
+
+The Go server and ORM serve the same access. The auth provider's
+`callerPrincipal` hook names the caller whole, a `session.Caller`: its id,
+its kind, whom it acts for, its grants and its credential. An auth step
+puts one on the request with `session.ContextWithCaller`; a step that puts
+only an id, as the identity runtime does, names a user. Each route binds
+the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
+every read and write of the operation to it, as the TypeScript ones do.
+`orm.AsSystem(ctx)`, and a context outside any operation, read every row.
+
+```go
+router.Use(session.GrantAuthenticator(db, identityMiddleware, nil))
+api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
+```
+
+`session.GrantAuthenticator` runs a request with a `grant_` token as the
+grant's holder; the ORM of a database with an `@accessGrants` table is the
+authority it reads the grant from on every call. The grants are the ORM's:
+
+| Function | Does |
+| --- | --- |
+| `orm.IssueGrant(ctx, db, access.IssueGrantInput{...})` | writes a grant and answers its token |
+| `orm.RevokeGrant(ctx, db, id, at)` | revokes it |
+| `orm.ActiveGrants(ctx, db, access.ActiveGrantsFilter{...})` | lists the grants active now |
+| `orm.AccessConditions(ctx, table, &args, offset, write)` | the conditions a read across tables applies as a repository does |
+
+A row rule's path (`by: ["unit.contract.parties.party"]`) is one filter of
+the row through the relations; the Go filters reach through a one-to-many
+relation by its name (`Parties`). A view's field under
+`@decrypted({ permission })` is masked for a caller without it, and each
+value opened for one with it is recorded in the access log in the
+operation's transaction. A route of an API whose database has an
+`@accessLog` table records its call itself, before the permission check:
+there is no option to pass. A revealed field holds text, and the database
+needs an `@accessLog` table, or the build is refused.
+
+A Go server refuses at build time the platform features it does not
+serve yet, on its database's tables and its own: `@calendarSource` and
+Recurrence, `@event`, `@notifier` and `@channelIdentities`, `@references`
+and `@attachments`, `@searchable`, `@party`, `@conversations` and
+`@runRequests`, `@agents`, provider slots and `@autonomy`. Serve such an
+API in TypeScript (`outputs.api.language: "TYPESCRIPT"`). A database keeps
+its Go types, which its Go ORM, always generated, needs.
+
 ### In the Rust server
 
 The Rust server serves the same access on Postgres (D181). Its runtime's
@@ -2113,11 +2158,11 @@ composes Recurrence.
 | --- | --- |
 | the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
 | a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
-| the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
-| grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
+| grants and the access log on the Go and Rust servers' SQLite | the Go and Rust servers serve them on Postgres |
+| a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
-| a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |
+| a generated TypeScript server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options; the Go server records its calls itself |
 | a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
 
 ## A table's behavior operations

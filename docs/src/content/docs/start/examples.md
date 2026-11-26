@@ -27,9 +27,11 @@ example's script, or the Go test that runs it, from a checkout that
 
 ## Platform features
 
-These seven are a schemas root and a hand-written TypeScript server's
-wiring, `server/server.ts`, each for one feature of the TypeScript
-runtime on Postgres. A Go test loads each example's schemas, and an
+These seven are a schemas root and the TypeScript runtime's wiring, each
+for one feature of the TypeScript runtime on Postgres: six wire it by hand
+in `server/server.ts`, and `agent-orchestration` has a stack whose
+generated server does, with its implementation in `typescript/work-api`.
+A Go test loads each example's schemas, and an
 end-to-end test runs the same scenario, under fixture names, against
 Postgres: set `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` for the
 `tsrestgen` tests and `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` for the
@@ -43,7 +45,7 @@ Postgres: set `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` for the
 | [`examples/references-files`](https://github.com/parable-work/superschematic/tree/main/examples/references-files) | [References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row): uploads straight to a bucket, a file filed onto a second row with no second upload, and backlinks held to what the reader may read | `TestReferencesFilesExampleLoads` (`internal/loader/rowrefs`) | `TestReferencesTablesEndToEnd` (`internal/generator/tsgen`) |
 | [`examples/search-across-tables`](https://github.com/parable-work/superschematic/tree/main/examples/search-across-tables) | [Search across tables](/superschematic/guides/database-tables/#search-across-tables): one ranked search over projects, tasks and pages, each caller's access checked inside the query, and an agent run or a party that finds only what its grant reaches | `TestSearchAcrossTablesExampleLoads` (`internal/loader/search`) | `TestSearchTablesEndToEnd` (`internal/generator/tsgen`) |
 | [`examples/parties`](https://github.com/parable-work/superschematic/tree/main/examples/parties) | [Outside parties](/superschematic/guides/parties/): contractors who send reports by text or email, one inbound path that decides who sent each message, email held to its SPF, DKIM and DMARC results, triage for unknown senders, and sending to a contact as a permission | `TestPartiesExampleLoads` (`internal/loader/conversations`) | `TestPartiesEndToEnd` (`internal/generator/tsgen`) |
-| [`examples/agent-orchestration`](https://github.com/parable-work/superschematic/tree/main/examples/agent-orchestration) | [Agent runs](/superschematic/guides/agent-runs/): agents as rows, each run in a fresh sandbox with a token its task bounds, approvals before money moves, budgets that pause, one switch that stops every run, and a customer's text that starts one | `TestAgentOrchestrationExampleLoads` (`internal/loader/agents`) | `TestAgentRunsEndToEnd` (`internal/generator/tsgen`) |
+| [`examples/agent-orchestration`](https://github.com/parable-work/superschematic/tree/main/examples/agent-orchestration) | [Agent runs](/superschematic/guides/agent-runs/): agents as rows, each run in a fresh sandbox with a token its task bounds, approvals before money moves, budgets that pause, one switch that stops every run, and a customer's text that starts one, on a generated server that builds the dispatcher | `TestAgentOrchestrationExampleLoads` (`internal/loader/agents`), `TestAgentOrchestrationExampleUsesTheGeneratedWiring` (`cmd/superschematic`) | `TestAgentRunsEndToEnd` (`internal/generator/tsgen`) |
 
 ## Runtime references
 

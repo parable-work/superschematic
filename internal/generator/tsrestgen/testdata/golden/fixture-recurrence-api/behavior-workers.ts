@@ -112,7 +112,7 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, w
           handle: async (signal: AbortSignal) => {
             const run = await orm
               .withBehaviorCaller(filingDeadlinesCaller)
-              .transaction(tx => tx.filing.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => filingDeadlinesEvent(workers, tx, claim.message, signal)));
+              .transaction(tx => tx.filing.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => filingDeadlinesEvent(workers, tx as FixtureRecurrenceDbTx, claim.message, signal)));
             if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
           },
         })),

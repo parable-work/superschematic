@@ -1890,10 +1890,9 @@ writes an access-log row.
 
 Left:
 
-- The Go server and repositories: the principal's kinds (through the
-  auth-provider hook `callerPrincipal`, which answers the id alone so
-  far), the audience filter, path row rules, grants, reveal and the
-  access log. Rust's on SQLite (D181). Python's ORM.
+- Python's ORM. Go (D180) and Rust (D181) serve the principal's kinds,
+  the audience filter, path row rules, grants, reveal and the access log
+  on Postgres; Rust's on SQLite is left.
 - A GIN index on `effective_audience` the build writes. (An audience on
   SQLite and D1, in TypeScript: D182.)
 - An audience in a declared query (`@query`), which reads every row.
@@ -1904,8 +1903,10 @@ Left:
   notifications applying `audienceConditions` (sections 2 to 5), and the
   backlinks an owner sees, designed above.
 - A generated route and declared query that list the active grants.
-- A generated server that wires `accessLogOf` and `grantAuthenticator`
-  itself; an app passes them in the router's options now.
+- A generated TypeScript server that wires `accessLogOf` and
+  `grantAuthenticator` itself; an app passes them in the router's options
+  now. The Go server records its calls in the access log itself (D180);
+  an app wires the grants' authenticator in both.
 - A party's principal across all its active grants, through a channel
   identity (section 7), and the agent run's narrowed token (section 8).
 - A path to a list field of ids in a row rule, and a team as a principal
@@ -2423,9 +2424,6 @@ Left:
 
 - Go and Rust: the inbound path, party principals and sends, and SQLite
   and D1.
-- The agent run that takes a run request held to the message's trust:
-  D158 takes the request and narrows its run to the request's grant's
-  role, and records the trust.
 - Comments' `via` on a table: the rules core's caller carries no channel,
   so a message posted into a row's Comments for a text's sender records
   its `for` and not its channel. The core's `Caller` gains a channel, the
@@ -2525,24 +2523,56 @@ its Lease; and administration is permissions.
 
 Left:
 
-- An inbound message's trust (`verified`, `entered`, D157) narrowing its
-  run: the run records it (`input.trust`) and runs as a verified one's.
 - Go and Rust: the dispatcher, the run's authenticator, autonomy and the
   runner; SQLite and D1.
-- The generated server building the dispatcher into its `Deps`, mounting
-  the agent routes and filling the requests queue's `@worker` with
-  `agents.handle`; an app wires them (`examples/agent-orchestration/server`).
-- `@autonomy` in the generated MCP tool records (`mcptools`), so
-  `mcpGate` reads a generated tool's class; it reads an internal write now.
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
   Postgres through Hyperdrive as the notifier's does.
 - A reply interpreter that is a model (D153's left), through an agent run.
-- A party the run acts for narrowing the role's relation paths to its
-  grant's; today the run's scope is the grant's target, the party's row
-  and the message's, and the agent's role's paths from them.
-- The schema writer writing `@agents` and `@autonomy` back.
+
+## D180. The Go server and ORM serve per-record access: the principal travels whole from the auth-provider hook to the repositories, one predicate holds every read and write of a table to it, grants and the access log are the ORM's, and the Go outputs refuse the platform features they do not serve yet (D156 amended)
+
+D156 built per-record access in the TypeScript server and repositories and
+left Go's. This entry ports it, and settles what Go's shape asked for.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The principal is `access.Principal` of `runtime/schema/go/access` (its subject, kind, `ActingFor`, `Grants` and `Credential`), which the generated ORM and the HTTP runtime both import; `session.Caller` is the same type. The zero principal is the anonymous caller. | A principal type in each, which a generated API would convert between. The session package's `Principal`, which the ORM cannot import. |
+| The auth-provider hook `callerPrincipal` answers a `runtimesession.Caller`, whole, as D156 said; the core's answer is `session.GetCaller(ctx)`, the principal `ContextWithCaller` put, or a user of the principal's ID. `callerImports` no longer names the session package, which `caller.go` imports itself. A provider of its own returns a `Caller` now. | A second hook beside the ID's, which D156 turned down. |
+| A route binds its caller with `orm.WithPrincipal`, in an ORM with per-record access; `orm.WithCaller(ctx, id)` stays the binding of an ID alone, for an ORM without. `AsSystem` and a context outside any operation read every row. `WithUserID` sets who a write stamps and leaves the reads as they were. | `WithUserID` reading as the user, as the TypeScript `withUser` does: the ORM calls it for every stamp, `AsSystem`'s among them. |
+| One predicate, data the ORM is generated with (`accessTables`: each table's audience columns, key and the relations a path steps through), holds a read or a write of a table to the caller: the audience, and the reach of each grant's role's paths. `AccessConditions(ctx, table, args, offset, write)` exports it for a read across tables. A filter through a relation holds its target the same way, through an unexported scope the repository sets on the filter. | A predicate generated per table, which a path through another table could not reach. A filter method that takes the context, which every filter's callers would change for. |
+| A grant reaches its rows through the same relation steps a row rule's path takes, and every Go filter now reaches through a one-to-many relation by its name (`Parties`), in every ORM: TypeScript's filter has it, and a row rule needs it with or without access. | The step in access ORMs alone, which would leave a row rule's path unserved elsewhere. |
+| The grants are generated in the ORM of a database with an `@accessGrants` table: `IssueGrant`, `RevokeGrant`, `ActiveGrants`, `GrantEnded` and `Database.AuthenticateGrant`, the `access.GrantAuthority` that `session.GrantAuthenticator(authority, inner, now)` reads on every call. A grant's row is read and written through its JSON, whatever pointer shapes the Go types give its members. | A runtime package reading the grant table by name, which would repeat the repository. |
+| The Go server records each call in the access log itself, in a route of an API whose database has an `@accessLog` table, before the permission check, through `session.AccessLogged`; a log that fails answers 500. | An option the app passes, as the TypeScript router takes (D156's left for TypeScript). |
+| A view's field under `@decrypted({ permission })` is masked, `[secret]`, for a caller without it, and each value opened for one with it is recorded in the operation's transaction. A revealed field holds text, and a database without an `@accessLog` table refuses the build, where TypeScript refuses the reveal when it happens. | A mask of another type's zero, which a reader cannot tell from a value. |
+| A path of `*` lets a grant read every row of the table, and the values the branches before it bound go with them. | Leaving them bound: TypeScript's `accessConditions` does, and a statement then binds more values than it names (left below). |
+| The loader refuses, in a Go server, each feature of D152 to D159 that Go does not serve yet, on the tables of the API's database and on the API's own provider slots and operations (`verify/go_features.go`); a Go server is an API whose server is Go and whose Go types are on. The loader checks the database when it reads it for a set or an operation, and the Go server's generation, which reads it always, checks it too (`verify.GoServerDatabaseErr`). Before it, a Go server left out the calendar and Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests`, `@agents`, provider slots and `@autonomy`, and, for D156, read an `@audience` table whole and opened a revealed field for every caller. `fixture-recurrence-api` was such a server, and is served in TypeScript now. | Refusing a DB service's Go types, as D181 refuses Rust's: the DB kind generates the Go ORM always and the build needs the Go types for it (`refuseORMWithoutGoTypes`), so every database with one of these tables would fail `build-all`, whatever language its API is served in. The Go ORM of these tables is their plain repositories, and the triggers and the core keep what each feature writes, whichever ORM writes the row; what would serve a feature wrongly is the Go server. Relaxing the build's requirement of Go types, which would leave a Go worker or job of the database with no ORM. This holds on Postgres, where the Go ORM keeps an audience (above) and triggers keep references and attachments; on SQLite, where neither holds for Go, D182 refuses a database's Go types for `@audience`, `@references` and `@attachments` (`sqlite_features.go`), and the two checks agree. |
+
+Built: `runtime/schema/go/access` and `session`'s `Caller`,
+`GrantAuthenticator`, `AccessLogged` and `RevealEntry`; `access_parity.json`,
+which Go writes and TypeScript checks (the token hash, the reaches, the
+call entries); `ormgen`'s `access.go` and the held repositories
+(`ormgen/access.go`, `templates/access.tmpl`), the one-to-many filter, a
+nullable `createdBy` stamped when a user acts, and a field named `field`
+ordering by `OrderByFieldField`; `apigen`'s caller, path rule, reveal and
+call log; the loader's refusal of a Go server. `TestGoAccessEndToEnd` serves
+`fixture-access-go-api` on Postgres through D156's checks, and
+`TestHeldRepositoriesCompile` builds the held repositories of the history,
+vector, merge, projection and behavior fixtures.
+
+Left:
+
+- A Go table operation that writes a list, `audienceNamed` among them
+  (D106); `fixture-access-go-api` sets a named audience through the ORM.
+- `ListAsOfBy<Field>ID` of a held table, which refuses, and the history of
+  a deleted row, which a held caller cannot read.
+- A held create outside a transaction keeps its row when it is refused, as
+  TypeScript's does; a generated table operation runs in one.
+- TypeScript's `accessConditions` keeps the values of the branches before
+  a `*` path bound.
+- The Go server's calendar, references, search, notifier, parties and
+  agents, which later Go workstreams port (D184 and on).
 
 ## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
 
@@ -2672,3 +2702,94 @@ Left:
   deleted, which a row trigger cannot tell.
 - The calendar, search, the notifier's queues, parties and agents on
   SQLite and D1 (D186, D189), on these shapes.
+
+## D183. An entered sender's run asks before every write, a party's run reaches only its grant's paths, a generated MCP tool carries its operation's @autonomy, and a generated TypeScript server builds the dispatcher into its Deps and runs its queues (D157, D158 amended)
+
+D158 left five of its own follow-ups in TypeScript. A run an inbound
+message started recorded the message's trust and ran as a verified one's;
+a run acting for a party reached through every path the agent's role
+names, whatever the party's grant reaches; `mcpGate` held every generated
+tool as an internal write; an app wired the dispatcher, its routes and its
+workers by hand; and the schema writer dropped `@agents` and `@autonomy`.
+
+### Trust
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A run an inbound message started records the message's trust on the run (`trust`, a field the loader adds to the runs part): `verified` when the message's row says so, and `entered` for anything else, an identity entered by hand, a row with no trust, a message the dispatcher cannot read or that the request carries as text. The dispatcher reads it from the message's row, never from the request. | The request's word for it, which any enqueuer could forge. A missing trust read as verified, which fails open. |
+| An `entered` sender's run reads as its policy says, and every other operation asks, whatever a policy row or the tool's mode says, as a money movement always does (`effectiveAutonomy`). `gate` reads the trust from the run's row, so the app's tools, `mcpGate`, `message_party` (through `sendPolicy`) and `ask_principal`, now gated as an internal write, all hold to it. The token's claims carry the trust (`claims.trust`) for the app; the approval's summary says the sender was entered by hand. | Its role narrowed to read and reply, which a write the party's grant allows could then never make, even with a person's approval. Refusing the run, which drops a real message from a known party. Narrowing its permissions, which would leave the policy rows to say auto for what remains. |
+
+### A party's paths
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A run acting for a party reaches, from each target, only the paths the agent's role names and the party's grant of the same target names too (`narrowReaches`), read on every call: the grant the run is under when the run names it, else each active grant of the party. A target no grant of the party names, the party's own row and its message's, gives no path: the run reaches the row alone. A grant that ended gives none. | Issuing the run's grants with a role of the intersection, a role row per run. Paths fixed when the run starts, which a grant revoked mid-run would not narrow. |
+
+### The generated MCP tools
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A tool's record in the router's table carries its operation's `@autonomy` (`autonomy: { class, mode? }`), which TypeScript's `McpRouteTool` declared and `mcpGate` already read; Rust's router reads the same table and ignores it. A tool whose operation declares none carries none, and the gate holds it as an internal write. | The class in the tool's `_meta`, which `tools/list` would show every client. |
+
+### The generated wiring
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A TypeScript API whose database declares the orchestration (and whose types write the repositories) holds the dispatcher in its `Deps` (`agents: Agents`). The API package's `agents.ts` exports `withAgents(deps, options)`, `createAgents` over `deps.orm` and the `@agents("requests")` queue with the app's options, and `dispatchAgentMessage`. Every entrypoint that builds `Deps` builds it but the dispatcher, asks the implementation's `createAgentOptions` (`AgentOptionsConstructor`, of `Deps` but its dispatcher) for the rest of `createAgents`' options, and builds `Deps` with `withAgents`. The scaffold writes a `createAgentOptions` that names an endpoint alone, and a build refuses an implementation that exports none. | Providers, the notifier and the inbound path built by the generator too, which D159, D153 and D157 leave to the app until the generated server builds each. The app building `createAgents` itself, which leaves the ORM and the queue to it. |
+| A server mounts `deps.agents.routes()` ahead of the API's router, which answers only under the endpoint's path, and passes `agents.mcpGate` as its MCP endpoint's call gate. | Mounting the routes at a fixed path, which the endpoint the sandbox is given must name anyway. |
+| A `@worker` of the requests queue or of D157's `@runRequests` queue is the dispatcher's: its entrypoint hands each message to `agents.handle` (`dispatchAgentMessage`) and calls no `createWorkers`, the requests queue's prune deletes the transcripts past their retention too, and the `Workers` interface and the implementation check have no method for either. Any other `@worker` stays the implementation's. | `inbound.runWorker(pool, m => agents.handle(m))` in the generated worker, which needs the app's inbound path in a process that runs nothing else of it; the queue is a queue, and its handler is the dispatcher's either way. |
+| The behavior worker's event handler takes the transaction as `Deps`' transaction type: the runtime's `OrmTx` lacked the `references` and `attachments` members a database with `@references` adds, so an API over one did not type-check. | A wider `transaction` type in the runtime, which every ORM caller reads. |
+
+### The schema writer
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript writer writes an orchestration class as `@agents("<part>")` and an operation's `@autonomy(class, mode?)`; the loader's fields and indexes carry `ir.OriginAgents` and are left out, so reading it back fills them again. The data forms carry both already. | Writing the part's fields, which the reader would then hold to the part's scalars twice. |
+
+Settled. An entered sender's run is held, not refused: it reads, and a
+person approves each write. A run reaches through a path only when both
+the agent's role and the party's grant name it. The generated server
+builds the dispatcher, its routes, its MCP gate and its queues' workers;
+the app gives the options only it knows.
+
+Built: the runs' `trust` (`internal/loader/agents`); `trustOf`,
+`effectiveAutonomy` and `narrowReaches` in `agents.ts`, the dispatcher
+recording the trust, the run's principal narrowing its paths and carrying
+the trust, `gate` holding an entered run to ask, `ask_principal` gated;
+`@autonomy` in `mcptools`' tool records; the agents' `Deps`, `agents.ts`
+and the scaffold's `createAgentOptions` (`tsrestgen`), the entrypoints'
+dispatcher, routes, MCP gate and workers (`servergen`), the build's check
+of `createAgentOptions` and of the workers' methods; the behavior worker's
+transaction type; `@agents` and `@autonomy` in the TypeScript writer;
+`examples/agent-orchestration`'s stack and implementation in place of its
+hand wiring; the guide's "Wire the dispatcher". The tests:
+`TestAgentRunsEndToEnd`, on Postgres, now with a verified and an entered
+sender's runs, a party's paths narrowed and ended with its grant;
+`TestMCPToolsCarryAutonomy`, `TestDepsHoldTheAgentDispatcher`,
+`TestTypeScriptRouterHoldsAgentRunsToTheirAutonomy`,
+`TestTSWriterWritesAgentOrchestration`, and
+`TestAgentOrchestrationExampleUsesTheGeneratedWiring`, which builds the
+example's stack and type-checks its server and workers against its
+implementation.
+
+Left:
+
+- Go, Rust and SQLite: the trust, the narrowed paths, the tool records'
+  `@autonomy` read by their gates, and the generated wiring (D158's left).
+- A run's token on the API's own routes: the generated server accepts it
+  only where the implementation's authenticator does
+  (`deps.agents.authenticator(inner)`), and a route holds the call to its
+  run's autonomy only where the implementation asks `deps.agents.gate`;
+  the generated router could gate every route an agent calls as the MCP
+  endpoint does.
+- The approval routes (`<endpoint>/approvals/<id>/approve`) in the
+  generated server, which `routes()` serves only with an authenticator of
+  a `Request`; approvals are decided through a reply or the app's own
+  operation meanwhile.
+- The channel's trust (D153's `channelTrust`) narrowing an inbound run
+  beside the identity's.
+- A trust read from a request that names its message as `{ table, key }`,
+  which runs as entered now.
+- A test that builds an API with the orchestration for Cloudflare: the
+  Workers entrypoints (`fetch.ts`, `drain.ts`) carry the same wiring, and
+  the example's stack has a local environment alone.
