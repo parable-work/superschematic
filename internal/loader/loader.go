@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/access"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/conversations"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/notifications"
@@ -681,6 +682,15 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// tables' fields join the schema before the pass, so it reads them as
 	// the table's own.
 	if added := access.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Outside parties and inbound messages (D157): the fields of the
+	// conversations' classes and the run requests queue join the schema
+	// before the references and attachments expansion, so a messages class
+	// may hold references and files.
+	if added := conversations.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

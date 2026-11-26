@@ -214,6 +214,15 @@ type ORMTable struct {
 	// notifier raises and routes; nil for a table with none.
 	TableEvents []ORMEvent
 
+	// Party marks a @party table (D157), whose rows are principals of kind
+	// party; PartyTitle is the field a party is named by, or "".
+	Party      bool
+	PartyTitle string
+
+	// Conversations is the part of the conversations the table is (D157):
+	// conversations or messages; empty for any other table.
+	Conversations string
+
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
@@ -557,6 +566,12 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			}
 			table.Notifier = notifierPartOf(td)
 			table.TableEvents = eventsOf(td)
+			if td.Party != nil {
+				table.Party, table.PartyTitle = true, td.Party.Title
+			}
+			if td.Conversations != nil {
+				table.Conversations = td.Conversations.Part
+			}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
