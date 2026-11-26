@@ -612,8 +612,9 @@ what the first call was.
 | Rust | `sdk.orders.place_order(input, Some(&RequestOptions { idempotency_key: Some("order-7".into()), ..Default::default() }))`, a field of `RequestOptions` |
 
 A method of any other operation sends no key: the Python one takes no
-`idempotency_key`, and the Rust one reads none from its options. The answer of a repeat is the first call's, so a
-method returns it as it returned the first. A key used for another
+`idempotency_key`, and the Rust one reads none from its options. The
+answer of a repeat is the first call's, so a method returns it as it
+returned the first. A key used for another
 request is the API's 422 `idempotency_key_reused`, and a repeat while the
 first call is still running its 409 `idempotency_in_flight`, each the
 SDK's API error with that code.

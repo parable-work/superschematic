@@ -218,8 +218,8 @@ path for when the store is unavailable.
   `guides/api-routes/#per-record-access`).
 - **Retries, per-caller budgets and old clients are declared.** A write a
   client may send twice takes `@idempotent({ ttl? })` and a table
-  `IdempotencyKey implements IdempotencyKeys` in its database (D140; Go and
-  TypeScript). A route that spends something per caller takes
+  `IdempotencyKey implements IdempotencyKeys` in its database (D140; Go,
+  TypeScript and Rust). A route that spends something per caller takes
   `@rateLimit({ requestsPerMinute, key: "principal" })`, its counter store
   passed to the router (D131). `clientVersions: true` in an API's config
   answers a client older than `MIN_CLIENT_VERSIONS` 426 (D143).
@@ -233,7 +233,8 @@ path for when the store is unavailable.
   enqueue whatever writes its rows, with `backfill: true` (or `stack
   queue backfill`) for the rows already there;
   `mode: "drain"` in an environment's worker settings for a gcp worker
-  that runs only when an enqueue wakes it (D145; Go and TypeScript); and
+  that runs only when an enqueue wakes it (D145; Go, TypeScript and Rust,
+  a behavior worker's among them); and
   `@deriver` on an API class to fill a table's or an engine type's Derived
   fields from a model.
 - **What every writer must keep is declared.** A status that moves only
@@ -288,8 +289,8 @@ path for when the store is unavailable.
   released? })` on each member table, a string `order` field for order
   keys (D137), `released: true` for a table of the released rows (D139),
   and `@graphOperations(Root)` on an empty API class to serve the graph's
-  operations as routes, SDK methods and MCP tools (D138, TypeScript
-  server). Docs: `reference/version-graphs/`.
+  operations as routes, SDK methods and MCP tools (D138, TypeScript, Go
+  and Rust servers). Docs: `reference/version-graphs/`.
 - **Reads that may lag go to a replica in Go.** `ConnectWithPools(primary,
   replica)`, then `ReadOnly()` or `ReadOnlyTransaction` (D150); a
   `@projection` whose rows a write withdraws takes `replica: false`. The
