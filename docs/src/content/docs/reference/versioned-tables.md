@@ -109,6 +109,8 @@ refuse.
 | Method | Does |
 | --- | --- |
 | `GetVersion(ctx, id, version)` | The row at that version. A tombstone's version reads as `ErrNotFound`. |
+| `GetVersions(ctx, keys)` | Many versions in one query. `keys` is a `[]VersionKey[K]` of `{ID, Version}`, and entry `i` of the result is what `GetVersion` returns for `keys[i]`, or nil where it returns `ErrNotFound`. A key named twice fills both entries. |
+| `GetVersionsWithFields(ctx, keys, fields)` | `GetVersions` that reads only the fields `fields` selects. The other fields are zero, and a selected relation holds only the key it stored. An empty selection and a nested one are errors. |
 | `ListVersions(ctx, id, opts)` | Every history record of the row, oldest first, as `types.HistoryRecord[*T]` (`Version`, `Operation`, `RecordedAt`, `Value`). `opts` pages. |
 | `GetAsOf(ctx, id, ts)` | The row as it was at `ts`: its latest history record at or before `ts`. `ErrNotFound` when there was none or it was a delete (for a soft-deletable table, also a soft-deleted image). |
 | `ListAsOfBy<Relation>ID(ctx, id, ts, opts)` | Per to-one relation: the rows that pointed at `id` at `ts`, with the same rule for deleted rows. |
@@ -142,6 +144,10 @@ if errors.Is(err, ErrVersionConflict) {
 }
 
 past, err := db.Recipe.GetVersion(ctx, breadID, 2)          // the row as version 2 left it
+pinned, err := db.Recipe.GetVersions(ctx, []VersionKey[types.IdentityUUID]{
+	{ID: breadID, Version: 2},
+	{ID: soupID, Version: 5},
+}) // pinned[1] is nil when soup has no version 5
 then, err := db.Recipe.GetAsOf(ctx, breadID, lastWeek)      // the row as it was at a time
 steps, err := db.Step.ListAsOfByRecipeID(ctx, breadID, lastWeek, nil)
 ```

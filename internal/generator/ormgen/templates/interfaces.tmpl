@@ -29,6 +29,8 @@ type ReadOnly{{ .TypeName }}RepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error)
 	{{- if .Versioned }}
 	GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error)
+	GetVersions(ctx context.Context, keys []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[{{ .PrimaryKeyType }}], fields {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error)
 	ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error)
 	GetAsOf(ctx context.Context, id {{ .PrimaryKeyType }}, ts time.Time) (*types.{{ .TypeName }}, error)
 	{{- range .Relationships }}
@@ -55,6 +57,8 @@ type {{ .TypeName }}RepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error)
 	{{- if .Versioned }}
 	GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error)
+	GetVersions(ctx context.Context, keys []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error)
+	GetVersionsWithFields(ctx context.Context, keys []VersionKey[{{ .PrimaryKeyType }}], fields {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error)
 	ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error)
 	GetAsOf(ctx context.Context, id {{ .PrimaryKeyType }}, ts time.Time) (*types.{{ .TypeName }}, error)
 	{{- if .HasPruneHistory }}
@@ -342,6 +346,14 @@ func (r *NoOp{{ .Name }}) GetManyByIDs(_ context.Context, _ []{{ .LookupKeyType 
 
 func (r *NoOp{{ .Name }}) GetVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64) (*types.{{ .TypeName }}, error) {
 	return nil, ErrNotFound
+}
+
+func (r *NoOp{{ .Name }}) GetVersions(_ context.Context, keys []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error) {
+	return make([]*types.{{ .TypeName }}, len(keys)), nil
+}
+
+func (r *NoOp{{ .Name }}) GetVersionsWithFields(_ context.Context, keys []VersionKey[{{ .PrimaryKeyType }}], _ {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
+	return make([]*types.{{ .TypeName }}, len(keys)), nil
 }
 
 func (r *NoOp{{ .Name }}) ListVersions(_ context.Context, _ {{ .PrimaryKeyType }}, _ *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error) {

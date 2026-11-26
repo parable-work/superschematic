@@ -71,74 +71,92 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsListPaymentActions")
         .apply(post(handle_order_payments_payments_list_payment_actions));
     router = router.route("/api/order/payments/list-payment-actions", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsCapturePayment")
         .apply(post(handle_order_payments_payments_capture_payment));
     router = router.route("/api/order/{id}/payments/capture-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsOpenPayment")
         .apply(post(handle_order_payments_payments_open_payment));
     router = router.route("/api/order/{id}/payments/open-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRecordPaymentEvent")
         .apply(post(handle_order_payments_payments_record_payment_event));
     router = router.route("/api/order/{id}/payments/record-payment-event", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRefundFor")
         .apply(post(handle_order_payments_payments_refund_for));
     router = router.route("/api/order/{id}/payments/refund-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRefundPayment")
         .apply(post(handle_order_payments_payments_refund_payment));
     router = router.route("/api/order/{id}/payments/refund-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsSettleRefundFor")
         .apply(post(handle_order_payments_payments_settle_refund_for));
     router = router.route("/api/order/{id}/payments/settle-refund-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsVoidPayment")
         .apply(post(handle_order_payments_payments_void_payment));
     router = router.route("/api/order/{id}/payments/void-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_order_payments_status_transition));
     router = router.route("/api/order/{id}/status/transition", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsListPaymentActions")
         .apply(post(handle_refund_payments_payments_list_payment_actions));
     router = router.route("/api/refund/payments/list-payment-actions", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsCapturePayment")
         .apply(post(handle_refund_payments_payments_capture_payment));
     router = router.route("/api/refund/{id}/payments/capture-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsOpenPayment")
         .apply(post(handle_refund_payments_payments_open_payment));
     router = router.route("/api/refund/{id}/payments/open-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRecordPaymentEvent")
         .apply(post(handle_refund_payments_payments_record_payment_event));
     router = router.route("/api/refund/{id}/payments/record-payment-event", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRefundFor")
         .apply(post(handle_refund_payments_payments_refund_for));
     router = router.route("/api/refund/{id}/payments/refund-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsRefundPayment")
         .apply(post(handle_refund_payments_payments_refund_payment));
     router = router.route("/api/refund/{id}/payments/refund-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsSettleRefundFor")
         .apply(post(handle_refund_payments_payments_settle_refund_for));
     router = router.route("/api/refund/{id}/payments/settle-refund-for", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("paymentsVoidPayment")
         .apply(post(handle_refund_payments_payments_void_payment));
     router = router.route("/api/refund/{id}/payments/void-payment", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("statusTransition")
         .apply(post(handle_refund_payments_status_transition));
     router = router.route("/api/refund/{id}/status/transition", route);
     router

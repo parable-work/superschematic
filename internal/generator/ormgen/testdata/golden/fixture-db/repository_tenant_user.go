@@ -192,6 +192,98 @@ func (r *TenantUserRepository) GetVersion(ctx context.Context, id types.Identity
 	return result, nil
 }
 
+// GetVersions retrieves many historical TenantUser values in one query
+// (D166). Entry i of the result is the value GetVersion(ctx, keys[i].ID,
+// keys[i].Version) returns, or nil where GetVersion returns ErrNotFound: no
+// such version, or a delete tombstone. A key named twice fills both entries.
+func (r *TenantUserRepository) GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.TenantUser, error) {
+	values := make([]*types.TenantUser, len(keys))
+	if len(keys) == 0 {
+		return values, nil
+	}
+	ids, versions := tenantUserVersionKeyArrays(keys)
+	// One parameter per column whatever the key count: the keys join as
+	// arrays, and WITH ORDINALITY says which key each history row answers.
+	query := `SELECT k.position, h.data FROM unnest($1::UUID[], $2::BIGINT[]) WITH ORDINALITY AS k(key_value, key_version, position) JOIN tenant_user_history h ON h.id = k.key_value AND h._version = k.key_version WHERE h.operation <> 'DELETE'`
+	if err := r.readVersions(ctx, query, values, ids, versions); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// GetVersionsWithFields is GetVersions reading only the selected fields of
+// each history image (D166): the fields left out keep their zero values.
+// A selected relation returns the key it stored, with no row behind it. It
+// refuses an empty selection and a nested selection of a relation, which a
+// history image cannot hydrate.
+func (r *TenantUserRepository) GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields TenantUserFields) ([]*types.TenantUser, error) {
+	columns := fields.ToStringSlice()
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("orm: GetVersionsWithFields of TenantUser selects no field")
+	}
+	if !fields.TenantNested.IsZero() {
+		return nil, fmt.Errorf("orm: GetVersionsWithFields of TenantUser cannot hydrate tenant from a history image")
+	}
+	values := make([]*types.TenantUser, len(keys))
+	if len(keys) == 0 {
+		return values, nil
+	}
+	ids, versions := tenantUserVersionKeyArrays(keys)
+	// The image keeps only the selected columns, so the decoder of a whole
+	// image reads them and leaves every other field zero.
+	query := `SELECT k.position, (SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM jsonb_each(h.data) AS e WHERE e.key = ANY($3::TEXT[])) FROM unnest($1::UUID[], $2::BIGINT[]) WITH ORDINALITY AS k(key_value, key_version, position) JOIN tenant_user_history h ON h.id = k.key_value AND h._version = k.key_version WHERE h.operation <> 'DELETE'`
+	if err := r.readVersions(ctx, query, values, ids, versions, columns); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// tenantUserVersionKeyArrays splits keys into the key and version arrays
+// GetVersions binds, each key as GetVersion binds it.
+func tenantUserVersionKeyArrays(keys []VersionKey[types.IdentityUUID]) ([]any, []int64) {
+	ids := make([]any, len(keys))
+	versions := make([]int64, len(keys))
+	for i, key := range keys {
+		ids[i] = key.ID.ToUUID()
+		versions[i] = key.Version
+	}
+	return ids, versions
+}
+
+// readVersions runs a GetVersions query, whose rows are a key's position,
+// counted from 1, and a history image, and sets values[position-1] to the
+// image's value.
+func (r *TenantUserRepository) readVersions(ctx context.Context, query string, values []*types.TenantUser, args ...any) error {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, args...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, args...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query TenantUser history versions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var position int64
+		var data []byte
+		if err := rows.Scan(&position, &data); err != nil {
+			return fmt.Errorf("failed to scan TenantUser history version: %w", err)
+		}
+		value, err := decodeTenantUserHistoryData(data)
+		if err != nil {
+			return err
+		}
+		values[position-1] = value
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating TenantUser history versions: %w", err)
+	}
+	return nil
+}
+
 // ListVersions retrieves historical TenantUser values ordered by version.
 func (r *TenantUserRepository) ListVersions(ctx context.Context, id types.IdentityUUID, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error) {
 	if opts == nil {

@@ -185,6 +185,101 @@ func (r *CoverRepository) GetVersion(ctx context.Context, id types.IdentityUUID,
 	return result, nil
 }
 
+// GetVersions retrieves many historical Cover values in one query
+// (D166). Entry i of the result is the value GetVersion(ctx, keys[i].ID,
+// keys[i].Version) returns, or nil where GetVersion returns ErrNotFound: no
+// such version, or a delete tombstone. A key named twice fills both entries.
+func (r *CoverRepository) GetVersions(ctx context.Context, keys []VersionKey[types.IdentityUUID]) ([]*types.Cover, error) {
+	values := make([]*types.Cover, len(keys))
+	if len(keys) == 0 {
+		return values, nil
+	}
+	ids, versions := coverVersionKeyArrays(keys)
+	// One parameter per column whatever the key count: the keys join as
+	// arrays, and WITH ORDINALITY says which key each history row answers.
+	query := `SELECT k.position, h.data FROM unnest($1::UUID[], $2::BIGINT[]) WITH ORDINALITY AS k(key_value, key_version, position) JOIN cover_history h ON h.id = k.key_value AND h._version = k.key_version WHERE h.operation <> 'DELETE'`
+	if err := r.readVersions(ctx, query, values, ids, versions); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// GetVersionsWithFields is GetVersions reading only the selected fields of
+// each history image (D166): the fields left out keep their zero values.
+// A selected relation returns the key it stored, with no row behind it. It
+// refuses an empty selection and a nested selection of a relation, which a
+// history image cannot hydrate.
+func (r *CoverRepository) GetVersionsWithFields(ctx context.Context, keys []VersionKey[types.IdentityUUID], fields CoverFields) ([]*types.Cover, error) {
+	columns := fields.ToStringSlice()
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("orm: GetVersionsWithFields of Cover selects no field")
+	}
+	if !fields.RecipeNested.IsZero() {
+		return nil, fmt.Errorf("orm: GetVersionsWithFields of Cover cannot hydrate recipe from a history image")
+	}
+	if !fields.RefNested.IsZero() {
+		return nil, fmt.Errorf("orm: GetVersionsWithFields of Cover cannot hydrate ref from a history image")
+	}
+	values := make([]*types.Cover, len(keys))
+	if len(keys) == 0 {
+		return values, nil
+	}
+	ids, versions := coverVersionKeyArrays(keys)
+	// The image keeps only the selected columns, so the decoder of a whole
+	// image reads them and leaves every other field zero.
+	query := `SELECT k.position, (SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM jsonb_each(h.data) AS e WHERE e.key = ANY($3::TEXT[])) FROM unnest($1::UUID[], $2::BIGINT[]) WITH ORDINALITY AS k(key_value, key_version, position) JOIN cover_history h ON h.id = k.key_value AND h._version = k.key_version WHERE h.operation <> 'DELETE'`
+	if err := r.readVersions(ctx, query, values, ids, versions, columns); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// coverVersionKeyArrays splits keys into the key and version arrays
+// GetVersions binds, each key as GetVersion binds it.
+func coverVersionKeyArrays(keys []VersionKey[types.IdentityUUID]) ([]any, []int64) {
+	ids := make([]any, len(keys))
+	versions := make([]int64, len(keys))
+	for i, key := range keys {
+		ids[i] = key.ID.ToUUID()
+		versions[i] = key.Version
+	}
+	return ids, versions
+}
+
+// readVersions runs a GetVersions query, whose rows are a key's position,
+// counted from 1, and a history image, and sets values[position-1] to the
+// image's value.
+func (r *CoverRepository) readVersions(ctx context.Context, query string, values []*types.Cover, args ...any) error {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, args...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, args...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query Cover history versions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var position int64
+		var data []byte
+		if err := rows.Scan(&position, &data); err != nil {
+			return fmt.Errorf("failed to scan Cover history version: %w", err)
+		}
+		value, err := decodeCoverHistoryData(data)
+		if err != nil {
+			return err
+		}
+		values[position-1] = value
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating Cover history versions: %w", err)
+	}
+	return nil
+}
+
 // ListVersions retrieves historical Cover values ordered by version.
 func (r *CoverRepository) ListVersions(ctx context.Context, id types.IdentityUUID, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error) {
 	if opts == nil {

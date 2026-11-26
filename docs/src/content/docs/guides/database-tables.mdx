@@ -1983,6 +1983,29 @@ returns an error the savepoint is rolled back to and released, and the
 transaction around it goes on, as it may after a statement that failed
 in `fn` (D89).
 
+In Go, a transaction runs work after it commits (D166). The transaction a
+`Transaction`, `TransactionWith` or `ReadOnlyTransaction` function takes is
+a `*orm.Tx`, and it has three methods that the `TxInterface` does not:
+
+- `tx.AfterCommit(fn)` adds `fn` to the functions that run after the
+  commit, in the order added, with the transaction's context, before
+  `Transaction` returns. Use it for a side effect that must not happen
+  before the commit, such as a signal that tells another process to read
+  what the transaction wrote. An error from the transaction's function, a
+  panic, or a failed commit runs none of them. A nested `tx.Transaction`
+  that rolls back to its savepoint keeps them, those it added among them.
+- `tx.AfterCommitHook(key, newHook)` returns the hook the transaction holds
+  under `key`, and makes one with `newHook` the first time. A hook is an
+  `orm.CommitHook`, whose `AfterCommit(ctx)` runs once after the commit,
+  so many writes of one transaction can add to one hook.
+- `tx.CommitDuration()` is how long the `COMMIT` took, zero before it.
+
+A caller takes these methods with a type assertion, `tx.(*orm.Tx)`, or
+asserts a small interface of its own, which the no-op transaction does not
+satisfy. A `RunEvent` handler's transaction is a `*orm.Tx` too: its
+functions run after the event's own transaction commits, or after the
+caller's when `RunEvent` runs in one.
+
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
@@ -3784,8 +3807,9 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads one page of 500 rows; past it the value is
-  `{ "over": true }` and its gate does not hold.
+  details. A rollup reads the rows that relate to the row 500 at a time,
+  up to 10,000; past that the value is `{ "over": true }` and its gate
+  does not hold.
 - Rollups keeps no column. A read of the row computes its values through
   the core; no repository, route or SDK serves that read yet. Rollups
   joins and leaves a table with rows.

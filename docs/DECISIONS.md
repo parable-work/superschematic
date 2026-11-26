@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D168 is the highest so far.
+  the highest number any branch has used. D199 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -1871,10 +1871,10 @@ writes an access-log row.
 
 Left:
 
-- The Go and Rust servers and repositories: the principal's kinds (Go's
-  through the auth-provider hook `callerPrincipal`, which answers the id
-  alone so far), the audience filter, path row
-  rules, grants, reveal and the access log. Python's ORM.
+- The Go server and repositories: the principal's kinds (through the
+  auth-provider hook `callerPrincipal`, which answers the id alone so
+  far), the audience filter, path row rules, grants, reveal and the
+  access log. Rust's on SQLite (D181). Python's ORM.
 - An audience on SQLite and D1, and a GIN index on `effective_audience`
   the build writes.
 - An audience in a declared query (`@query`), which reads every row.
@@ -2523,3 +2523,47 @@ Left:
   grant's; today the run's scope is the grant's target, the party's row
   and the message's, and the agent's role's paths from them.
 - The schema writer writing `@agents` and `@autonomy` back.
+
+## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
+
+D156 built per-record access in the TypeScript runtime and left the Go
+and Rust servers. This entry ports it to Rust, on Postgres, with the
+TypeScript tables, columns, statements and refusals. It is the first of
+the Rust parity entries; the later ones port D152 to D159 onto it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime's `Principal` gains `kind` (`PrincipalKind`, `user` unless set), `acting_for`, `grants` (`GrantReach`) and `credential`, as fields with builders, so every authenticator written before still compiles and reads as a user. | A principal enum per kind, which every guard would match on. |
+| Rust has no ambient caller, so the caller travels explicitly: a table operation's repositories are opened `with_access(AccessCaller::of(principal))`, the anonymous caller for a route with none, and a hand-written implementation opens its own the same way. Repositories opened without it, and `as_system()`, read every row. | A task-local caller, which a spawned task would lose and D87's acting user does not use either. |
+| The repositories' definition gains `audience`, `access` and `many` (the one-to-many relations), which rustgen writes from `sqlutil` as tsgen does. The conditions are the TypeScript `accessConditions`: `audience_conditions` (exported, as `audienceConditions` is) and a branch per grant, a role's path written as a nested filter that steps through to-one and one-to-many relations. | Generated per-table SQL, a second compiler beside the filter's. |
+| A grant's end by its target's state is read by counting the target's rows with the state (`Repository::count`), so no value of the row is opened and an encrypted target needs no key. | Reading the row, as the TypeScript runtime does, which in Rust opens every encrypted field and fails without the database's keys. |
+| The access log of a call is an authenticator's: `Authenticator::called` is told each call of an operation that `RouteControls::operation` names, after the caller is established and before the permission check, and `access::Logged` records `call_entry` in an `AccessLog` (`TableAccessLog` over the `@accessLog` table). The generated router names each authorized route's operation. | A field of `RouterOptions`, which derives `Eq` and could not hold the log. |
+| A table operation's literal carries its name, its `@decrypted` members and their reveal permissions; the handler masks a member to a caller without its permission, `[secret]` as TypeScript does, and writes a `reveal` row per value opened, as the system, in the operation's transaction. | A reveal outside the transaction, which a refused operation would still record. |
+| The Rust outputs refuse each D152 to D159 feature they do not serve, at load (`verify/rust_features.go`, from the config's `outputs.types.rust` and `outputs.api.language: rust`) and in rustgen and rustrestgen for IR that did not come through it: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests` and `@agents` on a DB service's Rust types, and on a Rust server `@providers` slots, `@autonomy` and its database's table features. Recurrence is refused on a Rust server alone: the core runs it in every language and the Rust types write it through the core. Before this, the Rust outputs dropped every one of them in silence, and a `@decrypted({ permission })` member and an `@audience` table's rows were served to every caller. | Refusing Recurrence in the Rust types too, which the Rust core runs and fixture-recurrence-db's config lists. |
+
+Built: the runtime's principal and the identity principal's API key
+(`runtime/http/rust/src/auth.rs`, `identity/service.rs`); the
+repositories' audience, grant reach, one-to-many filters, `count` and
+`with_access` (`orm/mod.rs`, `plan.rs`, `run.rs`, `postgres.rs`,
+`sqlite.rs`); path row rules and reveal in the table operations
+(`orm/routes.rs`); grants and the access log (`access.rs`); the
+definition's `audience`, `access` and `many` (`rustgen/orm.go`), the
+generated `with_access`, the table operation's literal and
+`.operation(...)` (`rustrestgen`); the refusals
+(`internal/loader/verify/rust_features.go`, `internal/loader/rust_output.go`).
+`TestRustAccessEndToEnd` runs D156's "done when" through the generated
+Rust router on Postgres: audience reads, writes, searches and counts, a
+named and an inherited audience and the cascade, an agent run, a row
+rule through three relations, a grant that reaches only its paths and
+ends by revocation, date and state, a reveal, and the access log.
+
+Left:
+
+- Grants, the access log and grant reach on the Rust server's SQLite;
+  an audience stays Postgres's in every language.
+- A generated Rust server that wires `GrantAuthenticator` and `Logged`
+  itself; an app wraps the authenticator its `Handlers` take.
+- The typed filters' one-to-many members; a path filter is the
+  untyped repositories' and the table operations' so far.
+- The D152 to D159 features the refusals name, which the later Rust
+  entries port.

@@ -714,6 +714,45 @@ revalidates a file it was allowed to keep, so pair validators with a
 The Go and TypeScript servers answer each case alike
 (`runtime/http/testdata/file_answer_parity.json`).
 
+### A stream
+
+An operation with `@httpBinaryStream` answers a stream, not the JSON
+envelope (D167): rows a caller reads as they arrive, such as an Arrow IPC
+stream or newline-delimited JSON. A reporting API exports a report's rows:
+
+```ts
+export class Reports {
+  @rest(HttpMethod.POST, "reports/{reportId}/export")
+  @manualRouteRegistration
+  @httpBinaryStream({ contentType: "application/vnd.apache.arrow.stream", responseHeaders: ["X-Export-Id"] })
+  exportReport(reportId: string, input: ExportReportInput, format: QueryParam<Nullable<string>>): ReportSummary {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- `contentType` is the media type of the success body, lowercase and
+  without parameters. JSON, `application/json` or a `+json` type, is
+  refused: a JSON result is the declared type, without the decorator.
+- `responseHeaders` names the headers the stream answers with, each a
+  header name, once.
+- The generated routes answer the envelope, so the operation is also
+  `@manualRouteRegistration`. Each router gates the route and hands it to
+  your handler, which writes the stream: the body, its `Content-Type`
+  and the headers. A refusal is a problem body, as any route's.
+- Each SDK method returns the stream unread, with its headers
+  ([Client SDKs](/superschematic/guides/client-sdks/#streams)).
+- The OpenAPI document describes the 200 as the stream's media type, a
+  binary string, with the `responseHeaders`, and no envelope. The
+  refusals stay `application/problem+json`.
+- A client sends the input type as a JSON body, beside the path and
+  query parameters, so the operation is no `@webhook`, not encrypted,
+  takes no [upload](#uploads) and no `FilterBy`, and is not `@paginated`
+  or `@idempotent`.
+- The declared result, `ReportSummary` here, is the operation's result
+  in the [tool documents](/superschematic/reference/mcp-tools/): the value
+  a tool binding hands its caller after it reads the stream.
+
 ## Errors
 
 An implementation returns an error to fail the call. The generated package
@@ -2001,12 +2040,53 @@ buildRouter(implementations, {
 });
 ```
 
+### In the Rust server
+
+The Rust server serves the same access on Postgres (D181). Its runtime's
+`Principal` has the same kind, `acting_for`, grants and credential, and
+the identity service's principal names the API key it called with.
+
+A table operation's repositories keep to the route's caller, and a route
+with no caller sees the rows everyone may. Rust has no ambient caller, so
+a hand-written implementation opens its repositories for one:
+
+```rust
+let repositories = Repositories::new(&client)?
+    .acting(orm::routes::acting(ctx.principal.as_ref()))
+    .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+```
+
+Repositories opened without `with_access`, and `as_system()`, read every
+row, as a job does. `audience_conditions(definition, audience, caller,
+args, write)` in `orm` is the predicate a read across tables applies.
+
+The grants and the access log are in the runtime's `access` module:
+
+| TypeScript | Rust |
+| --- | --- |
+| `issueGrant`, `revokeGrant`, `activeGrants` | `issue_grant`, `revoke_grant`, `active_grants` |
+| `grantAuthenticator({ orm, inner })` | `GrantAuthenticator::new(tables)?.with_inner(inner)` |
+| `accessLog: accessLogOf(orm)` | `Logged::new(authenticator, Arc::new(access_log_of(&tables)?.unwrap()))` |
+
+`Logged` wraps the authenticator the server's `Handlers` take, and records
+a call once the router has its caller, before its permissions are
+checked. A row rule's path and `@decrypted({ permission })` are served by
+the generated table operations, as in TypeScript.
+
+The Rust outputs refuse, at build time, the platform features they do not
+serve yet: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
+`@references`, `@attachments`, `@searchable`, `@party`, `@conversations`,
+`@runRequests` and `@agents` on a table of a DB service with Rust types,
+and on a Rust server `@providers` slots, `@autonomy` and a table that
+composes Recurrence.
+
 ### What access does not do yet
 
 | Not built | Until then |
 | --- | --- |
 | an audience on SQLite and D1 | an `@audience` table is built for Postgres |
-| the Go and Rust servers' and repositories' audience, grants, reveal and access log | the TypeScript server serves them |
+| the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
+| grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
 | a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |

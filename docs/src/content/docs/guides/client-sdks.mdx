@@ -250,6 +250,26 @@ The Rust SDK refuses to generate an API with a `FileDownload` result,
 naming the operation; generate another language's SDK for it, or leave
 Rust out of `outputs.sdk`. Support follows.
 
+## Streams
+
+An operation with `@httpBinaryStream`
+([A stream](/superschematic/guides/api-routes/#a-stream)) returns its
+success body unread, with its headers, in place of the declared result
+(D167). The request asks for the stream's media type or a problem in
+`Accept`, and the SDK checks the answer's `Content-Type` against the
+declared one before it returns: another media type is an error, with the
+body closed. A refusal is the error any call's is. In Go and TypeScript
+the SDK's timeout bounds the wait for the response headers, not the body,
+which the call's cancellation and closing the stream bound. The last
+column says what bounds it in Python and Rust.
+
+| Language | The method returns | Read, then close |
+| --- | --- | --- |
+| TypeScript | `Promise<BinaryStreamResponse>`: `{ contentType, body, status, headers }`, `body` a `ReadableStream<Uint8Array>` and `headers` keyed in lower case | read `stream.body` to its end, or cancel it; `stream.headers["x-export-id"]`; another media type is a `NetworkError` |
+| Go | `(*runtime.BinaryStream, error)`: `ContentType`, `Header http.Header`, `Body io.ReadCloser` | `defer stream.Close()`, read `stream.Body`, `stream.Header.Get("X-Export-Id")`; another media type is `ErrStreamContentType` |
+| Python | `BinaryStream`: `content_type`, `status_code`, `headers`, and `read(size)` or iteration for the body | `with stream:` then `for chunk in stream`, `stream.headers["X-Export-Id"]`; another media type raises `SDKError`. The timeout bounds each read, not the whole body |
+| Rust | `Result<runtime::BinaryStream, SDKError>`: `content_type` and `response`, the `reqwest::Response` | `stream.response.chunk().await` until `None`, `stream.response.headers()`, drop it to end the request; another media type is `SDKError::Contract`. The client's timeout, or `RequestOptions::timeout_ms`, bounds the whole exchange, the body included |
+
 ## Errors
 
 A response outside 2xx is an error that carries the status, the problem's
