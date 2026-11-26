@@ -1920,13 +1920,39 @@ does not see.
 
 The predicate is exported for a read across tables to apply as a
 repository does: `audienceConditions(definition, caller, args, offset)`
-from `@superschematic/http-runtime/postgres`, with `currentAccess()` for
-the caller of the operation being run.
+from `@superschematic/http-runtime/postgres`, or `/d1`, with
+`currentAccess()` for the caller of the operation being run.
 
 The build checks that `owner` holds an id, that `inheritFrom` is a to-one
 relation to an `@audience` table, that the table declares none of the five
-columns, and that a projection of the table holds its key. An audience is
-built for Postgres: a service that lists the `sqlite` dialect is refused.
+columns, and that a projection of the table holds its key.
+
+#### On SQLite and D1
+
+A service that lists `sqlite` keeps an audience too (D182), and its
+TypeScript repositories on SQLite hold every read and write to it as they
+do on Postgres
+([TypeScript on SQLite and D1](/superschematic/guides/database-tables/#on-sqlite-and-d1)).
+`effective_audience` is a JSON array of ids in a `TEXT` column, and a read
+asks whether it holds the caller's id through `json_each`:
+
+```sql
+(note.effective_audience IS NULL
+  OR EXISTS (SELECT 1 FROM json_each(note.effective_audience) WHERE json_each.value IN (?1, ?2)))
+```
+
+SQLite has no trigger functions, and does not fire a trigger that is
+already running, so its triggers count on no other to finish their work:
+
+| Trigger | Fires | Does |
+| --- | --- | --- |
+| `trg_<table>_audience_insert` | after each insert | refuses an audience or an agent access it does not know, and sets the row's resolved columns |
+| `trg_<table>_audience_update` | after each update whose resolved columns are not what its audience resolves to | the same; its condition stops it once they are, whether or not a connection turns recursive triggers on |
+| `trg_<table>_audience_cascade` | on a table another inherits from, after an update that changes a row's resolved columns | sets each inheriting child's from the parent; a table that inherits from itself sets every inheriting row below the parent through a recursive query, and then the children of each in other tables |
+
+Go's and Rust's repositories on SQLite do not keep to an audience yet, so a
+service that lists `sqlite` and enables their types is refused, naming the
+language.
 
 ### Grants
 
@@ -2066,7 +2092,8 @@ composes Recurrence.
 
 | Not built | Until then |
 | --- | --- |
-| an audience on SQLite and D1 | an `@audience` table is built for Postgres |
+| the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
+| a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
 | the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
 | grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |

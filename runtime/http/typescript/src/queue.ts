@@ -17,8 +17,8 @@ import {
   type QueueDefinition,
   type QueueField,
 } from './queue-core.js';
-import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
 export { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
@@ -356,3 +356,5 @@ const queueTypes = {
     return override ?? pg.types.getTypeParser(oid, format);
   },
 };
+
+

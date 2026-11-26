@@ -6,8 +6,8 @@ SqlDatabase over a SQLite file through node:sqlite (D64): what openSqlite
 (./sqlite) gives over bun:sqlite, on Node.js 24 or later, and on Bun,
 which has node:sqlite too. Both are sqliteDatabaseOf over the connection
 (./sqlite-database), so the queue client on SQLite, the behaviors' adapter
-and the repositories (./orm-sqlite) run on either alike. This is the
-package's ./node-sqlite entry.
+and the generated repositories (sqliteOrm, D182) run on either alike. This
+is the package's ./node-sqlite entry.
 */
 
 export { configureSqlite, sqliteDatabaseOf, sqliteFile } from './sqlite-database.js';
@@ -15,6 +15,10 @@ export type { OpenSqliteOptions, SqliteDatabase, SqliteDriver, SqliteDriverState
 export { ClaimLostError } from './queue-core.js';
 export type { EnqueueOptions, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
+// The generated repositories over the file (D182), and the field keys'
+// reader, as ./sqlite exports them under Bun.
+export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
+export { FieldKeyring, parseFieldKeys } from './fieldcrypt.js';
 
 /**
  * Opens the SQLite file at path through node:sqlite, creating it when

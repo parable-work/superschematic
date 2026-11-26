@@ -7,6 +7,12 @@ import { configureSqlite, sqliteDatabaseOf, type OpenSqliteOptions, type SqliteD
 export { ClaimLostError } from './queue-core.js';
 export type { EnqueueOptions, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
+// The generated repositories over the file (D182), as ./d1 exports them, and
+// the field keys' reader, which needs node:crypto, as Bun has it: under
+// Bun, createOrm(db, { fieldKeys: parseFieldKeys(secret) }) opens a
+// database's Encrypted<T> fields.
+export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
+export { FieldKeyring, parseFieldKeys } from './fieldcrypt.js';
 
 /*
 SqlDatabase over a SQLite file through bun:sqlite (D64, section 18.13 of

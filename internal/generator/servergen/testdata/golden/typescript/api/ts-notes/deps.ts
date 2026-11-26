@@ -29,16 +29,16 @@ export interface Deps {
    */
   readonly db: SqlDatabase;
   /**
-   * The repositories of ts-notes-db's tables over db (D79, D116), a table's
-   * rows read and written as its types' ./orm entry declares them, on its
-   * SQLite statements. In an operation it acts as the caller, whom
-   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
-   * no one: orm.asSystem() acts as the database's system actor, and
-   * orm.withUser(id) as another user (D87). On a SQLite file
+   * The repositories of ts-notes-db's tables over db (D79, D182), a table's
+   * rows read and written as its types' ./orm entry declares them, on the
+   * statements of its ./orm/sqlite entry. In an operation it acts as the
+   * caller, whom createdBy, updatedBy and deletedBy record, and in a job or
+   * a worker as no one: orm.asSystem() acts as the database's system actor,
+   * and orm.withUser(id) as another user (D87). On a SQLite file
    * orm.transaction(fn) writes in one transaction, which holds the file
-   * until it ends; on D1, which has no interactive transaction, it is
-   * refused, and a repository's write of several statements goes as one
-   * batch.
+   * until it ends; on D1, which has no interactive transaction, its
+   * statements each commit as they run, so writes of your own that must
+   * commit together go as one batch on db.
    */
   readonly orm: TsNotesDbOrm;
   /** The API's logger. */

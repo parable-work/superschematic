@@ -1,11 +1,10 @@
 import { parseDuration } from './queue-core.js';
 
 /*
-The text forms of Postgres values the clients read and write themselves
-(D53, D79): a one-dimensional array literal, a POINT and an INTERVAL. The
-queue client (./queue) and the value codec (./pgcodec) share them, and this
-module imports no driver, so the repositories on SQLite and D1, which run
-over the codec's module, load no pg.
+The text forms of the Postgres values the codec and the queue client read
+and write by hand (D79): an array literal, a POINT and an INTERVAL. They
+import nothing of pg, so the repositories' runtime, which a Worker bundles
+over D1 (D182), reads them without it; ./queue re-exports them.
 */
 
 /**
@@ -119,4 +118,3 @@ export function parseInterval(text: string): bigint {
   }
   return nanos;
 }
-

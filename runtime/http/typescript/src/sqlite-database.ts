@@ -54,6 +54,8 @@ export interface SqliteDriver {
 
 /** A SqlDatabase over an open SQLite file, which close closes. */
 export interface SqliteDatabase extends SqlDatabase {
+  /** It runs BEGIN and SAVEPOINT, which D1 does not, so the repositories run their transactions on it (D182). */
+  readonly beginsTransactions: true;
   /** The file it opened. */
   readonly path: string;
   /** Closes the connection; the database answers no statement after. */
@@ -170,6 +172,9 @@ class SqliteStatement implements SqlPreparedStatement {
 }
 
 class SqliteConnection implements SqliteDatabase {
+  // It runs BEGIN and SAVEPOINT, so the repositories run their transactions
+  // on it (sqliteOrmPool, D182).
+  readonly beginsTransactions = true as const;
   private readonly statements = new Map<string, SqliteDriverStatement>();
   private closed = false;
   /** How many batches are open in savepoints, which names each one. */

@@ -183,7 +183,7 @@ func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
 // worker, IndexNotes, logs each message, failing one of the note poison.
 const tsNotesImplementation = `import { notFound } from '@superschematic/http-runtime';
 import { enqueueStatement } from '@superschematic/http-runtime/d1';
-import { NotFoundError } from '@superschematic/http-runtime/orm-sqlite';
+import { NotFoundError } from '@superschematic/http-runtime/d1';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
 import type { Constructor, JobsConstructor, WorkersConstructor } from '@schemas/ts-notes-api';
 
@@ -231,9 +231,9 @@ export const createJobs: JobsConstructor = deps => ({
 // the implementation, fetch.ts and scheduled.ts among them, and both
 // bundle for workerd, the job's bundle running under workerd over a D1
 // stand-in, fetch.ts with the repositories over the D1 binding
-// (createD1Orm, D116). The server runs under Bun on a sqlite: URL: it
-// opens the file, answers /readyz, keeps a note in it and reads it back
-// through Deps.orm, the repositories over the file (createSqliteOrm), and
+// (createOrm of ./orm/sqlite, D182). The server runs under Bun on a sqlite:
+// URL: it opens the file, answers /readyz, keeps a note in it and reads it
+// back through Deps.orm, the same repositories over the file, and
 // stops cleanly. The job runs once on the same file and prunes the
 // empty note. On a postgres:// URL, or a D1 binding, which only a Worker
 // reaches, the server refuses to start, naming the variable.

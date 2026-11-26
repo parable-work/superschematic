@@ -4,8 +4,7 @@
 // ts-ledger (docs/stack-model.md, section 18.5). superschematic writes
 // it beside main.ts, which stack dev runs on Bun, because an environment of
 // the stack places the server on Cloudflare Workers; bundle.ts bundles it
-// for workerd, with Node's modules, which node-postgres and the repositories'
-// runtime need (D92, D116).
+// for workerd, with Node's modules, which node-postgres needs (D92).
 //
 // When Cloudflare loads the version, fetch.ts reads each API's config from
 // the Worker's string bindings, so a refused config fails the version's

@@ -32,7 +32,7 @@ import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
-import { createSqliteOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 
 /** How long a stopping worker lets its running handlers finish. */
 const GRACE_MS = 2 * 1000;

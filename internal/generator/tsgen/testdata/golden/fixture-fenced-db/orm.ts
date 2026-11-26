@@ -10,12 +10,6 @@ createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them;
 createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
-
-On SQLite (D116), each table also carries its statements there, and
-createSqliteOrm(db) opens the repositories over a SQLite file, as
-openSqlite and openNodeSqlite open one, and createD1Orm(db) over a D1
-binding, which has no interactive transaction: there a repository's write
-of several statements goes as one batch, and transaction(fn) is refused.
 A row holds each column by member, a to-one relation's key as <field>Id, a
 UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
 acting user: in an operation the router runs, its caller (D87);
@@ -36,8 +30,6 @@ query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
-import type { SqlDatabase } from '@superschematic/http-runtime/d1';
-import { d1OrmOf, sqliteOrmOf } from '@superschematic/http-runtime/orm-sqlite';
 import type * as T from './types';
 
 /**
@@ -156,45 +148,6 @@ export const courierTable: TableDefinition = {
   many: [
     { name: "deliveries", target: "delivery", column: "courierId" },
   ],
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"name\"",
-      qualifiedColumns: "\"courier\".\"id\", \"courier\".\"name\"",
-      selectColumn: "\"courier\".\"%s\"",
-      getOne: "SELECT \"id\", \"name\" FROM courier WHERE id = ?1",
-      getOneFields: "SELECT %s FROM courier WHERE id = ?1",
-      getMany: "SELECT \"id\", \"name\" FROM courier WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM courier%s%s LIMIT 1",
-      findMany: "SELECT %s FROM courier%s%s%s",
-      count: "SELECT COUNT(*) FROM courier%s",
-      page: "SELECT %s FROM courier%s%s LIMIT %d",
-      pageAfterKey: "courier.id %s %s",
-      pageAfter: "(%s, courier.id) %s ((SELECT %s FROM courier AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM courier AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", courier.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM courier WHERE courier.id = ?1)",
-      insert: "INSERT INTO courier (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO courier (%s) VALUES %s RETURNING %s",
-      update: "UPDATE courier SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"name\"",
-      updateMany: "UPDATE courier SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO courier (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM courier WHERE id = ?1",
-      deleteMany: "DELETE FROM courier%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = courier.id", rows: "SELECT \"id\", \"name\" FROM courier WHERE (id) IN (VALUES %s)" },
-    },
-  },
 };
 
 /**
@@ -357,45 +310,6 @@ export const deliveryTable: TableDefinition = {
   relations: [
     { field: "courier", column: "courierId", target: "courier", probe: "delivery.courier_id IN (SELECT courier.id FROM courier%s)" },
   ],
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\"",
-      qualifiedColumns: "\"delivery\".\"id\", \"delivery\".\"address\", \"delivery\".\"courier_id\", \"delivery\".\"plan_version\", \"delivery\".\"attempts\", \"delivery\".\"proof\", \"delivery\".\"run_version\", \"delivery\".\"note\", \"delivery\".\"updated_at\"",
-      selectColumn: "\"delivery\".\"%s\"",
-      getOne: "SELECT \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\" FROM delivery WHERE id = ?1",
-      getOneFields: "SELECT %s FROM delivery WHERE id = ?1",
-      getMany: "SELECT \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\" FROM delivery WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM delivery%s%s LIMIT 1",
-      findMany: "SELECT %s FROM delivery%s%s%s",
-      count: "SELECT COUNT(*) FROM delivery%s",
-      page: "SELECT %s FROM delivery%s%s LIMIT %d",
-      pageAfterKey: "delivery.id %s %s",
-      pageAfter: "(%s, delivery.id) %s ((SELECT %s FROM delivery AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM delivery AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", delivery.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM delivery WHERE delivery.id = ?1)",
-      insert: "INSERT INTO delivery (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO delivery (%s) VALUES %s RETURNING %s",
-      update: "UPDATE delivery SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\"",
-      updateMany: "UPDATE delivery SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO delivery (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM delivery WHERE id = ?1",
-      deleteMany: "DELETE FROM delivery%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = delivery.id", rows: "SELECT \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\" FROM delivery WHERE (id) IN (VALUES %s)" },
-    },
-  },
 };
 
 /**
@@ -522,45 +436,6 @@ export const depotTable: TableDefinition = {
   ],
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = depot.id", rows: "SELECT \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\" FROM depot WHERE (id) IN (%s)" },
-  },
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\"",
-      qualifiedColumns: "\"depot\".\"id\", \"depot\".\"name\", \"depot\".\"capacity\", \"depot\".\"revision\", \"depot\".\"deleted_at\"",
-      selectColumn: "\"depot\".\"%s\"",
-      getOne: "SELECT \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\" FROM depot WHERE id = ?1",
-      getOneFields: "SELECT %s FROM depot WHERE id = ?1",
-      getMany: "SELECT \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\" FROM depot WHERE id IN (%s)",
-      live: " AND deleted_at IS NULL",
-      liveWhere: " WHERE deleted_at IS NULL",
-      liveCondition: "depot.deleted_at IS NULL",
-      findOne: "SELECT %s FROM depot%s%s LIMIT 1",
-      findMany: "SELECT %s FROM depot%s%s%s",
-      count: "SELECT COUNT(*) FROM depot%s",
-      page: "SELECT %s FROM depot%s%s LIMIT %d",
-      pageAfterKey: "depot.id %s %s",
-      pageAfter: "(%s, depot.id) %s ((SELECT %s FROM depot AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM depot AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", depot.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM depot WHERE depot.id = ?1)",
-      insert: "INSERT INTO depot (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO depot (%s) VALUES %s RETURNING %s",
-      update: "UPDATE depot SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\"",
-      updateMany: "UPDATE depot SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO depot (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\"",
-      softDelete: "UPDATE depot SET deleted_at = ?1, revision = depot.revision + 1 WHERE id = ?2 AND deleted_at IS NULL",
-      softDeleteMany: "UPDATE depot SET deleted_at = ?1, revision = depot.revision + 1%s",
-      delete: "DELETE FROM depot WHERE id = ?1",
-      deleteMany: "DELETE FROM depot%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = depot.id", rows: "SELECT \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\" FROM depot WHERE (id) IN (VALUES %s)" },
-    },
   },
 };
 
@@ -693,46 +568,6 @@ export const parcelTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = parcel.id", rows: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE (id) IN (%s)" },
     "trackingCode": { conflict: "(tracking_code)", keep: "tracking_code = parcel.tracking_code", rows: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE (tracking_code) IN (%s)" },
   },
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\"",
-      qualifiedColumns: "\"parcel\".\"id\", \"parcel\".\"tracking_code\", \"parcel\".\"weight_grams\", \"parcel\".\"note\", \"parcel\".\"version\"",
-      selectColumn: "\"parcel\".\"%s\"",
-      getOne: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE id = ?1",
-      getOneFields: "SELECT %s FROM parcel WHERE id = ?1",
-      getMany: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM parcel%s%s LIMIT 1",
-      findMany: "SELECT %s FROM parcel%s%s%s",
-      count: "SELECT COUNT(*) FROM parcel%s",
-      page: "SELECT %s FROM parcel%s%s LIMIT %d",
-      pageAfterKey: "parcel.id %s %s",
-      pageAfter: "(%s, parcel.id) %s ((SELECT %s FROM parcel AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM parcel AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", parcel.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM parcel WHERE parcel.id = ?1)",
-      insert: "INSERT INTO parcel (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO parcel (%s) VALUES %s RETURNING %s",
-      update: "UPDATE parcel SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\"",
-      updateMany: "UPDATE parcel SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO parcel (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM parcel WHERE id = ?1",
-      deleteMany: "DELETE FROM parcel%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = parcel.id", rows: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE (id) IN (VALUES %s)" },
-      "trackingCode": { conflict: "(tracking_code)", keep: "tracking_code = parcel.tracking_code", rows: "SELECT \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\" FROM parcel WHERE (tracking_code) IN (VALUES %s)" },
-    },
-  },
 };
 
 /** The repositories of fixture-fenced-db, by table. */
@@ -796,50 +631,6 @@ export const fixtureFencedDbOrm: OrmDefinition = {
     depot: depotTable,
     parcel: parcelTable,
   },
-  sqlite: {
-    clauses: {
-      eq: "%s = ?%d",
-      ne: "%s IS DISTINCT FROM ?%d",
-      gt: "%s > ?%d",
-      gte: "%s >= ?%d",
-      lt: "%s < ?%d",
-      lte: "%s <= ?%d",
-      ilike: "%s LIKE ?%d ESCAPE '\\'",
-      in: "%s IN (%s)",
-      noneOf: "(%s IN (%s)) IS NOT TRUE",
-      isNull: "%s IS NULL",
-      isNotNull: "%s IS NOT NULL",
-      search: "%s LIKE ?%d ESCAPE '\\'",
-      exists: "EXISTS (%s)",
-      notExists: "NOT EXISTS (%s)",
-      set: "%s = ?%d",
-      setNull: "%s = NULL",
-      pageKey: "page_key.%s",
-      placeholder: "?%d",
-      default: "",
-      or: " OR ",
-      group: "(%s)",
-      where: " WHERE ",
-      and: " AND ",
-      orderBy: " ORDER BY ",
-      orderTerm: "%s %s",
-      limit: " LIMIT %d",
-      offset: " OFFSET %d",
-      setExcluded: "%s = EXCLUDED.%s",
-      excluded: "EXCLUDED.%s",
-      changed: "(%s) IS DISTINCT FROM (%s)",
-      never: "FALSE",
-      null: "NULL",
-      notIn: "%s NOT IN (%s)",
-    },
-    jsonClauses: {
-      eq: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-      ne: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-      in: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
-      noneOf: "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
-      value: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-    },
-  },
 };
 
 /**
@@ -848,23 +639,4 @@ export const fixtureFencedDbOrm: OrmDefinition = {
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): FixtureFencedDbOrm {
   return ormOf<FixtureFencedDbRepositories>(pool, fixtureFencedDbOrm, options);
-}
-
-/**
- * Opens the repositories of fixture-fenced-db over db, a SQLite file as
- * openSqlite or openNodeSqlite opens one (D116), acting as the user options
- * names, or as the user it is when a string: each transaction holds the
- * file until it ends.
- */
-export function createSqliteOrm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureFencedDbOrm {
-  return sqliteOrmOf<FixtureFencedDbRepositories>(db, fixtureFencedDbOrm, options);
-}
-
-/**
- * Opens the repositories of fixture-fenced-db over db, a D1 binding (D116),
- * which has no interactive transaction: a repository's write of several
- * statements goes as one batch, and transaction(fn) is refused.
- */
-export function createD1Orm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureFencedDbOrm {
-  return d1OrmOf<FixtureFencedDbRepositories>(db, fixtureFencedDbOrm, options);
 }

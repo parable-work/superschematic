@@ -15,7 +15,7 @@ import (
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
 // reveal and the access log. An audience on SQLite is refused for every
-// language (checkAccess).
+// language but TypeScript (refuseSQLiteReaders, D182).
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
 // for an @providers slot, an @autonomy operation, and the table features

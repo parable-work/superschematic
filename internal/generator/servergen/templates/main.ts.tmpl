@@ -58,7 +58,7 @@ import type { Pool } from 'pg';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
-import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
+import { openSqlite, {{ if .SQLiteFieldKeys }}parseFieldKeys, {{ end }}sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';

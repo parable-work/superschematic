@@ -303,9 +303,8 @@ type ModuleOutput struct {
 
 	// ORM is the schema's repositories (D79), which orm.ts writes and
 	// package.json exports as "./orm", nil for a schema with no table or a
-	// database that lists neither postgres nor sqlite. With one, the
-	// package depends on the HTTP runtime, whose ormOf runs them, and on
-	// SQLite and D1 its ./orm-sqlite (D116).
+	// database that lists no postgres dialect. With one, the package
+	// depends on the HTTP runtime, whose ormOf runs them.
 	ORM *ORMInfo
 
 	// StateMachines are the schema's @stateMachine declarations (D118),
@@ -445,13 +444,14 @@ type Options struct {
 	EngineDocument []byte
 
 	// SQLite is whether the DB service lists the sqlite dialect, whose
-	// statements each queue in queues.ts and each table in orm.ts then
-	// carries beside Postgres's (D53, amended, D116).
+	// statements each queue in queues.ts then carries beside Postgres's
+	// (D53, amended), and whose repositories orm-sqlite.ts holds (D182).
 	SQLite bool
 
 	// NoPostgres is whether the DB service lists no postgres dialect: its
-	// package then writes orm.ts only when it lists sqlite (D116), with no
-	// createOrm over a pg Pool.
+	// orm.ts then holds the repositories' types alone, and orm-sqlite.ts,
+	// for a service that lists sqlite, their definitions (D182); a service
+	// that lists neither writes no orm.ts.
 	NoPostgres bool
 
 	// Actor is the DB service's system actor and whether an update needs

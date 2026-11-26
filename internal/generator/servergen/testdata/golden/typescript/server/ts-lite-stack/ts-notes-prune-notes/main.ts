@@ -23,7 +23,7 @@ import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
-import { createSqliteOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 
 const logger = createLogger({ stack: 'ts-lite-stack', job: 'ts-notes-prune-notes' });
 

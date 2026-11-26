@@ -1,5 +1,5 @@
 import type { SqlDatabase } from '../d1.js';
-import { inTurn } from '../sqlite-turns.js';
+import { inSqliteTurn } from '../orm-sqlite.js';
 import { SqlIdentityStore, driveAsync, driveSync, type SqlParam, type SqlRow, type SqlRunner, type SqlWork } from './sqlstore.js';
 
 /*
@@ -20,8 +20,9 @@ cascade.
 sqlDatabaseIdentityStore is the same store over a SqlDatabase of a SQLite
 file (openSqlite, openNodeSqlite), the one a server's repositories run on
 (D116): each operation awaits its statements in the file's turn
-(../sqlite-turns), its transaction too, so it never meets a transaction of
-the repositories open on the same connection. A D1 binding has no
+(inSqliteTurn, the turns the repositories' pool takes, D182), its
+transaction too, so it never meets a transaction of the repositories open
+on the same connection. A D1 binding has no
 interactive transaction, and an operation's transaction reads before it
 writes, so no store runs over one.
 */
@@ -145,7 +146,7 @@ export function sqlDatabaseRunner(db: SqlDatabase): SqlRunner {
   return {
     dialect: 'sqlite',
     run<T>(work: () => SqlWork<T>, transaction: boolean): Promise<T> {
-      return inTurn(db, async () => {
+      return inSqliteTurn(db, async () => {
         if (!transaction) return driveAsync(work(), execute);
         await db.exec('BEGIN IMMEDIATE');
         let out: T;

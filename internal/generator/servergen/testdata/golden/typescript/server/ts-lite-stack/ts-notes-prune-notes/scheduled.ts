@@ -4,8 +4,8 @@
 // ts-notes on Cloudflare's Cron Triggers (docs/stack-model.md, section 18.9).
 // superschematic writes it beside main.ts, which stack dev runs on Bun,
 // because an environment of the stack places the job on Cron Triggers;
-// bundle.ts bundles it for workerd, with Node's modules, which
-// node-postgres and the repositories' runtime need (D92, D116).
+// bundle.ts bundles it for workerd, with no Node API but AsyncLocalStorage,
+// under nodejs_als.
 //
 // When Cloudflare loads the version, scheduled.ts reads the API's config
 // from the Worker's string bindings, so a refused config fails the
@@ -43,7 +43,7 @@ import { createLogger, type DatabaseConnection } from '@superschematic/http-runt
 import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import type { SqlDatabase } from '@superschematic/http-runtime/d1';
-import { createD1Orm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
 

@@ -196,8 +196,9 @@ export function decodeValue(value: unknown, codec: ValueCodec): unknown {
   if (codec.interval) return decodeInterval(value);
   if (codec.vector) return decodeVector(value);
   if (codec.list) {
-    // A list of a type pg does not know, such as citext[], arrives as its text.
-    const elements = typeof value === 'string' ? parseArray(value) : value;
+    // A list of a type pg does not know, such as citext[], arrives as its
+    // text, and on SQLite every list as its JSON array's text (D182).
+    const elements = typeof value === 'string' ? (value.startsWith('[') ? JSON.parse(value) : parseArray(value)) : value;
     if (!Array.isArray(elements)) throw new Error(`${JSON.stringify(value)} is no list`);
     return elements.map(element => (element === null || element === undefined ? null : decodeScalar(element, codec)));
   }

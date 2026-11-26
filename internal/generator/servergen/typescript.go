@@ -277,6 +277,11 @@ type TypeScriptServer struct {
 	// bundle.ts (D92).
 	Workers bool
 
+	// SQLiteFieldKeys is whether an API's repositories on a sqlite-first
+	// database open Encrypted<T> fields, whose keyring main.ts reads with
+	// parseFieldKeys of the runtime's ./sqlite (D85, D182).
+	SQLiteFieldKeys bool
+
 	// Runner is what an engine's runner's entrypoint runs, nil for every
 	// other (D58).
 	Runner *TypeScriptRunner
@@ -665,11 +670,12 @@ type TypeScriptDatabase struct {
 	// database (D58); nil for every other.
 	Engine *TypeScriptEngine
 
-	// ORM is the name the entrypoint imports the opener of the database's
+	// ORM is the name the entrypoint imports createOrm of the database's
 	// repositories as (D79), from ORMModule, the ./orm entry of its
-	// TypeScript types package, ORMPackage, when an API on the database
-	// holds them in Deps.orm; empty otherwise. The opener is ORMOpener's, or
-	// in a Workers entrypoint WorkersORMOpener's.
+	// TypeScript types package, ORMPackage, or for a sqlite-first database
+	// its ./orm/sqlite entry, whose createOrm opens them over the SQLite
+	// file under Bun and the D1 binding on Workers (D182), when an API on
+	// the database holds them in Deps.orm; empty otherwise.
 	ORM        string
 	ORMModule  string
 	ORMPackage string
@@ -678,26 +684,6 @@ type TypeScriptDatabase struct {
 	// entrypoint imports (D138), from the ./versiongraph entry of its
 	// TypeScript types package, each once.
 	Graphs []*TypeScriptGraph
-}
-
-// ORMOpener is what the entrypoint on Bun opens the database's
-// repositories with: createOrm over a pg Pool, or for a sqlite-first
-// database createSqliteOrm over its SQLite file (D116).
-func (d *TypeScriptDatabase) ORMOpener() string {
-	if d.SQLite {
-		return "createSqliteOrm"
-	}
-	return "createOrm"
-}
-
-// WorkersORMOpener is what a Workers entrypoint opens the database's
-// repositories with: createOrm over a Hyperdrive pool, or for a
-// sqlite-first database createD1Orm over its D1 binding (D116).
-func (d *TypeScriptDatabase) WorkersORMOpener() string {
-	if d.SQLite {
-		return "createD1Orm"
-	}
-	return "createOrm"
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -1071,11 +1057,26 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				s.Rules = s.Rules || o.TableBehaviors
 				if key := o.Deps.ORMFieldKeys; key != "" && api.Config != "" {
 					api.ORMFieldKeys = api.Config + "." + key
+					if d.SQLite {
+						// The repositories on SQLite take a keyring read
+						// already, which parseFieldKeys of the runtime's
+						// ./sqlite reads under Bun; a Worker has no
+						// node:crypto to read one with (D182).
+						if s.Workers {
+							return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists sqlite first and holds Encrypted<T> fields, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: a Worker has no node:crypto to read the field keys with, so the repositories on D1 open no Encrypted<T> field yet (D85, D182)", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
+						}
+						api.ORMFieldKeys = "parseFieldKeys(" + api.ORMFieldKeys + ")"
+						s.SQLiteFieldKeys = true
+					}
 				}
 				if d.ORM == "" {
 					stem := varStem(d.Service)
 					d.ORM = taken.take("create" + strings.ToUpper(stem[:1]) + stem[1:] + "Orm")
 					d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMEntry
+					if d.SQLite {
+						// The repositories on SQLite and D1 (D182).
+						d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMSQLiteEntry
+					}
 					d.ORMPackage = o.Deps.DatabaseTypesPackage
 				}
 			}
@@ -1487,22 +1488,11 @@ func (s *TypeScriptServer) BundleEntry() string {
 
 // NodeCompat reports whether the Workers bundle runs with Node's modules:
 // it opens a Postgres database through Hyperdrive with node-postgres, which
-// imports them (D92), or the repositories of a D1 database, whose runtime
-// seals an Encrypted<T> field with node:crypto (D85, D116), so bundle.ts
-// keeps them external.
+// imports them (D92), so bundle.ts keeps them external. The repositories
+// of a D1 database import none but node:async_hooks, which nodejs_als
+// gives (D182).
 func (s *TypeScriptServer) NodeCompat() bool {
-	return s.Workers && (len(s.PostgresDatabases()) > 0 || s.sqliteORM())
-}
-
-// sqliteORM reports whether an API of the server holds the repositories of
-// a sqlite-first database (D116).
-func (s *TypeScriptServer) sqliteORM() bool {
-	for _, d := range s.SQLiteDatabases() {
-		if d.ORM != "" {
-			return true
-		}
-	}
-	return false
+	return s.Workers && len(s.PostgresDatabases()) > 0
 }
 
 // DrainSeconds is how long each firing of a worker's drain.ts claims unless
@@ -1626,7 +1616,7 @@ func (s *TypeScriptServer) QueueWakeClass() string { return ir.QueueWakeClass }
 // ImportsPostgres reports whether main.ts imports the HTTP runtime's
 // ./postgres entry: for its pools, or, for a runner, for the Cloud SQL
 // socket it serves the engine on. The repositories of a sqlite-first
-// database import no pg (./orm-sqlite, D116).
+// database import no pg (./orm/sqlite, D182).
 func (s *TypeScriptServer) ImportsPostgres() bool {
 	if s.Runner != nil {
 		return len(s.CloudSQL) > 0

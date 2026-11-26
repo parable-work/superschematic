@@ -10,12 +10,6 @@ createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them;
 createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
-
-On SQLite (D116), each table also carries its statements there, and
-createSqliteOrm(db) opens the repositories over a SQLite file, as
-openSqlite and openNodeSqlite open one, and createD1Orm(db) over a D1
-binding, which has no interactive transaction: there a repository's write
-of several statements goes as one batch, and transaction(fn) is refused.
 A row holds each column by member, a to-one relation's key as <field>Id, a
 UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
 acting user: in an operation the router runs, its caller (D87);
@@ -36,8 +30,6 @@ query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
-import type { SqlDatabase } from '@superschematic/http-runtime/d1';
-import { d1OrmOf, sqliteOrmOf } from '@superschematic/http-runtime/orm-sqlite';
 import type * as T from './types';
 
 /**
@@ -156,45 +148,6 @@ export const orderTable: TableDefinition = {
   many: [
     { name: "orderLines", target: "orderLine", column: "orderId" },
   ],
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"placed_at\"",
-      qualifiedColumns: "\"order\".\"id\", \"order\".\"placed_at\"",
-      selectColumn: "\"order\".\"%s\"",
-      getOne: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE id = ?1",
-      getOneFields: "SELECT %s FROM \"order\" WHERE id = ?1",
-      getMany: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM \"order\"%s%s LIMIT 1",
-      findMany: "SELECT %s FROM \"order\"%s%s%s",
-      count: "SELECT COUNT(*) FROM \"order\"%s",
-      page: "SELECT %s FROM \"order\"%s%s LIMIT %d",
-      pageAfterKey: "\"order\".id %s %s",
-      pageAfter: "(%s, \"order\".id) %s ((SELECT %s FROM \"order\" AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"order\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", \"order\".id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"order\" WHERE \"order\".id = ?1)",
-      insert: "INSERT INTO \"order\" (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO \"order\" (%s) VALUES %s RETURNING %s",
-      update: "UPDATE \"order\" SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"placed_at\"",
-      updateMany: "UPDATE \"order\" SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO \"order\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"placed_at\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM \"order\" WHERE id = ?1",
-      deleteMany: "DELETE FROM \"order\"%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = \"order\".id", rows: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE (id) IN (VALUES %s)" },
-    },
-  },
 };
 
 /**
@@ -331,45 +284,6 @@ export const orderLineTable: TableDefinition = {
     { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
     { field: "product", column: "productId", target: "product", probe: "order_line.product_id IN (SELECT product.id FROM product%s)" },
   ],
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
-      qualifiedColumns: "\"order_line\".\"id\", \"order_line\".\"order_id\", \"order_line\".\"product_id\", \"order_line\".\"quantity\", \"order_line\".\"note\"",
-      selectColumn: "\"order_line\".\"%s\"",
-      getOne: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id = ?1",
-      getOneFields: "SELECT %s FROM order_line WHERE id = ?1",
-      getMany: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM order_line%s%s LIMIT 1",
-      findMany: "SELECT %s FROM order_line%s%s%s",
-      count: "SELECT COUNT(*) FROM order_line%s",
-      page: "SELECT %s FROM order_line%s%s LIMIT %d",
-      pageAfterKey: "order_line.id %s %s",
-      pageAfter: "(%s, order_line.id) %s ((SELECT %s FROM order_line AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM order_line AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", order_line.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM order_line WHERE order_line.id = ?1)",
-      insert: "INSERT INTO order_line (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO order_line (%s) VALUES %s RETURNING %s",
-      update: "UPDATE order_line SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
-      updateMany: "UPDATE order_line SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO order_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM order_line WHERE id = ?1",
-      deleteMany: "DELETE FROM order_line%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = order_line.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE (id) IN (VALUES %s)" },
-    },
-  },
 };
 
 /**
@@ -488,45 +402,6 @@ export const productTable: TableDefinition = {
   many: [
     { name: "orderLines", target: "orderLine", column: "productId" },
   ],
-  sqlite: {
-    statements: {
-      columns: "\"id\", \"name\"",
-      qualifiedColumns: "\"product\".\"id\", \"product\".\"name\"",
-      selectColumn: "\"product\".\"%s\"",
-      getOne: "SELECT \"id\", \"name\" FROM product WHERE id = ?1",
-      getOneFields: "SELECT %s FROM product WHERE id = ?1",
-      getMany: "SELECT \"id\", \"name\" FROM product WHERE id IN (%s)",
-      live: "",
-      liveWhere: "",
-      liveCondition: "",
-      findOne: "SELECT %s FROM product%s%s LIMIT 1",
-      findMany: "SELECT %s FROM product%s%s%s",
-      count: "SELECT COUNT(*) FROM product%s",
-      page: "SELECT %s FROM product%s%s LIMIT %d",
-      pageAfterKey: "product.id %s %s",
-      pageAfter: "(%s, product.id) %s ((SELECT %s FROM product AS page_key WHERE page_key.id = %s), %s)",
-      pageAfterNulls: "CASE (SELECT %s IS NULL FROM product AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
-      pageOrder: " ORDER BY %s %s",
-      pageOrderNulls: " ORDER BY %s %s NULLS LAST",
-      pageTiebreak: ", product.id %s",
-      pageKeyExists: "SELECT EXISTS (SELECT 1 FROM product WHERE product.id = ?1)",
-      insert: "INSERT INTO product (%s) VALUES (%s) RETURNING %s",
-      insertMany: "INSERT INTO product (%s) VALUES %s RETURNING %s",
-      update: "UPDATE product SET %s WHERE id = ?%d",
-      returning: " RETURNING \"id\", \"name\"",
-      updateMany: "UPDATE product SET %s%s",
-      updatedAt: "updated_at = ?%d",
-      updatedBy: "updated_by = ?%d",
-      upsert: "INSERT INTO product (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\"",
-      softDelete: "",
-      softDeleteMany: "",
-      delete: "DELETE FROM product WHERE id = ?1",
-      deleteMany: "DELETE FROM product%s",
-    },
-    uniqueKeys: {
-      "id": { conflict: "(id)", keep: "id = product.id", rows: "SELECT \"id\", \"name\" FROM product WHERE (id) IN (VALUES %s)" },
-    },
-  },
 };
 
 /** The repositories of fixture-queue-db, by table. */
@@ -588,50 +463,6 @@ export const fixtureQueueDbOrm: OrmDefinition = {
     orderLine: orderLineTable,
     product: productTable,
   },
-  sqlite: {
-    clauses: {
-      eq: "%s = ?%d",
-      ne: "%s IS DISTINCT FROM ?%d",
-      gt: "%s > ?%d",
-      gte: "%s >= ?%d",
-      lt: "%s < ?%d",
-      lte: "%s <= ?%d",
-      ilike: "%s LIKE ?%d ESCAPE '\\'",
-      in: "%s IN (%s)",
-      noneOf: "(%s IN (%s)) IS NOT TRUE",
-      isNull: "%s IS NULL",
-      isNotNull: "%s IS NOT NULL",
-      search: "%s LIKE ?%d ESCAPE '\\'",
-      exists: "EXISTS (%s)",
-      notExists: "NOT EXISTS (%s)",
-      set: "%s = ?%d",
-      setNull: "%s = NULL",
-      pageKey: "page_key.%s",
-      placeholder: "?%d",
-      default: "",
-      or: " OR ",
-      group: "(%s)",
-      where: " WHERE ",
-      and: " AND ",
-      orderBy: " ORDER BY ",
-      orderTerm: "%s %s",
-      limit: " LIMIT %d",
-      offset: " OFFSET %d",
-      setExcluded: "%s = EXCLUDED.%s",
-      excluded: "EXCLUDED.%s",
-      changed: "(%s) IS DISTINCT FROM (%s)",
-      never: "FALSE",
-      null: "NULL",
-      notIn: "%s NOT IN (%s)",
-    },
-    jsonClauses: {
-      eq: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-      ne: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-      in: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
-      noneOf: "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
-      value: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
-    },
-  },
 };
 
 /**
@@ -640,23 +471,4 @@ export const fixtureQueueDbOrm: OrmDefinition = {
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): FixtureQueueDbOrm {
   return ormOf<FixtureQueueDbRepositories>(pool, fixtureQueueDbOrm, options);
-}
-
-/**
- * Opens the repositories of fixture-queue-db over db, a SQLite file as
- * openSqlite or openNodeSqlite opens one (D116), acting as the user options
- * names, or as the user it is when a string: each transaction holds the
- * file until it ends.
- */
-export function createSqliteOrm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureQueueDbOrm {
-  return sqliteOrmOf<FixtureQueueDbRepositories>(db, fixtureQueueDbOrm, options);
-}
-
-/**
- * Opens the repositories of fixture-queue-db over db, a D1 binding (D116),
- * which has no interactive transaction: a repository's write of several
- * statements goes as one batch, and transaction(fn) is refused.
- */
-export function createD1Orm(db: SqlDatabase, options?: string | null | OrmOptions): FixtureQueueDbOrm {
-  return d1OrmOf<FixtureQueueDbRepositories>(db, fixtureQueueDbOrm, options);
 }

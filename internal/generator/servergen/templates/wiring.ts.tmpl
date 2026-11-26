@@ -40,23 +40,9 @@ APIs.
 {{- define "ts-orm-imports" -}}
 {{- range .Databases }}
 {{- if .ORM }}
-import { {{ .ORMOpener }} as {{ .ORM }} } from '{{ .ORMModule }}';
+import { createOrm as {{ .ORM }} } from '{{ .ORMModule }}';
 {{- end }}
 {{- end }}
-{{- template "ts-graph-imports" . }}
-{{- end }}
-
-{{- /* A Workers entrypoint's: a sqlite-first database is a D1 binding there (D116). */ -}}
-{{- define "ts-workers-orm-imports" -}}
-{{- range .Databases }}
-{{- if .ORM }}
-import { {{ .WorkersORMOpener }} as {{ .ORM }} } from '{{ .ORMModule }}';
-{{- end }}
-{{- end }}
-{{- template "ts-graph-imports" . }}
-{{- end }}
-
-{{- define "ts-graph-imports" -}}
 {{- range .Databases }}
 {{- range .Graphs }}
 import { {{ .Facade }}{{ if ne .Facade .Class }} as {{ .Class }}{{ end }} } from '{{ .Module }}';

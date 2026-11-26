@@ -5,8 +5,7 @@
 // it beside main.ts, which stack dev runs on Bun, because an environment of
 // the stack places the server on Cloudflare Workers; bundle.ts bundles it
 {{- if .NodeCompat }}
-// for workerd, with Node's modules, which node-postgres and the repositories'
-// runtime need (D92, D116).
+// for workerd, with Node's modules, which node-postgres needs (D92).
 {{- else }}
 // for workerd, with no Node API but AsyncLocalStorage, under nodejs_als.
 {{- end }}
@@ -73,7 +72,7 @@ import type { Pool } from 'pg';
 {{- if .Identity }}
 import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
-{{- template "ts-workers-orm-imports" . }}
+{{- template "ts-orm-imports" . }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';

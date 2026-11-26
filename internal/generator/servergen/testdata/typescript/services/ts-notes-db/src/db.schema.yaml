@@ -5,9 +5,10 @@ scalars:
     name: Identity.UUID
     languagePrimitive: string
 types:
-  # Read and written through the repositories on the SQLite file (D116):
-  # ts-notes' Deps.orm, which its server opens with createSqliteOrm, and on
-  # Workers with createD1Orm. The key is the note's name.
+  # Read and written through the repositories on the SQLite file (D182):
+  # ts-notes' Deps.orm, which its server opens with createOrm of the types'
+  # ./orm/sqlite over the file, and on Workers over the D1 binding. The key
+  # is the note's name.
   Note:
     name: Note
     role: DBTable

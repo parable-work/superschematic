@@ -59,7 +59,7 @@ import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
 import type { Pool } from 'pg';
 import { {{ .Worker.Definition }} } from '{{ .Worker.Module }}';
-{{- template "ts-workers-orm-imports" . }}
+{{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}

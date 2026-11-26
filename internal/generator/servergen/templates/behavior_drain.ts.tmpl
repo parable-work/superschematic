@@ -54,7 +54,7 @@ import { runFiring, WAKE_HORIZON_MS, WAKE_IDLE_MS, workerConcurrency, workerDrai
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
 import type { Pool } from 'pg';
-{{- template "ts-workers-orm-imports" . }}
+{{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 {{- if .Worker.Behavior.Emits }}
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
