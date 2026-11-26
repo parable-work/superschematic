@@ -1940,12 +1940,12 @@ the example's own on Node.js and Bun.
 
 Left:
 
-- Go and Rust: the five interfaces, `providersFrom` and the injection in
-  each runtime, and the principal kind in Go's auth hooks (D156's
-  `callerPrincipal`).
-- The generated server: a TypeScript API that lists providers gets its
-  slots from the IR and builds `Providers` into its `Deps`, importing the
-  listed packages; today the project's wiring calls `providersFrom`.
+- Rust: the five interfaces, `providersFrom` and the injection. Go's
+  are built (D184).
+- The generated TypeScript server: a TypeScript API that lists providers
+  gets its slots from the IR and builds `Providers` into its `Deps`,
+  importing the listed packages; today the project's wiring calls
+  `providersFrom`. A Go server does (D184).
 - A provider package named by its npm name, resolved from the service's
   `node_modules`, beside a directory.
 - Provider packages in build-all's dependency graph (D136) and in its
@@ -2029,7 +2029,7 @@ Left:
 - Generated routes, MCP tools and SDK methods for references and
   attachments; an app writes its routes over `orm.references` and
   `orm.attachments` now (`examples/references-files/server`).
-- The Go and Rust repositories, and Python's.
+- The Rust repositories, and Python's. Go's are built (D184).
 - The file processor (section 9) and its wiring: `pending` and
   `processed` are its seam. Search (section 5) indexes `extractedText`.
 - D142's content-addressed objects once PR 512 merges, and a multipart
@@ -2565,8 +2565,9 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's calendar, references, search, notifier, parties and
-  agents, which later Go workstreams port (D184 and on).
+- The Go server's calendar, search, notifier, parties and agents, which
+  later Go workstreams port. References, attachments and provider slots
+  are D184's.
 
 ## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
 
@@ -2611,3 +2612,52 @@ Left:
   untyped repositories' and the table operations' so far.
 - The D152 to D159 features the refusals name, which the later Rust
   entries port.
+
+## D184. The Go runtime serves D159's five provider interfaces, a Go server imports each provider's Go module and builds its providers into Deps, and the Go repositories serve D154's references and attachments (D154, D159, D180 amended)
+
+D159 built the runtime extension points in TypeScript and D154 the
+references and attachments of its repositories, and left Go's. This entry
+ports both onto D180's principal, with the TypeScript runtime's tables,
+statements, refusals and parity files, and settles what Go's shape asked
+for. The Rust chain ports the same two in D185.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Go HTTP runtime's `providers` package holds the five interfaces, a method per operation, `context.Context` first. An optional operation is an interface of its own (`ChannelStatusReader`, `ChannelInboundReader`; a model's `ModelEmbedder`, which is no contract operation, as it is none of TypeScript's). `Contracts()` is `ir.RuntimeContracts`, and its test holds it to `runtime_contracts.json` and each Go interface's methods to its contract's operations. | Optional methods on the interface answering an `Unsupported` error, as Rust's defaults do, which a type assertion could no longer tell from an adapter that has them. |
+| A Go provider is a Go module in the provider's directory, the one the API's config lists: `go.mod` names it, and its root package exports `Definition() providers.Definition`. The directory declares the provider once, in its `package.json` beside a TypeScript package, or for a provider of Go alone in `superschematic.json`, whose `provider` object is the `package.json`'s `superschematic.provider`; both, when present, declare one provider. The loader puts the module on `ir.RuntimeProvider.Module` and the directory on `Dir`, which is not written. | A module path in the API's config, a second list beside `providers`; a declaration in `go.mod`, which has no place for one; a Go module in the `package.json`'s manifest, which would make the TypeScript package name the Go one. |
+| The generated Go server of an API with slots writes `providers.go`: `ProviderSlots`, `ProviderDefinitions()` (each listed module's `Definition()`), the manifests the build read, and `ProvidersOf(EnvConfig, logger)`, which reads the slot and setting fields of the config, a `Secret<string>` field as a secret, into `providers.From`. `Deps.Providers` holds the result, the entrypoint builds it and stops when it does not read, and the API's and the server's `go.mod` require and replace each module. The loader refuses a Go server a listed provider of no Go module, in place of D180's refusal of every slot. | The implementation calling `From` itself, as TypeScript's wiring does still (D159's left), which every Go API would repeat. |
+| `From` holds each linked definition to the manifest the build read (`CheckManifest`) and refuses one the config lists but the server does not link, as Rust's `providers_from` does, beside TypeScript's checks, with its messages. A Go config holds a secret as a string, so `From` reads `ConfigValue`s, `Text` or `Secret`, which the generated code writes from the IR. | Telling a secret from a plain string by its value, as TypeScript's `Revealable` does, which a Go string cannot. |
+| Go has an ambient caller, the context, so a provider runs within its principal as in TypeScript: every call `From`'s providers answer is made with a context that `Options.Bind` binds to the provider's principal, `access.Principal{Subject: "extension:<name>", Kind: extension}` (D180's), with its role, a `session.Role` of its permissions. The generated server binds `orm.WithPrincipal` too, so a provider reads what everyone may read; an audit column, which holds a user's id, stamps no one for it. `Providers.Within(ctx, slot)` is that context, for a route that handles what a provider posts back. `ExtensionAuthenticator(keys, inner)` composes with `session.GrantAuthenticator`. | A provider context with the principal alone, as Rust's must, which a provider would have to bind itself before every read. |
+| An `Injection` has unexported fields alone, so no other package makes one that holds a value: an `Injection{}` is refused by `ApplyInjection` and `UseCredential`. Its JSON, `String`, `GoString` and `Format` print the reference and the target. `SecretValue` and `ConfigValue` mask the same way in every `fmt` verb and in zap. | A value with a getter behind a build tag; a mask on `String` alone, which `%#v` would pass. |
+| References and attachments are the schema runtime's `rowrefs` package, over a `Host` the generated ORM implements (its pool or transaction, the caller of a context, and `Visible`, which reads a table's rows through its repository and so keeps to the caller, D180). ormgen writes `rowrefs.go` for a database with `@references`, `@attachments` or a table's Comments, with tsgen's definitions keyed by type, and `References()` and `Attachments()` on the database, a transaction and their interfaces. A write of several statements runs in the database's transaction or a savepoint of the caller's, as TypeScript's does. | The package in the HTTP runtime, which every ORM would then require; generating the statements per table, which the definitions already hold. |
+| A bucket is what `rowrefs.Bucket` names (sign, open, delete), and `bucket.ForAttachments` makes one of a listed `bucket.Bucket`. A key is a row's wire form, a UUID in base62, and either form is read. | The ORM importing the HTTP runtime's bucket package. |
+
+Built: `runtime/http/go/providers` and its test; `runtime/schema/go/rowrefs`
+and `runtime/http/go/bucket/attachments.go`; ormgen's `rowrefs.go`
+(`ormgen/rowrefs.go`, `templates/rowrefs.tmpl`) and the comments fixture's
+goldens; the loader's Go module (`internal/loader/providers_go.go`) and
+`ir.RuntimeProvider.Module`; apigen's `providers.go` and `Deps.Providers`,
+servergen's wiring and go.mod; the Go modules of
+`examples/runtime-providers`' six providers, each held to its
+`package.json` in its own test; `fixture-providers-go-api`.
+`TestGoReferencesEndToEnd` runs D154's "done when" through the Go
+repositories on Postgres, the TypeScript and Rust cases, over a bucket
+whose uploads a browser sends to the URL `Begin` signed.
+`TestGoProvidersEndToEnd` runs D159's in a generated Go server: the
+credential provider and a channel adapter with no change to core, the
+SMS provider swapped by the config alone, a bad config refused at start,
+a provider as its own principal at the ORM and at a generated route, a
+sandbox, a model and a file processor, and the Deps' references and
+attachments. `TestAGoServerReadsItsAPIsProviders` holds the entrypoint
+and its go.mod.
+
+Left:
+
+- The features' `Uses`: attachments' `files` and agent runs'
+  `credentials` (D159's left), in every language.
+- Generated routes, MCP tools and SDK methods for references and
+  attachments, as in TypeScript (D154's left).
+- Go on SQLite, which refuses both declarations as TypeScript does.
+- A provider package named by its Go module path alone, resolved from
+  the module cache rather than a directory.
+

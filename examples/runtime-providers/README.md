@@ -22,6 +22,7 @@ either: an environment's config picks each one.
 | `src/app.ts` | The server's wiring: `notesProviders`, which reads the providers a loaded config names with `providersFrom`, and `sendNotice` and `receiveReplies`, which send through and read from whichever adapter `SMS` names |
 | `test/providers.test.ts` | Each provider against a stub service behind a fetch the test gives: the same notice through either relay with only the config changed, signed replies read as the adapter's own principal, the broker's list and a browser fill with no value in any log or record, a sandbox run and a cancel, a tool call, and text and previews from `fixtures/` |
 | `test/injection.typecheck.ts` | What the credential types hold, which tsc checks: an `Injection` has no value to read, and no object literal passes for one |
+| `providers/*/provider.go` | Each provider but mail-relay in Go too (D184): a Go module beside the TypeScript package, whose `Definition()` a Go server links; `package.json` declares the provider for both, and each module's test holds it to the Go code |
 
 ## What it shows
 
@@ -53,7 +54,9 @@ examples/runtime-providers/scripts/check.sh
 ```
 
 It builds the HTTP runtime, links it into `node_modules`, type-checks the
-example and its providers, and runs the test on Node.js and on Bun. The
+example and its providers, runs the test on Node.js and on Bun, and vets
+and tests the providers' Go modules. `TestGoProvidersEndToEnd`
+(`internal/generator`) serves the Go modules from a generated Go server. The
 stack builds with the installed binary:
 
 ```sh
