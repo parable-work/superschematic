@@ -236,5 +236,8 @@ async fn a_refusal_under_500_is_kept_and_replayed_as_a_problem() {
     );
     assert_eq!((first.replay, again.replay), (false, true));
     assert_eq!(again.body["detail"], "sold out");
+    // The kept problem names the first request, as a kept envelope does.
+    assert!(first.body["requestId"].is_string(), "{}", first.body);
+    assert_eq!(again.body["requestId"], first.body["requestId"]);
     assert_eq!(runs.load(Ordering::SeqCst), 1);
 }

@@ -559,11 +559,24 @@ impl Idempotent {
             })
             .await;
         }
+        // The request's id, which the router's request_ids wrote: a kept
+        // problem names the first request, as a kept envelope does.
+        let request_id = parts
+            .headers
+            .get(crate::response::REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let request = Request::from_parts(parts, Body::from(body));
         let held = lookup.clone();
         let attempt = async move {
             let response = next.run(request).await;
-            settle(store.as_ref(), &held, started_at, response).await
+            let kept = Kept {
+                store: store.as_ref(),
+                lookup: &held,
+                started_at,
+                request_id: request_id.as_deref(),
+            };
+            kept.settle(response).await
         };
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return attempt.await;
@@ -583,31 +596,70 @@ impl Idempotent {
     }
 }
 
-/// The handler's answer, settled for its key: one of 500 or more deletes
-/// the row, so a retry runs again; any other is stored as done, and passed
-/// on as it was.
-async fn settle(store: &dyn Store, lookup: &str, started_at: i64, response: Response) -> Response {
-    let status = response.status();
-    if status.is_server_error() {
-        abandon(store, lookup, started_at).await;
-        return response;
+/// The attempt that started a key's row, which settles the handler's
+/// answer.
+struct Kept<'a> {
+    store: &'a dyn Store,
+    lookup: &'a str,
+    started_at: i64,
+    request_id: Option<&'a str>,
+}
+
+impl Kept<'_> {
+    /// The handler's answer, settled for its key: one of 500 or more
+    /// deletes the row, so a retry runs again; any other is stored as done,
+    /// a problem with the request's id, and passed on as it was.
+    async fn settle(&self, response: Response) -> Response {
+        let status = response.status();
+        if status.is_server_error() {
+            abandon(self.store, self.lookup, self.started_at).await;
+            return response;
+        }
+        let (mut parts, body) = response.into_parts();
+        let Ok(mut bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+            // The answer broke off while it was read: nothing was answered.
+            abandon(self.store, self.lookup, self.started_at).await;
+            return internal_error();
+        };
+        if let Some(named) = self.named_problem(&parts.headers, &bytes) {
+            bytes = named.into();
+            parts.headers.remove(http::header::CONTENT_LENGTH);
+        }
+        // A failure to store the answer fails no call that committed: the
+        // row stays running, and a repeat after the time limit runs again.
+        let body = String::from_utf8_lossy(&bytes);
+        let finished = self
+            .store
+            .finish(self.lookup, self.started_at, status.as_u16(), &body)
+            .await;
+        if let Err(err) = finished {
+            tracing::error!(error = %err, "idempotency: finish");
+        }
+        Response::from_parts(parts, Body::from(bytes))
     }
-    let (parts, body) = response.into_parts();
-    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
-        // The answer broke off while it was read: nothing was answered.
-        abandon(store, lookup, started_at).await;
-        return internal_error();
-    };
-    // A failure to store the answer fails no call that committed: the row
-    // stays running, and a repeat after the time limit runs again.
-    let body = String::from_utf8_lossy(&bytes);
-    if let Err(err) = store
-        .finish(lookup, started_at, status.as_u16(), &body)
-        .await
-    {
-        tracing::error!(error = %err, "idempotency: finish");
+
+    /// A problem body with the request's id as its `requestId`, which the
+    /// router's request_ids adds on the way out, so a replay names the
+    /// first request as the Go router's does; `None` for any other body,
+    /// and one that names its request already.
+    fn named_problem(&self, headers: &http::HeaderMap, bytes: &[u8]) -> Option<String> {
+        let id = self.request_id?;
+        let problem = headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with(crate::PROBLEM_CONTENT_TYPE));
+        if !problem {
+            return None;
+        }
+        let serde_json::Value::Object(mut body) = serde_json::from_slice(bytes).ok()? else {
+            return None;
+        };
+        if body.contains_key("requestId") {
+            return None;
+        }
+        body.insert("requestId".to_owned(), serde_json::Value::from(id));
+        Some(serde_json::Value::Object(body).to_string())
     }
-    Response::from_parts(parts, Body::from(bytes))
 }
 
 /// Deletes the attempt's running row, logging a failure, which leaves the
