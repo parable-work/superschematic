@@ -112,6 +112,11 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 	if op.Projection {
 		return unserved("it reads the projection %s, and the Rust repositories read tables so far", op.Type)
 	}
+	for _, member := range op.By {
+		if strings.Contains(member, ".") {
+			return unserved("its row rule names the path %s, and the Rust server holds a rule to the row's own members so far (D156)", member)
+		}
+	}
 	table := &TableInfo{Operation: owner, Kind: op.Kind, Database: op.Database, Type: op.Type}
 	// A create that names the state its row starts in (D109) carries the
 	// members that name it: the runtime's handler creates the row and

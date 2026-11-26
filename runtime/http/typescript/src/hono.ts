@@ -3,6 +3,7 @@ import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth.js';
+import { callEntry, type AccessLog } from './access.js';
 import { withCaller } from './caller.js';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope.js';
 import type { OperationSpec, RequestContext } from './operation.js';
@@ -30,7 +31,7 @@ import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './uploa
 // What an operation runs within: its caller, whom an ORM opened with no
 // user acts as (D87). A manual route's handler may run its writes within
 // one too.
-export { currentCaller, withCaller, type Caller } from './caller.js';
+export { accessCallerOf, currentAccess, currentCaller, withCaller, type AccessCaller, type Caller } from './caller.js';
 
 // A built-in WebhookVerifier: a JWT carrying the body's SHA-256 (D81).
 export { INVALID_SIGNATURE_CODE, jwtBodyHashVerifier } from './webhook.js';
@@ -144,6 +145,14 @@ export interface RouterRuntimeOptions {
    * such a route without one throws.
    */
   idempotencyStore?: IdempotencyStore;
+  /**
+   * Where the calls the access log records are written (D156): each call
+   * made with an API key (D114) or a grant's token, and each read an agent
+   * run makes, once its caller is established and before its permissions
+   * are checked, so a refused call is recorded too. accessLogOf(orm) writes
+   * the database's @accessLog table. Absent, nothing is recorded.
+   */
+  accessLog?: AccessLog;
 }
 
 export interface MountOptions {
@@ -419,6 +428,8 @@ async function establishCaller(ctx: RequestContext, options: RouterRuntimeOption
   const { auth } = ctx.operation;
   if (auth.public || !auth.required) return;
   ctx.principal = options.authenticate ? await options.authenticate(ctx) : null;
+  const entry = options.accessLog ? callEntry(ctx.principal, ctx.operation.name, ctx.method) : undefined;
+  if (entry) await options.accessLog!.record(entry);
   authorize(ctx.principal, auth, options.permissionMatcher);
 }
 

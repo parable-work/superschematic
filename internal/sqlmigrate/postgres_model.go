@@ -149,6 +149,28 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
+	// An @audience table's trigger and a parent's cascade (D156): each
+	// function, and the trigger that runs it. The audience trigger resolves
+	// a table's rows once when it is created on one that holds rows.
+	for _, a := range out.AudienceTriggers {
+		m.Functions = append(m.Functions, &Function{Name: a.FunctionName, Definition: a.FunctionSQL(), Origin: a.Origin})
+		trigger, err := modelTrigger(a.Trigger(), a.Origin)
+		if err != nil {
+			return nil, err
+		}
+		trigger.Backfill = a.BackfillSQL()
+		trigger.BackfillNote = fmt.Sprintf("Backfilling %s resolves the audience of every row of %s while the new trigger's lock blocks writes to %s.", a.TriggerName, a.Table, a.Table)
+		m.Triggers = append(m.Triggers, trigger)
+	}
+	for _, c := range out.AudienceCascades {
+		m.Functions = append(m.Functions, &Function{Name: c.FunctionName, Definition: c.FunctionSQL(), Origin: c.Origin})
+		trigger, err := modelTrigger(c.Trigger(), c.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
 		// A view without a pool is created beside the tables (D90), in a

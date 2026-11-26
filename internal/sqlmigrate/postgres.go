@@ -478,6 +478,10 @@ func (postgresDialect) seedHistory(c *change) *Step {
 // enqueued twice, and the insert takes time that grows with the table.
 // On SQLite the step holds the database's write lock as long.
 func backfillStep(step *Step, c *change) *Step {
+	if c.trigger.BackfillNote != "" {
+		blocking(step, c.trigger.BackfillNote)
+		return step
+	}
 	blocking(step, fmt.Sprintf(
 		"Backfilling %s enqueues a message for every row of %s that meets its conditions while the new trigger's lock blocks writes to %s; for a large table, add the trigger without backfill and run stack queue backfill.",
 		c.trigger.Name, c.table, c.table))

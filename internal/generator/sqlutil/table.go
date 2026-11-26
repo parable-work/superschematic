@@ -478,6 +478,18 @@ type TableModel struct {
 	// Fences are the table's @fenced counters, in the order declared, which
 	// its statements advance (D119, FenceBumps); none for most tables.
 	Fences []FenceModel
+
+	// Audience is an @audience table's resolved columns, qualified by its
+	// table, which a read compares its caller with (D156); on a projection
+	// of one, its source's, which AudienceProbe holds the view to. Nil for
+	// a table or view no audience holds.
+	Audience *AudienceModel
+
+	// Access names what the table is to the runtime's per-record access
+	// (D156): AccessGrants for the @accessGrants table, AccessLog for the
+	// @accessLog one, AccessRoles for the UserRole table of a schema with
+	// grants, whose rows a grant's role names. Empty for every other.
+	Access string
 }
 
 // ColumnModel is a column of a table.
@@ -725,7 +737,50 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 	}
 	attachReferences(tables)
 	attachRelations(tables)
+	grants := schema.AccessGrantsTable() != nil
+	for i := range tables {
+		td := schema.Types[tables[i].Type]
+		switch {
+		case td == nil:
+		case td.Audience != nil:
+			tables[i].Audience = AudienceOf(td)
+		case td.AccessGrants != nil:
+			tables[i].Access = AccessGrants
+		case td.AccessLog != nil:
+			tables[i].Access = AccessLog
+		case td.UserRole != nil && grants:
+			tables[i].Access = AccessRoles
+		}
+	}
 	return tables, nil
+}
+
+// What a table is to the runtime's per-record access (TableModel.Access,
+// D156).
+const (
+	AccessGrants = "grants"
+	AccessLog    = "log"
+	AccessRoles  = "roles"
+)
+
+// AudienceModel is what a read of an @audience table compares its caller
+// with (D156): the row's resolved audience and agent access, each a column
+// qualified by its table, and on a projection of one, Probe, the view's key
+// in the keys of its source's rows of the WHERE %s, which the audience's
+// condition on the source's columns writes.
+type AudienceModel struct {
+	Effective string
+	Agents    string
+	Probe     string
+}
+
+// AudienceOf is the audience model of td, an @audience table.
+func AudienceOf(td *ir.TypeDef) *AudienceModel {
+	table := TableName(td)
+	return &AudienceModel{
+		Effective: Qualify(table, codegen.ToSnakeCase(ir.EffectiveAudienceField)),
+		Agents:    Qualify(table, codegen.ToSnakeCase(ir.EffectiveAgentsField)),
+	}
 }
 
 func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scalars map[string]ScalarClass, enums, unions map[string]bool) (TableModel, error) {
