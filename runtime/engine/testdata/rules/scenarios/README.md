@@ -101,6 +101,25 @@ writes them, and `test/corpus.test.ts` does not list them.
   a whole; a delete that frees the row's names; and the define refusals.
   No engine implements Aliased.
 
+- `core-declarative.json` (D103, step 5): the declarative vocabulary over
+  test.Votes, a behavior whose declaration states its rules and which no
+  Rust implements (`../declarations/test.Votes.behavior.json`): a vote that
+  upserts the caller's row of a sub-table, its parameter held to the
+  config's maxScore; fields derived from the rows as a count, a sum, an
+  average, a highest, a lowest and a filtered count; guards over the row,
+  the Workflow's status and the caller; a counter; an operation's move;
+  two reactions heard from the change queue; the field rules Constants
+  and StateRules have; and the define refusals. Its `declarations` lists
+  the declaration files, from this directory, which the replay hands the
+  core and the transcript holds whole. The acme example keeps acme.Rating's
+  cases the same way (`examples/acme-schematic/testdata/rules/acme-rating.json`),
+  whose transcript is `../acme-rating.transcript.json`.
+
+`../declarations` also holds Constants and StateRules written in the
+vocabulary, each its own declaration file with rules that read the use's
+config, which `rules-testkit`'s `declarative_field_rules` replays every
+file composing it on in place of the Rust behavior (step 5's question).
+
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
 refusal whole (its class, code, message and details), in the core's words.
@@ -125,7 +144,8 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/declarative_scenarios.rs` and
 `runtime/engine/rust/rules-testkit/tests/comments_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
