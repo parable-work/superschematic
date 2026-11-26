@@ -18,14 +18,25 @@ import (
 // are refused @references and @attachments on every dialect
 // (rust_features.go, D181), so this leaves them to that check, and holds
 // Rust to an audience on SQLite alone, which D181 serves on Postgres.
+//
+// The grants and the access log (D156) run on SQLite in TypeScript, whose
+// repositories keep a party's or an agent run's reads to its grants through
+// their filters there, and in Rust, whose repositories do the same, its
+// server's grant authenticator and access log being Postgres's (D181). The
+// Go ORM serves them on Postgres alone (D180): its repositories on SQLite
+// would read every row for a caller with grants, and its server would
+// record its calls in no log there. So a DB service that lists sqlite and
+// declares either takes no Go types.
 
 // sqliteReaders are the languages each feature is not refused for here on
 // SQLite: those whose repositories serve it there, and those another check
 // refuses it for on every dialect.
 var sqliteReaders = map[string][]string{
-	"@audience":    {registry.LangTypeScript},
-	"@references":  {registry.LangTypeScript, registry.LangRust},
-	"@attachments": {registry.LangTypeScript, registry.LangRust},
+	"@audience":     {registry.LangTypeScript},
+	"@references":   {registry.LangTypeScript, registry.LangRust},
+	"@attachments":  {registry.LangTypeScript, registry.LangRust},
+	"@accessGrants": {registry.LangTypeScript, registry.LangRust},
+	"@accessLog":    {registry.LangTypeScript, registry.LangRust},
 }
 
 // refuseSQLiteReaders refuses decorator on td in a DB service that lists the
