@@ -243,6 +243,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
 		vin.GoServer = goServer(cfg)
+		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.TypesLanguages = typesLanguages(cfg)
 		vin.RustOutput = rustOutput(cfg)
 
@@ -274,6 +275,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
 				return nil, nil, err
 			}
+			vin.DatabaseDialects = databaseDialects(servicePath, schema, vin.Database, vin.TypeScriptServer, reg)
 			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 				return nil, nil, err
 			}
@@ -305,6 +307,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
 		vin.GoServer = goServer(cfg)
+		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.RustOutput = rustOutput(cfg)
 	}
 
@@ -387,6 +390,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
 		return nil, nil, err
 	}
+	vin.DatabaseDialects = databaseDialects(servicePath, schema, vin.Database, vin.TypeScriptServer, reg)
 	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 		return nil, nil, err
 	}

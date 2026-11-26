@@ -92,6 +92,7 @@ func checkTableOperations(schema *ir.Schema, in Input, r *Result) {
 	}
 	for _, m := range ops {
 		checkTableOperation(schema, db, m.set, m.op, r)
+		refuseSQLiteMergeRoutes(schema, in, dbName, m.set.Name+"."+m.op.Name, m.op, r)
 	}
 	// Each operation the loader filled documents itself (D111).
 	documentTableOperations(schema, in.registry().ToolInvocationPolicy())
