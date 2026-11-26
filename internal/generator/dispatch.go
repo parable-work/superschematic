@@ -811,6 +811,14 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 			if keys != nil {
 				tsDeps.ORMFieldKeys = keys.Name
 			}
+			// A database that uses the agent orchestration puts its
+			// dispatcher in Deps, over the repositories (D158, D183).
+			if requests := schema.AgentsTable(ir.AgentRequests); requests != nil {
+				tsDeps.Agents = &tsrestgen.DepsAgents{Requests: requests.Name}
+				if runs := schema.RunRequestsQueue(); runs != nil {
+					tsDeps.Agents.RunRequests = runs.Name
+				}
+			}
 		}
 	}
 	if e := apiOutput.Engine; e != nil {

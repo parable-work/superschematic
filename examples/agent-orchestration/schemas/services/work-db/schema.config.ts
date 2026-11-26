@@ -8,6 +8,7 @@ export default defineConfig({
   kind: SchemaKind.DB,
   outputs: {
     types: {
+      [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true }
     },
     sql: { dialects: ["postgres"] }
