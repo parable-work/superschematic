@@ -556,6 +556,16 @@ impl<'a> Run<'a> {
         }
     }
 
+    pub fn read_permissions(
+        &self,
+        request: &ReadRequest,
+    ) -> Hook<&'a BTreeMap<String, Vec<String>>> {
+        match self.read(request)? {
+            Answer::Permissions(held) => Ok(held),
+            _ => Err(mismatched(request)),
+        }
+    }
+
     /// A row of any type as the run has it: the one the run reached, its
     /// writes applied, else the host's; `None` when the type has none of the
     /// key, or the run deleted it or found it gone.

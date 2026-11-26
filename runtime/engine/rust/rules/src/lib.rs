@@ -100,7 +100,7 @@ pub use changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SharedRowChange,
     SharedRowWrite, Signal, SubRowChange, SubRowWrite, WriteKind, MAX_SIGNAL_DATA_BYTES,
 };
-pub use command::{Action, Caller, Command};
+pub use command::{Action, Assurance, Caller, Command};
 pub use context::{ConfigCx, Cx, View};
 pub use core::{Core, Outcome, Source, Step, MAX_ROUNDS};
 pub use namespace::{NamespaceCx, NAMESPACE};
