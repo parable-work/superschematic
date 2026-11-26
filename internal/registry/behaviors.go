@@ -311,6 +311,14 @@ type BehaviorOperation struct {
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
+	// Permissions are the config's members whose permissions the
+	// operation checks (D103's step 5), each a ConfigPath: Workflow's
+	// transition checks transitions[].permission and overridePermission.
+	// The permission catalog lists under the operation only the strings a
+	// use's config holds at them. A declaration none of whose operations
+	// lists any states none, and the catalog lists every permission its
+	// config names under each operation of its use.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // BehaviorEvent is an event a behavior emits about a row (D104): its kind,
