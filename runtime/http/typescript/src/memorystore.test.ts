@@ -262,7 +262,8 @@ describe('the typed layer', () => {
   });
 
   test('a key counts and claims through the store with its TTL', async () => {
-    const store = new InProcessMemoryStore('shop-cache');
+    // A fixed clock: on Date.now a millisecond can pass between the claim and ttlOf.
+    const store = new InProcessMemoryStore('shop-cache', { now: clock().now });
     const key = new Key(ref('views:p1'), 5000);
     expect(await key.increment(store)).toBe(1);
     expect(await key.count(store)).toBe(1);

@@ -52,6 +52,11 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- with .DatabaseTypesDependency }}
 {{ .Name }} = { path = "{{ .Path }}"{{ $.DependencyFeatures .Name }} }
 {{- end }}
+{{- with .Providers }}
+{{- range .Crates }}
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
+{{- end }}
 {{- with .Deps }}
 {{- range .Calls }}
 {{ .Crate }} = { path = "{{ .Path }}" }

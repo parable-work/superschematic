@@ -97,8 +97,20 @@ type RuntimeProvider struct {
 	// Implements is the runtime interface the provider implements.
 	Implements string `json:"implements"`
 
-	// Package is the package's name in its package.json.
+	// Package is the package's name in its package.json, empty for a
+	// directory that holds a Rust crate of the provider alone.
 	Package string `json:"package"`
+
+	// Crate is the Rust crate's name in its Cargo.toml, when the directory
+	// holds one whose [package.metadata.superschematic.provider] declares
+	// the same provider (D185): the crate a Rust server links, whose root
+	// exports definition(). Empty for a provider of TypeScript alone.
+	Crate string `json:"crate,omitempty"`
+
+	// Dir is the directory the loader found the provider in, absolute: what
+	// a Rust server's Cargo.toml names its crate by (D185). It is the
+	// loader's alone, and no schema.json holds it.
+	Dir string `json:"-"`
 
 	// Path is the package's directory as the API's config lists it,
 	// relative to the service's directory, in slash form.
