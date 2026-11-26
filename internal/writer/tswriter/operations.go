@@ -305,6 +305,18 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	if op.ManualRouteRegistration {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
+	if stream := op.HTTPBinaryStream; stream != nil {
+		// A stream success body, not the envelope (D167).
+		config := "contentType: " + quote(stream.ContentType)
+		if len(stream.ResponseHeaders) > 0 {
+			headers := make([]string, len(stream.ResponseHeaders))
+			for i, header := range stream.ResponseHeaders {
+				headers[i] = quote(header)
+			}
+			config += ", responseHeaders: [" + strings.Join(headers, ", ") + "]"
+		}
+		fmt.Fprintf(&e.body, "  @%s({ %s })\n", e.use("httpBinaryStream"), config)
+	}
 	if op.TableOperation != nil {
 		// The loader fills what the decorator leaves unsaid (D106); the
 		// row rule is the author's (D108).
@@ -460,6 +472,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.Filter = nil
 	rest.TableOperation = nil
 	rest.FileDownload = nil
+	rest.HTTPBinaryStream = nil
 	rest.Middleware = nil
 	rest.Arguments = nil
 	if !reflect.DeepEqual(&rest, &ir.FieldDef{}) {

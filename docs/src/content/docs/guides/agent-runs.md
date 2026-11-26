@@ -66,7 +66,8 @@ export abstract class AgentApproval {}
 
 Every part is required, and the orchestration runs on Postgres. An API
 over such a database uses the `agents` runtime feature, so an environment
-that sets no sandbox slot or no model slot is refused.
+that sets no sandbox slot or no model slot is refused
+([runtime providers](/superschematic/guides/runtime-providers/#features-that-need-a-provider)).
 
 ## Start a run
 
@@ -75,13 +76,15 @@ puts one in the caller's transaction.
 
 | Trigger | How it arrives |
 | --- | --- |
-| `route` | A notifier route whose recipients name `{ agent: "reviewer" }`. The run is about the event's record. |
+| `route` | A notifier route whose recipients name `{ agent: "reviewer" }` ([route it](/superschematic/guides/notifications/#route-it)). The run is about the event's record. |
 | `assigned` | The app assigns a row and requests a run about it. A paused agent's row goes back to its queue (`onReturn`). |
 | `schedule` | A Schedules run or a Recurrence event, through a route or the app's Workers method. |
 | `principal` | A person asks, naming whom the run acts for. |
-| `inbound` | A party's message (D157): `createInbound` puts `{ trigger: "inbound", party, message, grant }` on the `@runRequests` queue, and `inbound.runWorker(pool, m => agents.handle(m))` hands it over as it is. It names no agent; the definition whose `inbound` is set takes it. Its scope is the grant's target, the party's row and the message's. |
+| `inbound` | A party's message ([outside parties](/superschematic/guides/parties/#act-on-a-run-request), D157): `createInbound` puts `{ trigger: "inbound", party, message, grant }` on the `@runRequests` queue, and `inbound.runWorker(pool, m => agents.handle(m))` hands it over as it is. It names no agent; the definition whose `inbound` is set takes it. Its scope is the grant's target, the party's row and the message's. |
 
 A run's principal may not request a run: only the dispatcher starts one.
+An agent that hands work on asks a principal, whose request starts the
+next run.
 
 The dispatcher is a `@worker` of the requests queue. A generated
 TypeScript server builds it into the API's `Deps` (`deps.agents`) when the
@@ -96,9 +99,10 @@ at each Cron firing, and a message due within the minute wakes it.
 
 ## The run's token
 
-The token is a grant (D156) per target row, held by the run, whose role is
-the agent's. The agent routes' authenticator resolves it to a principal of
-kind `agent`:
+The token is a grant (D156,
+[per-record access](/superschematic/guides/api-routes/#per-record-access))
+per target row, held by the run, whose role is the agent's. The agent
+routes' authenticator resolves it to a principal of kind `agent`:
 
 - its permissions are the role's, narrowed to those whom it acts for holds;
 - it reaches its target rows and the rows its role's `reaches` name;

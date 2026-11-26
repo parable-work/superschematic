@@ -1,10 +1,12 @@
 # The superschematic agent skill
 
 The skill a coding agent reads to build software **with** superschematic:
-it declares types, tables, routes, permissions, jobs, queues and stacks
-in schema files, and lets the compiler generate the SQL, migrations,
-validation, servers, OpenAPI, SDKs and deploys it would otherwise write
-by hand (D76).
+it declares types, tables, routes, permissions, row access, jobs,
+queues, behaviors and stacks in schema files, and lets the compiler
+generate the SQL, migrations, validation, servers, OpenAPI, SDKs and
+deploys it would otherwise write by hand (D76). For search, notifications,
+outside parties and agent runs, which a TypeScript server wires by hand,
+it names the declarations and the guide that covers each.
 
 ```text
 .claude-plugin/marketplace.json       the marketplace, at the repository root: one plugin, superschematic
@@ -56,8 +58,8 @@ stop and ask the user.
 - Don't restate a scalar, decorator, flag or default the binary prints.
   Point at the command instead.
 - A change to a command the skill names (`init`, `new service`, `check`,
-  `build`, `catalog`, `stack`, `migrate plan`) updates `SKILL.md` in the
-  same pull request.
+  `build`, `build-all`, `catalog`, `queries verify`, `stack`, `migrate
+  plan`) updates `SKILL.md` in the same pull request.
 - Keep `SKILL.md` short: it loads whenever the skill triggers.
 - `name` must stay `superschematic`, matching its directory. Keep
   `description` under 1024 characters: it decides when the skill

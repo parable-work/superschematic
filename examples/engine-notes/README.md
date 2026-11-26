@@ -31,9 +31,10 @@ examples/engine-notes/scripts/check.sh
 It builds the HTTP runtime and the engine, and the engine's Node-API addon
 with cargo when the engine has none (`scripts/engine-napi.sh`: the engine
 is the Rust library every server links, D58, which the package loads),
-links them into `node_modules`, type-checks the example, and runs
-`test/notes.test.ts` with `node --test` and with `bun test`, each serving
-the example on a free port. The `typescript` job in
+builds `superschematic-dev` with cargo unless `SUPERSCHEMATIC_DEV` names
+one, links them into `node_modules`, type-checks the example, and runs
+`test/notes.test.ts` and `test/notes.dev.test.ts` with `node --test` and
+with `bun test`, each serving the example on a free port. The `typescript` job in
 `.github/workflows/ci.yml` runs it after the engine's own tests in the
 full tier (D40), which the release candidate runs on `main` twice a day,
 and so does `make ts`.

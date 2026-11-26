@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
+	"net/http"
 	"net/url"
 )
 
@@ -68,6 +70,22 @@ type DownloadedFile struct {
 	Body        []byte
 	Filename    string
 	ContentType string
+}
+
+// BinaryStream is the success body of an @httpBinaryStream operation
+// (D167), unread. The caller reads Body and must Close it. Closing it
+// before its end ends the request. ContentType is the media type the
+// schema declares, which the client checked before it returned, and Header
+// the response's headers.
+type BinaryStream struct {
+	ContentType string
+	Header      http.Header
+	Body        io.ReadCloser
+}
+
+// Close closes the body.
+func (s *BinaryStream) Close() error {
+	return s.Body.Close()
 }
 
 // FilenameOf is the filename a Content-Disposition offers: filename*, the

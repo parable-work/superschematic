@@ -12,6 +12,8 @@ in [superschematic.toml](/superschematic/reference/naming/).
 ## Requirements
 
 - Node 22.12 or newer (CI uses the `NODE_VERSION` pin in `tools.env`).
+- Bun, which installs the generated workspace and runs a TypeScript
+  server (CI and a server's image use `BUN_VERSION` in `tools.env`).
 - The [CLI](/superschematic/install/go/), built from this repository until
   the first tag.
 
@@ -350,9 +352,17 @@ with `{ forward: ctx }` as a method's last argument: the call sends
 `ctx.bearerToken` as `Authorization`, or none when it is null, instead of
 the configured token, and does not refresh it.
 
+`client: { name, version }` names the app the SDK runs in, which it sends
+as `X-Client-Version`
+([The client's name and version](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+A method of an `@idempotent` operation sends an `Idempotency-Key`, the
+call's `idempotencyKey` or a fresh UUID
+([An idempotency key](/superschematic/guides/client-sdks/#an-idempotency-key)).
+
 An operation without an input type takes its arguments in order after the
 path parameters, then its query parameters as one object, if it has any,
-and an `AbortSignal` or `RequestOptions` (`{ signal, forward }`). A plain
+and an `AbortSignal` or `RequestOptions` (`{ signal, forward,
+idempotencyKey }`). A plain
 object in the first argument's place is instead all of its arguments by
 name, followed by the query parameters and the signal or options. They
 travel where the route reads them: on `GET` in the query string, and on
@@ -420,7 +430,12 @@ dependency), and `orm`, the database's generated repositories, when the
 database has tables and TypeScript types
 ([Database tables](/superschematic/guides/database-tables/#typescript)),
 a TypeScript SDK client of each API it `calls` (`shopApi`
-for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
+for `shop-api`), a `Bucket` for each bucket it lists (a `ContentBucket`
+for one that names its objects by their content), a `MemoryStore` for
+each memory store it lists, `engine` for an engine database, and a
+`logger`, the HTTP runtime's JSON-lines logger. Over a database whose DB
+service lists `sqlite` first, `db` is a `SqlDatabase`, D1's interface,
+which a D1 binding gives a Worker and a SQLite file gives `stack dev`.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route
 that needs an end user also declares `AuthenticatorFactory`, the type of
@@ -681,6 +696,22 @@ For a provider that signs with a JWT carrying the body's SHA-256, such as
 Plaid, `jwtBodyHashVerifier` from the same module is the verifier
 ([A JWT that carries the body's hash](/superschematic/guides/api-routes/#a-jwt-that-carries-the-bodys-hash)).
 It verifies with WebCrypto, so it runs on Node.js, Bun and Workers.
+
+The platform features of D152 to D159 are built in TypeScript first, with
+their Go and Rust parts mostly left:
+[runtime providers](/superschematic/guides/runtime-providers/),
+[references and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row),
+[recurrence and the calendar](/superschematic/guides/database-tables/#a-rows-recurrence-and-the-calendar),
+[search across tables](/superschematic/guides/database-tables/#search-across-tables),
+[events and notifications](/superschematic/guides/notifications/),
+[outside parties](/superschematic/guides/parties/) and
+[agent runs](/superschematic/guides/agent-runs/). Several need the app to
+wire their routes or their runtime into its server; each guide says how,
+and what is left.
+
+[Development mode](/superschematic/guides/development-mode/#from-typescript)
+runs a project's tables in the Rust handler built for WebAssembly, which
+`@superschematic/rules-handler` mounts in a TypeScript server you write.
 
 The generated package ships TypeScript sources, so run it with Bun, a
 bundler or a TypeScript loader. The runtime ships compiled JavaScript with

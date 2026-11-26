@@ -11,17 +11,19 @@ A Stack service declares which of your services run, how they group into
 servers and databases, and the environments they run in. Its build wires
 each server to its database and to the APIs it calls, checks the result
 offline, and writes three things: each environment as `environment.json`,
-an entrypoint and Dockerfile for each Go, TypeScript and Rust server and
-each Go and TypeScript job and worker, and a
+an entrypoint and Dockerfile for each Go, TypeScript and Rust server, job
+and worker, and a
 scaffold of each API implementation that is missing. Wiring the schemas already say,
 such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
 
 `superschematic stack dev` runs an environment on your machine, with
 Postgres, a storage emulator and Valkey in Docker and each server as a process. The `stack` commands
-bootstrap, plan and deploy the cloud environments, and the gcp target
+bootstrap, plan and deploy the cloud environments: the gcp target
 lowers them to Cloud Run, Cloud Scheduler, Cloud SQL, Secret Manager, load
-balancer and DNS resources that the Pulumi provisioner applies.
+balancer and DNS resources, and the cloudflare target to Workers, D1, R2
+and Hyperdrive ones, which the Pulumi provisioner applies. An environment
+on the embedded target builds as one binary.
 
 ## What is built
 
@@ -33,12 +35,13 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
 | [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell, on gcp to Cloud Trace or a collector, and on cloudflare to a collector, when the environment's `telemetry` turns it on | metrics and logs |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
+| the gcp target, with `stack bootstrap`, `secrets set`, `prepare`, `build`, `plan`, `deploy`, `destroy`, `outputs`, `unlock` and `queue`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers and behavior workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger and are woken through a Workflow for a message due sooner, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself |
 | [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and an engine in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
+| [runtime providers](/superschematic/guides/runtime-providers/): a provider slot per environment in the deployable's `env`, checked against the providers its API lists, each deployable's `providers` in `environment.json`, and the refusal of an environment that runs a feature with no provider of the interface it needs, [notifications](/superschematic/guides/notifications/) and [agent runs](/superschematic/guides/agent-runs/) among them ([Environments](#environments)) | a generated server that builds the providers into `Deps` |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | |
 | [packages and a Dockerfile of your own in a deployable's image](#add-to-an-image): `images` in `@stack`, the three generated Dockerfiles, the image's identity, `stack dev`'s notice and the refusal on a platform that builds no image | a build of the extended image by `docker build` alone: the deploy runs the second build |
@@ -565,11 +568,11 @@ TypeScript twin.
 
 | Key | What it sets |
 | --- | --- |
-| `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, storageCorsHeaders, memoryStoreImage, memoryStorePort }` |
+| `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp`, `cloudflare` or `embedded` in the installed binary |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, `cloudflare: { accountId, workersSubdomain, secretsStoreId, telemetry }`, `embedded: { port }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, storageCorsHeaders, memoryStoreImage, memoryStorePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency`, `enabled`, `mode` and `idle` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
+| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency`, `enabled`, `mode` and `idle` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); a deriver's names it beside its API's handle, `{ of: ShopCart, deriver: "TriageTickets" }`, and takes `enabled`, `instances` and `concurrency` ([Derivers](#derivers)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -578,6 +581,18 @@ TypeScript twin.
 `T`. An `@server` or `@database` class takes either kind's settings and
 any `env` key, since tsc cannot see what it serves; the loader checks
 them.
+
+An API that uses [runtime providers](/superschematic/guides/runtime-providers/)
+has a slot for each in its `@envVars`, and `env` chooses the provider
+per environment by binding the slot to a provider's name, beside the
+settings that provider reads:
+`{ of: NotesApi, env: { SMS: "sms-relay-b", SMS_URL: "https://relay.example.test" } }`.
+The build refuses a slot that names a provider the API does not list, or
+leaves its settings unbound (`provider`), and an environment that runs a
+feature with no provider of the interface it needs, a channel adapter for
+[notifications](/superschematic/guides/notifications/) or a sandbox and a
+model for [agent runs](/superschematic/guides/agent-runs/) (`no-provider`)
+([Choose a provider per environment](/superschematic/guides/runtime-providers/#choose-a-provider-per-environment)).
 
 An `@environment` class may extend another. It inherits the parent's
 target, values and settings, which merge key by key, and adds its own
@@ -1188,7 +1203,7 @@ Under the output root, `schemas/dist` by default, the build writes:
   for each TypeScript server, job and worker, holding `main.ts`,
   `package.json`, `tsconfig.json`, a `Dockerfile` and
   `Dockerfile.dockerignore`, a member of the output root's Bun workspace,
-  and a crate for each Rust server, holding `Cargo.toml`, `src/main.rs`, a
+  and a crate for each Rust server, job and worker, holding `Cargo.toml`, `src/main.rs`, a
   `Dockerfile` and `Dockerfile.dockerignore`, a member of the output
   root's Cargo workspace, `Cargo.toml` beside `schemas/dist/Cargo.lock`
   ([Rust servers](#rust-servers));
@@ -1231,8 +1246,9 @@ stack shop-stack environment Production does not resolve:
   unbound-field: server Orders: required config field FULFILLMENT_REGION of OrdersConfig has no binding and no default
 ```
 
-The installed `superschematic` links the gcp target, so a stack with gcp
-environments builds with it. The core alone registers only `local`, and a
+The installed `superschematic` links the gcp, cloudflare and embedded
+targets, so a stack with environments on them builds with it. The core
+alone registers only `local`, and a
 stack on a target the binary does not link fails with `unknown-target`.
 
 ### What is checked offline
@@ -1247,10 +1263,14 @@ lowered:
 | `unknown-env-key` | an `env` key that is not a field of the server's `@envVars`, or an `env` on a database |
 | `secret-literal` | a literal or a parameter for a `Secret<T>` field |
 | `kind-mismatch` | a handle whose kind is not the kind of the service it names, or a handle in a place that does not take its kind |
+| `provider` | a provider slot whose value names no provider its API lists, one of another interface, or one whose settings the environment leaves unbound ([runtime providers](/superschematic/guides/runtime-providers/#choose-a-provider-per-environment)) |
+| `no-provider` | a deployable whose API uses a feature that needs a runtime provider, notifications a channel adapter, while the environment names none of that interface |
 | `unrealizable` | a deployable its platform cannot run, such as a job on a target with no job platform, or a server whose APIs are in two languages |
 | `no-connector` | an edge no connector realizes between the two platforms. Between platforms of two providers, such as a server placed on another target's platform with a settings `platform`, the core's generic connector serves an http or a site edge |
 | `cross-provider-unexposed` | an http edge between deployables of two providers to a server the stack does not expose: the generic connector reaches a server only at its public address |
 | `expose-not-server` | an exposed deployable that is not a server |
+| `site-calls-unexposed` | a site that calls an API whose server is not exposed, which no browser reaches ([Static sites](/superschematic/guides/static-sites/#deploy-it-in-a-stack)) |
+| `origin` | an origin of `@stack` that names a site the stack does not deploy, a site another origin names, an API twice, or an API its site does not call ([One origin](/superschematic/guides/static-sites/#one-origin)) |
 | `unreachable-edge` | a `calls` edge to an API none of whose operations admits the calling server |
 | `ambiguous-database` | an API with several DB dependencies and no `authDb` |
 | `call-cycle` | servers that call each other, which no callee-first rollout serves |
@@ -1390,7 +1410,8 @@ holds, so neither writes a statement by hand:
 
 ## Run it locally
 
-`stack dev` runs an environment on the core's `local` target and stays in
+`stack dev` runs an environment on the core's `local` target, or one that
+builds as [one binary](#build-one-binary) as that one process, and stays in
 the foreground until Ctrl-C. Give each secret a value first; `stack dev`
 refuses a secret that has none and names the file it reads:
 
@@ -1478,8 +1499,8 @@ leaves it and its data, and prints the `docker rm` that removes it.
 | Stack concept | On `local` |
 | --- | --- |
 | server | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo |
-| job | a Go process per run, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
-| worker | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
+| job | a Go process per run, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
+| worker | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
 | app | a Rust process, built from its crate with cargo as a Rust server is, with its API's config and `PORT`, started in the wave after its API's servers; ready once it accepts a TCP connection on its port, none when it is off ([Apps](#apps)) |
 | database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another, or `pgvector/pgvector:0.8.7-pg16` when a DB service of the stack has a vector column (D84); for a DB schema that lists `sqlite` first, a SQLite file, `<schemas-root>/.superschematic/local/<stack>/<environment>/databases/<database>.sqlite` |
 | bucket | a bucket on the checkout's one fake-gcs-server container for the environment, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
@@ -1511,13 +1532,17 @@ each deployable sends.
 
 The resolved environment is what a provisioner reads, and it is stable:
 fields in a fixed order and map keys sorted, so a wiring change reads as a
-diff in review. Its top-level keys are `stack`, `environment`, `extends`,
+diff in review. Its top-level keys are `version`, `stack`, `environment`, `extends`,
 `target`, `provisioner`, `values`, `parameters`, `domain`, `dns`,
-`deployables`, `edges`, `secrets`, `resources` (the resource graph) and
+`deployables`, `disabled` (what the settings turn off and so place
+nowhere, a memory store with `enabled: false`),
+`edges`, `secrets`, `resources` (the resource graph) and
 `deployOrder`.
 
 Each deployable carries its platform, its name and address in the
-environment, and a binding for every config field, from one of four
+environment, the provider each of its
+[provider slots](/superschematic/guides/runtime-providers/#choose-a-provider-per-environment)
+names, under `providers`, and a binding for every config field, from one of four
 sources: `literal`, `secret`, `derived` or `parameter`. A value may
 reference a node's output (`$output`), a parameter (`$parameter`), or
 both joined (`$concat`). These are the `Orders` server's bindings in
@@ -1718,9 +1743,9 @@ runs, brings the copy up to date. A crate that inherits from a workspace
 `rust-impl/shop-stock`, keeps the stock in `shop-db`'s `Inventory`, which
 the engine keeps (D70): it calls the engine in-process, through the
 `Background` its `Deps` holds, on the blocking pool, since the engine is
-synchronous. It reads `shop-db`'s `product` table with tokio-postgres,
-which the HTTP runtime re-exports, over the pool its `Deps` holds, since
-no ORM is generated for Rust, and enqueues `StockLow` with the runtime's
+synchronous. It reads `shop-db`'s products through the repositories
+`shop-db`'s Rust types carry (D116), on a connection of the pool its
+`Deps` holds, and enqueues `StockLow` with the runtime's
 `queue::enqueue` and the descriptor `shop-db`'s Rust types hold:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" symbol="engine_call" />
@@ -2145,7 +2170,7 @@ buckets on R2 ([Buckets on R2](#buckets-on-r2)), databases on D1
 postgres first, on a Postgres outside Cloudflare through Hyperdrive
 ([Databases on Hyperdrive](#databases-on-hyperdrive)), TypeScript jobs on
 Cron Triggers ([Jobs on Cron Triggers](#jobs-on-cron-triggers)),
-TypeScript queue workers on Cron Triggers too
+TypeScript queue and behavior workers on Cron Triggers too
 ([Queue workers on Cron Triggers](#queue-workers-on-cron-triggers)) and
 sites on Workers' static assets ([Sites on Workers](#sites-on-workers)).
 What every deploy goes through:
@@ -3030,8 +3055,8 @@ cli.New(cli.Config{Name: "superschematic"},
 
 ## The Pulumi provisioner
 
-`extensions/pulumi` is the provisioner the gcp target names, and the cloud
-commands drive it. It renders an environment's graph as `Pulumi.yaml` in
+`extensions/pulumi` is the provisioner the gcp and cloudflare targets
+name, and the cloud commands drive it. It renders an environment's graph as `Pulumi.yaml` in
 `<schemas-root>/dist/program/<stack>/<environment>`: one resource per
 node, keyed and named by the node's ID, with `dependsOn`,
 `${node.output}` references and the provider version pinned for each

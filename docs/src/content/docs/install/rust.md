@@ -184,6 +184,17 @@ from the `superscalar` crate (`scalar_rust_registry` names another
 registry), and the Rust validators run the same vectors as the other
 three languages in `internal/generator/parity`.
 
+### Repositories
+
+A DB schema's types crate also holds its tables' repositories, in
+`src/orm.rs` (D116), behind its `postgres` feature, asynchronous over a
+tokio-postgres client, and its `sqlite` feature, synchronous over a
+`rusqlite` connection. They run the statements the Go ORM runs
+([Database tables](/superschematic/guides/database-tables/#rust)). A Rust
+server serves a `@tableOperation` from them
+([The servers](/superschematic/guides/api-routes/#the-servers)), and the
+acme-shop example's `shop-stock` reads and writes `shop-db` through them.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Rust writes `schemas-<name>-sdk`.
@@ -301,9 +312,10 @@ operation's arguments, decoded and checked, as one struct,
 `<Namespace><Operation>Args`: a field per path, query and body argument,
 typed as the schema declares it, and `input` for an input type. The method
 returns the operation's result type. An operation without arguments has
-no `args`, and one without a result returns `()`. A `@tableOperation` is
-such a method too: the Rust server writes no handler for one yet, and the
-build warns
+no `args`, and one without a result returns `()`. A `@tableOperation` has
+no method: the router serves it from the database's
+[repositories](#repositories) (D116). One over a projection, which the
+repositories do not read, stays such a method, and the build warns
 ([Operations the build serves](/superschematic/guides/api-routes/#the-servers)):
 
 ```rust
@@ -499,7 +511,13 @@ with `with_key_fetcher`, or turn the feature on.
 
 `@rateLimit`, `@bodyLimit` and `@timeout` apply as in the Go server. The
 rate limit counts each client's requests to the operation per minute, in
-process memory, and answers 429 with `Retry-After`. The limiter is the
+process memory, and answers 429 with `Retry-After`. A stack's server
+counts them in the API's `rateLimitStore` instead, when its config names
+one (`RateLimits::with_store`, D75). A limit with `key: 'principal'`
+counts per the caller the permission check admits, in
+`Implementations.principal_rate_limit_store`, a store every replica shares
+([A rate limit per principal](/superschematic/guides/api-routes/#a-rate-limit-per-principal)).
+The limiter is the
 operation's in a `RateLimits` registry, `RouterOptions::rate_limits`:
 `build_router` makes a registry of its own, and routers built with one
 registry share each operation's budget, as a Topcoat app's JSON API, its
@@ -595,6 +613,21 @@ app that serves two APIs whose operations match on all of those gives
 each API a registry of its own. Options compare their registry by
 identity: a clone is equal to its original, and two
 `RouterOptions::default()` are not equal.
+
+The crate also exports `Api`, which answers a request with no transport
+under it (D116;
+[The Rust server](/superschematic/guides/api-routes/#the-rust-server)).
+`Api::new(implementations)`, or `Api::with` and a
+`RouterOptions`, builds it, and `api.handle(request).await` takes the
+`http` crate's `Request<Bytes>`, its body already read, and answers a
+`Response<Bytes>` through the handlers `build_router`'s routes run, the
+MCP endpoint's among them. What needs a socket, a clock or a store shared
+between requests stays the host's: the listener, TLS, the body's limit,
+timeouts, rate limits, CORS and draining. `Api::UNROUTED` names the
+`@manualRouteRegistration` operations it does not route. A host with no
+async runtime drives `handle` with the runtime's `block_on`, which polls
+on the calling thread: an API whose databases are SQLite files, and that
+calls no other server, awaits nothing that needs a reactor.
 
 A schema with an `@envVars` class (see
 [Modeling types](/superschematic/guides/modeling-types/)) also gets the
@@ -777,6 +810,18 @@ it. The naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust`
 and `scalar_rust` name the checkouts the crates depend on, and the image
 builds from a context that holds them.
 
+On the `embedded` target, an environment's Rust servers and workers run
+as one binary, each database a SQLite file that the binary migrates as it
+starts, from the plans `stack build --release` records
+([Build one binary](/superschematic/guides/stacks/#build-one-binary)).
+
+The platform features of D152 to D159, runtime providers, references and
+attachments, recurrence and the calendar, search across tables,
+notifications, outside parties and agent runs, are built in TypeScript
+first. Their Rust parts, in the runtime, the repositories and the server,
+are mostly not built yet; each guide says what is left
+([Runtime providers](/superschematic/guides/runtime-providers/)).
+
 ### Jobs and workers
 
 An API's `@job` and `@worker` classes (D52, D53, D65) add two traits to
@@ -825,6 +870,14 @@ pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
 An implementation crate is written once, so one that predates its API's
 jobs or workers lacks them. The stack's build reads its `src/lib.rs` and
 refuses it, naming the function to add and its methods.
+
+A `@behaviorWorker` of a table (D103) is a worker too, and needs no
+method: its crate runs the table's deadline, change and event queues
+through the handlers the API crate's behaviors module holds. It builds
+`Deps` and calls `create_workers` only when the table's behaviors emit
+events, each of which it hands to a method of `Workers` that you write
+([A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
+[A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers)).
 
 In a stack, each job and each worker gets a crate of its own beside the
 server's, `schemas/dist/server/<stack>/<job>/`, a member of the same

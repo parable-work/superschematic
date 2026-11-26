@@ -2,11 +2,13 @@
 
 A work app whose agents are rows: each run gets a fresh sandbox instance
 and a token held to its task, asks before it moves money, spends within a
-budget, and stops when someone pulls the switch (D158).
+budget, and stops when someone pulls the switch (D158). The
+[Agent runs](https://parable-work.github.io/superschematic/guides/agent-runs/)
+guide covers it in full.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/work-db` | DB, Postgres: `Task` (a schedule wakes an agent on it, a person and an agent talk in its thread), `TaskNote` and `Invoice`, which a run on a task reaches through its role; `Customer`, a party outside the user table, and `Grant`, the grants a customer's and a run's token are; the notifier's tables; and the orchestration's: `Agent` (`@versioned` definitions), `AgentRun` (runs, holding a Lease while their instance runs and started again by Retries), `AgentRunRequest` (the dispatcher's queue), `AutonomyPolicy`, `AgentApproval`, `AgentControl` (each agent's stop switch and budget) and `AgentBudget` (every agent's); `Customer` is a party (D157), with `Conversation`, `Message` and `RunRequest`, the queue its inbound messages put run requests on |
+| `schemas/services/work-db` | DB, Postgres: `Task` (a schedule wakes an agent on it, a person and an agent talk in its thread), `TaskNote` and `Invoice`, which a run on a task reaches through its role, `Task` and `TaskNote` `@searchable` on the queue `SearchIndexing`; `Customer`, a party outside the user table (D157), and `Grant`, the grants a customer's and a run's token are; the notifier's tables; and the orchestration's: `Agent` (`@versioned` definitions), `AgentRun` (runs, holding a Lease while their instance runs and started again by Retries), `AgentRunRequest` (the dispatcher's queue), `AutonomyPolicy`, `AgentApproval`, `AgentControl` (each agent's stop switch and budget) and `AgentBudget` (every agent's); and D157's `Conversation`, `Message` and `RunRequest`, the queue a customer's inbound messages put run requests on |
 | `schemas/services/work-api` | API over `work-db`, served in TypeScript: `WorkApiConfig` names a sandbox, a model, a credential broker and an SMS channel slot, and where an instance reaches the agent routes; `getTask` and `payInvoice` say what they are to an agent's autonomy, `payInvoice` moving money; `Dispatch` runs the dispatcher on its queue, `InboundRuns` hands it each run request a customer's message made, `Notify` the notifier, `TaskDeadlines` each task's schedules and `RunDeadlines` each run's lease and backoff |
 | `schemas/services/work-stack` | Stack: `work-api` on this machine, its provider slots bound in `Dev`'s env |
 | `typescript/work-api` | `work-api`'s implementation: `createAgentOptions`, what the dispatcher is built with beside its tables (the providers the config names, the notifier, the inbound path, the app's tools); the operations, each an agent's call held to its run's autonomy; and the workers the app runs itself |
@@ -18,9 +20,9 @@ routes an instance calls, and hands each message of `Dispatch`'s and
 method for either.
 
 The providers are `examples/runtime-providers`'s: the local-process
-sandbox, the model stub, the vault broker and the first SMS relay. A real
-deployment swaps the sandbox for a container platform's and the model for a
-model API's, by config alone.
+sandbox, the model stub, the vault broker and the first SMS relay.
+Swapping the sandbox for a container platform's, or the model for a model
+API's, is config alone, though no such provider ships yet.
 
 ## What it shows
 
@@ -71,3 +73,8 @@ fixture name `fixture-agent-runs-db`, runs end to end against Postgres in
 `TestAgentRunsEndToEnd` (`internal/generator/tsgen`): the dispatcher starts
 each instance in the local-process sandbox, which runs the runtime's
 `runAgentInstance` under Bun, completing its turns through the model stub.
+
+The dispatcher is the TypeScript runtime's, on Postgres: the Go and Rust
+servers have no dispatcher or autonomy yet. The generated TypeScript server
+builds it into `work-api`'s `Deps` (D183), and `typescript/work-api` gives
+it the options only the app knows.

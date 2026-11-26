@@ -31,7 +31,12 @@ it. Extraction and previews are a file processor's (D159): complete asks
 extraction, a file's first view asks its preview, and processed records
 what the processor made.
 
-Postgres alone: the loader refuses either declaration on sqlite.
+On SQLite and D1 (D182) the members run the same reads and writes in
+SQLite's words (sqlOf): a parameter ?n, a cast CAST(... AS TEXT), a ref
+block matched through json_each, and no advisory lock, since a transaction
+on SQLite holds the database's one write lock from its BEGIN IMMEDIATE, and
+D1 runs each statement alone. A row's time reads back as its text there,
+which the members read as a Date.
 */
 
 /** A row of a table, by its type's name and its key in its wire form (a UUID in base62). */
@@ -287,6 +292,8 @@ interface KeyReader {
 
 /** What the members run through: the ORM or the transaction that holds them. */
 export interface RowFeatureHost {
+  /** The dialect of the database the host's statements run on (D182); Postgres unless sqlite. */
+  readonly dialect?: 'postgres' | 'sqlite';
   readonly references?: RowReferencesDefinition;
   readonly attachments?: AttachmentsDefinition;
   /** Runs a statement as written, reading every row. */
@@ -319,9 +326,72 @@ const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]
 /** The ORM's references and attachments members over host, as the database declares them. */
 export function rowFeatureMembers(host: RowFeatureHost): Partial<ReferencesMembers & AttachmentsMembers> {
   const out: Partial<ReferencesMembers & AttachmentsMembers> = {};
-  if (host.references) Object.assign(out, { references: referencesOf(host) });
-  if (host.attachments) Object.assign(out, { attachments: attachmentsOf(host) });
+  const dialect = inDialect(host);
+  if (host.references) Object.assign(out, { references: referencesOf(dialect) });
+  if (host.attachments) Object.assign(out, { attachments: attachmentsOf(dialect) });
   return out;
+}
+
+// ---- the dialect ----
+
+/** The words of a statement that differ between Postgres and SQLite (D182). */
+interface Sql {
+  /** text with each $n a parameter of the dialect. */
+  readonly statement: (text: string) => string;
+  /** expr as text, as a key or an id compares. */
+  readonly text: (expr: string) => string;
+  /** expr as an integer, as a count reads. */
+  readonly int: (expr: string) => string;
+  /** The database's clock. */
+  readonly now: string;
+  /** A share lock of the row a statement reads, or none. */
+  readonly forShare: string;
+  /** Whether a statement may take an advisory lock. */
+  readonly locks: boolean;
+}
+
+const POSTGRES_SQL: Sql = {
+  statement: text => text,
+  text: expr => `${expr}::text`,
+  int: expr => `${expr}::int`,
+  now: 'now()',
+  forShare: ' FOR SHARE',
+  locks: true,
+};
+
+/** SQLite's, which holds a time as its RFC 3339 text to the millisecond, as its schema's defaults write it. */
+const SQLITE_SQL: Sql = {
+  statement: text => text.replace(/\$(\d+)/gu, '?$1'),
+  text: expr => `CAST(${expr} AS TEXT)`,
+  int: expr => `CAST(${expr} AS INTEGER)`,
+  now: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+  forShare: '',
+  locks: false,
+};
+
+function sqlOf(host: RowFeatureHost): Sql {
+  return host.dialect === 'sqlite' ? SQLITE_SQL : POSTGRES_SQL;
+}
+
+/** A time a row read holds: a Date on Postgres, its text on SQLite. */
+function timeOf(value: unknown): Date {
+  return value instanceof Date ? value : new Date(String(value));
+}
+
+/** A boolean a row read holds: true on Postgres, 1 on SQLite. */
+function truthOf(value: unknown): boolean {
+  return value === true || value === 1 || value === 1n;
+}
+
+/** host's statements written in its dialect's words, $n among them. */
+function inDialect(host: RowFeatureHost): RowFeatureHost {
+  const sql = sqlOf(host);
+  if (sql === POSTGRES_SQL) return host;
+  return {
+    ...host,
+    query: (text, values) => host.query(sql.statement(text), values),
+    transaction: fn => host.transaction(h => fn(inDialect(h))),
+  };
 }
 
 // ---- keys ----
@@ -354,7 +424,13 @@ async function visibleKeys(host: RowFeatureHost, member: string, keys: readonly 
   return seen;
 }
 
+/**
+ * Holds name's advisory lock to the end of the transaction on Postgres. On
+ * SQLite the transaction holds the database's write lock, and D1 runs each
+ * statement alone, so there is none to take.
+ */
 async function lock(host: RowFeatureHost, name: string): Promise<void> {
+  if (!sqlOf(host).locks) return;
   await host.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [name]);
 }
 
@@ -368,6 +444,7 @@ function limitOf(limit: number | undefined): number {
 
 function referencesOf(host: RowFeatureHost): References {
   const definition = host.references!;
+  const sql = sqlOf(host);
   const holderOf = (table: string): ReferencesHolderDefinition => {
     const holder = definition.holders[table];
     if (!holder) throw new RowFeatureError('not_a_holder', `${table} keeps no references: it is no @references table`, { table });
@@ -386,10 +463,10 @@ function referencesOf(host: RowFeatureHost): References {
       to: { table: String(row.target_table), key: wireKey(to?.uuid, String(row.target_key)) },
       role: String(row.role ?? ''),
       ...(row.added_by ? { addedBy: uuidFromDb(row.added_by) } : {}),
-      addedAt: row.added_at as Date,
+      addedAt: timeOf(row.added_at),
     };
   };
-  const columns = (holder: ReferencesHolderDefinition) => `id::text AS id, "target_table", "target_key", "role", added_by::text AS added_by, "added_at"`;
+  const columns = (_holder: ReferencesHolderDefinition) => `${sql.text('id')} AS id, "target_table", "target_key", "role", ${sql.text('added_by')} AS added_by, "added_at"`;
   /** Throws not found unless the reader sees the row. */
   const mustSee = async (h: RowFeatureHost, row: RowRef, member: string): Promise<void> => {
     if (!(await visibleKeys(h, member, [row.key])).has(row.key)) throw h.notFound(`${row.table} ${row.key} is not there`);
@@ -411,14 +488,14 @@ function referencesOf(host: RowFeatureHost): References {
         await mustSee(h, from, holder.member);
         await mustSee(h, to, target.member);
         await lock(h, `references:${holder.table}:${fromKey}`);
-        const keyText = (await h.query(`SELECT ${target.key}::text AS key FROM ${target.table} WHERE ${target.key} = $1`, [toKey])).rows[0]?.key;
+        const keyText = (await h.query(`SELECT ${sql.text(target.key)} AS key FROM ${target.table} WHERE ${target.key} = $1`, [toKey])).rows[0]?.key;
         if (keyText === undefined) throw h.notFound(`${to.table} ${to.key} is not there`);
         const held = await h.query(
           `SELECT ${columns(holder)} FROM ${holder.table} WHERE ${holder.row} = $1 AND "target_table" = $2 AND "target_key" = $3 AND "role" = $4`,
           [fromKey, to.table, keyText, role]
         );
         if (held.rows[0]) return reference(from, holder, held.rows[0]);
-        const count = Number((await h.query(`SELECT count(*)::int AS n FROM ${holder.table} WHERE ${holder.row} = $1`, [fromKey])).rows[0]?.n ?? 0);
+        const count = Number((await h.query(`SELECT ${sql.int('count(*)')} AS n FROM ${holder.table} WHERE ${holder.row} = $1`, [fromKey])).rows[0]?.n ?? 0);
         if (count >= holder.maxPerRow) {
           throw new RowFeatureError('too_many', `${from.table} ${from.key} holds ${count} references, the most it may`, { max: holder.maxPerRow });
         }
@@ -444,7 +521,7 @@ function referencesOf(host: RowFeatureHost): References {
           values.push(role);
           roleCondition = ' AND "role" = $4';
         }
-        const removed = await h.query(`DELETE FROM ${holder.table} WHERE ${holder.row} = $1 AND "target_table" = $2 AND "target_key" = $3::text${roleCondition}`, values);
+        const removed = await h.query(`DELETE FROM ${holder.table} WHERE ${holder.row} = $1 AND "target_table" = $2 AND "target_key" = ${sql.text('$3')}${roleCondition}`, values);
         return removed.rowCount;
       });
     },
@@ -472,7 +549,7 @@ function referencesOf(host: RowFeatureHost): References {
       const target = targetOf(row.table);
       const key = dbKey(target.uuid, row.key);
       await mustSee(host, row, target.member);
-      const keyText = (await host.query(`SELECT ${target.key}::text AS key FROM ${target.table} WHERE ${target.key} = $1`, [key])).rows[0]?.key;
+      const keyText = (await host.query(`SELECT ${sql.text(target.key)} AS key FROM ${target.table} WHERE ${target.key} = $1`, [key])).rows[0]?.key;
       if (keyText === undefined) throw host.notFound(`${row.table} ${row.key} is not there`);
       // Every row that points at the row, as the system reads them: the
       // references held to it, then the ref blocks of messages that name it.
@@ -489,19 +566,25 @@ function referencesOf(host: RowFeatureHost): References {
         if (holder.tables && !holder.tables.includes(row.table)) continue;
         const rows = (
           await host.query(
-            `SELECT ${holder.row}::text AS holder, "role", "added_at" FROM ${holder.table} WHERE "target_table" = $1 AND "target_key" = $2 ORDER BY "added_at" DESC LIMIT ${MAX_SCAN}`,
+            `SELECT ${sql.text(holder.row)} AS holder, "role", "added_at" FROM ${holder.table} WHERE "target_table" = $1 AND "target_key" = $2 ORDER BY "added_at" DESC LIMIT ${MAX_SCAN}`,
             [row.table, keyText]
           )
         ).rows;
-        for (const r of rows) found.push({ table, key: wireKey(holder.uuid, String(r.holder)), via: 'reference', role: String(r.role ?? ''), at: (r.added_at as Date).getTime() });
+        for (const r of rows) found.push({ table, key: wireKey(holder.uuid, String(r.holder)), via: 'reference', role: String(r.role ?? ''), at: timeOf(r.added_at).getTime() });
       }
       const ids = target.uuid ? [uuidFromDb(keyText), keyText] : [keyText];
       for (const [table, source] of Object.entries(definition.comments ?? {})) {
-        const probes = ids.map(id => JSON.stringify([{ kind: 'ref', schema: row.table, id }]));
-        const conditions = probes.map((_, i) => `${source.blocks} @> $${i + 1}::jsonb`).join(' OR ');
+        // A ref block of a message that names the row: JSONB containment on
+        // Postgres, and on SQLite, whose blocks are JSON text, a block
+        // json_each finds.
+        const probes = host.dialect === 'sqlite' ? [row.table, ...ids] : ids.map(id => JSON.stringify([{ kind: 'ref', schema: row.table, id }]));
+        const conditions =
+          host.dialect === 'sqlite'
+            ? `EXISTS (SELECT 1 FROM json_each(${source.blocks}) AS block WHERE json_extract(block.value, '$.kind') = 'ref' AND json_extract(block.value, '$.schema') = $1 AND json_extract(block.value, '$.id') IN (${ids.map((_, i) => `$${i + 2}`).join(', ')}))`
+            : probes.map((_, i) => `${source.blocks} @> $${i + 1}::jsonb`).join(' OR ');
         const rows = (
           await host.query(
-            `SELECT ${source.row}::text AS holder, ${source.id} AS message FROM ${source.table} WHERE (${conditions}) AND ${source.state} IN ('posted', 'interrupted') ORDER BY ${source.id} DESC LIMIT ${MAX_SCAN}`,
+            `SELECT ${sql.text(source.row)} AS holder, ${source.id} AS message FROM ${source.table} WHERE (${conditions}) AND ${source.state} IN ('posted', 'interrupted') ORDER BY ${source.id} DESC LIMIT ${MAX_SCAN}`,
             probes
           )
         ).rows;
@@ -530,8 +613,8 @@ function referencesOf(host: RowFeatureHost): References {
       // rows they cannot see point at it (D156).
       const sees = host.sees();
       if (sees !== 'all' && target.owner && target.restricted && holders > visible) {
-        const own = (await host.query(`SELECT ${target.owner}::text AS owner, ${target.restricted} IS NOT NULL AS restricted FROM ${target.table} WHERE ${target.key} = $1`, [key])).rows[0];
-        if (own?.restricted === true && sameSubject(String(own.owner ?? ''), sees.subject)) return { items, hidden: holders - visible };
+        const own = (await host.query(`SELECT ${sql.text(target.owner)} AS owner, ${target.restricted} IS NOT NULL AS restricted FROM ${target.table} WHERE ${target.key} = $1`, [key])).rows[0];
+        if (truthOf(own?.restricted) && sameSubject(String(own?.owner ?? ''), sees.subject)) return { items, hidden: holders - visible };
       }
       return { items };
     },
@@ -540,28 +623,27 @@ function referencesOf(host: RowFeatureHost): References {
 
 // ---- attachments ----
 
-const ATTACHMENT_COLUMNS = [
-  'id::text AS id',
-  'row_key',
-  '"name"',
-  '"media_type"',
-  '"size"::text AS size',
-  '"content_hash"',
-  '"object_key"',
-  '"caption"',
-  '"state"',
-  '"uploaded_by"::text AS uploaded_by',
-  '"uploaded_at"',
-  '"expires_at"',
-  '"filed_from"',
-  '"extraction"',
-  '"extracted_text"',
-  '"preview"',
-  '"preview_object"',
-];
-
-function attachmentColumns(holder: AttachmentsHolderDefinition): string {
-  return ATTACHMENT_COLUMNS.map(c => (c === 'row_key' ? `${holder.row}::text AS row_key` : c)).join(', ');
+/** The columns of a file, each named as attachment reads it, those read as text cast in sql's words. */
+function attachmentColumnsOf(holder: AttachmentsHolderDefinition, sql: Sql): string {
+  return [
+    `${sql.text('id')} AS id`,
+    `${sql.text(holder.row)} AS row_key`,
+    '"name"',
+    '"media_type"',
+    `${sql.text('"size"')} AS size`,
+    '"content_hash"',
+    '"object_key"',
+    '"caption"',
+    '"state"',
+    `${sql.text('"uploaded_by"')} AS uploaded_by`,
+    '"uploaded_at"',
+    '"expires_at"',
+    '"filed_from"',
+    '"extraction"',
+    '"extracted_text"',
+    '"preview"',
+    '"preview_object"',
+  ].join(', ');
 }
 
 function mediaTypeAllowed(allowed: readonly string[] | undefined, mediaType: string): boolean {
@@ -579,6 +661,8 @@ function checkName(name: string): void {
 
 function attachmentsOf(host: RowFeatureHost): Attachments {
   const definition = host.attachments!;
+  const sql = sqlOf(host);
+  const attachmentColumns = (holder: AttachmentsHolderDefinition): string => attachmentColumnsOf(holder, sql);
   const holderOf = (table: string): AttachmentsHolderDefinition => {
     const holder = definition.holders[table];
     if (!holder) throw new RowFeatureError('not_a_holder', `${table} holds no files: it is no @attachments table`, { table });
@@ -596,8 +680,8 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
     ...(row.caption != null ? { caption: String(row.caption) } : {}),
     state: row.state === 'ready' ? 'ready' : 'pending',
     ...(row.uploaded_by ? { uploadedBy: uuidFromDb(row.uploaded_by) } : {}),
-    uploadedAt: row.uploaded_at as Date,
-    ...(row.expires_at ? { expiresAt: row.expires_at as Date } : {}),
+    uploadedAt: timeOf(row.uploaded_at),
+    ...(row.expires_at ? { expiresAt: timeOf(row.expires_at) } : {}),
     ...(row.filed_from != null ? { filedFrom: String(row.filed_from) } : {}),
     extraction: String(row.extraction) as ProcessingState,
     ...(row.extracted_text != null ? { extractedText: String(row.extracted_text) } : {}),
@@ -629,7 +713,7 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
     await lock(h, `attachments:${holder.table}:${key}`);
     const held = (
       await h.query(
-        `SELECT count(*)::int AS files, COALESCE(sum("size"), 0)::text AS bytes FROM ${holder.table} WHERE ${holder.row} = $1 AND ("state" = 'ready' OR "expires_at" > now())`,
+        `SELECT ${sql.int('count(*)')} AS files, ${sql.text('COALESCE(sum("size"), 0)')} AS bytes FROM ${holder.table} WHERE ${holder.row} = $1 AND ("state" = 'ready' OR "expires_at" > ${sql.now})`,
         [key]
       )
     ).rows[0]!;
@@ -707,7 +791,7 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
       }
       const row = (
         await host.query(
-          `UPDATE ${holder.table} SET "state" = 'ready', "expires_at" = NULL, "uploaded_at" = now(), "extraction" = 'pending' WHERE id = $1 AND "state" = 'pending' RETURNING ${attachmentColumns(holder)}`,
+          `UPDATE ${holder.table} SET "state" = 'ready', "expires_at" = NULL, "uploaded_at" = ${sql.now}, "extraction" = 'pending' WHERE id = $1 AND "state" = 'pending' RETURNING ${attachmentColumns(holder)}`,
           [uuidToDb(file.id)]
         )
       ).rows[0];
@@ -764,7 +848,7 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
     async file(input) {
       const to = holderOf(input.to.table);
       return host.transaction(async h => {
-        const { holder: from, file } = await read(h, input, ' FOR SHARE');
+        const { holder: from, file } = await read(h, input, sql.forShare);
         if (file.state !== 'ready') throw new RowFeatureError('not_ready', `file ${input.id} is still being uploaded`);
         await mustSee(h, to, input.to);
         await admit(h, to, input.to, file.mediaType, file.size);
@@ -784,7 +868,7 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
         const references = h.references?.holders[input.table];
         const target = h.references?.targets[input.to.table];
         if (references && target && (!references.tables || references.tables.includes(input.to.table))) {
-          const toKey = (await h.query(`SELECT ${target.key}::text AS key FROM ${target.table} WHERE ${target.key} = $1`, [dbKey(target.uuid, input.to.key)])).rows[0]?.key;
+          const toKey = (await h.query(`SELECT ${sql.text(target.key)} AS key FROM ${target.table} WHERE ${target.key} = $1`, [dbKey(target.uuid, input.to.key)])).rows[0]?.key;
           await h.query(
             `INSERT INTO ${references.table} (${references.row}, "target_table", "target_key", "role", "added_by") VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (${references.row}, "target_table", "target_key", "role") DO NOTHING`,
@@ -803,8 +887,8 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
         let held = 0;
         for (const holder of Object.values(definition.holders)) {
           // An upload never completed goes once its URL has expired.
-          await h.query(`DELETE FROM ${holder.table} WHERE "object_key" = $1 AND "state" = 'pending' AND "expires_at" <= now()`, [objectKey]);
-          held += Number((await h.query(`SELECT count(*)::int AS n FROM ${holder.table} WHERE "object_key" = $1`, [objectKey])).rows[0]?.n ?? 0);
+          await h.query(`DELETE FROM ${holder.table} WHERE "object_key" = $1 AND "state" = 'pending' AND "expires_at" <= ${sql.now}`, [objectKey]);
+          held += Number((await h.query(`SELECT ${sql.int('count(*)')} AS n FROM ${holder.table} WHERE "object_key" = $1`, [objectKey])).rows[0]?.n ?? 0);
         }
         if (held > 0) return { deleted: false };
         for (const name of [objectKey, previewObjectOf(objectKey)]) {

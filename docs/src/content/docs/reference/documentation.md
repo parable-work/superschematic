@@ -94,8 +94,15 @@ serves it at `GET /api/openapi.json`):
 
 - `summary` is `title`. Without `@docs` it is the operation name.
 - `description` is the `@docs` description. Without `@docs` it is the
-  operation's comment.
+  operation's comment, as the TypeScript reader reads it: with the naming
+  file's `private_remarks = "drop"`, each `@privateRemarks` section is
+  left out
+  ([`private_remarks`](/superschematic/reference/naming/#private_remarks)).
 - `deprecated: true` when `lifecycle` is `deprecated` or `retired`.
+- `errors` adds no response. Each error response the document declares
+  is an RFC 9457 problem, `application/problem+json` with the
+  `ProblemDetails` component, the body every server writes (D134,
+  [OpenAPI](/superschematic/guides/api-routes/#openapi)).
 - The whole record is written under the vendor key `x-superschematic-docs`,
   with the optional keys only when set, `errors` as a list of objects, and
   a declared replay mode as `replay: { mode, idempotencyKeyPointers,
