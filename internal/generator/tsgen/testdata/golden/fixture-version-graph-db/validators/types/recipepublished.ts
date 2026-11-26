@@ -12,6 +12,8 @@ import type { RecipePublished } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
 
+import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
+
 /**
  * Validates a RecipePublished object
  */
@@ -36,6 +38,13 @@ export function validateRecipePublished(value: RecipePublished | null | undefine
     }
   }
 
+  if (value.sequence !== null && value.sequence !== undefined) {
+    const [valid, fieldErrors] = validateGenericInt64(value.sequence);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "sequence", fieldErrors);
+    }
+  }
+
   return Object.keys(errors).length > 0 ? errors : true;
 }
 
@@ -55,6 +64,7 @@ export function validateRecipePublishedRequired(value: RecipePublished | null | 
 const RecipePublishedKnownFields = new Set<string>([
   'root',
   'commit',
+  'sequence',
 ]);
 
 type RecipePublishedTextParser = (value: string) => unknown;

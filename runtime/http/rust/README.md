@@ -20,6 +20,13 @@ This crate provides:
 - `ParamSpec`: how the generated router decodes one path, query or body
   argument, as the TypeScript runtime's `params.ts` does, refusing a value
   with a 400 whose `details` name it
+- `graph_routes`: what a generated crate's graph operations share (D138),
+  which its `src/graphs.rs` runs through each graph's facade: the problem
+  of each refusal of the engine or the core by its code (`refusal`), the
+  bodies of the operations, a save's edits as the facade takes them
+  (`facade_edits`), and a tree's rows as the API's types hold them
+  (`tree`, `rows`). It names neither the database's types nor the engine,
+  as the TypeScript runtime's `graph-routes.ts` does not
 - `page`: the page of a `@paginated` operation (D60). `PageSpec::query`
   reads `cursor` and `limit` from the query with a parameter's 400s,
   `PageSpec::request` and `PageSpec::check` hold a request an in-process

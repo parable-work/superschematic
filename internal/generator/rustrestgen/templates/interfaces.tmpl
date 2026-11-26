@@ -211,6 +211,13 @@ pub struct Implementations {
     /// so no namespace trait has a method for it.
     pub tables: crate::tables::Tables,
 {{- end }}
+{{- if .HasGraphOperations }}
+    /// What the graph operations run on (D138): the facade of each version
+    /// graph of {{ .GraphDatabase }} they serve, and its repositories, over which
+    /// the router's handler of each runs it, so no namespace trait has a
+    /// method for it.
+    pub graphs: crate::graphs::Graphs,
+{{- end }}
 }
 {{- if .WebhookProviders }}
 

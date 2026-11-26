@@ -613,19 +613,6 @@ func (r run) warnGoTableOperationsUnserved() error {
 	return nil
 }
 
-// warnGraphOperationsUnserved warns, once for each @graphOperations set of
-// the API, that the server of language writes no handlers for a version
-// graph's operations yet (D138): the TypeScript server serves them, and
-// on the Go and the Rust servers each stays a method of the
-// implementation's interface, to be written by hand over the graph's
-// generated facade.
-func (r run) warnGraphOperationsUnserved(language string) {
-	for _, set := range apigen.UnservedGraphSets(r.Schema) {
-		r.Warnf("%s: the %s server writes no handlers for %s, a @graphOperations set of %s's version graph (D138): its %d operations (%s) each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them",
-			r.Config.Name, language, set.Set, set.Root, len(set.Operations), strings.Join(set.Operations, ", "))
-	}
-}
-
 // generateAPI dispatches API server generation by implementation language.
 func (r run) generateAPI() error {
 	if proto := r.Outputs.API.Protocol; proto != APIProtocolREST {
@@ -636,7 +623,6 @@ func (r run) generateAPI() error {
 		if err := r.warnGoTableOperationsUnserved(); err != nil {
 			return err
 		}
-		r.warnGraphOperationsUnserved("Go")
 		return r.generateGoAPI()
 	case APILanguageRust:
 		return r.generateRustAPI()
@@ -1870,9 +1856,12 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 // crate is at apiDir, in deps when the API has an operation marked
 // @tableOperation (D106, D116): its handlers are served from the tables'
 // repositories, which the types crate's src/orm.rs holds. The Rust types
-// of db must be generated.
+// of db must be generated. An API with a @graphOperations set needs them
+// too (D138): its operations run through each graph's facade there, and
+// read its roots and refs through the repositories.
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
-	if !r.Schema.HasTableOperations() {
+	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
+	if !r.Schema.HasTableOperations() && !graphs {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {
@@ -1880,6 +1869,9 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
 			if err != nil {
 				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) && !r.Schema.HasTableOperations() {
+				return fmt.Errorf("generator: the Rust server of %s serves the operations of a version graph of %s through its facade, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D138)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) {
 				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from the repositories of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D106, D116)", r.Config.Name, db, db, LangRust, db)
@@ -1915,7 +1907,6 @@ func (r run) generateRustAPI() error {
 		r.Warnf("%s: the Rust server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
 			r.Config.Name, op.Operation, op.Reason)
 	}
-	r.warnGraphOperationsUnserved("Rust")
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if err := rustrestgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {

@@ -535,6 +535,10 @@ type API struct {
 	ManualRoutes bool
 	Behaviors    bool
 	Tables       bool
+	// Graphs is true when the API serves a version graph's operations,
+	// which read through the ORM of its database and run through each
+	// graph's facade, GraphsOf its ORM (D138).
+	Graphs bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -921,6 +925,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].ManualRoutes = o.HasManualRoutes()
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			apis[i].Tables = o.HasTableEndpoints()
+			apis[i].Graphs = o.HasGraphEndpoints()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -988,6 +993,9 @@ func Plan(in Input) (*Server, error) {
 			if err := checkTableCallers(in, o); err != nil {
 				return nil, err
 			}
+		}
+		if api.Graphs && api.Database == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose graph operations run through the ORM of its database (D138), and it has no database", in.Stack, in.Server, o.SchemaName)
 		}
 		if api.Idempotent {
 			if api.Database == nil {

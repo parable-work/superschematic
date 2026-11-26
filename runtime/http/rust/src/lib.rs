@@ -30,6 +30,9 @@ pub mod filter;
 // A bucket on Google Cloud Storage (D54), with the `gcs` feature.
 #[cfg(feature = "gcs")]
 pub mod gcs;
+// What a generated router's graph operations share (D138): the refusals'
+// problems, the bodies, and the rows of a tree as the API's types hold them.
+pub mod graph_routes;
 #[cfg(feature = "http-client")]
 mod http_client;
 /// The user model's runtime (D50), with the `identity` feature.

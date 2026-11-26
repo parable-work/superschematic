@@ -454,7 +454,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types as database_types: for its workers' messages and queues,
 // a behavior worker's among them (D65, D103).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -474,11 +474,12 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 
 // DependencyFeatures is what follows the path of the Cargo.toml dependency
 // on the crate name: for the database's Rust types of an API with table
-// operations or a deriver of tables, the feature of the database's
-// dialect, which the repositories they are served from, or pulled and
-// settled through, are behind (D116, D146); empty for any other crate.
+// operations, graph operations or a deriver of tables, the feature of the
+// database's dialect, which the repositories they are served from, or
+// pulled and settled through, are behind (D116, D138, D146); empty for any
+// other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasTableDerivers()) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -529,6 +530,10 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	}
 	o.Deps = &deps
 	if err := o.checkTableDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkGraphDeps(); err != nil {
 		o.Deps = nil
 		return err
 	}
@@ -661,7 +666,7 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasIdempotent() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasIdempotent() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {

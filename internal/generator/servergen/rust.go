@@ -545,6 +545,11 @@ type RustAPI struct {
 	Tables    bool
 	FieldKeys bool
 
+	// Graphs is true when the API serves a version graph's operations
+	// (D138): Implementations::new then takes Database's pool too, over
+	// which the router's handlers run each through the graph's facade.
+	Graphs bool
+
 	// Idempotency is true when the API has @idempotent operations (D140):
 	// Implementations::new then takes Database's pool too, over which it
 	// builds the store of their keys.
@@ -1061,6 +1066,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Tables = true
 			api.FieldKeys = o.TableFieldKeys()
+		}
+		if o.HasGraphOperations() {
+			if api.Database == nil || api.Database.Service != o.GraphDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose graph operations run on %s (D138), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.GraphDatabase())
+			}
+			api.Graphs = true
 		}
 		if o.HasIdempotent() && !background {
 			if api.Database == nil {
@@ -2012,7 +2023,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 		}
 		args = append(args, authenticator)
 	}
-	if a.Behaviors || a.Tables || a.Idempotency {
+	if a.Behaviors || a.Tables || a.Graphs || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {

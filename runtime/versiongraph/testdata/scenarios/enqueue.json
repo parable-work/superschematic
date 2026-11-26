@@ -1,6 +1,6 @@
 {
   "name": "enqueue",
-  "description": "A graph whose root names a queue for its commits and one for its releases: on the generated tables, which are Postgres's, each commit written, a change set's and a merge's alike, enqueues the commit queue's message with its root, ref, commit and sequence, null on a commit that is not tagged; a root's first release and each move of it to another commit enqueue the release queue's message, and a release of the commit already released does not. The fixed layout has no trigger, so its steps read no queue.",
+  "description": "A graph whose root names a queue for its commits and one for its releases: on the generated tables, which are Postgres's, each commit written, a change set's and a merge's alike, enqueues the commit queue's message with its root, ref, commit and sequence, null on a commit that is not tagged; a root's first release and each move of it to another commit enqueue the release queue's message with its root, commit and the commit's sequence, which the trigger reads from the commit table, and a release of the commit already released does not. The fixed layout has no trigger, so its steps read no queue.",
   "roots": ["Bread"],
   "steps": [
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
@@ -27,9 +27,9 @@
     {"op": "release", "root": "Bread", "commit": "c1"},
     {"op": "release", "root": "Bread", "commit": "c1", "expect": {"release": {"commit": "c1", "version": 2}}},
     {"op": "sql", "backends": ["postgres"],
-      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' ELSE 'other' END AS \"commit\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
+      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' ELSE 'other' END AS \"commit\", COALESCE(\"sequence\"::text, 'none') AS \"sequence\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
       "args": [{"uuid": "Bread"}, {"commit": "c1"}],
-      "expect": {"rows": [{"commit": "c1"}]}},
+      "expect": {"rows": [{"commit": "c1", "sequence": "1"}]}},
 
     {"op": "branch", "from": "main", "name": "edit", "as": "edit"},
     {"op": "save", "ref": "edit", "edits": {"part": {"upsert": [
@@ -41,9 +41,9 @@
     {"op": "release", "root": "Bread", "commit": "c1"},
     {"op": "release", "root": "Bread", "commit": "c1", "version": 1, "expect": {"error": "version_conflict"}},
     {"op": "sql", "backends": ["postgres"],
-      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' WHEN $3::uuid THEN 'c2' ELSE 'other' END AS \"commit\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
+      "statement": {"postgres": "SELECT CASE \"commit\" WHEN $2::uuid THEN 'c1' WHEN $3::uuid THEN 'c2' ELSE 'other' END AS \"commit\", COALESCE(\"sequence\"::text, 'none') AS \"sequence\" FROM recipe_published_queue WHERE root = $1::uuid ORDER BY created_at"},
       "args": [{"uuid": "Bread"}, {"commit": "c1"}, {"commit": "c2"}],
-      "expect": {"rows": [{"commit": "c1"}, {"commit": "c2"}, {"commit": "c1"}]}},
+      "expect": {"rows": [{"commit": "c1", "sequence": "1"}, {"commit": "c2", "sequence": "2"}, {"commit": "c1", "sequence": "1"}]}},
     {"op": "sql", "backends": ["postgres"],
       "statement": {"postgres": "SELECT count(*)::text AS messages FROM recipe_committed_queue WHERE root = $1::uuid"},
       "args": [{"uuid": "Bread"}], "expect": {"rows": [{"messages": "4"}]}},

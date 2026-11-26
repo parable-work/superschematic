@@ -131,6 +131,16 @@ type Config struct {
 	// DB is the ORM of {{ .Deps.Database }}, the API's database: the table
 	// operations are served from its tables (D106).
 	DB orm.DatabaseInterface
+{{- else if .HasGraphEndpoints }}
+	// DB is the ORM of {{ .Deps.Database }}, the API's database: the graph
+	// operations read the root, its refs and its commits through it (D138).
+	DB orm.DatabaseInterface
+{{- end }}
+{{- if .HasGraphEndpoints }}
+
+	// Graphs are the facades of the version graphs the graph operations
+	// run through (D138): GraphsOf(db) builds them from the ORM.
+	Graphs Graphs
 {{- end }}
 
 	// Logger is the base logger for request-scoped logging
@@ -257,9 +267,18 @@ func (c *Config) Validate() error {
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required: it serves the table operations of {{ .SchemaName }} (D106)")
 	}
+{{- else if .HasGraphEndpoints }}
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: the graph operations of {{ .SchemaName }} read through it (D138)")
+	}
 {{- else if .IsPublic }}
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required")
+	}
+{{- end }}
+{{- if .HasGraphEndpoints }}
+	if err := c.Graphs.validate(); err != nil {
+		return err
 	}
 {{- end }}
 	if c.Logger == nil {
@@ -531,6 +550,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 {{- else if .BehaviorOperation }}create{{ .HandlerName }}(cfg.DB)
 {{- else if .TableRequiresCaller }}requireTableCaller(create{{ .HandlerName }}(cfg.DB))
 {{- else if .ServedTable }}create{{ .HandlerName }}(cfg.DB)
+{{- else if .GraphRoutes }}create{{ .HandlerName }}(&{{ .GraphRoutes }}{db: cfg.DB, graph: cfg.Graphs.{{ .GraphMember }}})
 {{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
 {{- end }}
 {{- end }}
@@ -718,8 +738,16 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // repository in one transaction (D106): no implementation method serves
 // it.
 {{- end }}
+{{- if .GraphRoutes }}
+//
+// It runs {{ .GraphOperation.Graph }}'s {{ .GraphOperation.Operation }}, an operation of a version graph of
+// {{ .GraphOperation.Database }} (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+{{- end }}
 {{- if or .BehaviorOperation .ServedTable }}
 func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {
+{{- else if .GraphRoutes }}
+func create{{ .HandlerName }}(impl *{{ .GraphRoutes }}) gohttp.HandlerFunc {
 {{- else }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
 {{- end }}
