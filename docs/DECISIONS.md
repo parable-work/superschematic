@@ -140,9 +140,8 @@ a secret, on gcp and on Workers, and a collector the target runs.
 **D69** (L 8468). A planner per pull request. `planner` admits every pull
 request in every project with a plan job.
 
-**D31, amended** (L 8521, 9320).
-- The parity matrix (`internal/generator/parity`) has no union field.
-- No compatibility check holds a Go enum's members as a wire contract.
+**D31, amended** (L 8521, 9320). No compatibility check holds a Go
+enum's members as a wire contract.
 
 **D71** (L 9735). A template per scenario, such as an API with its
 database and sign-in. Once the authoring packages are published, `init`
@@ -667,10 +666,15 @@ pays for a claim, each held to the test and passing it; a supply's write
 takes the lock its row names, and on SQLite and D1 every adapter checks a
 sub-table read made under a lock against its row's version, refusing one
 of a use that writes beside its rows or through an operation of the
-namespace. Development mode runs all twenty-five. Left of step 4: the
-folded Links, Search, Queue and Branches removed, Blueprint ported and
-Variants a field type (D149). Then steps 5 to 7, whose step 6 D117
-renames development mode. What the built steps left follows. The
+namespace. Then Blueprint, ported, and Variants, a field type (D149), and
+Aliased (D147). Development mode runs those twenty-five and Blueprint;
+its handler refuses a create that gives Aliased's name (D147). The folded
+Links, Search, Queue and Branches are removed with engine types at step
+7, since engine types and the examples still compose them. On
+development mode, `examples/engine-jobs` replaces Links with a relation,
+Search with a `contains` list filter, since development mode serves no
+`searchText`, and Queue with D104's claim. Then steps 5 to 7, whose step
+6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
 Four of step 4's ports met the test in part or not at all: Rollups,
@@ -679,8 +683,9 @@ Blueprint stay behaviors, Revisions keeps its own log, and Variants
 becomes a discriminated-union field type.
 
 What Rollups and Dependencies left: a route or field that serves Rollups'
-`values` and Dependencies' `blocked`, which only `Action::Read` reaches;
-the TypeScript and Rust servers of `fixture-steps-api`, run end to end,
+`values` and Dependencies' `blocked`, which only `Action::Read` reaches.
+No table adapter runs `Action::Read` yet, only development mode's handler
+does, so each adapter needs it first. Also left: the TypeScript and Rust servers of `fixture-steps-api`, run end to end,
 and their SDK goldens; Rollups' `latest`, which needs a creation time the
 core can read; `listDependents` on a table (`registry.TableLeavesOut`),
 which needs a read across tables outside the core; hearing a blocker's
@@ -693,8 +698,7 @@ What Numbering and Revisions left: their SDK goldens and servers run end
 to end, and an API fixture of Revisions; a proposal's patch typed by the
 table's own fields, where `Generic.JSON` lets a patch name a field the
 table lacks and fail at the approval; `pendingProposals` served by the
-adapters and by development mode, which runs no `Action::Read` and so
-serves no Rollups `values` either; Retries' `resultField` and Budget's
+adapters, as development mode serves it; Retries' `resultField` and Budget's
 `limitField` with `setLimit`, which `Cx::update` now allows; Lease's
 `directOn` and Reactions' `when.revised`, which wait for Branches; a
 Reactions rule on `Revisions.pendingProposals`, which the build refuses;
@@ -1065,9 +1069,14 @@ Built: steps 1 to 3. A Workflow transition takes `by`,
 `overridePermission`, `repeat` and `from`; Constants, StateRules,
 Approvals, Lease, Retries, Presence and Budget run on the core with their
 upgrades; and Seats, Reconcile, Schedules and Pool join it, with the
-`Capacity` contract Budget implements. Left: step 4, "Barrier, Mailbox
-and Assignment as bundles with step 5, and the `caller` operand of its
-declarative conditions", and what the built steps left.
+`Capacity` contract Budget implements. Queue's claim is built in
+`examples/engine-jobs` as a declared read and Lease's `acquire`, with no
+new primitive: it lists the queued rows by `-priority,id`, skips those
+`dependenciesBlocked`, takes the first with `Lease.acquire`, transitions
+it with the token as a precondition, and calls `Budget.reserve`. Left:
+step 4, "Barrier, Mailbox and Assignment as bundles with step 5, and the
+`caller` operand of its declarative conditions", and what the built
+steps left.
 
 ### Step 4
 
@@ -1100,9 +1109,10 @@ context is written out.
 - An own-field write from an operation: the engine's `update()` runs
   through validation and the guards of Constants and StateRules
   (L 17048).
-- `Queue` folds into `@queue`: its claim a declared read and Lease's
-  `acquire`. The recordings that compose Presence or Budget beside Queue
-  wait for it, as does `checkReserve`'s `hears` (L 14883, 15070, 17235).
+- `Queue`'s claim is built (above). The recordings that compose Presence
+  or Budget beside Queue, and `checkReserve`'s `hears`, need a claim
+  mapping in the testkit, since a claim is now several commands where a
+  recorded `claimNext` was one (L 14883, 15070, 17235).
 - An operation of the namespace runs on the core now
   (`Action::NamespaceOperation`); a build's table still leaves Comments'
   streamed replies and read state out, and `@behaviorOperations` warns
@@ -1283,9 +1293,6 @@ its policy. Left:
   and a publish through the planner and a runner), the library on Workers
   and in a browser, run, and the Go and Python libraries over the C ABI;
   and the prebuilt image (D103's step 6).
-- `examples/engine-notes` and `examples/engine-jobs` on development mode:
-  engine-notes runs there (its differences are in its README), and
-  engine-jobs waits for Blueprint on the core (D149).
 - The policy asked of a behavior's reads of other types (Dependencies'
   blockers, Revisions' evidence, Rollups' links), as the engine asked
   them; the runner's requests made by a system principal the policy sees.
@@ -1650,32 +1657,38 @@ before it writes; a version graph's table that references the table, and
 a unique index that lists no keys on a referencing table, are refused at
 the build; and the counts are disjoint and leave `from` out.
 
-Left: `Aliased`, whole. A field typed `Aliased<T, { normalize? }>` is a
-name with aliases, `normalize` being `lower` (the default) or `slug`. The
-behavior keeps a table of the names, each unique in its normalized form
-across the table's names and aliases together. Its operations are
-`rename({ name })`, which keeps the old name as an alias, `addAlias` and
-`removeAlias`, and on the table `resolve({ name })`, which answers the row
-whose name or alias matches. A name another row holds, as a name or an
-alias, is refused with that row's key. The rules are the behaviors'
-core's, and a merge of a table with such a field moves `from`'s aliases to
-`into` and adds its name as one, a statement of `sqlutil.MergePlan`.
+Also built: `Aliased` on the core and on a table, in Go, TypeScript and
+Rust, over two primitives of the core: a declaration's value field that a
+create hands the behavior (`fromCreate`), refused at an update, and a
+shared row's delete held to its version (`Cx::delete_shared`). A field
+typed `Aliased<T, { normalize? }>` is a name with aliases, each unique in
+its normalized form (`lower`, the default, or `slug`) across the table's
+names and aliases together, through a shared table whose `holder` is
+typed by the table's key. Its operations are `rename`, `addAlias`,
+`removeAlias` and `resolve`, and a name another row holds is refused with
+`name_taken`, which names the holder. A merge moves `from`'s aliases to
+`into` and adds its name as one, through `MergeStep.Before`. The Rust
+repositories gain `merge_into` on Postgres and on SQLite
+(`sqlutil.SQLiteMergePlanOf`), where a merge that deletes `@versioned`
+rows is refused; opened for a caller (D181), `merge_into` finds only the
+two rows the caller may write. A `@tableOperation` merge
+(`ir.TableOperationMerge`) serves a table's `mergeInto` as a route, which
+the TypeScript server serves on Postgres, its repositories refusing a
+merge on SQLite (D182). It settled what the text left open: `resolve`
+answers `{ row: null }` for a name no row holds; `T` is `string`; a name
+is at most 256 characters; and a name whose holder is no live row is
+taken over.
 
-Two things it waits on in the core. A field anchor's field is its
-behavior's alone (`anchored_writes` refuses it in a create), so a name a
-create gives needs a field anchor whose value a create hands the behavior,
-or the use on the type naming an own field. And uniqueness across rows
-needs a key the database holds: a use's shared table keyed by the
-normalized name serves it (`ReadRequest::SharedRow`), but the core deletes
-no shared row and reads no sub-table across rows, so a removed alias and
-a deleted row's names need one of the two.
-
-Also left: `merge_into` in the Rust repositories, SQLite and D1; a route
-that serves a table's `mergeInto`; a merge that repoints a version graph's
-table, which needs the merge as a commit; a Derived field whose input is
-a repointed relation, which the merge does not hash again (Derived hears
-no set-based write); and a check of cycles longer than `into` under
-`from` in a relation of the table to itself.
+Left: Go and Rust handlers of the merge route; a create on development
+mode, whose handler refuses the name a create gives as Aliased's owned
+field, though its stores replay `core-aliased`; a merge that repoints a
+version graph's table, which needs the merge as a commit; a Derived field
+whose input is a repointed relation, which the merge does not hash again
+(Derived hears no set-based write); a check of cycles longer than `into`
+under `from` in a relation of the table to itself; and `MergeResult`,
+which the generated Rust `orm.rs` does not re-export. A merge in the
+TypeScript repositories on SQLite and D1, which refuse it, is D182's to
+build.
 
 ## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
 
@@ -1705,11 +1718,45 @@ the one behavior with no state, by this entry; Variants goes from the
 behaviors as a field type, as Links, Search, Queue and Branches go as
 schema features.
 
-Built: Rollups and Revisions as they are. Left: Blueprint on the core,
-its recordings replayed, a table implementing it in each language and
-`examples/engine-jobs` on it; the discriminated-union field type in the
-IR, both readers, every validator, the DDL and both ORMs; and the
-engine's Variants removed with engine types (step 7).
+Built: Rollups and Revisions as they are, and Blueprint and Variants.
+
+Blueprint runs on the core. A create stamps its children through
+`Cx::create_row` in the create's change set, `children` is computed at a
+read, and a Dependencies blocker may be a row created earlier in the same
+command. `workqueue-blueprint.json` replays 206 of its 405 steps with no
+mismatch, and its transcript runs in every adapter. A table implements it
+in Go, TypeScript and Rust, through `fixture-blueprint-db` and
+`fixture-blueprint-api`. `examples/engine-jobs` runs on development mode
+beside its engine version. It settled what the text left open: `from` is
+refused on a table, since a relation pins no revision; a child's key is a
+UUID drawn from `Cx::new_key`; and Blueprint may be removed from a table
+that has rows.
+
+Variants is a field type, `Variant<By, Arms>`. A schema writes it as a
+named alias (`export type X = Variant<"kind", { a: A; b: B }>`) and types
+the field `X`; an inline `Variant` is refused. That settles the syntax the
+text left to the change that builds it. The IR's `UnionDef` takes `by` and
+`arms`, and both readers and the TypeScript writer carry it. The
+validators and decoders in Go, TypeScript, Rust and Python read the field
+by its sibling, and the parity matrix has a union field, with 19 vectors.
+On Postgres and SQLite the column is JSONB with a one-level CHECK. Every
+union column is now JSONB, where a single union field was TEXT before. The
+Go ORM reads the field by its sibling, and the SDKs carry it.
+
+Left of Blueprint: `from` and `copyLinks` pins, which wait for a relation
+pinned to a revision; on development mode, a child row's own fields
+validated at its create, and an access policy asked of the children; the
+generated fixture packages run end to end; and the engine's Blueprint,
+which goes with engine types (step 7).
+
+Left of Variants: a variant field in `union_requests.json`; a Go route
+that answers each error of a variant field, where `bodyargs.DecodeRefusal`
+substitutes an enum's first value and so answers the `kind` error alone;
+the TypeScript ORM and the Rust repositories run on Postgres with a
+variant field; a test of a Go versioned history's decode of a variant
+field; projections and `@tableOperation` views over a variant field; a
+dependency's variant union checked by verify, where generation checks it
+now; and the engine's Variants, which goes at step 7.
 
 ## D151. A behavior worker drains on Workers at a Cron Trigger's firings within its CPU time, a write due before the next firing wakes the worker's Workflow, and an environment whose behavior queue no worker drains is refused (D80, D92, D103, D145 amended)
 
