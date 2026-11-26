@@ -1,6 +1,7 @@
 // Package versiongraph is the Go binding of the version-graph core
 // (runtime/versiongraph/rust): compose, merge, diff, hash and validate trees
-// of versioned rows, described by a graph descriptor.
+// of versioned rows, described by a graph descriptor, and make the order
+// keys that place a row among its siblings.
 //
 // Every function sends one JSON document through the core's C ABI and reads
 // one back. Trees and rows stay json.RawMessage: a row is a JSON object keyed
@@ -162,6 +163,38 @@ type ValidateResult struct {
 	Findings []Finding `json:"findings"`
 }
 
+// OrderKeysRequest asks for Count order keys that sort strictly between
+// Before and After. An empty bound is the start or the end.
+type OrderKeysRequest struct {
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+	Count  int    `json:"count"`
+}
+
+// OrderKeysResult is the keys, lowest first: evenly spread, each as short
+// as it can be.
+type OrderKeysResult struct {
+	Keys []string `json:"keys"`
+}
+
+// ArrangeRequest names the entity keys of one parent's live children of
+// Kind, in Tree, in the order wanted. An empty Parent is none: the rows of
+// the kind that have no parent.
+type ArrangeRequest struct {
+	Descriptor json.RawMessage `json:"descriptor,omitempty"`
+	Tree       json.RawMessage `json:"tree,omitempty"`
+	Kind       string          `json:"kind"`
+	Parent     string          `json:"parent,omitempty"`
+	Keys       []string        `json:"keys"`
+}
+
+// ArrangeResult is the rows that need a new order key to read in the order
+// wanted, each as an engine writes it, in that order. The longest run of
+// children already in order keeps its keys.
+type ArrangeResult struct {
+	Rows []json.RawMessage `json:"rows"`
+}
+
 // Compose lays an overlay over a base tree.
 func Compose(req ComposeRequest) (*ComposeResult, error) {
 	return run[ComposeResult](opCompose, req)
@@ -187,6 +220,17 @@ func Validate(req TreeRequest) (*ValidateResult, error) {
 	return run[ValidateResult](opValidate, req)
 }
 
+// OrderKeys makes order keys between two others.
+func OrderKeys(req OrderKeysRequest) (*OrderKeysResult, error) {
+	return run[OrderKeysResult](opOrderKeys, req)
+}
+
+// Arrange gives the fewest of one parent's children new order keys so they
+// read in the order wanted. The kind's order is a string key.
+func Arrange(req ArrangeRequest) (*ArrangeResult, error) {
+	return run[ArrangeResult](opArrange, req)
+}
+
 type op int
 
 const (
@@ -195,6 +239,8 @@ const (
 	opDiff
 	opContentHash
 	opValidate
+	opOrderKeys
+	opArrange
 )
 
 func run[T any](o op, req any) (*T, error) {
@@ -249,6 +295,10 @@ func call(o op, in []byte) ([]byte, bool, error) {
 		code = C.vg_content_hash(inPtr, inLen, &outPtr, &outLen)
 	case opValidate:
 		code = C.vg_validate(inPtr, inLen, &outPtr, &outLen)
+	case opOrderKeys:
+		code = C.vg_order_keys(inPtr, inLen, &outPtr, &outLen)
+	case opArrange:
+		code = C.vg_arrange(inPtr, inLen, &outPtr, &outLen)
 	default:
 		return nil, false, fmt.Errorf("versiongraph: unknown operation %d", o)
 	}

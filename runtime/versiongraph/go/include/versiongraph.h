@@ -22,6 +22,8 @@ int32_t vg_merge(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t
 int32_t vg_diff(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 int32_t vg_content_hash(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 int32_t vg_validate(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
+int32_t vg_order_keys(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
+int32_t vg_arrange(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 void vg_free(uint8_t *ptr, size_t len);
 
 #endif

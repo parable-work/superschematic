@@ -15,6 +15,7 @@ import {
   type ListOptions,
   type ListPage,
   type PutOptions,
+  type PutResult,
   type SignedUrlOptions,
 } from './bucket.js';
 import type { BucketConnection, StackEnv } from './stackconfig.js';
@@ -103,6 +104,11 @@ function isNotFound(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === 404;
 }
 
+/** A write whose ifGenerationMatch found another generation: 412. */
+function isPreconditionFailed(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 412;
+}
+
 function objectOf(metadata: FileMetadata): BucketObject {
   return {
     name: metadata.name ?? '',
@@ -132,14 +138,40 @@ class GcsBucket implements Bucket {
     return this.#handle.file(name);
   }
 
-  async put(name: string, body: BucketBody, options: PutOptions = {}): Promise<BucketObject> {
+  async put(name: string, body: BucketBody, options: PutOptions = {}): Promise<PutResult> {
     const file = this.#file(name);
     const contentType = options.contentType;
     // One request, a multipart upload, as the Go client sends an object
     // smaller than its chunk: a large object goes to the bucket from the
     // browser, through a signed URL, rather than through the server.
-    await pipeline(readableOf(body), file.createWriteStream({ resumable: false, ...(contentType ? { contentType, metadata: { contentType } } : {}) }));
-    return objectOf(file.metadata);
+    const write = file.createWriteStream({
+      resumable: false,
+      ...(contentType ? { contentType, metadata: { contentType } } : {}),
+      // Generation 0 is no object: GCS writes only when the name is free,
+      // and answers 412 when it is not (D142).
+      ...(options.ifAbsent ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
+    });
+    try {
+      await pipeline(readableOf(body), write);
+    } catch (error) {
+      if (!options.ifAbsent || !isPreconditionFailed(error)) throw error;
+      const held = await this.head(name);
+      if (held === undefined) {
+        throw new Error(`bucket ${this.name}: object ${JSON.stringify(name)} was there when put looked and gone when it read it; put it again`, { cause: error });
+      }
+      return { ...held, created: false };
+    }
+    return { ...objectOf(file.metadata), created: true };
+  }
+
+  async head(name: string): Promise<BucketObject | undefined> {
+    try {
+      const [metadata] = await this.#file(name).getMetadata();
+      return objectOf(metadata);
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    }
   }
 
   async get(name: string): Promise<BucketRead> {

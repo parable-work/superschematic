@@ -1,6 +1,7 @@
 import type { Context, Env, Hono } from 'hono';
 import { authorize } from './auth.js';
 import { checkRoute, mountManualOperation, type RouterRuntimeOptions } from './hono.js';
+import { IDEMPOTENCY_KEY_HEADER, IdempotencyCode, isIdempotencyKey } from './idempotency.js';
 import {
   MCP_CONFIRMATION_ARGUMENT,
   MCP_CONFIRMATION_DECLINED,
@@ -910,6 +911,9 @@ export interface McpMount {
  */
 const UNFORWARDED = new Set([
   'accept',
+  // A key is one call's: the tool's idempotencyKey argument (D140), never
+  // the key of the request that carries the call.
+  'idempotency-key',
   'connection',
   'content-encoding',
   'content-length',
@@ -1012,6 +1016,58 @@ export function mountMcp<E extends Env>(
   }
 }
 
+/**
+ * The argument the tool of an @idempotent operation takes the call's key
+ * in (D140): a tool call has no headers, so the endpoint sends the
+ * argument to the route as its Idempotency-Key. A repeat of the call with
+ * the same key and arguments runs nothing and is answered what the first
+ * was.
+ */
+export const MCP_IDEMPOTENCY_ARGUMENT = 'idempotencyKey';
+
+/**
+ * Whether the tool takes the key argument: its operation is @idempotent,
+ * and no argument of its own has the name, which then stays the
+ * operation's.
+ */
+function takesIdempotencyKey(tool: McpRouteTool, spec: OperationSpec): boolean {
+  return spec.idempotent !== undefined && !tool.arguments.some(argument => argument.key === MCP_IDEMPOTENCY_ARGUMENT);
+}
+
+/**
+ * The input schema of an @idempotent operation's tool (D140), with the
+ * argument its key goes in, required when the operation requires one.
+ */
+function withIdempotencyArgument(inputSchema: unknown, required: boolean): unknown {
+  if (!isObject(inputSchema)) return inputSchema;
+  const properties = isObject(inputSchema.properties) ? inputSchema.properties : {};
+  const listed = Array.isArray(inputSchema.required) ? inputSchema.required : [];
+  return {
+    ...inputSchema,
+    properties: {
+      ...properties,
+      [MCP_IDEMPOTENCY_ARGUMENT]: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 255,
+        description:
+          'A key you make for this call, a UUID say. Send the same key with the same arguments to repeat the call safely: it runs once, and the repeat is answered what the first call was. Use a new key for a new call.',
+      },
+    },
+    ...(required ? { required: [...listed, MCP_IDEMPOTENCY_ARGUMENT] } : {}),
+  };
+}
+
+/**
+ * The input schema tools/list gives a tool: its own, with the key argument
+ * of an @idempotent operation (D140) and the token argument of a tool that
+ * confirms (D93).
+ */
+function listedSchema(tool: McpRouteTool, spec: OperationSpec): unknown {
+  const schema = takesIdempotencyKey(tool, spec) ? withIdempotencyArgument(tool.inputSchema, spec.idempotent?.required === true) : tool.inputSchema;
+  return tool.confirm ? withConfirmationArgument(schema) : schema;
+}
+
 /** The tools one request to the endpoint is served, as its caller. */
 function routerTools<E extends Env>(
   app: Hono<E>,
@@ -1035,11 +1091,11 @@ function routerTools<E extends Env>(
     list: () =>
       [...byName.values()]
         .filter(({ spec }) => offered(spec))
-        .map(({ tool }) => ({
+        .map(({ tool, spec }) => ({
           name: tool.name,
           ...(tool.title !== undefined ? { title: tool.title } : {}),
           ...(tool.description !== undefined ? { description: tool.description } : {}),
-          inputSchema: tool.confirm ? withConfirmationArgument(tool.inputSchema) : tool.inputSchema,
+          inputSchema: listedSchema(tool, spec),
           ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {}),
           ...(tool._meta !== undefined ? { _meta: tool._meta } : {}),
         })),
@@ -1174,6 +1230,19 @@ function filterQuery(query: URLSearchParams, name: string, filter: unknown): str
  */
 function toolRequest(tool: McpRouteTool, spec: OperationSpec, args: Readonly<Record<string, unknown>>, raw: Request, ctx: RequestContext): Request | HttpProblem {
   const keys = new Set(tool.arguments.map(argument => argument.key));
+  // An @idempotent operation's tool takes the call's key as an argument,
+  // which goes to the route as the header a request carries it in (D140).
+  let idempotencyKey: string | undefined;
+  if (takesIdempotencyKey(tool, spec)) {
+    keys.add(MCP_IDEMPOTENCY_ARGUMENT);
+    const key = args[MCP_IDEMPOTENCY_ARGUMENT];
+    if (key !== undefined && key !== null) {
+      if (typeof key !== 'string' || !isIdempotencyKey(key)) {
+        return new HttpProblem(400, `${tool.name}: ${MCP_IDEMPOTENCY_ARGUMENT} is 1 to 255 printable ASCII characters`, { code: IdempotencyCode.INVALID });
+      }
+      idempotencyKey = key;
+    }
+  }
   for (const key of Object.keys(args)) {
     if (!keys.has(key)) {
       const takes = keys.size > 0 ? `takes ${[...keys].join(', ')}` : 'takes no arguments';
@@ -1222,6 +1291,7 @@ function toolRequest(tool: McpRouteTool, spec: OperationSpec, args: Readonly<Rec
   headers.set('accept', 'application/json');
   headers.set('x-request-id', ctx.requestId);
   if (hasBody) headers.set('content-type', 'application/json');
+  if (idempotencyKey !== undefined) headers.set(IDEMPOTENCY_KEY_HEADER, idempotencyKey);
   return new Request(url, {
     method: spec.method,
     headers,

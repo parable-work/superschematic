@@ -5,6 +5,11 @@
 //! keyed by field name. A canonical row is keyed by column name. The
 //! generator knows which field each column holds, and whether the field is a
 //! to-one relation, whose column holds the target's key.
+//!
+//! An operation that takes ids and no rows, as arrange and an entity's
+//! history do, takes its kind and each id through [`text`], and a patch
+//! operation the engine returns is typed through [`parse`]. An order key is
+//! a string as it stands, so `order_keys` needs nothing here.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;

@@ -14,6 +14,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_cover.go` -- Cover repository
 - `repository_ingredient.go` -- Ingredient repository
 - `repository_note.go` -- Note repository
+- `repository_part.go` -- Part repository
+- `repository_part_released.go` -- PartReleased repository, read-only: the released rows of Part
 - `repository_recipe.go` -- Recipe repository
 - `repository_recipe_commit.go` -- RecipeCommit repository
 - `repository_recipe_patch.go` -- RecipePatch repository
@@ -48,6 +50,12 @@ and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
 `GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
 a table with soft deletes and hard-deletes one without. Tables with soft
 deletes additionally expose `HardDeleteOne`.
+
+The repository of a version graph member's released rows
+(`PartReleased`) is read-only: it exposes `GetOne`, `GetManyByIDs`,
+`FindOne`, `FindMany` and `FindPage` and no write, and has no `*Update`
+type. The graph's `Release` owns those rows and rewrites them at each
+release (D139); a raw SQL write of them (`Tx.Exec`) is not refused.
 
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full

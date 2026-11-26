@@ -457,6 +457,38 @@ func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConf
 	if len(d.args) != 1 {
 		return nil, errorAtNode(d.node, "@versionGraph takes at most one config object")
 	}
+	// enqueueOnCommit and enqueueOnRelease name schema classes as values,
+	// which an expression's value cannot hold: they are read from the
+	// literal's own properties, and the rest of it evaluated.
+	arg := d.args[0]
+	if arg.Kind == kindObjectLiteralExpression {
+		rest := map[string]any{}
+		serr := w.eachProperty(arg, func(key string, value *astNode) *SchemaError {
+			switch key {
+			case "enqueueOnCommit", "enqueueOnRelease":
+				name, serr := w.classReference(d, value)
+				if serr != nil {
+					return serr
+				}
+				if key == "enqueueOnCommit" {
+					out.EnqueueOnCommit = name
+				} else {
+					out.EnqueueOnRelease = name
+				}
+			default:
+				v, serr := w.evaluateExpression(value)
+				if serr != nil {
+					return serr
+				}
+				rest[key] = v
+			}
+			return nil
+		})
+		if serr != nil {
+			return nil, serr
+		}
+		return out, w.versionGraphScalars(d, out, rest)
+	}
 	v, serr := w.evaluateExpression(d.args[0])
 	if serr != nil {
 		return nil, serr
@@ -465,36 +497,47 @@ func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConf
 	if !ok {
 		return nil, errorAtNode(d.node, "@versionGraph config must be an object literal")
 	}
+	if serr := w.versionGraphScalars(d, out, cfg); serr != nil {
+		return nil, serr
+	}
+	return out, nil
+}
+
+// versionGraphScalars reads the members of a @versionGraph config that are
+// plain values into out.
+func (w *walker) versionGraphScalars(d decoratorRef, out *ir.VersionGraphConfig, cfg map[string]any) *SchemaError {
 	for key, value := range cfg {
 		switch key {
 		case "name":
 			s, ok := value.(string)
 			if !ok {
-				return nil, errorAtNode(d.node, "@versionGraph name must be a string literal")
+				return errorAtNode(d.node, "@versionGraph name must be a string literal")
 			}
 			out.Name = s
 		case "schemaEpoch":
 			f, ok := value.(float64)
 			if !ok || f != float64(int64(f)) {
-				return nil, errorAtNode(d.node, "@versionGraph schemaEpoch must be an integer literal")
+				return errorAtNode(d.node, "@versionGraph schemaEpoch must be an integer literal")
 			}
 			out.SchemaEpoch = int64(f)
 		case "snapshotEvery":
 			f, ok := value.(float64)
 			if !ok || f != float64(int64(f)) {
-				return nil, errorAtNode(d.node, "@versionGraph snapshotEvery must be an integer literal")
+				return errorAtNode(d.node, "@versionGraph snapshotEvery must be an integer literal")
 			}
 			n := int64(f)
 			out.SnapshotEvery = &n
+		case "enqueueOnCommit", "enqueueOnRelease":
+			return errorAtNode(d.node, "@versionGraph %s names a @queue class in the config's object literal", key)
 		default:
-			return nil, errorAtNode(d.node, "@versionGraph config has unknown key %q", key)
+			return errorAtNode(d.node, "@versionGraph config has unknown key %q", key)
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // graphMemberFromDecorator reads @graphMember({ graph, parent?, order?,
-// singleton? }). graph and parent.of name schema classes as values. The
+// singleton?, released? }). graph and parent.of name schema classes as values. The
 // object literal is walked here rather than evaluated whole, so each bad
 // property is reported at its value; see the registration in
 // internal/registry/core_decorators.go for why the decorator has no Apply.
@@ -533,6 +576,16 @@ func (w *walker) graphMemberFromDecorator(d decoratorRef) (*ir.GraphMemberConfig
 				return errorAtNode(value, "@graphMember singleton must be a boolean literal")
 			}
 			out.Singleton = b
+		case "released":
+			v, serr := w.evaluateExpression(value)
+			if serr != nil {
+				return serr
+			}
+			b, ok := v.(bool)
+			if !ok {
+				return errorAtNode(value, "@graphMember released must be a boolean literal")
+			}
+			out.Released = b
 		default:
 			return errorAtNode(value, "@graphMember config has unknown key %q", key)
 		}
@@ -702,11 +755,15 @@ func (w *walker) walkClass(node *astNode) {
 	name := node.Name().Text()
 	decorators := w.decoratorsOf(node)
 
-	// A user model route set (D50) and a table's behavior operations
-	// (D103) are each a class with no methods that the loader fills.
+	// A user model route set (D50), a table's behavior operations (D103)
+	// and a version graph's operations (D138) are each a class with no
+	// methods that the loader fills.
 	routes := identityRoutesDecorator(decorators)
 	if routes == nil {
 		routes = behaviorOperationsDecorator(decorators)
+	}
+	if routes == nil {
+		routes = graphOperationsDecorator(decorators)
 	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
@@ -1664,8 +1721,16 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 		w.schema.OperationSets = append(w.schema.OperationSets, set)
 		return
 	}
+	if set.IsGraphOperations() {
+		w.checkGraphOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
 	// The class-level @auth, @requirePermission and @publicRoute are a
-	// @behaviorOperations set's alone (D103).
+	// @behaviorOperations set's and a @graphOperations set's alone (D103,
+	// D138).
 	w.checkSetClause(set, decorators)
 
 	if set.IsIdentityRoutes() {

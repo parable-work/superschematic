@@ -106,6 +106,13 @@ export interface Tx {
   walk(commit: string, limit: number): Promise<Commit[]>;
   /** Reads head and the parents of it that ref wrote, nearest first, at most limit of them. */
   refCommits(ref: string, head: string, limit: number): Promise<Commit[]>;
+  /**
+   * Reads a root's primary lines: its refs with no parent that are not
+   * discarded, in the order they were created.
+   */
+  primaryRefs(root: string): Promise<Ref[]>;
+  /** Reads the patches of one entity among commits, in no particular order: at most one a commit. */
+  entityPatches(commits: readonly string[], kind: string, entityKey: string): Promise<Patch[]>;
   /** Reads every patch of the commits. */
   patches(commits: readonly string[]): Promise<Patch[]>;
   /**
@@ -131,6 +138,15 @@ export interface Tx {
    * pointer as written.
    */
   writeRelease(write: ReleaseWrite): Promise<Release>;
+
+  /**
+   * Rewrites one kind's rows of a root in the kind's released table (D139):
+   * with replace it deletes every row of the root first; it deletes the
+   * entities delete names, then writes each row of upsert, by entity key,
+   * with the release's commit and sequence. A kind whose descriptor names no
+   * released table is refused.
+   */
+  writeReleased(kind: string, write: ReleasedWrite): Promise<void>;
 
   /**
    * Deletes the history images of one kind older than retentionDays (0 for
@@ -225,6 +241,13 @@ export interface SyncTx {
   walk(commit: string, limit: number): Commit[];
   /** Reads head and the parents of it that ref wrote, nearest first, at most limit of them. */
   refCommits(ref: string, head: string, limit: number): Commit[];
+  /**
+   * Reads a root's primary lines: its refs with no parent that are not
+   * discarded, in the order they were created.
+   */
+  primaryRefs(root: string): Ref[];
+  /** Reads the patches of one entity among commits, in no particular order: at most one a commit. */
+  entityPatches(commits: readonly string[], kind: string, entityKey: string): Patch[];
   /** Reads every patch of the commits. */
   patches(commits: readonly string[]): Patch[];
   /**
@@ -250,6 +273,15 @@ export interface SyncTx {
    * pointer as written.
    */
   writeRelease(write: ReleaseWrite): Release;
+
+  /**
+   * Rewrites one kind's rows of a root in the kind's released table (D139):
+   * with replace it deletes every row of the root first; it deletes the
+   * entities delete names, then writes each row of upsert, by entity key,
+   * with the release's commit and sequence. A kind whose descriptor names no
+   * released table is refused.
+   */
+  writeReleased(kind: string, write: ReleasedWrite): undefined;
 
   /**
    * Deletes the history images of one kind older than retentionDays (0 for
@@ -411,4 +443,20 @@ export interface ReleaseWrite {
   commit: string;
   version: number;
   actor: string;
+}
+
+/**
+ * What a release writes of one kind into its released table: the root, the
+ * commit released and its sequence, the canonical rows the release adds or
+ * changes, each as JSON text, and the entity keys it removes. replace is set
+ * for a root's first release and for a release of the commit already
+ * released, which rewrite every row of the root.
+ */
+export interface ReleasedWrite {
+  root: string;
+  commit: string;
+  sequence: number;
+  replace: boolean;
+  upsert: readonly string[];
+  delete: readonly string[];
 }

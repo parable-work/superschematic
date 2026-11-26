@@ -107,6 +107,11 @@ type ConfigOutput struct {
 	// EnvConfig holds the identity runtime's config parsed from it (D57),
 	// and values-schema.json never lists it.
 	IdentityField string
+	// ClientVersions is true for an API whose config says clientVersions
+	// (D143), when Options.Derived asks for EnvConfig: EnvConfig holds the
+	// minimums read from ir.MinClientVersionsSetting, an optional setting
+	// that lists none when unset, and values-schema.json lists it.
+	ClientVersions bool
 	// Background is true for an API that declares a job, a worker or a
 	// deriver, whose entrypoint loads the API's EnvConfig too (D52, D53,
 	// D74). A stack sets no callers field for a job, a worker or a
@@ -360,8 +365,14 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 			return nil, err
 		}
 	}
+	clientVersions := opts.Derived && api && schema.ClientVersions
+	if clientVersions {
+		if err := collides(ir.MinClientVersionsSetting, "client versions setting"); err != nil {
+			return nil, err
+		}
+	}
 	if envVarsType == nil {
-		if len(derived) == 0 && callers == "" && cors == "" && identity == "" {
+		if len(derived) == 0 && callers == "" && cors == "" && identity == "" && !clientVersions {
 			return nil, nil
 		}
 		return &ConfigOutput{
@@ -378,6 +389,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 			ListedCallersField: listed,
 			CORSField:          cors,
 			IdentityField:      identity,
+			ClientVersions:     clientVersions,
 			Background:         background,
 		}, nil
 	}
@@ -412,6 +424,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		ListedCallersField: listed,
 		CORSField:          cors,
 		IdentityField:      identity,
+		ClientVersions:     clientVersions,
 		Background:         background,
 	}
 

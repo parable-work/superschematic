@@ -27,9 +27,15 @@ are two filters of an allOf (D99).
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
+
+The table of a graph member's released rows (D139), <Member>Released, has
+a repository of reads alone, a table's reads and none of its writes: the
+graph's release owns the rows and rewrites them, so the repository has no
+create, update, upsert or delete, and the table no create, update or
+unique key type. A raw SQL write of its rows is never refused.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReadRepository, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -477,7 +483,277 @@ export const noteTable: TableDefinition = {
 };
 
 /**
- * A row of Recipe, the recipe table: A recipe: the stable identity its steps and ingredients are versioned under.
+ * A row of Part, the part table: A part of the recipe's write-up, nested under another part. Its rank is
+ * a string order key, so Arrange places it among its siblings, and the
+ * parts a recipe has released are kept in a table of their own, with the
+ * index a reader of them uses.
+ */
+export interface PartRow {
+  id: T.IdentityUUID;
+  recipeId: T.IdentityUUID;
+  parentKey: T.IdentityUUID | null;
+  rank: string;
+  heading: string;
+  entityKey: T.IdentityUUID;
+  refId: T.IdentityUUID;
+  deletedOnRef: boolean;
+  _version: number;
+}
+
+/** What a create of a row of Part sets; a member left unset takes its column's default, or the schema's. */
+export interface PartCreate {
+  id?: T.IdentityUUID | null;
+  recipeId: T.IdentityUUID;
+  parentKey?: T.IdentityUUID | null;
+  rank: string;
+  heading: string;
+  entityKey?: T.IdentityUUID | null;
+  refId: T.IdentityUUID;
+  deletedOnRef?: boolean | null;
+}
+
+/** What an update of a row of Part sets: each member set, null setting a column that may be null to NULL. */
+export interface PartUpdate {
+  recipeId?: T.IdentityUUID;
+  parentKey?: T.IdentityUUID | null;
+  rank?: string;
+  heading?: string;
+  entityKey?: T.IdentityUUID;
+  refId?: T.IdentityUUID;
+  deletedOnRef?: boolean;
+}
+
+/** The rows of Part a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface PartFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  recipeId?: UuidFilter<T.IdentityUUID>;
+  parentKey?: UuidFilter<T.IdentityUUID> & NullFilter;
+  rank?: StringFilter<string>;
+  heading?: StringFilter<string>;
+  entityKey?: UuidFilter<T.IdentityUUID>;
+  refId?: UuidFilter<T.IdentityUUID>;
+  deletedOnRef?: BoolFilter;
+  _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly PartFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly PartFilter[];
+}
+
+/** The members findOne and findMany order rows of Part by. */
+export type PartOrderField = "id" | "parentKey" | "rank" | "heading" | "entityKey" | "deletedOnRef" | "_version";
+
+/** The members findPage orders rows of Part by (D60, amended); ties break by id. */
+export type PartSortField = "id" | "parentKey" | "rank" | "heading" | "entityKey";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type PartUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
+
+/** The position of a row of Part in a findPage order: its id. */
+export interface PartPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Part includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface PartRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
+/** The repository of Part. */
+export type PartRepository = Repository<
+  PartRow,
+  PartCreate,
+  PartUpdate,
+  PartFilter,
+  PartOrderField,
+  PartSortField,
+  PartUniqueKey,
+  T.IdentityUUID,
+  PartPageKey,
+  PartRelations
+>;
+
+/** The part table, as the runtime reads and writes it. */
+export const partTable: TableDefinition = {
+  name: "Part",
+  table: "part",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "part.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "part.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "parentKey", column: "parent_key", field: "parentKey", qualified: "part.parent_key", uuid: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "rank", column: "rank", field: "rank", qualified: "part.rank", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "heading", column: "heading", field: "heading", qualified: "part.heading", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "part.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "refId", column: "ref_id", field: "ref", qualified: "part.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "part.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "_version", column: "_version", field: "_version", qualified: "part._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    qualifiedColumns: "\"part\".\"id\", \"part\".\"recipe_id\", \"part\".\"parent_key\", \"part\".\"rank\", \"part\".\"heading\", \"part\".\"entity_key\", \"part\".\"ref_id\", \"part\".\"deleted_on_ref\", \"part\".\"_version\"",
+    selectColumn: "\"part\".\"%s\"",
+    getOne: "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE id = $1",
+    getOneFields: "SELECT %s FROM part WHERE id = $1",
+    getMany: "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM part%s%s LIMIT 1",
+    findMany: "SELECT %s FROM part%s%s%s",
+    count: "SELECT COUNT(*) FROM part%s",
+    page: "SELECT %s FROM part%s%s LIMIT %d",
+    pageAfterKey: "part.id %s %s",
+    pageAfter: "(%s, part.id) %s ((SELECT %s FROM part AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM part AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", part.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM part WHERE part.id = $1)",
+    insert: "INSERT INTO part (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO part (%s) VALUES %s RETURNING %s",
+    update: "UPDATE part SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    updateMany: "UPDATE part SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO part (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM part WHERE id = $1",
+    deleteMany: "DELETE FROM part%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = part.id", rows: "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = part.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"parent_key\", \"rank\", \"heading\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM part WHERE (entity_key, ref_id) IN (%s)" },
+  },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "part.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "part.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
+};
+
+/**
+ * A row of PartReleased, the part_released table: The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+ */
+export interface PartReleasedRow {
+  id: T.IdentityUUID;
+  recipeId: T.IdentityUUID;
+  entityKey: T.IdentityUUID;
+  parentKey: T.IdentityUUID | null;
+  rank: string;
+  heading: string;
+  commitId: T.IdentityUUID;
+  sequence: T.GenericInt64;
+}
+
+/** The rows of PartReleased a read finds: each member set is one condition, all of them ANDed. */
+export interface PartReleasedFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  recipeId?: UuidFilter<T.IdentityUUID>;
+  entityKey?: UuidFilter<T.IdentityUUID>;
+  parentKey?: UuidFilter<T.IdentityUUID> & NullFilter;
+  rank?: StringFilter<string>;
+  heading?: StringFilter<string>;
+  commitId?: UuidFilter<T.IdentityUUID>;
+  sequence?: NumberFilter<T.GenericInt64>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly PartReleasedFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly PartReleasedFilter[];
+}
+
+/** The members findOne and findMany order rows of PartReleased by. */
+export type PartReleasedOrderField = "id" | "entityKey" | "parentKey" | "rank" | "heading" | "sequence";
+
+/** The members findPage orders rows of PartReleased by (D60, amended); ties break by id. */
+export type PartReleasedSortField = "id" | "entityKey" | "parentKey" | "rank" | "heading" | "sequence";
+
+/** The position of a row of PartReleased in a findPage order: its id. */
+export interface PartReleasedPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of PartReleased includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface PartReleasedRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
+}
+
+/** The repository of PartReleased, with reads alone: its rows are the released rows of Part, which the graph's release owns and rewrites (D139). */
+export type PartReleasedRepository = ReadRepository<PartReleasedRow, PartReleasedFilter, PartReleasedOrderField, PartReleasedSortField, T.IdentityUUID, PartReleasedPageKey, PartReleasedRelations>;
+
+/** The part_released table, as the runtime reads it. */
+export const partReleasedTable: TableDefinition = {
+  name: "PartReleased",
+  table: "part_released",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "part_released.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "part_released.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "part_released.entity_key", uuid: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "parentKey", column: "parent_key", field: "parentKey", qualified: "part_released.parent_key", uuid: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "rank", column: "rank", field: "rank", qualified: "part_released.rank", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "heading", column: "heading", field: "heading", qualified: "part_released.heading", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "commitId", column: "commit_id", field: "commit", qualified: "part_released.commit_id", uuid: true, required: true, relation: "RecipeCommit", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "sequence", column: "\"sequence\"", field: "sequence", qualified: "part_released.\"sequence\"", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\"",
+    qualifiedColumns: "\"part_released\".\"id\", \"part_released\".\"recipe_id\", \"part_released\".\"entity_key\", \"part_released\".\"parent_key\", \"part_released\".\"rank\", \"part_released\".\"heading\", \"part_released\".\"commit_id\", \"part_released\".\"sequence\"",
+    selectColumn: "\"part_released\".\"%s\"",
+    getOne: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE id = $1",
+    getOneFields: "SELECT %s FROM part_released WHERE id = $1",
+    getMany: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM part_released%s%s LIMIT 1",
+    findMany: "SELECT %s FROM part_released%s%s%s",
+    count: "SELECT COUNT(*) FROM part_released%s",
+    page: "SELECT %s FROM part_released%s%s LIMIT %d",
+    pageAfterKey: "part_released.id %s %s",
+    pageAfter: "(%s, part_released.id) %s ((SELECT %s FROM part_released AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM part_released AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", part_released.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM part_released WHERE part_released.id = $1)",
+    insert: "INSERT INTO part_released (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO part_released (%s) VALUES %s RETURNING %s",
+    update: "UPDATE part_released SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\"",
+    updateMany: "UPDATE part_released SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO part_released (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM part_released WHERE id = $1",
+    deleteMany: "DELETE FROM part_released%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = part_released.id", rows: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (id) IN (%s)" },
+    "recipe,entityKey": { conflict: "(recipe_id, entity_key)", keep: "recipe_id = part_released.recipe_id", rows: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (recipe_id, entity_key) IN (%s)" },
+  },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "part_released.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "part_released.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
+};
+
+/**
+ * A row of Recipe, the recipe table: A recipe: the stable identity its steps and ingredients are versioned
+ * under. Its commits and its releases each enqueue a message.
  */
 export interface RecipeRow {
   id: T.IdentityUUID;
@@ -509,6 +785,10 @@ export interface RecipeFilter {
   referencedByIngredientRecipe?: ReferencedByFilter;
   /** The rows a Note row's recipe points at, or none does. */
   referencedByNoteRecipe?: ReferencedByFilter;
+  /** The rows a Part row's recipe points at, or none does. */
+  referencedByPartRecipe?: ReferencedByFilter;
+  /** The rows a PartReleased row's recipe points at, or none does. */
+  referencedByPartReleasedRecipe?: ReferencedByFilter;
   /** The rows a RecipeCommit row's root points at, or none does. */
   referencedByRecipeCommitRoot?: ReferencedByFilter;
   /** The rows a RecipeRef row's root points at, or none does. */
@@ -546,6 +826,8 @@ export interface RecipeRelations {
   readonly covers: Related<CoverRow, CoverRelations, 'many'>;
   readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
   readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly parts: Related<PartRow, PartRelations, 'many'>;
+  readonly partReleaseds: Related<PartReleasedRow, PartReleasedRelations, 'many'>;
   readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
   readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
   readonly recipeReleases: Related<RecipeReleaseRow, RecipeReleaseRelations, 'many'>;
@@ -620,6 +902,8 @@ export const recipeTable: TableDefinition = {
     { filter: "referencedByCoverRecipe", probe: "SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id" },
     { filter: "referencedByIngredientRecipe", probe: "SELECT 1 FROM ingredient WHERE ingredient.recipe_id = recipe.id" },
     { filter: "referencedByNoteRecipe", probe: "SELECT 1 FROM note WHERE note.recipe_id = recipe.id" },
+    { filter: "referencedByPartRecipe", probe: "SELECT 1 FROM part WHERE part.recipe_id = recipe.id" },
+    { filter: "referencedByPartReleasedRecipe", probe: "SELECT 1 FROM part_released WHERE part_released.recipe_id = recipe.id" },
     { filter: "referencedByRecipeCommitRoot", probe: "SELECT 1 FROM recipe_commit WHERE recipe_commit.root_id = recipe.id" },
     { filter: "referencedByRecipeRefRoot", probe: "SELECT 1 FROM recipe_ref WHERE recipe_ref.root_id = recipe.id", live: " AND recipe_ref.deleted_at IS NULL" },
     { filter: "referencedByRecipeReleaseRoot", probe: "SELECT 1 FROM recipe_release WHERE recipe_release.root_id = recipe.id" },
@@ -631,6 +915,8 @@ export const recipeTable: TableDefinition = {
     { name: "covers", target: "cover", column: "recipeId" },
     { name: "ingredients", target: "ingredient", column: "recipeId" },
     { name: "notes", target: "note", column: "recipeId" },
+    { name: "parts", target: "part", column: "recipeId" },
+    { name: "partReleaseds", target: "partReleased", column: "recipeId" },
     { name: "recipeCommits", target: "recipeCommit", column: "rootId" },
     { name: "recipeRefs", target: "recipeRef", column: "rootId" },
     { name: "recipeReleases", target: "recipeRelease", column: "rootId" },
@@ -691,6 +977,8 @@ export interface RecipeCommitFilter {
   sequence?: NumberFilter<T.GenericInt64> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   createdBy?: UuidFilter<T.IdentityUUID>;
+  /** The rows a PartReleased row's commit points at, or none does. */
+  referencedByPartReleasedCommit?: ReferencedByFilter;
   /** The rows a RecipeCommit row's parentCommit points at, or none does. */
   referencedByRecipeCommitParentCommit?: ReferencedByFilter;
   /** The rows a RecipePatch row's commit points at, or none does. */
@@ -734,6 +1022,7 @@ export interface RecipeCommitRelations {
   readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
   readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
   readonly parentCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly partReleaseds: Related<PartReleasedRow, PartReleasedRelations, 'many'>;
   readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
   readonly recipePatches: Related<RecipePatchRow, RecipePatchRelations, 'many'>;
   readonly recipeRefsByBaseCommit: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
@@ -812,6 +1101,7 @@ export const recipeCommitTable: TableDefinition = {
     "root,sequence": { conflict: "(root_id, \"sequence\")", keep: "root_id = recipe_commit.root_id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (root_id, \"sequence\") IN (%s)" },
   },
   referencedBy: [
+    { filter: "referencedByPartReleasedCommit", probe: "SELECT 1 FROM part_released WHERE part_released.commit_id = recipe_commit.id" },
     { filter: "referencedByRecipeCommitParentCommit", probe: "SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id" },
     { filter: "referencedByRecipePatchCommit", probe: "SELECT 1 FROM recipe_patch WHERE recipe_patch.commit_id = recipe_commit.id" },
     { filter: "referencedByRecipeRefBaseCommit", probe: "SELECT 1 FROM recipe_ref WHERE recipe_ref.base_commit_id = recipe_commit.id", live: " AND recipe_ref.deleted_at IS NULL" },
@@ -825,6 +1115,7 @@ export const recipeCommitTable: TableDefinition = {
     { field: "parentCommit", column: "parentCommitId", target: "recipeCommit", probe: "recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
   ],
   many: [
+    { name: "partReleaseds", target: "partReleased", column: "commitId" },
     { name: "recipeCommits", target: "recipeCommit", column: "parentCommitId" },
     { name: "recipePatches", target: "recipePatch", column: "commitId" },
     { name: "recipeRefsByBaseCommit", target: "recipeRef", column: "baseCommitId" },
@@ -1038,6 +1329,8 @@ export interface RecipeRefFilter {
   referencedByIngredientRef?: ReferencedByFilter;
   /** The rows a Note row's ref points at, or none does. */
   referencedByNoteRef?: ReferencedByFilter;
+  /** The rows a Part row's ref points at, or none does. */
+  referencedByPartRef?: ReferencedByFilter;
   /** The rows a RecipeCommit row's ref points at, or none does. */
   referencedByRecipeCommitRef?: ReferencedByFilter;
   /** The rows a RecipeRef row's parentRef points at, or none does. */
@@ -1085,6 +1378,7 @@ export interface RecipeRefRelations {
   readonly covers: Related<CoverRow, CoverRelations, 'many'>;
   readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
   readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly parts: Related<PartRow, PartRelations, 'many'>;
   readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
   readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
   readonly steps: Related<StepRow, StepRelations, 'many'>;
@@ -1171,6 +1465,7 @@ export const recipeRefTable: TableDefinition = {
     { filter: "referencedByCoverRef", probe: "SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id" },
     { filter: "referencedByIngredientRef", probe: "SELECT 1 FROM ingredient WHERE ingredient.ref_id = recipe_ref.id" },
     { filter: "referencedByNoteRef", probe: "SELECT 1 FROM note WHERE note.ref_id = recipe_ref.id" },
+    { filter: "referencedByPartRef", probe: "SELECT 1 FROM part WHERE part.ref_id = recipe_ref.id" },
     { filter: "referencedByRecipeCommitRef", probe: "SELECT 1 FROM recipe_commit WHERE recipe_commit.ref_id = recipe_ref.id" },
     { filter: "referencedByRecipeRefParentRef", probe: "SELECT 1 FROM recipe_ref WHERE recipe_ref.parent_ref_id = recipe_ref.id", live: " AND recipe_ref.deleted_at IS NULL" },
     { filter: "referencedByStepRef", probe: "SELECT 1 FROM step WHERE step.ref_id = recipe_ref.id" },
@@ -1187,6 +1482,7 @@ export const recipeRefTable: TableDefinition = {
     { name: "covers", target: "cover", column: "refId" },
     { name: "ingredients", target: "ingredient", column: "refId" },
     { name: "notes", target: "note", column: "refId" },
+    { name: "parts", target: "part", column: "refId" },
     { name: "recipeCommits", target: "recipeCommit", column: "refId" },
     { name: "recipeRefs", target: "recipeRef", column: "parentRefId" },
     { name: "steps", target: "step", column: "refId" },
@@ -1997,6 +2293,8 @@ export interface FixtureVersionGraphDbRepositories {
   readonly cover: CoverRepository;
   readonly ingredient: IngredientRepository;
   readonly note: NoteRepository;
+  readonly part: PartRepository;
+  readonly partReleased: PartReleasedRepository;
   readonly recipe: RecipeRepository;
   readonly recipeCommit: RecipeCommitRepository;
   readonly recipePatch: RecipePatchRepository;
@@ -2059,6 +2357,8 @@ export const fixtureVersionGraphDbOrm: OrmDefinition = {
     cover: coverTable,
     ingredient: ingredientTable,
     note: noteTable,
+    part: partTable,
+    partReleased: partReleasedTable,
     recipe: recipeTable,
     recipeCommit: recipeCommitTable,
     recipePatch: recipePatchTable,

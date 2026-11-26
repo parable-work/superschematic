@@ -21,5 +21,8 @@
     "CREATE TABLE IF NOT EXISTS \"graph_member_history\" (history_id TEXT NOT NULL PRIMARY KEY, graph TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, _version INTEGER NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')), data TEXT NOT NULL, recorded_at INTEGER NOT NULL) STRICT",
     "CREATE UNIQUE INDEX IF NOT EXISTS \"graph_member_history_version\" ON \"graph_member_history\" (id, _version)",
     "CREATE INDEX IF NOT EXISTS \"graph_member_history_recorded\" ON \"graph_member_history\" (graph, kind, recorded_at)"
+  ],
+  "released": [
+    "CREATE TABLE IF NOT EXISTS \"graph_released\" (graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, entity_key TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES \"graph_commit\" (id), sequence INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (graph, kind, root_id, entity_key)) STRICT"
   ]
 }

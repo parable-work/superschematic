@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_rejects_after_of_zeros_alone",
+  "op": "order_keys",
+  "input": {
+    "after": "00",
+    "count": 1
+  },
+  "expect": {
+    "error": {
+      "code": "no_order_key",
+      "message": "order_keys: no key is made between the start and \"00\": the second must be above the first by more than trailing zeros"
+    }
+  }
+}

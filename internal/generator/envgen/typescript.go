@@ -200,6 +200,9 @@ type typeScriptEnvConfig struct {
 	HasMemoryStore        bool
 	Callers               string
 	CallersLiteral        string
+	// ClientVersions is ir.MinClientVersionsSetting for an API whose
+	// config says clientVersions (D143), empty for any other.
+	ClientVersions string
 	// Background is true for an API with a callers field and a job, a
 	// worker or a deriver: loadEnvConfig and loadBackgroundEnvConfig,
 	// which leaves the
@@ -238,6 +241,9 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 		Callers:        output.CallersField,
 		CallersLiteral: jsString(output.CallersField),
 		Background:     output.Background && output.CallersField != "",
+	}
+	if output.ClientVersions {
+		view.ClientVersions = ir.MinClientVersionsSetting
 	}
 	for _, field := range output.Derived {
 		derived := typeScriptDerivedField{Key: field.Key, KeyLiteral: jsString(field.Key)}

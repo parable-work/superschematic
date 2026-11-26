@@ -65,6 +65,12 @@ export interface KindDescriptor {
   table: string;
   /** The table that holds the kind's history images. */
   historyTable: string;
+  /**
+   * The table that holds the released tree's rows of the kind, which a
+   * storage adapter rewrites at each release; absent for a kind that keeps
+   * none. The core does not read it.
+   */
+  releasedTable?: string;
   /** The entity key column: the logical identity rows are matched on. */
   key: string;
   /** The row id column. */
@@ -83,7 +89,7 @@ export interface KindDescriptor {
   /** The column naming who wrote the row; conflicts report it. */
   author?: string;
   parent?: ParentEdge;
-  /** An integer column that orders siblings. */
+  /** The column that orders siblings: an integer, or a string order key. */
   order?: string;
   /** At most one live row. Default false. */
   singleton?: boolean;
@@ -260,8 +266,47 @@ export interface ValidateOutput {
   findings: Finding[];
 }
 
+/** The input of order_keys. A bound that is absent or null is the start or the end. */
+export interface OrderKeysInput {
+  /** The key the new keys sort above. */
+  before?: string | null;
+  /** The key the new keys sort below. */
+  after?: string | null;
+  /** How many keys to make, from 0 to 1000000. */
+  count: number;
+}
+
+export interface OrderKeysOutput {
+  /** The keys, lowest first: evenly spread, each as short as it can be. */
+  keys: string[];
+}
+
+/** The input of arrange: one parent's live children of a kind, in the order wanted. */
+export interface ArrangeInput {
+  descriptor: Descriptor;
+  tree: Tree;
+  /** A kind whose order is a string key. */
+  kind: string;
+  /** The parent's entity key; absent or null for the rows that have no parent. */
+  parent?: string | null;
+  /** The entity key of every live child of the parent, in the order wanted. */
+  keys: string[];
+}
+
+export interface ArrangeOutput {
+  /** The rows that need a new order key, each as an engine writes it, in the order wanted. */
+  rows: Row[];
+}
+
 /** The core's operations, as the vectors and the C ABI (`vg_<op>`) name them. */
-export type OperationName = "compose" | "merge" | "diff" | "content_hash" | "validate";
+export type OperationName =
+  | "compose"
+  | "merge"
+  | "diff"
+  | "content_hash"
+  | "validate"
+  | "order_keys"
+  | "arrange";
 
 export type ErrorCode =
   | "invalid_json"
@@ -273,6 +318,9 @@ export type ErrorCode =
   | "order_out_of_range"
   | "invalid_resolution"
   | "unmatched_resolution"
+  | "no_order_key"
+  | "order_not_a_key"
+  | "invalid_arrangement"
   | "internal";
 
 /** What the core returns for a refused input. */

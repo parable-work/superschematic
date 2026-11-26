@@ -1,0 +1,125 @@
+{
+  "name": "released",
+  "description": "A kind that keeps its released rows in a table of its own: a root's first release writes the released tree's rows of the kind, each with the release's commit and sequence; a later release writes the rows that differ from the tree released before and removes the ones it lost, and leaves the others as an earlier release wrote them; a rollback is a release too; a release of the commit already released rewrites every row, which restores one removed by hand; a release refused for its version, or for an untagged commit, writes nothing; another root's rows, and a kind that keeps no released table, are untouched.",
+  "roots": ["Bread", "Soup"],
+  "steps": [
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "write", "as": "write"},
+    {"op": "save", "ref": "write", "edits": {
+      "part": {"upsert": [
+        {"entity_key": "Mix", "parent_key": null, "rank": "F", "heading": "Mix"},
+        {"entity_key": "Knead", "parent_key": null, "rank": "V", "heading": "Knead"},
+        {"entity_key": "Bake", "parent_key": null, "rank": "k", "heading": "Bake"},
+        {"entity_key": "Oven", "parent_key": "Bake", "rank": "V", "heading": "Heat the oven"}
+      ]},
+      "step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}
+    }},
+    {"op": "commit", "ref": "write"},
+    {"op": "merge", "source": "write", "target": "main", "tag": true, "as": "v1", "expect": {"commit": {"sequence": 1}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading FROM part_released WHERE recipe_id = $1::uuid",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading FROM graph_released WHERE kind = 'part' AND root_id = ?1"},
+      "args": [{"uuid": "Bread"}], "expect": {"rows": []}},
+
+    {"op": "release", "root": "Bread", "commit": "v1", "expect": {"release": {"commit": "v1", "version": 1}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, rank, CASE WHEN parent_key IS NULL THEN 'none' ELSE 'some' END AS parent, sequence::text AS sequence, CASE commit_id WHEN $2::uuid THEN 'v1' ELSE 'other' END AS commit FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, json_extract(data, '$.rank') AS rank, CASE WHEN json_extract(data, '$.parent_key') IS NULL THEN 'none' ELSE 'some' END AS parent, CAST(sequence AS TEXT) AS sequence, CASE commit_id WHEN ?2 THEN 'v1' ELSE 'other' END AS \"commit\" FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Bread"}, {"commit": "v1"}],
+      "expect": {"rows": [
+        {"heading": "Bake", "rank": "k", "parent": "none", "sequence": "1", "commit": "v1"},
+        {"heading": "Heat the oven", "rank": "V", "parent": "some", "sequence": "1", "commit": "v1"},
+        {"heading": "Knead", "rank": "V", "parent": "none", "sequence": "1", "commit": "v1"},
+        {"heading": "Mix", "rank": "F", "parent": "none", "sequence": "1", "commit": "v1"}
+      ]}},
+
+    {"op": "branch", "from": "main", "name": "edit", "as": "edit"},
+    {"op": "save", "ref": "edit", "edits": {
+      "part": {
+        "upsert": [
+          {"entity_key": "Knead", "parent_key": null, "rank": "V", "heading": "Knead well"},
+          {"entity_key": "Rest", "parent_key": null, "rank": "c", "heading": "Rest"}
+        ],
+        "delete": ["Bake"]
+      },
+      "step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {}}]}
+    }},
+    {"op": "commit", "ref": "edit"},
+    {"op": "merge", "source": "edit", "target": "main", "tag": true, "as": "v2", "expect": {"commit": {"sequence": 2}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, sequence::text AS sequence FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, CAST(sequence AS TEXT) AS sequence FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Bread"}],
+      "expect": {"rows": [
+        {"heading": "Bake", "sequence": "1"}, {"heading": "Heat the oven", "sequence": "1"},
+        {"heading": "Knead", "sequence": "1"}, {"heading": "Mix", "sequence": "1"}
+      ]}},
+
+    {"op": "release", "root": "Bread", "commit": "v2", "version": 7, "expect": {"error": "version_conflict"}},
+    {"op": "release", "root": "Bread", "commit": "v2", "expect": {"release": {"commit": "v2", "version": 2}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, sequence::text AS sequence FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, CAST(sequence AS TEXT) AS sequence FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Bread"}],
+      "expect": {"rows": [
+        {"heading": "Knead well", "sequence": "2"}, {"heading": "Mix", "sequence": "1"}, {"heading": "Rest", "sequence": "2"}
+      ]}},
+
+    {"op": "createPrimary", "root": "Soup", "name": "main", "as": "soup"},
+    {"op": "branch", "from": "soup", "name": "stock", "as": "stock"},
+    {"op": "save", "ref": "stock", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": "Make the stock"}
+    ]}}},
+    {"op": "commit", "ref": "stock"},
+    {"op": "merge", "source": "stock", "target": "soup", "tag": true, "as": "s1"},
+    {"op": "release", "root": "Soup", "commit": "s1", "expect": {"release": {"commit": "s1", "version": 1}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, sequence::text AS sequence FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, CAST(sequence AS TEXT) AS sequence FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Soup"}],
+      "expect": {"rows": [{"heading": "Make the stock", "sequence": "1"}]}},
+
+    {"op": "release", "root": "Bread", "commit": "v1", "expect": {"release": {"commit": "v1", "version": 3}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, sequence::text AS sequence FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, CAST(sequence AS TEXT) AS sequence FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Bread"}],
+      "expect": {"rows": [
+        {"heading": "Bake", "sequence": "1"}, {"heading": "Heat the oven", "sequence": "1"},
+        {"heading": "Knead", "sequence": "1"}, {"heading": "Mix", "sequence": "1"}
+      ]}},
+
+    {"op": "sql",
+      "statement": {"postgres": "DELETE FROM part_released WHERE recipe_id = $1::uuid AND heading = 'Mix'",
+        "sqlite": "DELETE FROM graph_released WHERE kind = 'part' AND root_id = ?1 AND json_extract(data, '$.heading') = 'Mix'"},
+      "args": [{"uuid": "Bread"}]},
+    {"op": "sql",
+      "statement": {"postgres": "UPDATE part_released SET heading = 'Scribbled' WHERE recipe_id = $1::uuid AND heading = 'Knead'",
+        "sqlite": "UPDATE graph_released SET data = '{\"heading\":\"Scribbled\",\"parent_key\":null,\"rank\":\"V\"}' WHERE kind = 'part' AND root_id = ?1 AND json_extract(data, '$.heading') = 'Knead'"},
+      "args": [{"uuid": "Bread"}]},
+    {"op": "release", "root": "Bread", "commit": "v1", "expect": {"release": {"commit": "v1", "version": 4}}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT heading, sequence::text AS sequence FROM part_released WHERE recipe_id = $1::uuid ORDER BY heading",
+        "sqlite": "SELECT json_extract(data, '$.heading') AS heading, CAST(sequence AS TEXT) AS sequence FROM graph_released WHERE kind = 'part' AND root_id = ?1 ORDER BY 1"},
+      "args": [{"uuid": "Bread"}],
+      "expect": {"rows": [
+        {"heading": "Bake", "sequence": "1"}, {"heading": "Heat the oven", "sequence": "1"},
+        {"heading": "Knead", "sequence": "1"}, {"heading": "Mix", "sequence": "1"}
+      ]}},
+
+    {"op": "branch", "from": "main", "name": "untagged", "as": "draft"},
+    {"op": "save", "ref": "draft", "edits": {"part": {"upsert": [
+      {"entity_key": "Serve", "parent_key": null, "rank": "s", "heading": "Serve"}
+    ]}}},
+    {"op": "commit", "ref": "draft", "as": "untagged"},
+    {"op": "release", "root": "Bread", "commit": "untagged", "expect": {"error": "not_tagged"}},
+    {"op": "sql",
+      "statement": {"postgres": "SELECT count(*)::text AS rows FROM part_released",
+        "sqlite": "SELECT CAST(count(*) AS TEXT) AS rows FROM graph_released"},
+      "expect": {"rows": [{"rows": "5"}]}},
+    {"op": "released", "root": "Bread", "expect": {"release": {"commit": "v1", "version": 4}, "tree": {
+      "part": [{"entity_key": "Mix"}, {"entity_key": "Knead"}, {"entity_key": "Oven"}, {"entity_key": "Bake"}],
+      "step": [{"entity_key": "Mix", "instruction": "Mix"}]
+    }}}
+  ]
+}

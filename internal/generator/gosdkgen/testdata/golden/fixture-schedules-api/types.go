@@ -20,16 +20,32 @@ type RequestInterceptor func(ctx context.Context, req *http.Request) error
 type ResponseInterceptor func(ctx context.Context, response *http.Response, body []byte) ([]byte, error)
 
 type SDKConfig struct {
-	BaseURL             string
-	Timeout             int
-	MaxResponseSize     int64
-	Auth                *AuthConfig
-	ServiceCredential   *ServiceCredentialConfig
+	BaseURL           string
+	Timeout           int
+	MaxResponseSize   int64
+	Auth              *AuthConfig
+	ServiceCredential *ServiceCredentialConfig
+	// Client is the client this SDK runs in (D143): every call then sends
+	// `X-Client-Version: <name>/<version>`, and an API that lists the
+	// client answers a version under its minimum with a
+	// *ClientTooOldError. Nil sends no such header.
+	Client              *ClientIdentity
 	Encryption          *EncryptionConfig
 	RequestInterceptor  RequestInterceptor
 	ResponseInterceptor ResponseInterceptor
 	Transport           http.RoundTripper
 	MaxRateLimitRetries *int
+}
+
+// ClientIdentity is the application an SDK runs in, as it names itself to
+// the API (D143): a command-line client, a desktop app. Name is letters,
+// digits, `.`, `_` and `-`, starting with a letter or a digit, 64
+// characters at most. Version is the application's own version, a
+// semantic version such as 0.5.0 for the API to compare it; any other
+// version is sent and never refused.
+type ClientIdentity struct {
+	Name    string
+	Version string
 }
 
 // AuthConfig configures authentication for the SDK client.

@@ -24,6 +24,8 @@ var ops = map[string]op{
 	"diff":         opDiff,
 	"content_hash": opContentHash,
 	"validate":     opValidate,
+	"order_keys":   opOrderKeys,
+	"arrange":      opArrange,
 }
 
 // TestVectors runs every vector through the C ABI and compares the output
@@ -72,6 +74,10 @@ func TestVectors(t *testing.T) {
 				checkTyped(t, v, ContentHash)
 			case "validate":
 				checkTyped(t, v, Validate)
+			case "order_keys":
+				checkTyped(t, v, OrderKeys)
+			case "arrange":
+				checkTyped(t, v, Arrange)
 			}
 		})
 	}

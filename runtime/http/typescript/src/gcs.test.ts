@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EMULATOR_SIGNER, emulatorEndpoint, openBucket } from './gcs';
-import { ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './index';
+import { ObjectNotFoundError, checkObjectName, checkSignedUrlOptions, contentBucket } from './index';
 
 /*
 The GCS implementation of Bucket (D54). The signing and the refusals run
@@ -80,7 +80,30 @@ describe.skipIf(emulator === '')('a bucket on fake-gcs-server', () => {
     expect(got.status).toBe(200);
     expect(await got.text()).toBe('png bytes');
 
-    for (const name of ['a.txt', 'b.txt', 'c.txt', 'upload.png']) await bucket.delete(prefix + name);
+    // D142: a head without the bytes, and a put that writes only when
+    // the name is free, which GCS checks and writes in one step.
+    expect(await bucket.head(`${prefix}a.txt`)).toMatchObject({ name: `${prefix}a.txt`, size: 14, contentType: 'text/plain' });
+    expect(await bucket.head(`${prefix}absent.txt`)).toBeUndefined();
+    expect(stored.created).toBe(true);
+    const fresh = await bucket.put(`${prefix}once.txt`, 'first', { contentType: 'text/plain', ifAbsent: true });
+    expect(fresh).toMatchObject({ name: `${prefix}once.txt`, size: 5, created: true });
+    const again = await bucket.put(`${prefix}once.txt`, new Blob(['second, longer']).stream(), { ifAbsent: true });
+    expect(again).toMatchObject({ name: `${prefix}once.txt`, size: 5, contentType: 'text/plain', created: false });
+    expect(await new Response((await bucket.get(`${prefix}once.txt`)).body).text()).toBe('first');
+    const raced = await Promise.all(Array.from({ length: 8 }, () => bucket.put(`${prefix}raced.txt`, 'x', { ifAbsent: true })));
+    expect(raced.filter(put => put.created).length).toBe(1);
+    // A content bucket over it: the same bytes are one object.
+    const content = contentBucket(bucket, { maxBytes: 64 });
+    const hello = await content.put('hello', { contentType: 'text/plain' });
+    expect(hello).toEqual({ hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', size: 5, created: true });
+    expect((await content.put(new Blob(['hello']).stream())).created).toBe(false);
+    expect(await content.has(hello.hash)).toBe(true);
+    expect(await content.missing([hello.hash, '0'.repeat(64)])).toEqual(['0'.repeat(64)]);
+    expect(await new Response((await content.get(hello.hash)).body).text()).toBe('hello');
+    expect((await fetch(await content.signedUrl(hello.hash, { expiresInSeconds: 60 }))).status).toBe(200);
+    await content.raw.delete(`sha256/${hello.hash}`);
+
+    for (const name of ['a.txt', 'b.txt', 'c.txt', 'upload.png', 'once.txt', 'raced.txt']) await bucket.delete(prefix + name);
     await expect(bucket.get(`${prefix}a.txt`)).rejects.toBeInstanceOf(ObjectNotFoundError);
     await expect(bucket.delete(`${prefix}a.txt`)).rejects.toBeInstanceOf(ObjectNotFoundError);
     expect((await bucket.list({ prefix })).objects).toEqual([]);

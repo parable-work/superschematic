@@ -24,6 +24,8 @@ import { join } from "node:path";
 import {
   init,
   VersionGraphError,
+  type ArrangeInput,
+  type ArrangeOutput,
   type Change,
   type ChangeOperation,
   type ComposeInput,
@@ -43,6 +45,8 @@ import {
   type MergeInput,
   type MergeOutput,
   type OperationName,
+  type OrderKeysInput,
+  type OrderKeysOutput,
   type ParentEdge,
   type Resolution,
   type RootTable,
@@ -177,6 +181,9 @@ const errorCode = literal<ErrorCode>("ErrorCode", {
   order_out_of_range: true,
   invalid_resolution: true,
   unmatched_resolution: true,
+  no_order_key: true,
+  order_not_a_key: true,
+  invalid_arrangement: true,
   internal: true,
 });
 
@@ -226,6 +233,7 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   kind: req(same),
   table: req(same),
   historyTable: req(same),
+  releasedTable: opt(same),
   key: req(same),
   id: req(same),
   ref: req(same),
@@ -324,6 +332,21 @@ const treeInput = decoder<TreeInput>("TreeInput", { descriptor: req(descriptor),
 const contentHashOutput = decoder<ContentHashOutput>("ContentHashOutput", { contentHash: req(same) });
 const validateOutput = decoder<ValidateOutput>("ValidateOutput", { findings: req(list(finding)) });
 
+const orderKeysInput = decoder<OrderKeysInput>("OrderKeysInput", {
+  before: opt(same),
+  after: opt(same),
+  count: req(same),
+});
+const orderKeysOutput = decoder<OrderKeysOutput>("OrderKeysOutput", { keys: req(same) });
+const arrangeInput = decoder<ArrangeInput>("ArrangeInput", {
+  descriptor: req(descriptor),
+  tree: req(tree),
+  kind: req(same),
+  parent: opt(same),
+  keys: req(same),
+});
+const arrangeOutput = decoder<ArrangeOutput>("ArrangeOutput", { rows: req(list(row)) });
+
 const errorBody = decoder<ErrorDocument["error"]>("ErrorDocument.error", {
   code: req(errorCode),
   message: req(same),
@@ -369,6 +392,8 @@ const operations: Record<OperationName, Operation> = {
   diff: operation(diffInput, (g, i) => g.diff(i), diffOutput),
   content_hash: operation(treeInput, (g, i) => g.contentHash(i), contentHashOutput),
   validate: operation(treeInput, (g, i) => g.validate(i), validateOutput),
+  order_keys: operation(orderKeysInput, (g, i) => g.orderKeys(i), orderKeysOutput),
+  arrange: operation(arrangeInput, (g, i) => g.arrange(i), arrangeOutput),
 };
 
 const vectorsDir = join(import.meta.dir, "../../testdata/vectors");

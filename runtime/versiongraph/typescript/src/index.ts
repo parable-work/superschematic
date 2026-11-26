@@ -1,6 +1,7 @@
 // @superschematic/versiongraph: the version-graph core
 // (runtime/versiongraph/rust) built for wasm32-unknown-unknown, with typed
-// compose, merge, diff, contentHash and validate over its JSON contract
+// compose, merge, diff, contentHash, validate, orderKeys and arrange over
+// its JSON contract
 // (runtime/versiongraph/README.md).
 //
 // The module has no imports and no generated glue. Each operation copies its
@@ -9,6 +10,8 @@
 // two out slots, reads the document and releases it (vg_free).
 
 import type {
+  ArrangeInput,
+  ArrangeOutput,
   ComposeInput,
   ComposeOutput,
   ContentHashOutput,
@@ -19,6 +22,8 @@ import type {
   MergeInput,
   MergeOutput,
   OperationName,
+  OrderKeysInput,
+  OrderKeysOutput,
   TreeInput,
   ValidateOutput,
 } from "./contract.js";
@@ -74,6 +79,10 @@ export interface VersionGraph {
   contentHash(input: TreeInput): ContentHashOutput;
   /** Duplicate keys, the singleton rule, absent parents, cycles and orders out of range. */
   validate(input: TreeInput): ValidateOutput;
+  /** Order keys that sort strictly between two others, evenly spread. */
+  orderKeys(input: OrderKeysInput): OrderKeysOutput;
+  /** The rows of one parent that need a new order key to read in the order wanted. */
+  arrange(input: ArrangeInput): ArrangeOutput;
   /**
    * Runs one operation on a JSON document and returns the output document
    * as text, untouched by `parse`. Throws VersionGraphError for a refused
@@ -94,6 +103,8 @@ interface Exports {
   vg_diff: Export;
   vg_content_hash: Export;
   vg_validate: Export;
+  vg_order_keys: Export;
+  vg_arrange: Export;
 }
 
 const EXPORTS = [
@@ -106,6 +117,8 @@ const EXPORTS = [
   "vg_diff",
   "vg_content_hash",
   "vg_validate",
+  "vg_order_keys",
+  "vg_arrange",
 ] as const;
 
 // The return codes of the C ABI (runtime/versiongraph/rust/src/ffi.rs).
@@ -238,6 +251,8 @@ class Core implements VersionGraph {
       diff: exports.vg_diff,
       content_hash: exports.vg_content_hash,
       validate: exports.vg_validate,
+      order_keys: exports.vg_order_keys,
+      arrange: exports.vg_arrange,
     };
     this.#parse = options.parse ?? JSON.parse;
     this.#stringify = options.stringify ?? JSON.stringify;
@@ -261,6 +276,14 @@ class Core implements VersionGraph {
 
   validate(input: TreeInput): ValidateOutput {
     return this.#typed("validate", input) as ValidateOutput;
+  }
+
+  orderKeys(input: OrderKeysInput): OrderKeysOutput {
+    return this.#typed("order_keys", input) as OrderKeysOutput;
+  }
+
+  arrange(input: ArrangeInput): ArrangeOutput {
+    return this.#typed("arrange", input) as ArrangeOutput;
   }
 
   run(operation: OperationName, input: string): string {

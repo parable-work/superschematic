@@ -194,6 +194,17 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 		envVars = append(envVars, entry)
 	}
 
+	if output.ClientVersions {
+		description := "The oldest version of each client the API serves (D143): <client>=<version> entries separated by commas, as in cli=0.5.0,desktop=2.1.0. A request whose X-Client-Version names a listed client at a lower semantic version is answered 426 client_too_old. Unset, every client is served."
+		properties[ir.MinClientVersionsSetting] = valuesSchemaProp{Type: "string", Description: description}
+		envVars = append(envVars, valuesSchemaEnvVar{
+			Name:        ir.MinClientVersionsSetting,
+			IRType:      "String",
+			Primitive:   "string",
+			Description: description,
+		})
+	}
+
 	// An API with derived fields and no @envVars type has only EnvConfig.
 	title := output.TypeName
 	if title == "" {

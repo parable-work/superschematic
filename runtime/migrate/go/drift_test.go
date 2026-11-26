@@ -64,6 +64,28 @@ func TestDrift(t *testing.T) {
 				t.Errorf("the drift does not say %q:\n%s", want, got)
 			}
 		}
+		// A column's collation is part of its type: a string order key's
+		// column is COLLATE "C" (D137), and one changed by hand differs.
+		if dialect == migrate.Postgres {
+			testdb.Exec(t, url, `ALTER TABLE customer ALTER COLUMN name TYPE TEXT COLLATE "C"`)
+			want := `column customer.name: the model's type is TEXT, and the database's text COLLATE "C"`
+			if got := strings.Join(drift(create.Model()), "\n"); !strings.Contains(got, want) {
+				t.Errorf("the drift does not say %q:\n%s", want, got)
+			}
+			const plain = `"origin":"Customer.name","type":"TEXT"`
+			if !strings.Contains(string(create.Model().Canonical), plain) {
+				t.Fatalf("the model does not spell customer.name as %s", plain)
+			}
+			collated, err := migrate.ReadModel([]byte(strings.Replace(string(create.Model().Canonical), plain, `"origin":"Customer.name","type":"TEXT COLLATE \"C\""`, 1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range drift(collated) {
+				if strings.Contains(line, "customer.name") {
+					t.Errorf("a model whose column is COLLATE \"C\" differs from a database that holds it: %s", line)
+				}
+			}
+		}
 		if st := status(t, r, "shop"); st.ModelHash != create.To {
 			t.Fatalf("the diff changed the state: %+v", st)
 		}

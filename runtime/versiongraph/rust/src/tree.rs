@@ -12,14 +12,28 @@ use crate::error::Error;
 /// outside +/- this would sort differently once a browser parses it.
 pub const MAX_EXACT_ORDER: i64 = 9_007_199_254_740_991;
 
+/// A row's order among its siblings: an integer, or a string key compared
+/// by its bytes (D137). Every row of one kind holds the same variant, the
+/// one its descriptor's order column declares.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Order {
+    Integer(i64),
+    Key(String),
+}
+
+/// Whether `key` is an order key: one or more characters of `0-9A-Za-z`.
+pub fn is_order_key(key: &str) -> bool {
+    !key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 /// One row and the role values read from it.
 #[derive(Debug, Clone)]
 pub struct Row {
     pub key: String,
     pub deleted: bool,
     pub parent: Option<String>,
-    /// The order value; 0 when the kind has no order column.
-    pub order: i64,
+    /// The order value; integer 0 when the kind has no order column.
+    pub order: Order,
     /// False when the order is an integer outside +/- [`MAX_EXACT_ORDER`].
     pub order_in_range: bool,
     pub value: Map<String, Value>,
@@ -143,7 +157,20 @@ pub(crate) fn parse_row(kind: &Kind, at: &str, value: Value) -> Result<Row, Erro
         },
     };
     let (order, order_in_range) = match &kind.order {
-        None => (0, true),
+        None => (Order::Integer(0), true),
+        Some(column) if kind.order_is_key => match value.get(column) {
+            Some(Value::String(key)) if is_order_key(key) => (Order::Key(key.clone()), true),
+            None => {
+                return Err(Error::row(format!(
+                    "{at}: order column {column:?} is missing; it must be an order key, one or more characters of 0-9A-Za-z"
+                )))
+            }
+            Some(_) => {
+                return Err(Error::row(format!(
+                    "{at}: order column {column:?} must be an order key, one or more characters of 0-9A-Za-z"
+                )))
+            }
+        },
         Some(column) => {
             let number = match value.get(column) {
                 Some(Value::Number(number)) => number,
@@ -163,14 +190,17 @@ pub(crate) fn parse_row(kind: &Kind, at: &str, value: Value) -> Result<Row, Erro
             let text = number.to_string();
             let digits = text.strip_prefix('-').unwrap_or(&text);
             if let Some(order) = number.as_i64() {
-                (order, (-MAX_EXACT_ORDER..=MAX_EXACT_ORDER).contains(&order))
+                (
+                    Order::Integer(order),
+                    (-MAX_EXACT_ORDER..=MAX_EXACT_ORDER).contains(&order),
+                )
             } else if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
                 let order = if text.starts_with('-') {
                     i64::MIN
                 } else {
                     i64::MAX
                 };
-                (order, false)
+                (Order::Integer(order), false)
             } else {
                 return Err(Error::row(format!(
                     "{at}: order column {column:?} must be an integer, not {number}"
@@ -189,8 +219,10 @@ pub(crate) fn parse_row(kind: &Kind, at: &str, value: Value) -> Result<Row, Erro
 }
 
 /// The checks every operation but `validate` refuses on: one row per entity
-/// key in a kind, and every order inside the range a JavaScript number holds
-/// exactly. `validate` reports the same problems as findings.
+/// key in a kind, and every integer order inside the range a JavaScript
+/// number holds exactly. `validate` reports the same problems as findings.
+/// Two rows may hold one order, a string key included: the entity key
+/// settles them.
 pub fn check(graph: &Graph, side: &str, tree: &Tree) -> Result<(), Error> {
     for (kind, rows) in graph.kinds.iter().zip(&tree.kinds) {
         let mut keys = HashSet::with_capacity(rows.len());

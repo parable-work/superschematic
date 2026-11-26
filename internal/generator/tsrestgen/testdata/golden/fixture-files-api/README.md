@@ -40,6 +40,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `POST` | `/api/statements` | `statements.importStatement` | none |
 | `GET` | `/api/statements/{accountId}/export` | `statements.exportStatement` | none |
 | `GET` | `/api/statements/{accountId}/original` | `statements.originalStatement` | none |
+| `GET` | `/api/statements/{accountId}/preview` | `statements.previewStatement` | none |
 
 ## Usage
 

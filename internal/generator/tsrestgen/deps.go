@@ -119,6 +119,12 @@ type DepsBucket struct {
 
 	// Field is the Deps member that holds the bucket.
 	Field string
+
+	// ContentAddressed is the Bucket service's contentAddressed (D142):
+	// Deps then holds a content bucket over it, which puts at most
+	// MaxBytes.
+	ContentAddressed bool
+	MaxBytes         int64
 }
 
 // DepsMemoryStore is a memory store in Deps: the HTTP runtime's
@@ -228,6 +234,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	if err := o.checkTableDeps(deps); err != nil {
+		return err
+	}
+	if err := o.checkGraphDeps(deps); err != nil {
 		return err
 	}
 	if err := o.checkBehaviorWorkers(deps); err != nil {
@@ -803,4 +812,26 @@ func ImplementationExists(dir string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// PlainBuckets reports whether Deps holds a bucket that is not content
+// addressed, and ContentBuckets one that is (D142): deps.ts imports the
+// type of each.
+func (d DepsInfo) PlainBuckets() bool {
+	for _, b := range d.Buckets {
+		if !b.ContentAddressed {
+			return true
+		}
+	}
+	return false
+}
+
+// ContentBuckets is PlainBuckets for content-addressed buckets.
+func (d DepsInfo) ContentBuckets() bool {
+	for _, b := range d.Buckets {
+		if b.ContentAddressed {
+			return true
+		}
+	}
+	return false
 }

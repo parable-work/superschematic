@@ -27,6 +27,17 @@ export type TimeoutConfig = {
   readonly seconds: number;
 };
 
+/**
+ * What `@idempotent` takes (D140). `ttl` is how long a key's answer is
+ * kept, a duration such as "24h", "90m" or "30s", "24h" when absent.
+ * `required: true` answers a call without an Idempotency-Key header 400;
+ * without it such a call runs as any other.
+ */
+export type IdempotentConfig = {
+  readonly ttl?: string;
+  readonly required?: boolean;
+};
+
 export type HmacVerifiedConfig = {
   readonly provider: string;
 };
@@ -188,7 +199,7 @@ export function icon(_name: string): MethodDecorator {
 
 /**
  * The route needs a caller holding one of the permissions. On a
- * @behaviorOperations class, every route the set serves.
+ * @behaviorOperations or @graphOperations class, every route the set serves.
  */
 export function requirePermission(_perms: readonly string[]): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
@@ -200,14 +211,14 @@ export function requirePermission(_perms: readonly string[]): ClassDecorator & M
  * implementation that could check it.
  */
 export const requireOwnership: MethodDecorator = noopMethodDecorator;
-/** The route needs a caller. On a @behaviorOperations class, every route the set serves. */
+/** The route needs a caller. On a @behaviorOperations or @graphOperations class, every route the set serves. */
 export const auth: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
 /** The route's request body travels as an encrypted envelope. */
 export const encrypted: MethodDecorator = noopMethodDecorator;
 /**
  * Anyone may call the route, in an `Authenticated` set too. Refused with
  * `@auth`, `@requirePermission` or `@requireOwnership`. On a
- * @behaviorOperations class, every route the set serves.
+ * @behaviorOperations or @graphOperations class, every route the set serves.
  */
 export const publicRoute: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
 /** An operation a third party calls: no SDK has a method or a tool for it. */
@@ -318,6 +329,17 @@ export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & Meth
 
 /** Bounds a route's requests per minute; on a class, each route of the set's. */
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
+}
+
+/**
+ * Makes a repeated call answer what the first one answered (D140): a
+ * caller sends an Idempotency-Key header, and the server keeps the key
+ * with the answer, in the table the API's database declares with
+ * `export abstract class IdempotencyKey implements IdempotencyKeys {}`. On
+ * a POST, PUT, PATCH or DELETE operation that answers the JSON envelope.
+ */
+export function idempotent(_cfg?: IdempotentConfig): MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
@@ -453,6 +475,78 @@ export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecora
  * ```
  */
 export function behaviorOperations(_table: abstract new (...args: never[]) => unknown): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The operations a @graphOperations set serves (D138), each a route under the graph's root. */
+export type GraphOperationName =
+  | "branch"
+  | "save"
+  | "arrange"
+  | "commit"
+  | "seal"
+  | "merge"
+  | "rebase"
+  | "revert"
+  | "discard"
+  | "history"
+  | "compose"
+  | "release"
+  | "released"
+  | "materialize"
+  | "diff"
+  | "entityHistory";
+
+/** The options of a @graphOperations set (D138). */
+export type GraphOperationsOptions = {
+  /** The operations the set serves; every one unless set. */
+  readonly operations?: readonly GraphOperationName[];
+  /**
+   * The permissions an operation needs, by operation: a caller holding one
+   * of them is admitted. They replace the class's @requirePermission for
+   * that operation.
+   */
+  readonly permissions?: Readonly<Partial<Record<GraphOperationName, readonly string[]>>>;
+  /**
+   * The members of a change set's ref that name who may write it:
+   * `["createdBy"]` keeps save, arrange, commit, seal, rebase, revert and
+   * discard to the caller who branched it, and a merge into a change set
+   * too; a merge into a primary line is not held. Another caller's change
+   * set is the 404 of one that is not there.
+   */
+  readonly by?: readonly "createdBy"[];
+  /** The permission whose holder `by` does not hold back. */
+  readonly overridePermission?: string;
+};
+
+/**
+ * Serves a version graph's operations (D138), on a class with no members:
+ * superschematic adds a route for each operation of the graph the root
+ * declares with @versionGraph, under the root's plural and its key
+ * (POST /api/recipes/{id}/refs, PUT /api/recipes/{id}/refs/{ref}/edits and
+ * the rest), an SDK method and an MCP tool each, with generated input and
+ * result types, each run through the graph's generated facade by the
+ * generated server, so the implementation has no method for them. The root
+ * is a class of the API's database, imported from that service's package,
+ * and an API serves a root from one such class. The class's @auth,
+ * @requirePermission and @publicRoute, its service clause, rate limit,
+ * body limit and timeout apply to every route it serves. The actor of
+ * every write is the caller's subject.
+ *
+ * ```ts
+ * @graphOperations(Recipe, {
+ *   permissions: { release: ["recipes.release"] },
+ *   by: ["createdBy"],
+ *   overridePermission: "recipes.admin"
+ * })
+ * @requirePermission(["recipes.write"])
+ * export abstract class RecipeOperations {}
+ * ```
+ */
+export function graphOperations(
+  _root: abstract new (...args: never[]) => unknown,
+  _options?: GraphOperationsOptions
+): ClassDecorator {
   return noopClassDecorator;
 }
 

@@ -1,6 +1,7 @@
 import type { Principal } from './auth.js';
 import type { ParamSpec } from './params.js';
 import type { ServiceCaller } from './serviceauth.js';
+import type { OperationIdempotency } from './idempotency.js';
 
 /*
 The operation table the generated router carries. One OperationSpec per @rest
@@ -77,12 +78,24 @@ export interface OperationUpload {
   readonly extensions: readonly string[];
 }
 
-/** A FileDownload result (D81): the file the route answers in place of the envelope. */
+/** A FileDownload result (D81, D141): the file the route answers in place of the envelope. */
 export interface OperationDownload {
   /** The Content-Type the route answers with. */
   readonly contentType: string;
+  /** The media types the implementation may name in contentType's place (D141). */
+  readonly contentTypes?: readonly string[];
   /** The filename Content-Disposition offers when the implementation names none. */
   readonly filename?: string;
+  /** Content-Disposition's type (D141); attachment when absent. */
+  readonly disposition?: 'attachment' | 'inline';
+  /** The answer's Cache-Control, sent as written (D141); no-store when absent. */
+  readonly cacheControl?: string;
+  /**
+   * true adds Content-Security-Policy: sandbox and
+   * Cross-Origin-Resource-Policy: same-origin (D141); a list adds its
+   * tokens to the policy.
+   */
+  readonly sandbox?: boolean | readonly string[];
 }
 
 export interface OperationSpec {
@@ -121,6 +134,13 @@ export interface OperationSpec {
    * RouterRuntimeOptions.principalRateLimitStore under `<METHOD> <path>`.
    */
   readonly rateLimitKey?: 'principal';
+  /**
+   * @idempotent (D140): a request that sends Idempotency-Key runs once per
+   * key, and a repeat is answered what the first request was, from
+   * RouterRuntimeOptions.idempotencyStore. Absent for an operation that is
+   * not @idempotent.
+   */
+  readonly idempotent?: OperationIdempotency;
   /** @timeout: seconds the operation may take before the adapter answers 504 (the Go runtime's Timeout middleware). */
   readonly timeoutSeconds?: number;
   /** @hmacVerified: the provider whose webhook verifier checks the request before every other step. */

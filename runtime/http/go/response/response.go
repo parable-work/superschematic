@@ -133,6 +133,23 @@ func RequestError(w http.ResponseWriter, r *http.Request, status int, message st
 	}, status)
 }
 
+// RequestErrorWithDetails is RequestError with a structured `details`
+// member: the problem with the request's id, and no log line. The refusal
+// of a client too old for the API (D143) is one.
+func RequestErrorWithDetails(w http.ResponseWriter, r *http.Request, status int, message string, errorCode string, details any) {
+	writeProblemJSON(w, detailedProblemDetail{
+		problemDetail: problemDetail{
+			Type:      "about:blank",
+			Title:     http.StatusText(status),
+			Status:    status,
+			Detail:    message,
+			Code:      errorCode,
+			RequestID: chimiddleware.GetReqID(r.Context()),
+		},
+		Details: details,
+	}, status)
+}
+
 // LoggedError extracts the request-scoped logger from context, emits a
 // structured log line (Warn for 4xx, Error for 5xx), then writes an RFC 9457
 // Problem Details response including the requestId from context.

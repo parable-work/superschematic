@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
@@ -164,25 +166,64 @@ var _ bucket.Bucket = (*gcsBucket)(nil)
 
 func (b *gcsBucket) Name() string { return b.name }
 
-func (b *gcsBucket) Put(ctx context.Context, name string, body io.Reader, opts bucket.PutOptions) (bucket.Object, error) {
+func (b *gcsBucket) Put(ctx context.Context, name string, body io.Reader, opts bucket.PutOptions) (bucket.PutResult, error) {
 	if err := bucket.CheckName(name); err != nil {
-		return bucket.Object{}, err
+		return bucket.PutResult{}, err
 	}
 	// Cancelling the writer's context abandons the upload, so a failed
 	// copy leaves no object.
-	ctx, cancel := context.WithCancel(ctx)
+	writeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	w := b.handle.Object(name).NewWriter(ctx)
+	object := b.handle.Object(name)
+	if opts.IfAbsent {
+		// GCS writes only when the name is free, ifGenerationMatch=0, and
+		// answers 412 when it is not (D142).
+		object = object.If(storage.Conditions{DoesNotExist: true})
+	}
+	w := object.NewWriter(writeCtx)
 	w.ContentType = opts.ContentType
-	if _, err := io.Copy(w, body); err != nil {
+	if opts.IfAbsent {
+		// One request, as the TypeScript client's resumable: false. Past
+		// the writer's chunk size an upload is resumable, and its 412 can
+		// come from a write as well as from Close.
+		w.ChunkSize = 0
+	}
+	_, err := io.Copy(w, body)
+	if err != nil {
 		cancel()
 		_ = w.Close()
-		return bucket.Object{}, fmt.Errorf("bucket %s: put %s: %w", b.name, name, err)
+	} else {
+		err = w.Close()
 	}
-	if err := w.Close(); err != nil {
-		return bucket.Object{}, fmt.Errorf("bucket %s: put %s: %w", b.name, name, err)
+	if err != nil {
+		var refused *googleapi.Error
+		if opts.IfAbsent && errors.As(err, &refused) && refused.Code == http.StatusPreconditionFailed {
+			held, found, err := b.Head(ctx, name)
+			switch {
+			case err != nil:
+				return bucket.PutResult{}, err
+			case !found:
+				return bucket.PutResult{}, fmt.Errorf("bucket %s: put %s: the object was there when put looked and gone when it read it; put it again", b.name, name)
+			}
+			return bucket.PutResult{Object: held}, nil
+		}
+		return bucket.PutResult{}, fmt.Errorf("bucket %s: put %s: %w", b.name, name, err)
 	}
-	return objectOf(w.Attrs()), nil
+	return bucket.PutResult{Object: objectOf(w.Attrs()), Created: true}, nil
+}
+
+func (b *gcsBucket) Head(ctx context.Context, name string) (bucket.Object, bool, error) {
+	if err := bucket.CheckName(name); err != nil {
+		return bucket.Object{}, false, err
+	}
+	attrs, err := b.handle.Object(name).Attrs(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return bucket.Object{}, false, nil
+	}
+	if err != nil {
+		return bucket.Object{}, false, fmt.Errorf("bucket %s: head %s: %w", b.name, name, err)
+	}
+	return objectOf(attrs), true, nil
 }
 
 func (b *gcsBucket) Get(ctx context.Context, name string) (*bucket.Reader, error) {
@@ -261,6 +302,13 @@ func (b *gcsBucket) SignedURL(_ context.Context, name string, opts bucket.Signed
 		return "", fmt.Errorf("bucket %s: sign a URL for %s: %w", b.name, name, err)
 	}
 	return u, nil
+}
+
+// contentBucket is the content bucket over raw (D142), for a Bucket
+// service whose config says contentAddressed: Deps holds it in raw's
+// place, and it puts at most maxBytes.
+func contentBucket(raw bucket.Bucket, maxBytes int64) *bucket.ContentBucket {
+	return bucket.NewContent(raw, maxBytes)
 }
 
 // objectOf is what the runtime's bucket package holds of an object.

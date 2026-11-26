@@ -36,8 +36,8 @@ use superschematic_versiongraph_engine::postgres::{self, PostgresStorage, TokioP
 use superschematic_versiongraph_engine::sqlite::{self, Rusqlite, SqliteStorage};
 use superschematic_versiongraph_engine::storage::{Storage, Tx};
 use superschematic_versiongraph_engine::{
-    ready, Change, Commit, CommitOptions, Conflict, Edits, Engine, EngineOn, Error, KindEdits,
-    Options, Ref, Release, Resolution, SweepOptions, SweepReport, TreeResult,
+    ready, Change, Commit, CommitOptions, Conflict, Edits, Engine, EngineOn, EntityChange, Error,
+    KindEdits, Options, Ref, Release, Resolution, SweepOptions, SweepReport, TreeResult,
 };
 #[cfg(feature = "rusqlite")]
 use support::hosts::RusqliteHost;
@@ -96,6 +96,9 @@ struct Step {
     snapshot_every: usize,
     sweep: Option<StepSweep>,
     kind: String,
+    parent: String,
+    keys: Vec<String>,
+    key: String,
     #[serde(deserialize_with = "statements")]
     statement: Option<BTreeMap<String, String>>,
     args: Vec<SqlArg>,
@@ -151,11 +154,22 @@ struct Expect {
     conflicts: Option<Vec<PartialRow>>,
     changes: Option<Vec<PartialRow>>,
     commits: Option<Vec<String>>,
+    #[serde(rename = "entityHistory")]
+    entity_history: Option<Vec<EntityChangeExpect>>,
     rows: Option<Vec<PartialRow>>,
     patches: Option<Vec<PartialRow>>,
     snapshot: Option<Vec<PartialRow>>,
     release: Option<ReleaseExpect>,
     report: Option<PartialRow>,
+}
+
+/// One entry of an entityHistory step's result: the commit, by name, and
+/// what it did to the entity.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct EntityChangeExpect {
+    commit: String,
+    operation: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -378,6 +392,8 @@ struct Returned {
     conflicts: Vec<Conflict>,
     changes: Vec<Change>,
     history: Vec<Commit>,
+    /// An entity's history; none when the step's op reads none.
+    entity_history: Option<Vec<EntityChange>>,
     rows: Vec<Value>,
     patches: Vec<Value>,
     snapshot: Vec<Value>,
@@ -438,7 +454,15 @@ impl Runner {
         connection
             .execute_batch("PRAGMA foreign_keys = ON")
             .expect("turn foreign keys on");
-        for statement in sqlite::layout(&fixed::default_table_name).expect("the layout") {
+        // The released table too: the fixture has a kind that keeps its
+        // released rows.
+        let name = &fixed::default_table_name;
+        let released = sqlite::released_layout(name).expect("the released layout");
+        for statement in sqlite::layout(name)
+            .expect("the layout")
+            .into_iter()
+            .chain(released)
+        {
             connection
                 .execute_batch(&statement)
                 .expect("create the layout");
@@ -456,8 +480,13 @@ impl Runner {
         let schema = PostgresSchema::create(dsn, "vg_rust_fixed_scenario");
         let mut client = schema.connect();
         let mut tx = client.transaction().expect("begin");
-        for statement in
-            fixed::layout(Dialect::Postgres, &fixed::default_table_name).expect("the layout")
+        let name = &fixed::default_table_name;
+        let released =
+            fixed::released_layout(Dialect::Postgres, name).expect("the released layout");
+        for statement in fixed::layout(Dialect::Postgres, name)
+            .expect("the layout")
+            .into_iter()
+            .chain(released)
         {
             tx.batch_execute(&statement).expect("create the layout");
         }
@@ -688,8 +717,10 @@ impl Runner {
             .unwrap_or_else(|| support::DEFAULT_ACTOR.to_owned());
         match st.op.as_str() {
             "holdSweepLock" | "releaseSweepLock" | "sql" => self.control(st, out).await,
-            "released" | "snapshot" | "materialize" | "compose" | "diff" | "history" | "rows"
-            | "patches" => self.read(st, engine.on(storage), storage, out).await,
+            "released" | "snapshot" | "materialize" | "compose" | "diff" | "history"
+            | "entityHistory" | "rows" | "patches" => {
+                self.read(st, engine.on(storage), storage, out).await
+            }
             _ => self.write(st, engine.on(storage), &actor, out).await,
         }
     }
@@ -807,6 +838,24 @@ impl Runner {
                     .map(|saved| {
                         out.ref_ = Some(saved.ref_);
                         out.saved = Some(saved.saved);
+                    })
+            }
+            "arrange" => {
+                // An empty parent is none, as the Go runner's is.
+                let parent = (!st.parent.is_empty()).then_some(st.parent.as_str());
+                engine
+                    .arrange(
+                        &actor,
+                        &self.ref_id(&st.ref_),
+                        self.version(st, &st.ref_),
+                        &st.kind,
+                        parent,
+                        &st.keys,
+                    )
+                    .await
+                    .map(|arranged| {
+                        out.ref_ = Some(arranged.ref_);
+                        out.saved = Some(arranged.saved);
                     })
             }
             "commit" | "seal" | "revert" => {
@@ -932,6 +981,10 @@ impl Runner {
                 .history(&self.ref_id(&st.ref_))
                 .await
                 .map(|history| out.history = history),
+            "entityHistory" => engine
+                .entity_history(&st.root, &st.kind, &st.key)
+                .await
+                .map(|changes| out.entity_history = Some(changes)),
             "rows" => {
                 let (kind, ref_id) = (st.kind.clone(), self.ref_id(&st.ref_));
                 in_tx(storage, |tx| {
@@ -1210,6 +1263,25 @@ impl Runner {
                 .collect();
             if got != *want {
                 fail!(self, "history {got:?}, want {want:?}");
+            }
+        }
+        if let Some(want) = &x.entity_history {
+            let Some(changes) = &out.entity_history else {
+                fail!(
+                    self,
+                    "expects an entity's history, and {} returns none",
+                    st.op
+                );
+            };
+            let got: Vec<EntityChangeExpect> = changes
+                .iter()
+                .map(|change| EntityChangeExpect {
+                    commit: self.commit_name(&change.commit.id),
+                    operation: change.operation.clone(),
+                })
+                .collect();
+            if got != *want {
+                fail!(self, "entity history {got:?}, want {want:?}");
             }
         }
         if let Some(want) = &x.rows {

@@ -4,7 +4,8 @@
 // snapshot entry tables and two enums; each @graphMember gets its
 // entityKey, ref and deletedOnRef fields, a unique (entityKey, ref) index
 // and, when it prunes history, pins that keep every row version a patch or
-// a snapshot entry names.
+// a snapshot entry names; and a member with released: true gets a table of
+// its released rows, <Member>Released (D139).
 //
 // The sql, orm and types generators emit the result with no graph-specific
 // code. Every definition the expansion adds carries
@@ -32,7 +33,24 @@ const (
 	int64Scalar    = "Generic.Int64"
 )
 
-const restrict = "RESTRICT"
+const (
+	restrict = "RESTRICT"
+	cascade  = "CASCADE"
+)
+
+// ReleasedSuffix is appended to a member's name for the type of its
+// released rows (D139).
+const ReleasedSuffix = "Released"
+
+// ReleasedFields are the fields a released table adds beside the member's
+// content fields and its relation to the root: the entity key, and the
+// commit and the sequence of the release that wrote the row.
+var ReleasedFields = []string{"entityKey", "commit", "sequence"}
+
+// releasedIndex is unique per root and entity: the slot a release writes.
+func releasedIndex(rootField string) ir.IndexDef {
+	return ir.IndexDef{Keys: []string{rootField, "entityKey"}, Unique: true, Name: "root_entity"}
+}
 
 // The indexes the expansion adds: a ref's name is unique per root, a
 // commit's sequence is unique per root, a patch and a snapshot entry each
@@ -85,6 +103,9 @@ func Indexes(schema *ir.Schema, root *ir.TypeDef) []GeneratedIndex {
 	}
 	for _, member := range g.members {
 		out = append(out, GeneratedIndex{member.Name, memberIndex()})
+		if member.GraphMember.Released {
+			out = append(out, GeneratedIndex{member.Name + ReleasedSuffix, releasedIndex(g.rootField(member))})
+		}
 	}
 	return out
 }
@@ -170,8 +191,113 @@ func (g *graph) expand() {
 	g.addRelease()
 	g.addSnapshotEntry()
 	for _, member := range g.members {
+		if member.GraphMember.Released {
+			g.addReleased(member)
+		}
 		g.extendMember(member)
 	}
+}
+
+// rootField names a member's relation to the graph's root.
+func (g *graph) rootField(member *ir.TypeDef) string {
+	for _, fd := range member.Fields {
+		if g.relatesToRoot(fd) {
+			return fd.Name
+		}
+	}
+	return ""
+}
+
+func (g *graph) relatesToRoot(fd *ir.FieldDef) bool {
+	if fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.JsonField {
+		return false
+	}
+	if fd.Relation != nil && fd.Relation.Type != "" {
+		return fd.Relation.Type == g.root.Name
+	}
+	return fd.TypeRef.Name == g.root.Name
+}
+
+// ReleasedContent reports whether a member's field is one its released
+// table holds: content, as the graph's descriptor reads it. The key, the
+// relation to the root, the audit fields, a field excluded with
+// @conflictUnit("excluded") and a list of relations, which has no column,
+// are not.
+func ReleasedContent(fd *ir.FieldDef, root string) bool {
+	switch {
+	case fd.Key, fd.Origin == ir.OriginVersionGraph:
+		return false
+	case fd.ConflictUnit == ir.ConflictUnitExcluded:
+		return false
+	case fd.Relation != nil && fd.TypeRef.IsArray:
+		return false
+	}
+	switch fd.Name {
+	case "createdAt", "createdBy", "updatedAt", "updatedBy":
+		return false
+	}
+	if !fd.TypeRef.IsArray && !fd.TypeRef.IsMap && !fd.JsonField {
+		if fd.Relation != nil && fd.Relation.Type != "" {
+			return fd.Relation.Type != root
+		}
+		return fd.TypeRef.Name != root
+	}
+	return true
+}
+
+// addReleased adds <Member>Released (D139): the rows of each root's
+// released tree of the member, which the graph's Release rewrites in its
+// transaction. It holds the member's content fields as the member declares
+// them, so a @searchField, a validation or a vector comes with its field,
+// the member's relation to the root, the entity key, and the commit and
+// the sequence of the release that wrote the row. A root and an entity
+// name one row; the row goes with its root. The member's indexes that name
+// content fields alone come too. It is not versioned and no ref overlays
+// it.
+func (g *graph) addReleased(member *ir.TypeDef) {
+	rootField := g.rootField(member)
+	root := g.relation(rootField, g.root.Name, true)
+	root.Relation.OnDelete = cascade
+	root.Comment = "The root whose released tree holds the row."
+	entityKey := scalarField("entityKey", g.uuid, true)
+	entityKey.Comment = "The entity's logical identity, as its rows on every ref hold it."
+	fields := []*ir.FieldDef{g.idField(), root, entityKey}
+	content := map[string]bool{}
+	for _, fd := range member.Fields {
+		if !ReleasedContent(fd, g.root.Name) {
+			continue
+		}
+		copied := *fd
+		copied.ConflictUnit = ""
+		fields = append(fields, &copied)
+		content[fd.Name] = true
+	}
+	commit := g.relation("commit", g.commitType(), true)
+	commit.Relation.OnDelete = cascade
+	commit.Comment = "The released commit that last wrote the row."
+	sequence := scalarField("sequence", int64Scalar, true)
+	sequence.Comment = "That commit's sequence: the published version whose release last wrote the row."
+	fields = append(fields, commit, sequence)
+
+	indexes := []ir.IndexDef{releasedIndex(rootField)}
+	for _, idx := range member.Indexes {
+		carried := idx.Origin == "" && len(idx.Keys) > 0
+		for _, key := range idx.Keys {
+			carried = carried && content[key]
+		}
+		if carried {
+			copied := idx
+			copied.Keys = append([]string(nil), idx.Keys...)
+			indexes = append(indexes, copied)
+		}
+	}
+	g.addType(&ir.TypeDef{
+		Name:       member.Name + ReleasedSuffix,
+		Comment:    "The released rows of " + member.Name + ": what each root's release of the " + g.name + " version graph holds of it. A release rewrites them.",
+		ReleasedOf: member.Name,
+		Fields:     fields,
+		Indexes:    indexes,
+	})
 }
 
 // addEnums adds <Name>EntityKind, one value per member type, and
@@ -250,7 +376,27 @@ func (g *graph) addCommit() {
 			g.actorField("createdBy", true),
 		},
 		Indexes: []ir.IndexDef{commitIndex()},
+		// A commit is written once, so its insert is the commit (D138).
+		EnqueueOnChange: g.enqueue(g.root.VersionGraph.EnqueueOnCommit, []string{ir.EnqueueOnInsert}, nil,
+			map[string]string{"root": "root", "commit": "id", "ref": "ref", "sequence": "sequence"}),
 	})
+}
+
+// enqueue is the @enqueueOnChange a generated table carries for a queue
+// the graph names (D138), or none: it sets each field of message the
+// queue's message declares.
+func (g *graph) enqueue(queue string, on, fields []string, message map[string]string) []*ir.EnqueueOnChange {
+	td := g.schema.Types[queue]
+	if queue == "" || td == nil {
+		return nil
+	}
+	set := map[string]string{}
+	for _, fd := range td.Fields {
+		if source, ok := message[fd.Name]; ok {
+			set[fd.Name] = source
+		}
+	}
+	return []*ir.EnqueueOnChange{{Queue: queue, On: on, Fields: fields, Message: set}}
 }
 
 // addPatch adds <Name>Patch, written once: one entity a commit changed and
@@ -290,6 +436,11 @@ func (g *graph) addRelease() {
 			g.actorField("updatedBy", true),
 		},
 		Indexes: []ir.IndexDef{releaseIndex()},
+		// A root's first release inserts its pointer and a later one
+		// updates it: a pointer moved to another commit enqueues, and a
+		// release of the commit it already names does not (D138).
+		EnqueueOnChange: g.enqueue(g.root.VersionGraph.EnqueueOnRelease, []string{ir.EnqueueOnInsert, ir.EnqueueOnUpdate}, []string{"commit"},
+			map[string]string{"root": "root", "commit": "commit"}),
 	})
 }
 

@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/fixture-graph-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-graph-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-graph-api-api": "workspace:*",
+    "@schemas/fixture-graph-api-types": "workspace:*",
+    "@schemas/fixture-version-graph-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

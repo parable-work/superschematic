@@ -389,7 +389,7 @@ func writeGoAPIModuleWith(t *testing.T, schema *ir.Schema, service string, check
 
 // writeGoAPIModuleOver is writeGoAPIModuleWith for an API whose authDb's IR
 // is upstream, which the auth provider analyzes; nil for none.
-func writeGoAPIModuleOver(t *testing.T, schema *ir.Schema, service string, upstream *ir.Schema, checks apigen.RawBodyChecks) string {
+func writeGoAPIModuleOver(t *testing.T, schema *ir.Schema, service string, upstream *ir.Schema, checks apigen.RawBodyChecks, edit ...func(*apigen.Options)) string {
 	t.Helper()
 	typesModule := "example.com/schemas/types/go/" + service
 	paths := testpaths.Local(t)
@@ -412,7 +412,7 @@ func writeGoAPIModuleOver(t *testing.T, schema *ir.Schema, service string, upstr
 		t.Fatalf("typegen.WriteTypes: %v", err)
 	}
 
-	apiOutput, err := apigen.Generate(schema, apigen.Options{
+	options := apigen.Options{
 		Provider:      sessionauth.Provider{},
 		SchemaName:    service,
 		ModulePath:    "example.com/schemas/api/" + service,
@@ -420,7 +420,11 @@ func writeGoAPIModuleOver(t *testing.T, schema *ir.Schema, service string, upstr
 		UpstreamIR:    upstream,
 		Clock:         goModuleClock,
 		RawBodyChecks: checks,
-	})
+	}
+	for _, change := range edit {
+		change(&options)
+	}
+	apiOutput, err := apigen.Generate(schema, options)
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
 	}

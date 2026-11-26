@@ -317,6 +317,11 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 		r.errorf("", "%s: its result %s is @source(%s), a projection, which is read-only; a %s writes a table", owner, result.view.Name, result.source.Name, kind)
 		return
 	}
+	if result.source.ReleasedOf != "" && writes {
+		// A graph's Release owns a released table's rows (D139).
+		r.errorf("", "%s: its result %s is @source(%s), the released rows of %s, which the graph's release writes; a @tableOperation reads and lists them, and a %s would be overwritten", owner, result.view.Name, result.source.Name, result.source.ReleasedOf, kind)
+		return
+	}
 
 	// The path: the key, and the keys of the table's to-one relations.
 	var parents []ir.TableOperationParent

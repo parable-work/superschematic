@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_drop_trailing_zeros",
+  "op": "order_keys",
+  "input": {
+    "after": "C",
+    "before": "A",
+    "count": 1
+  },
+  "expect": {
+    "keys": [
+      "B"
+    ]
+  }
+}

@@ -12,8 +12,20 @@ decision. Nothing here imports from node: or a framework, so it runs
 wherever a fetch handler does.
 */
 
-/** The request headers a site's browser may send an API: what the generated SDKs send, the end user's token among them. */
-export const CORS_ALLOWED_HEADERS: readonly string[] = ['Accept', 'Authorization', 'Content-Type'];
+/**
+ * The request headers a site's browser may send an API: what the generated
+ * SDKs send, the end user's token among them, the key of an @idempotent
+ * operation (D140) and the client's name and version (D143).
+ */
+export const CORS_ALLOWED_HEADERS: readonly string[] = ['Accept', 'Authorization', 'Content-Type', 'Idempotency-Key', 'X-Client-Version'];
+
+/**
+ * The answer headers a site's script may read beyond those a browser always
+ * shows it: Idempotent-Replay, which says an @idempotent operation's answer
+ * is the kept one, and Retry-After, which the 409 of a call still running
+ * and a 429 carry (D140).
+ */
+export const CORS_EXPOSED_HEADERS: readonly string[] = ['Idempotent-Replay', 'Retry-After'];
 
 /** How long, in seconds, a browser may keep a preflight's answer. */
 export const CORS_MAX_AGE = 600;
@@ -64,8 +76,9 @@ export function isPreflight(method: string, headers: HeaderSource): boolean {
  * request with no Origin gets no header. One with an Origin the policy
  * lists gets Access-Control-Allow-Origin with that origin and
  * Access-Control-Allow-Credentials; its preflight is the server's to
- * answer, and gets the methods, the headers and the max age too. One with
- * an Origin the policy does not list gets Vary alone and is not the
+ * answer, and gets the methods, the headers and the max age too, and any
+ * other request of it gets Access-Control-Expose-Headers. One with an
+ * Origin the policy does not list gets Vary alone and is not the
  * server's to answer, a preflight included: the API answers it, and unless
  * a CORS check of its own allows the origin, the browser refuses the
  * answer.
@@ -83,6 +96,8 @@ export function corsDecision(policy: CorsPolicy, method: string, headers: Header
     out['Access-Control-Allow-Methods'] = policy.methods.join(', ');
     out['Access-Control-Allow-Headers'] = CORS_ALLOWED_HEADERS.join(', ');
     out['Access-Control-Max-Age'] = String(CORS_MAX_AGE);
+  } else {
+    out['Access-Control-Expose-Headers'] = CORS_EXPOSED_HEADERS.join(', ');
   }
   return { preflight, answer: preflight, headers: out };
 }

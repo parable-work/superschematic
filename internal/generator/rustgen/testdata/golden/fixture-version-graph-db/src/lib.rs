@@ -8,6 +8,7 @@ pub mod scalars;
 pub mod enums;
 pub mod types;
 pub mod validators;
+pub mod queues;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod orm;
 pub mod versiongraph_recipe;
@@ -15,4 +16,5 @@ pub mod versiongraph_recipe;
 pub use scalars::*;
 pub use enums::*;
 pub use types::*;
+pub use queues::*;
 pub use versiongraph_recipe::*;

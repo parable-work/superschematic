@@ -1,0 +1,124 @@
+{
+  "name": "arrange",
+  "description": "A kind ordered by a string key reads by its order keys' bytes and then by entity key. Arrange keeps the longest run of a parent's children already in order and writes new keys for the rest alone, as the change set's own rows; arranged as it stands, it writes nothing. Two change sets that insert into one gap with one key merge, and the entity key settles them; a move merges with an edit of another column; two moves of one row to different keys conflict on its order column. A save of a row whose order key is not one is refused and writes nothing. A list that is not the parent's live children, a kind ordered by an integer, a stale version, a primary line and a sealed ref are refused.",
+  "roots": ["Bread"],
+  "steps": [
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "write", "as": "write"},
+    {"op": "save", "ref": "write", "edits": {
+      "part": {"upsert": [
+        {"entity_key": "Dough", "parent_key": null, "rank": "V", "heading": "The dough"},
+        {"entity_key": "Finish", "parent_key": null, "rank": "k", "heading": "The finish"},
+        {"entity_key": "Mix", "parent_key": "Dough", "rank": "F", "heading": "Mix"},
+        {"entity_key": "Knead", "parent_key": "Dough", "rank": "V", "heading": "Knead"},
+        {"entity_key": "Rest", "parent_key": "Dough", "rank": "k", "heading": "Rest"},
+        {"entity_key": "Bake", "parent_key": "Finish", "rank": "V", "heading": "Bake"}
+      ]},
+      "step": {"upsert": [
+        {"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}},
+        {"entity_key": "Bake", "position": 2, "instruction": "Bake", "timings": {}}
+      ]}
+    }},
+    {"op": "save", "ref": "write", "edits": {"part": {"upsert": [
+      {"entity_key": "Proof", "parent_key": "Dough", "rank": "k-2", "heading": "Proof"}
+    ]}}, "expect": {"error": "invalid_row"}},
+    {"op": "save", "ref": "write", "edits": {"part": {"upsert": [
+      {"entity_key": "Proof", "parent_key": "Dough", "rank": "", "heading": "Proof"}
+    ]}}, "expect": {"error": "invalid_row"}},
+    {"op": "commit", "ref": "write"},
+    {"op": "merge", "source": "write", "target": "main", "as": "c1"},
+    {"op": "materialize", "commit": "c1", "expect": {"tree": {
+      "part": [
+        {"entity_key": "Mix", "rank": "F"},
+        {"entity_key": "Bake", "rank": "V"},
+        {"entity_key": "Dough", "rank": "V"},
+        {"entity_key": "Knead", "rank": "V"},
+        {"entity_key": "Finish", "rank": "k"},
+        {"entity_key": "Rest", "rank": "k"}
+      ],
+      "step": [{"entity_key": "Mix"}, {"entity_key": "Bake"}]
+    }}},
+
+    {"op": "branch", "from": "main", "name": "reorder", "as": "reorder"},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Mix", "Knead", "Rest"],
+      "expect": {"ref": {"version": 2}, "saved": {}}},
+    {"op": "rows", "ref": "reorder", "kind": "part", "expect": {"rows": []}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead"],
+      "expect": {"ref": {"version": 3}, "saved": {"part": [{"entity_key": "Rest", "rank": "7", "parent_key": "Dough", "heading": "Rest"}]}}},
+    {"op": "rows", "ref": "reorder", "kind": "part", "expect": {"rows": [{"entity_key": "Rest", "rank": "7"}]}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "keys": ["Finish", "Dough"],
+      "expect": {"ref": {"version": 4}, "saved": {"part": [{"entity_key": "Finish", "rank": "F", "parent_key": null}]}}},
+    {"op": "compose", "ref": "reorder", "expect": {"findings": [], "tree": {
+      "part": [
+        {"entity_key": "Rest", "rank": "7"},
+        {"entity_key": "Finish", "rank": "F"},
+        {"entity_key": "Mix", "rank": "F"},
+        {"entity_key": "Bake", "rank": "V"},
+        {"entity_key": "Dough", "rank": "V"},
+        {"entity_key": "Knead", "rank": "V"}
+      ],
+      "step": [{"entity_key": "Mix"}, {"entity_key": "Bake"}]
+    }}},
+
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix"], "expect": {"error": "invalid_arrangement"}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead", "Bake"], "expect": {"error": "invalid_arrangement"}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead", "Mix"], "expect": {"error": "invalid_arrangement"}},
+    {"op": "arrange", "ref": "reorder", "kind": "step", "keys": ["Bake", "Mix"], "expect": {"error": "order_not_a_key"}},
+    {"op": "arrange", "ref": "reorder", "kind": "cover", "keys": [], "expect": {"error": "order_not_a_key"}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead"], "version": 2, "expect": {"error": "version_conflict"}},
+    {"op": "arrange", "ref": "reorder", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead"], "actor": "", "expect": {"error": "no_actor"}},
+    {"op": "arrange", "ref": "main", "kind": "part", "parent": "Dough", "keys": ["Rest", "Mix", "Knead"], "expect": {"error": "primary_merge_only"}},
+    {"op": "rows", "ref": "reorder", "kind": "part", "expect": {"rows": [{"entity_key": "Finish"}, {"entity_key": "Rest"}]}},
+    {"op": "commit", "ref": "reorder", "as": "reordered", "expect": {"ref": {"version": 5}}},
+    {"op": "patches", "commit": "reordered", "expect": {"patches": [
+      {"kind": "part", "entityKey": "Finish", "operation": "UPDATE"},
+      {"kind": "part", "entityKey": "Rest", "operation": "UPDATE"}
+    ]}},
+
+    {"op": "branch", "from": "main", "name": "proof", "as": "proof"},
+    {"op": "save", "ref": "proof", "edits": {"part": {"upsert": [
+      {"entity_key": "Proof", "parent_key": "Dough", "rank": "N", "heading": "Proof"}
+    ]}}},
+    {"op": "commit", "ref": "proof"},
+    {"op": "branch", "from": "main", "name": "fold", "as": "fold"},
+    {"op": "save", "ref": "fold", "edits": {"part": {"upsert": [
+      {"entity_key": "Fold", "parent_key": "Dough", "rank": "N", "heading": "Fold"},
+      {"entity_key": "Mix", "parent_key": "Dough", "rank": "F", "heading": "Mix by hand"}
+    ]}}},
+    {"op": "commit", "ref": "fold"},
+    {"op": "merge", "source": "proof", "target": "main", "as": "c2"},
+    {"op": "rebase", "ref": "fold", "expect": {"conflicts": []}},
+    {"op": "merge", "source": "fold", "target": "main", "as": "c3", "expect": {"conflicts": []}},
+    {"op": "rebase", "ref": "reorder", "expect": {"conflicts": []}},
+    {"op": "merge", "source": "reorder", "target": "main", "as": "c4", "expect": {"conflicts": []}},
+    {"op": "materialize", "commit": "c4", "expect": {"tree": {
+      "part": [
+        {"entity_key": "Rest", "rank": "7", "heading": "Rest"},
+        {"entity_key": "Finish", "rank": "F"},
+        {"entity_key": "Mix", "rank": "F", "heading": "Mix by hand"},
+        {"entity_key": "Fold", "rank": "N"},
+        {"entity_key": "Proof", "rank": "N"},
+        {"entity_key": "Bake", "rank": "V"},
+        {"entity_key": "Dough", "rank": "V"},
+        {"entity_key": "Knead", "rank": "V"}
+      ],
+      "step": [{"entity_key": "Mix"}, {"entity_key": "Bake"}]
+    }}},
+
+    {"op": "branch", "from": "main", "name": "mix last", "as": "last"},
+    {"op": "arrange", "ref": "last", "kind": "part", "parent": "Dough", "keys": ["Rest", "Fold", "Proof", "Knead", "Mix"],
+      "expect": {"saved": {"part": [{"entity_key": "Mix", "rank": "k"}]}}},
+    {"op": "commit", "ref": "last"},
+    {"op": "branch", "from": "main", "name": "mix after the fold", "as": "after"},
+    {"op": "arrange", "ref": "after", "kind": "part", "parent": "Dough", "keys": ["Rest", "Fold", "Proof", "Mix", "Knead"],
+      "expect": {"saved": {"part": [{"entity_key": "Mix", "rank": "R"}]}}},
+    {"op": "commit", "ref": "after"},
+    {"op": "merge", "source": "last", "target": "main", "as": "c5"},
+    {"op": "rebase", "ref": "after", "expect": {"commit": null, "conflicts": [
+      {"kind": "part", "entityKey": "Mix", "path": "/rank", "base": "F", "ours": "R", "theirs": "k"}
+    ]}},
+    {"op": "rebase", "ref": "after", "resolutions": [{"kind": "part", "entityKey": "Mix", "path": "/rank", "take": "ours"}], "expect": {"conflicts": []}},
+    {"op": "seal", "ref": "after"},
+    {"op": "arrange", "ref": "after", "kind": "part", "parent": "Dough", "keys": ["Rest", "Fold", "Proof", "Mix", "Knead"], "expect": {"error": "ref_sealed"}}
+  ]
+}

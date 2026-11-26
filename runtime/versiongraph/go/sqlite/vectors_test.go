@@ -25,10 +25,11 @@ import (
 var vectorsDir = filepath.Join("..", "..", "testdata", "sqlite")
 
 // TestLayoutVector: the layout's statements under the default names are
-// layout.json's, string for string.
+// layout.json's, string for string, and so are the released table's.
 func TestLayoutVector(t *testing.T) {
 	var file struct {
 		Statements []string `json:"statements"`
+		Released   []string `json:"released"`
 	}
 	text, err := os.ReadFile(filepath.Join(vectorsDir, "layout.json"))
 	if err != nil {
@@ -45,6 +46,9 @@ func TestLayoutVector(t *testing.T) {
 		if statements[i] != file.Statements[i] {
 			t.Fatalf("statement %d is\n%s\nwhere layout.json has\n%s", i, statements[i], file.Statements[i])
 		}
+	}
+	if released := must(sqlite.ReleasedLayout(nil))(t); !reflect.DeepEqual(released, file.Released) {
+		t.Fatalf("the released layout is\n%q\nwhere layout.json has\n%q", released, file.Released)
 	}
 }
 

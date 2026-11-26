@@ -161,6 +161,10 @@ type EndpointInfo struct {
 	// the adapter applies them with the Go runtime's semantics.
 	RateLimitPerMinute *int
 	TimeoutSeconds     *int
+	// Idempotent is the operation's @idempotent (D140), nil for every
+	// other: the operation table carries it, and the router keeps a
+	// request's key in RouterOptions.idempotencyStore.
+	Idempotent *ir.IdempotentConfig
 	// RateLimitPrincipal marks a RateLimitPerMinute that counts per
 	// principal, the core's @rateLimit key 'principal' (D131): the spec
 	// says rateLimitKey 'principal', and the runtime counts each caller
@@ -197,6 +201,11 @@ type EndpointInfo struct {
 	// other: the router mounts it with the runtime's handler of its kind,
 	// over RouterOptions.orm, and the implementation has no method for it.
 	Table *TableRoute
+	// Graph is the graph operation the endpoint runs (D138), nil for every
+	// other: the router mounts it with the runtime's handler of the
+	// operation, over RouterOptions.orm and the graph's facade in
+	// RouterOptions.graphs, and the implementation has no method for it.
+	Graph *GraphRoute
 }
 
 // TableRoute is a table operation (D106) as the router mounts it: the
@@ -394,12 +403,31 @@ func (e EndpointInfo) InputDeclaredKeysLiteral() string {
 	return tsStringList(e.InputDeclaredKeys)
 }
 
-// DownloadLiteral is the operation table's download, its OperationDownload.
+// DownloadLiteral is the operation table's download, its OperationDownload:
+// the media type, and each member the schema writes beside it (D141).
 func (e EndpointInfo) DownloadLiteral() string {
-	if e.Download.Filename == "" {
-		return fmt.Sprintf("{ contentType: %s }", tsString(e.Download.ContentType))
+	download := e.Download
+	members := []string{"contentType: " + tsString(download.ContentType)}
+	if len(download.ContentTypes) > 0 {
+		members = append(members, "contentTypes: "+tsStringList(download.ContentTypes))
 	}
-	return fmt.Sprintf("{ contentType: %s, filename: %s }", tsString(e.Download.ContentType), tsString(e.Download.Filename))
+	if download.Filename != "" {
+		members = append(members, "filename: "+tsString(download.Filename))
+	}
+	if download.DispositionOrDefault() != ir.FileDispositionAttachment {
+		members = append(members, "disposition: "+tsString(download.Disposition))
+	}
+	if download.CacheControl != "" {
+		members = append(members, "cacheControl: "+tsString(download.CacheControl))
+	}
+	if download.Sandbox != nil {
+		if len(download.Sandbox.Allow) == 0 {
+			members = append(members, "sandbox: true")
+		} else {
+			members = append(members, "sandbox: "+tsStringList(download.Sandbox.Allow))
+		}
+	}
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // InputArgType is args.input's type: the input type, without its file
@@ -601,6 +629,10 @@ type PackageImport struct {
 
 // APIOutput is the template data for the generated package.
 type APIOutput struct {
+	// IdempotencyTable names the table of the API's database that keeps
+	// the keys of its @idempotent operations (D140), nil for an API with
+	// none: router.ts exports the names for the entrypoint's store.
+	IdempotencyTable *ir.IdempotencyTable
 	// HasPrincipalRateLimit reports whether a route's @rateLimit counts per
 	// principal (D131): RouterOptions then requires a
 	// principalRateLimitStore.
@@ -653,6 +685,12 @@ type APIOutput struct {
 	// Deps.orm resolves and whose wasm module its image builds. Set whether
 	// or not the API serves the table's behavior operations.
 	TableBehaviors bool
+
+	// GraphSets are the version graphs the API's @graphOperations sets
+	// serve (D138), in the order their first operation is routed: router.ts
+	// declares each for the runtime's handlers and takes its facade in
+	// RouterOptions.graphs.
+	GraphSets []GraphSetInfo
 
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
@@ -802,21 +840,33 @@ func (o *APIOutput) TableHandlers() []string {
 
 // RouterNeedsORM reports whether the router runs operations through
 // RouterOptions.orm, the repositories of the API's database: a table's
-// behavior operations (D103) and the table operations (D106).
+// behavior operations (D103), the table operations (D106) and a version
+// graph's operations (D138), which read the root and the graph's refs
+// through them.
 func (o *APIOutput) RouterNeedsORM() bool {
-	return o.HasBehaviors() || o.HasTableOperations()
+	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs()
 }
 
 // ORMOperations names what the router runs through RouterOptions.orm, with
 // the decisions that say so: "the behavior operations", "D103".
 func (o *APIOutput) ORMOperations() (what, decisions string) {
-	switch {
-	case o.HasBehaviors() && o.HasTableOperations():
-		return "the behavior operations and the table operations", "D103, D106"
-	case o.HasTableOperations():
-		return "the table operations", "D106"
+	var names, ids []string
+	if o.HasBehaviors() {
+		names, ids = append(names, "the behavior operations"), append(ids, "D103")
 	}
-	return "the behavior operations", "D103"
+	if o.HasTableOperations() {
+		names, ids = append(names, "the table operations"), append(ids, "D106")
+	}
+	if o.HasGraphs() {
+		names, ids = append(names, "the graph operations"), append(ids, "D138")
+	}
+	switch len(names) {
+	case 0:
+		return "the behavior operations", "D103"
+	case 1:
+		return names[0], ids[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1], strings.Join(ids, ", ")
 }
 
 // ORMRuns is what the router runs through RouterOptions.orm, as a
@@ -955,8 +1005,9 @@ func (o *APIOutput) OperationTableType() string {
 // RuntimeImport is router.ts's import from the runtime's main entry: the
 // helpers of the behavior operations' handlers (D103, D104), the page
 // helpers (D60), the filter reader (D106), the dropper of undeclared keys
-// (D87) and the table operations' handlers (D106) the router calls, and
-// the types of the operation table and of the table operations'.
+// (D87), the graph operations' handlers (D138) and the table operations'
+// handlers (D106) the router calls, and the types of the operation table,
+// of the graph operations' and of the table operations'.
 func (o *APIOutput) RuntimeImport() string {
 	var values []string
 	if o.HasBehaviors() {
@@ -974,6 +1025,7 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.DropsUndeclaredKeys() {
 		values = append(values, "declaredKeysOnly")
 	}
+	values = append(values, o.GraphHandlers()...)
 	if o.ReadsFilters() {
 		values = append(values, "readFilter")
 	}
@@ -984,6 +1036,9 @@ func (o *APIOutput) RuntimeImport() string {
 	var types []string
 	if o.HasFilters {
 		types = append(types, "FilterSpec")
+	}
+	if o.HasGraphs() {
+		types = append(types, "GraphOperation", "GraphSet")
 	}
 	types = append(types, "OperationSpec")
 	if o.HasPages {
@@ -1056,6 +1111,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
 		HasPrincipalRateLimit: apiOutput.HasPrincipalRateLimit,
+		IdempotencyTable:      apiOutput.IdempotencyTable,
 		SchemaName:            opts.SchemaName,
 		PackageName:           opts.Naming.NpmAPIPackage(opts.SchemaName),
 		TypesPackage:          opts.Naming.NpmTypesPackage(opts.SchemaName),
@@ -1127,6 +1183,19 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		// (D106), with the runtime's handler of its kind and no
 		// implementation method: the interfaces leave it out, and the
 		// router mounts it over RouterOptions.orm.
+		// A graph operation runs through the graph's facade (D138), with
+		// the runtime's handler of the operation and no implementation
+		// method: the interfaces leave it out, and the router mounts it
+		// over RouterOptions.orm and RouterOptions.graphs.
+		if op := ep.GraphOperation(); op != nil {
+			endpoint, err := b.graphEndpoint(ep, op, output)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			continue
+		}
 		if ep.Operation != nil && ep.Operation.TableOperation != nil {
 			endpoint, err := b.tableEndpoint(ep, ep.Operation.TableOperation)
 			if err != nil {
@@ -1603,6 +1672,7 @@ func (b *builder) identityEndpoint(ep apigen.EndpointInfo) EndpointInfo {
 		endpoint.RateLimitPerMinute = &rateLimit
 		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
+	endpoint.Idempotent = ep.Idempotent
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout
 		endpoint.TimeoutSeconds = &timeout
@@ -1656,6 +1726,7 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		endpoint.RateLimitPerMinute = &rateLimit
 		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
+	endpoint.Idempotent = ep.Idempotent
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout
 		endpoint.TimeoutSeconds = &timeout
@@ -2182,11 +2253,14 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "Multipart: the files ("+strings.Join(names, ", ")+") arrive in args.files, checked against their fields' limits.")
 	}
 	if ep.Download != nil {
-		line := "Answers a file (" + ep.Download.ContentType + "): a FileDownload, its body and its filename"
+		line := "Answers a file (" + strings.Join(ep.Download.AllContentTypes(), ", or ") + "), " + ep.Download.DispositionOrDefault() + ": a FileDownload, its body and its filename"
 		if ep.Download.Filename != "" {
 			line += ", " + ep.Download.Filename + " when it names none"
 		}
-		lines = append(lines, line+".")
+		if len(ep.Download.ContentTypes) > 0 {
+			line += ", and its contentType when it is not the first"
+		}
+		lines = append(lines, line+". An etag or a lastModified beside them answers a matching request 304.")
 	}
 	if ep.WebhookProvider != "" {
 		lines = append(lines, "Webhook: the "+ep.WebhookProvider+" webhook verifier checks the request before every other step.")
@@ -2256,6 +2330,9 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		return err
 	}
 	if err := output.checkTableDeps(output.Deps); err != nil {
+		return err
+	}
+	if err := output.checkGraphDeps(output.Deps); err != nil {
 		return err
 	}
 	if err := output.checkBehaviorWorkers(output.Deps); err != nil {
@@ -2338,4 +2415,23 @@ func templateFuncs() template.FuncMap {
 		// schedule such as */15 would.
 		"jsdoc": codegen.JSDocEscape,
 	}
+}
+
+// IdempotentLiteral is the operation table's idempotent, its
+// OperationIdempotency (D140).
+func (e EndpointInfo) IdempotentLiteral() string {
+	literal := fmt.Sprintf("{ ttlSeconds: %d", e.Idempotent.TTL())
+	if e.Idempotent.Required {
+		literal += ", required: true"
+	}
+	return literal + " }"
+}
+
+// IdempotencyTableLiteral is the names of the API's idempotency table as
+// the HTTP runtime's IdempotencyTable (D140).
+func (o *APIOutput) IdempotencyTableLiteral() string {
+	t := o.IdempotencyTable
+	return fmt.Sprintf("{ table: %s, columns: { lookup: %s, operation: %s, principal: %s, key: %s, requestHash: %s, state: %s, status: %s, body: %s, startedAt: %s, expiresAt: %s } }",
+		tsString(t.Table), tsString(t.Lookup), tsString(t.Operation), tsString(t.Principal), tsString(t.Key), tsString(t.RequestHash),
+		tsString(t.State), tsString(t.Status), tsString(t.Body), tsString(t.StartedAt), tsString(t.ExpiresAt))
 }

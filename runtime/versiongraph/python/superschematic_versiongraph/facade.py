@@ -33,12 +33,14 @@ from .engine import (
     CommitResult,
     Conflict,
     Engine,
+    EntityChange,
     KindEdits,
     MergeResult,
     Resolution,
     SweepOptions,
     SweepReport,
     TreeResult,
+    order_keys,
 )
 from . import errors as _errors
 from .errors import *  # noqa: F401,F403
@@ -60,6 +62,7 @@ __all__ = [
     "CommitOptions",
     "CommitResult",
     "Conflict",
+    "EntityChange",
     "Finding",
     "MergeResult",
     "Ref",
@@ -70,6 +73,7 @@ __all__ = [
     "DEFAULT_DISCARD_GRACE",
     "DEFAULT_SNAPSHOT_EVERY",
     "DEFAULT_WALK_CEILING",
+    "order_keys",
     "psycopg_client",
 ]
 __all__ += _errors.__all__
@@ -230,6 +234,32 @@ class VersionGraphFacade(Generic[TreeT, EditsT]):
         saved = self._engine.save(self._actor, ref, version, canonical)
         return TypedSaveResult(saved.ref, self._tree(TreeResult(saved.saved, "", [])))
 
+    def arrange(
+        self, ref: str, version: int, kind: str, parent: Optional[str], keys: Sequence[str]
+    ) -> TypedSaveResult[TreeT]:
+        """Puts one parent's children of kind, named as the descriptor names
+        it, in the order keys gives, on a change set at version. keys are the
+        entity keys of every live child of parent in the ref's tree, in the
+        order wanted; a parent of None is none: the rows of the kind that
+        have no parent. The longest run of children already in order keeps
+        its order keys, and each other child takes a new one between its
+        neighbors', written as the ref's override of it. It returns the ref
+        at its new version and the rows written, in the order wanted. The
+        kind's order is a string key: the core refuses another with
+        order_not_a_key, and a list that is not exactly the parent's live
+        children with invalid_arrangement. It refuses a sealed ref, and a
+        primary line with PrimaryMergeOnlyError."""
+        saved = self._engine.arrange(self._actor, ref, version, kind, parent, keys)
+        return TypedSaveResult(saved.ref, self._tree(TreeResult(saved.saved, "", [])))
+
+    @staticmethod
+    def order_keys(before: Optional[str], after: Optional[str], count: int) -> List[str]:
+        """Makes count order keys that sort strictly between before and
+        after, the start and the end when None: evenly spread, each as short
+        as it can be. A row saved with one of them as its order reads between
+        the rows that hold the bounds. It reads no ref and writes nothing."""
+        return order_keys(before, after, count)
+
     def commit(self, ref: str, version: int, options: CommitOptions = CommitOptions()) -> CommitResult:
         """Composes a change set at version, diffs it against its last commit
         (or its base), writes a commit with a patch per changed entity and
@@ -280,7 +310,10 @@ class VersionGraphFacade(Generic[TreeT, EditsT]):
         by the pointer's version: 0 for the root's first release. It writes
         no member rows, so a rollback is a release to an earlier tagged
         commit, and the pointer's history is the release log. An untagged
-        commit is NotTaggedError."""
+        commit is NotTaggedError. For each kind that keeps a released table
+        it rewrites the root's rows there in the same transaction: it writes
+        the rows the release adds or changes, with this commit and its
+        sequence, and deletes the ones it removes."""
         return self._engine.release(self._actor, root, commit, version)
 
     def released(self, root: str) -> TypedReleased[TreeT]:
@@ -307,6 +340,15 @@ class VersionGraphFacade(Generic[TreeT, EditsT]):
     def history(self, ref: str) -> List[Commit]:
         """Lists the commits a ref wrote, newest first."""
         return self._engine.history(ref)
+
+    def entity_history(self, root: str, kind: str, key: str) -> List[EntityChange]:
+        """Lists the commits of root's primary line that changed the entity
+        key of kind, named as the descriptor names it, newest first, each
+        with what it did to the entity: ADD, UPDATE or DELETE. It reads the
+        line's commits and the entity's patches among them, and no tree. A
+        root with no primary line, or an entity no commit changed, lists
+        nothing."""
+        return self._engine.entity_history(root, kind, key)
 
     def discard(self, ref: str, version: int) -> None:
         """Soft-deletes a ref at version, which frees its name."""

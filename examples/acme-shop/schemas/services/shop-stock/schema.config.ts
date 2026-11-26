@@ -13,6 +13,9 @@ export default defineConfig({
   kind: SchemaKind.API,
   authDb: ShopDb,
   dependencies: [ShopDb],
+  // An older copy of a client the environment's MIN_CLIENT_VERSIONS lists
+  // is answered 426 (D143).
+  clientVersions: true,
   outputs: {
     types: {
       [TargetLanguage.Go]: { enabled: true },

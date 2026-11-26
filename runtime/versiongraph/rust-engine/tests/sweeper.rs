@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use superschematic_versiongraph_engine::storage::{
     Commit, CommitNode, NewCommit, NewRef, Patch, Pin, Ref, RefUpdate, Release, ReleaseWrite,
-    RowWrite, SnapshotEntry, Storage, Tx,
+    ReleasedWrite, RowWrite, SnapshotEntry, Storage, Tx,
 };
 use superschematic_versiongraph_engine::{
     Edits, Engine, Error, KindEdits, Options, SweepOptions, SweepReport,
@@ -336,6 +336,17 @@ impl Tx for RacingTx<'_> {
     ) -> Result<Vec<Commit>, Error> {
         self.inner.ref_commits(ref_id, head, limit).await
     }
+    async fn primary_refs(&mut self, root: &str) -> Result<Vec<Ref>, Error> {
+        self.inner.primary_refs(root).await
+    }
+    async fn entity_patches(
+        &mut self,
+        commits: &[String],
+        kind: &str,
+        entity_key: &str,
+    ) -> Result<Vec<Patch>, Error> {
+        self.inner.entity_patches(commits, kind, entity_key).await
+    }
     async fn patches(&mut self, commits: &[String]) -> Result<Vec<Patch>, Error> {
         self.inner.patches(commits).await
     }
@@ -360,6 +371,9 @@ impl Tx for RacingTx<'_> {
     }
     async fn write_release(&mut self, write: ReleaseWrite) -> Result<Release, Error> {
         self.inner.write_release(write).await
+    }
+    async fn write_released(&mut self, kind: &str, write: ReleasedWrite) -> Result<(), Error> {
+        self.inner.write_released(kind, write).await
     }
     async fn prune(
         &mut self,

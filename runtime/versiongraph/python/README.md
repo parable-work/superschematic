@@ -3,8 +3,9 @@
 `superschematic-versiongraph` (module `superschematic_versiongraph`) is the
 version graph for Python (D17 and D19 in `docs/DECISIONS.md`): the core
 (`runtime/versiongraph/rust`) as a PyO3 extension module built with
-maturin, with typed `compose`, `merge`, `diff`, `content_hash` and
-`validate` over its JSON contract (`runtime/versiongraph/README.md`); the
+maturin, with typed `compose`, `merge`, `diff`, `content_hash`, `validate`,
+`order_keys` and `arrange` over its JSON contract
+(`runtime/versiongraph/README.md`); the
 engine, which runs every graph operation over a storage adapter; its
 Postgres adapter and its SQLite adapter (D32); and the base of the typed
 facade pygen generates per graph. It runs on CPython 3.9 and newer; one abi3 wheel per platform serves
@@ -15,14 +16,14 @@ them all.
 | `src/lib.rs` | The crate `superschematic-versiongraph-python`: the extension module `superschematic_versiongraph._native`, whose `run(operation, input)` takes the JSON input as bytes and returns `(ok, output)` with the core's output or error document. It calls the core natively, with the GIL released. PyO3 is its dependency, not the core's. |
 | `superschematic_versiongraph/__init__.py` | `VersionGraph`, the module-level operations, `run` and `VersionGraphError`. |
 | `superschematic_versiongraph/contract.py` | The contract's types, as `TypedDict`s and `Literal`s, every member named as the contract names it. |
-| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes. |
-| `superschematic_versiongraph/storage.py` | The storage protocol the engine runs over (`Storage`, `Tx`) and the values it takes and returns. |
+| `superschematic_versiongraph/engine.py` | `Engine`: create_primary, branch, save, arrange, commit, seal, merge, rebase, revert, release, released, materialize, compose, diff, history, entity_history, discard, sweep and run_sweeper, ported from the Go engine with its rules and error codes; and `order_keys`, the Go engine's `OrderKeys`. |
+| `superschematic_versiongraph/storage.py` | The storage protocol the engine runs over (`Storage`, `Tx`) and the values it takes and returns, `ReleasedWrite` among them: what a release hands `Tx.write_released` for a kind that keeps its released rows (D139). |
 | `superschematic_versiongraph/errors.py` | The named errors, each with its stable `code`, and `error_code`. |
 | `superschematic_versiongraph/canonical.py` | The canonical row rules, ported from the Go module's package `canonical`. |
 | `superschematic_versiongraph/exactjson.py` | The JSON reader and writer rows travel through, which keep every number's digits. |
-| `superschematic_versiongraph/postgres.py` | `PostgresAdapter`, which builds its statements from the descriptor at run time, its `Client` protocol, and `psycopg_client`, the psycopg 3 binding. |
-| `superschematic_versiongraph/sqlite.py` | `SqliteAdapter`, which holds every graph in one fixed layout of tables, `sqlite_layout`, its `Client` protocol, `is_unique_violation`, and `sqlite_client`, the binding over the standard library's `sqlite3`. |
-| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
+| `superschematic_versiongraph/postgres.py` | `PostgresAdapter`, which builds its statements from the descriptor at run time, a kind's released table's among them, its `Client` protocol, and `psycopg_client`, the psycopg 3 binding. |
+| `superschematic_versiongraph/sqlite.py` | `SqliteAdapter`, which holds every graph in one fixed layout of tables, `sqlite_layout`, `released_layout` for the table of released rows, its `Client` protocol, `is_unique_violation`, and `sqlite_client`, the binding over the standard library's `sqlite3`. |
+| `superschematic_versiongraph/facade.py` | `VersionGraphFacade`, which each generated `<Name>Graph` extends: the engine's operations with typed trees and edits, `arrange`, `order_keys` and `entity_history` among them, and the types it returns. |
 | `tests/` | Every core vector through the package, the binding's own tests, every scenario and canonical vector through the engine and each adapter, and the adapters', the sweeper's and the facade's own tests. |
 
 ## Use the core
@@ -35,6 +36,8 @@ tree, findings = result["tree"], result["findings"]
 merged = vg.merge({"descriptor": descriptor, "base": base, "ours": ours, "theirs": theirs})
 changes = vg.diff({"descriptor": descriptor, "from": base, "to": tree})["changes"]
 content_hash = vg.content_hash({"descriptor": descriptor, "tree": tree})["contentHash"]
+keys = vg.order_keys({"after": "V", "count": 2})["keys"]  # ["A", "K"], two keys below "V"
+moved = vg.arrange({"descriptor": descriptor, "tree": tree, "kind": "part", "parent": parent, "keys": wanted})["rows"]
 
 try:
     vg.validate({"descriptor": descriptor, "tree": {"recipe_step": []}})
@@ -80,6 +83,38 @@ committed = engine.commit(actor, draft.id, saved.ref.version)
   text, so a wide integer or numeric keeps its digits.
 - The named errors are exceptions with the stable `code` every language's
   engine shares; `error_code(err)` returns it, or the core's code.
+- A kind whose order is a string key (D137) is put in order by
+  `engine.arrange(actor, ref, version, kind, parent, keys)`: `keys` are the
+  entity keys of every live child of `parent` (`None` for the rows with no
+  parent) in the order wanted. It writes a new order key for each child
+  outside the longest run already in order, as the ref's own row, and
+  returns what `save` returns. The core's refusals keep their codes:
+  `invalid_arrangement` for a list that is not the parent's live children,
+  `order_not_a_key` for a kind ordered by an integer or by nothing.
+  `order_keys(before, after, count)`, a function of the module, makes the
+  keys a save places new rows with: `count` keys strictly between two
+  others, `None` for the start or the end.
+- `entity_history(root, kind, key)` lists the commits of a root's primary
+  line that changed one entity, newest first, each an `EntityChange`: the
+  commit and what it did to the entity (`ADD`, `UPDATE` or `DELETE`)
+  (D138). It reads the line's commits, at most the walk ceiling of them,
+  and the entity's patches among them, and no tree. A root with several
+  primary lines lists each line's, in the order the lines were created; a
+  change set's own commits are not in it.
+- `release(actor, root, commit, version)` moves a root's release pointer
+  to a tagged commit. For each kind whose descriptor names a
+  `releasedTable` (D139) it also rewrites the root's rows in that table, in
+  the same transaction: it reads the commit released before, diffs that
+  commit's tree against the new one's with the core's `diff`, and hands the
+  adapter's `write_released` the rows added or changed and the keys
+  deleted, with the new commit and its sequence. A root's first release
+  writes the whole tree, and so does a release of the commit already
+  released, after clearing the root's rows. A release that is refused
+  writes nothing, a graph with no such kind reads and writes nothing more,
+  and `sweep` leaves the tables alone. On Postgres the table is the one
+  the sql generator writes (`<member>_released`): the kind's root and
+  entity key columns, its content columns under their names, `commit_id`
+  and `sequence`.
 - `run_sweeper(interval, options, on_pass, stop)` runs a sweep now and then
   every `interval` (a `timedelta`) until the `threading.Event` `stop` is
   set, and returns. A pass under way finishes first.
@@ -116,6 +151,18 @@ engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_ev
   `STRICT` tables, the same for every graph, each row carrying its graph's
   name, history written in the statements that change a row, and every
   value stored canonical. It reads only the descriptor's kinds.
+- A graph with a kind that keeps its released rows (D139) has a tenth
+  table, `released`, which is not among the layout's nine:
+  `released_layout(table_name)` returns its one statement, and
+  `create_tables` runs it only for such a graph. The name function is
+  asked for `released` only by `released_layout` and by an adapter of such
+  a graph, so one that names the nine tables alone serves every other. A row is one entity of a
+  kind of a root: `graph`, `kind`, `root_id`, `entity_key`, the release's
+  `commit_id` and `sequence`, and `data`, the canonical JSON object of the
+  kind's content columns (its `columns` less its role columns, its author
+  and `excluded`), sorted by name, a column the row lacks as `null`.
+  `write_released` refuses a release's commit that is another graph's or
+  another root's, as `write_release` does.
 - `SqliteAdapter(descriptor, graph=..., table_name=..., clock=...)`:
   `table_name` names each table and index from its local name
   (`default_table_name`, `graph_` before it, when absent), and `clock`
@@ -126,9 +173,10 @@ engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_ev
   inside a transaction the caller holds once its savepoint is set; one
   begun inside another takes the outer one's time. A stored integer outside
   +/-(2^53-1), which the TypeScript adapter does not read, is refused.
-  `sqlite_layout(table_name)` lists the layout's statements for a caller
-  that runs its own migrations, and `create_tables` runs them, reading the
-  clock once as every transaction does.
+  `sqlite_layout(table_name)` lists the layout's statements, and
+  `released_layout(table_name)` the released table's, for a caller that
+  runs its own migrations, and `create_tables` runs them, reading the clock
+  once as every transaction does.
 - `sqlite_client(connection)` binds an open `sqlite3.Connection`, which
   must be opened with `isolation_level=None` (or `autocommit=True` from
   Python 3.12) so the module never begins a transaction on its own: the
@@ -178,6 +226,8 @@ in `contract.py` and fails when a member or literal there appears in no
 vector. `tests/test_binding.py` checks the errors, that many calls do not
 grow the process, and that the core runs with the GIL released.
 `tests/test_engine.py` checks the engine's rules that need no database,
+that `order_keys` makes the core's keys and what `entity_history` reads
+of storage,
 and `tests/test_scenarios.py` reads every scenario file and checks the
 scenario format's rules without one. The SQLite tests need no database
 server and run everywhere the others do, on Python 3.9 too:
@@ -187,11 +237,14 @@ the adapter's own rules: the version fences, a taken name, the history it
 writes, `STRICT` tables and foreign keys, two graphs in one file, the name
 function, the clock, its ids, a second connection's wait for the write
 lock, savepoints and the caller's transaction, a number's digits end to
-end, every canonical vector as a round trip, and what the binding
-refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
-SQLite vectors (`runtime/versiongraph/testdata/sqlite`): its layout is
-`layout.json`'s, the database the TypeScript adapter wrote reads back as
-`typescript.json` byte for byte, and one graph reads none of another's.
+end, every canonical vector as a round trip, the released table and what
+`write_released` writes into it and refuses, a root's primary lines and
+an entity's patches and history, and what the binding refuses. `tests/test_sqlite_vectors.py` holds the adapter to the shared
+SQLite vectors (`runtime/versiongraph/testdata/sqlite`): its layout and
+its released table are `layout.json`'s, the database the TypeScript
+adapter wrote reads back as `typescript.json` byte for byte, one graph
+reads none of another's, and the TypeScript script replayed through this
+adapter writes `typescript.sql` byte for byte.
 
 The Postgres tests need `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and
 skip without it; `make versiongraph-scenarios-python` runs the SQLite pass
@@ -204,9 +257,11 @@ checks each rendering against Postgres. `tests/test_adapter.py`,
 `tests/test_sweeper.py` and `tests/test_facade.py` hold the adapter's, the
 sweeper's and the facade's own rules: a ref lock another transaction waits
 for, the version fences, the sweep lock, a prune that keeps pinned images,
+the rows `write_released` writes into a kind's released table, a root's
+primary lines and an entity's patches and history,
 the psycopg client's savepoint and pool, a pass skipped while the lock is
-held, an idle draft written during a pass, and a relation written as its
-target's key.
+held, an idle draft written during a pass, a relation written as its
+target's key, and a parent's children arranged through the facade.
 
 The reference page is "Version graphs" in the docs site
 (`docs/src/content/docs/reference/version-graphs.md`).

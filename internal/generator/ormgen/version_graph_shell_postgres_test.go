@@ -45,7 +45,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		t.Fatalf("write graph release test: %v", err)
 	}
 	out := runORMModule(t, ormDir)
-	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
+	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeArranges", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)
 		}
@@ -63,12 +63,172 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 )
+
+// TestVersionGraphFacadeArranges saves parts, whose order is a string key,
+// under the keys OrderKeys makes, and moves one with Arrange: the facade
+// writes that row alone, and the tree reads in the order asked for (D137).
+func TestVersionGraphFacadeArranges(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph facade against Postgres")
+	}
+	db, pool := openShellDatabase(t, dsn)
+	ctx := WithUserID(context.Background(), mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"))
+	g := db.RecipeGraph()
+	keys, err := g.OrderKeys("", "", 3)
+	if err != nil || !reflect.DeepEqual(keys, []string{"F", "V", "k"}) {
+		t.Fatalf("OrderKeys = %v, %v, want F V k", keys, err)
+	}
+	if between, err := g.OrderKeys("V", "W", 1); err != nil || !reflect.DeepEqual(between, []string{"VV"}) {
+		t.Fatalf("OrderKeys between V and W = %v, %v, want VV", between, err)
+	}
+	if _, err := g.OrderKeys("V", "V", 1); err == nil || !strings.Contains(err.Error(), "no_order_key") {
+		t.Fatalf("OrderKeys between V and V = %v, want no_order_key", err)
+	}
+	recipe, err := db.Recipe.CreateOne(ctx, &types.Recipe{Title: "Bread"})
+	if err != nil {
+		t.Fatalf("create recipe: %v", err)
+	}
+	main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
+	if err != nil {
+		t.Fatalf("CreatePrimary: %v", err)
+	}
+	draft, err := g.Branch(ctx, *main.Id, "parts")
+	if err != nil {
+		t.Fatalf("Branch: %v", err)
+	}
+	saved, err := g.Save(ctx, *draft.Id, draft.Version, RecipeEdits{Part: GraphEdits[types.Part]{Upsert: []*types.Part{
+		{Rank: keys[0], Heading: "Mix"}, {Rank: keys[1], Heading: "Knead"}, {Rank: keys[2], Heading: "Bake"},
+	}}})
+	if err != nil {
+		t.Fatalf("save parts: %v", err)
+	}
+	mix, knead, bake := *saved.Saved.Part[0].EntityKey, *saved.Saved.Part[1].EntityKey, *saved.Saved.Part[2].EntityKey
+	// A string order column sorts bytewise, as the core makes its keys
+	// (D137): the column and its copy in part_released are COLLATE "C",
+	// so ORDER BY rank reads F, V, k whatever the database's locale,
+	// where en_US.UTF-8 would read F, k, V.
+	for _, table := range []string{"part", "part_released"} {
+		var collation string
+		if err := pool.QueryRow(ctx, "SELECT collation_name FROM information_schema.columns WHERE table_name = $1 AND column_name = 'rank'", table).Scan(&collation); err != nil || collation != "C" {
+			t.Fatalf("%s.rank has the collation %q, %v; want C", table, collation, err)
+		}
+	}
+	var byRank []string
+	rows, err := pool.Query(ctx, "SELECT heading FROM part WHERE ref_id = $1::uuid ORDER BY rank", draft.Id.ToUUID())
+	if err != nil {
+		t.Fatalf("read the parts by rank: %v", err)
+	}
+	for rows.Next() {
+		var heading string
+		if err := rows.Scan(&heading); err != nil {
+			t.Fatal(err)
+		}
+		byRank = append(byRank, heading)
+	}
+	rows.Close()
+	if !reflect.DeepEqual(byRank, []string{"Mix", "Knead", "Bake"}) {
+		t.Fatalf("ORDER BY rank reads %v, want the core's order Mix, Knead, Bake", byRank)
+	}
+	arranged, err := g.Arrange(ctx, *draft.Id, saved.Ref.Version, types.RecipeEntityKind_Part, nil, []types.IdentityUUID{bake, mix, knead})
+	if err != nil {
+		t.Fatalf("Arrange: %v", err)
+	}
+	if len(arranged.Saved.Part) != 1 || arranged.Saved.Part[0].Heading != "Bake" || arranged.Saved.Part[0].Rank != "7" {
+		t.Fatalf("Arrange wrote %+v, want Bake alone at 7", arranged.Saved.Part)
+	}
+	if arranged.Ref.Version != saved.Ref.Version+1 {
+		t.Fatalf("Arrange left the ref at version %d, want %d", arranged.Ref.Version, saved.Ref.Version+1)
+	}
+	tree, err := g.Compose(ctx, *draft.Id)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	var headings []string
+	for _, part := range tree.Part {
+		headings = append(headings, part.Heading)
+	}
+	if !reflect.DeepEqual(headings, []string{"Bake", "Mix", "Knead"}) {
+		t.Fatalf("the arranged parts read %v", headings)
+	}
+	if _, err := g.Arrange(ctx, *draft.Id, arranged.Ref.Version, types.RecipeEntityKind_Part, nil, []types.IdentityUUID{bake, mix}); err == nil || !strings.Contains(err.Error(), "invalid_arrangement") {
+		t.Fatalf("Arrange of a list that lacks a child = %v, want invalid_arrangement", err)
+	}
+	if _, err := g.Arrange(ctx, *draft.Id, arranged.Ref.Version, types.RecipeEntityKind_Step, nil, nil); err == nil || !strings.Contains(err.Error(), "order_not_a_key") {
+		t.Fatalf("Arrange of a kind ordered by an integer = %v, want order_not_a_key", err)
+	}
+	if _, err := g.Arrange(ctx, *main.Id, main.Version, types.RecipeEntityKind_Part, nil, nil); !errors.Is(err, ErrPrimaryMergeOnly) {
+		t.Fatalf("Arrange on a primary line = %v, want ErrPrimaryMergeOnly", err)
+	}
+
+	// Part keeps its released rows (D139): a release writes them into
+	// part_released, which the ORM reads as a table.
+	if _, err := g.Commit(ctx, *draft.Id, arranged.Ref.Version, RecipeCommitOptions{Message: "parts"}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	merged, err := g.Merge(ctx, *draft.Id, *main.Id, main.Version, nil, RecipeCommitOptions{Message: "parts", Tag: true})
+	if err != nil || merged.Commit == nil {
+		t.Fatalf("Merge = %+v, %v", merged, err)
+	}
+	everyField := &PartReleasedFindOptions{Fields: (PartReleasedFields{}).All()}
+	if rows, _, err := db.PartReleased.FindMany(ctx, nil, everyField); err != nil || len(rows) != 0 {
+		t.Fatalf("before a release part_released holds %d rows, %v", len(rows), err)
+	}
+	if _, err := g.Release(ctx, *recipe.Id, *merged.Commit.Id, 0); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	released, total, err := db.PartReleased.FindMany(ctx, nil, everyField)
+	if err != nil || total != 3 || len(released) != 3 {
+		t.Fatalf("part_released holds %d rows of %d, %v; want 3", len(released), total, err)
+	}
+	got := map[string]string{}
+	for _, row := range released {
+		if row.Sequence != 1 || row.Commit.Id == nil || *row.Commit.Id != *merged.Commit.Id || row.Recipe.Id == nil || *row.Recipe.Id != *recipe.Id {
+			t.Fatalf("a released part names another release or root: %+v", row)
+		}
+		got[row.Heading] = row.Rank
+		if row.Heading == "Bake" && row.EntityKey != bake {
+			t.Fatalf("the released Bake has entity key %v, want %v", row.EntityKey, bake)
+		}
+	}
+	if want := map[string]string{"Bake": "7", "Mix": "F", "Knead": "V"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("part_released holds %v, want %v", got, want)
+	}
+	// The repository reads a released row by its id too.
+	one, err := db.PartReleased.GetOne(ctx, *released[0].Id, nil)
+	if err != nil || one.Heading != released[0].Heading || one.EntityKey != released[0].EntityKey || one.Sequence != 1 {
+		t.Fatalf("GetOne of a released part = %+v, %v; want %+v", one, err, released[0])
+	}
+
+	// An entity's history is the primary line's commits that changed it
+	// (D138): the merge added Bake, and no commit touched an unknown key.
+	history, err := g.EntityHistory(ctx, *recipe.Id, types.RecipeEntityKind_Part, bake)
+	if err != nil || len(history) != 1 || *history[0].Commit.Id != *merged.Commit.Id || history[0].Operation != types.RecipePatchOperation_Add {
+		t.Fatalf("EntityHistory of Bake = %+v, %v; want the merge's ADD", history, err)
+	}
+	if none, err := g.EntityHistory(ctx, *recipe.Id, types.RecipeEntityKind_Part, *recipe.Id); err != nil || len(none) != 0 {
+		t.Fatalf("EntityHistory of an entity no commit changed = %+v, %v", none, err)
+	}
+
+	// The graph names a queue for its commits and one for its releases
+	// (D138): the change set's commit and the merge's each enqueued, and
+	// so did the release.
+	var commits, releases int
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM recipe_committed_queue WHERE root = $1::uuid), (SELECT count(*) FROM recipe_published_queue WHERE root = $1::uuid AND \"commit\" = $2::uuid)", recipe.Id.ToUUID(), merged.Commit.Id.ToUUID()).Scan(&commits, &releases); err != nil {
+		t.Fatalf("read the graph's queues: %v", err)
+	}
+	if commits != 2 || releases != 1 {
+		t.Fatalf("the graph enqueued %d commits and %d releases, want 2 and 1", commits, releases)
+	}
+}
 
 func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
 	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")

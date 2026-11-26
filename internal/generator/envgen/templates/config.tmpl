@@ -25,6 +25,9 @@ import (
 {{- end }}
 
 	"github.com/joho/godotenv"
+{{- if .ClientVersions }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/clientversion"
+{{- end }}
 {{- if .Derived }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
@@ -532,6 +535,16 @@ type {{ envConfigType }} struct {
 {{- end }}
 	{{ .GoName }} stackconfig.{{ .RuntimeType }}
 {{- end }}
+{{- if .ClientVersions }}
+{{- if or .TypeName .Derived }}
+
+{{ end }}
+	// MinClientVersions is the oldest version of each client the API
+	// serves (D143), read from MIN_CLIENT_VERSIONS, a list such as
+	// cli=0.5.0,desktop=2.1.0. Unset, it lists none and every client is
+	// served.
+	MinClientVersions clientversion.Minimums
+{{- end }}
 }
 
 // Load{{ envConfigType }} loads the API's configuration from environment variables.
@@ -554,6 +567,13 @@ func Load{{ envConfigType }}() (*{{ envConfigType }}, error) {
 		errs = append(errs, err)
 	} else {
 		cfg.{{ .GoName }} = v
+	}
+{{- end }}
+{{- if .ClientVersions }}
+	if v, err := clientversion.Load(); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.MinClientVersions = v
 	}
 {{- end }}
 	if len(errs) > 0 {

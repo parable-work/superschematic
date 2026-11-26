@@ -6,7 +6,9 @@
  * site: its config names the APIs it calls and how it builds, and its code
  * sits at its implementation path (D55). A Bucket service is private object
  * storage that APIs list in their `buckets` (D54): its config is all it
- * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`, with
+ * `contentAddressed: true` for one that names its objects by their
+ * content (D142). A MemoryStore
  * service is a Redis or Valkey server the replicas of a stack share, which
  * holds no fact (D75): its schema declares each channel and key it carries
  * (`@superschematic/memory-store`), and APIs list it in their
@@ -395,6 +397,18 @@ export type SchemaConfig = {
    */
   readonly rateLimitStore?: ServiceHandle<"MemoryStore">;
   /**
+   * Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as "cli=0.5.0,desktop=2.1.0", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.
+   */
+  readonly clientVersions?: boolean;
+  /**
+   * Whether this Bucket service names its objects by their content. With true, an API that lists it gets a content bucket in its Deps: put reads a body whole, names the object sha256/<hex> by the SHA-256 of its bytes and writes it if absent, and has, missing, get and signedUrl read by hash. Only a Bucket service sets it.
+   */
+  readonly contentAddressed?: boolean;
+  /**
+   * The largest object a content-addressed bucket puts, in bytes: a whole number above 0, 33554432 (32 MiB) when absent. Only a Bucket service whose contentAddressed is true sets it.
+   */
+  readonly maxBytes?: number;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -447,6 +461,18 @@ export type SchemaConfigDocument = {
    * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
    */
   readonly rateLimitStore?: ServiceDependencyRef;
+  /**
+   * Whether this API turns away a client too old to speak to it. With true its EnvConfig gains an optional setting, MIN_CLIENT_VERSIONS, a list such as "cli=0.5.0,desktop=2.1.0", and a request whose X-Client-Version header names a listed client at a lower version is answered 426 with the problem client_too_old. Only an API service sets it.
+   */
+  readonly clientVersions?: boolean;
+  /**
+   * Whether this Bucket service names its objects by their content. With true, an API that lists it gets a content bucket in its Deps: put reads a body whole, names the object sha256/<hex> by the SHA-256 of its bytes and writes it if absent, and has, missing, get and signedUrl read by hash. Only a Bucket service sets it.
+   */
+  readonly contentAddressed?: boolean;
+  /**
+   * The largest object a content-addressed bucket puts, in bytes: a whole number above 0, 33554432 (32 MiB) when absent. Only a Bucket service whose contentAddressed is true sets it.
+   */
+  readonly maxBytes?: number;
   /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */

@@ -1,7 +1,8 @@
 # Version-graph core
 
 The version-graph core composes, merges, diffs, hashes and validates trees
-of versioned rows (D17, D19 and D32 in `docs/DECISIONS.md`). It is one Rust crate
+of versioned rows, and makes the order keys that place a row among its
+siblings (D17, D19, D32 and D137 in `docs/DECISIONS.md`). It is one Rust crate
 with no IO, clock or randomness. Its operations take one JSON document and
 return one. A graph descriptor tells it which columns of each kind's rows
 play which role, so it holds no per-kind code.
@@ -114,6 +115,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
 | `kinds[].kind` | The kind's name: the tree member that holds its rows. Unique. |
 | `table`, `historyTable` | The table that holds the kind's rows, and the one that holds their history images. |
+| `releasedTable` | Optional. The table that holds the released tree's rows of the kind (D139), which a storage adapter rewrites at each release ([Released rows](#released-rows)). Non-empty when present; the core does not read it. |
 | `key` | The entity key column: the logical identity rows are matched on. Its value is a non-empty string. |
 | `id` | The row id column. |
 | `ref` | The column naming the ref the row was written on. |
@@ -122,7 +124,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `version` | The row version column. |
 | `author` | Optional. The column naming who wrote the row; conflicts report it. |
 | `parent` | Optional. `key` is a column holding the parent row's entity key (a string, or `null` for none), with the class of the parent kind's `key` column, and `kind` is the parent's kind, which may be the kind itself. |
-| `order` | Optional. An `integer` column that orders siblings. |
+| `order` | Optional. The column that orders siblings: an `integer` column, or a `string` column of order keys ([Order](#order)). |
 | `singleton` | Optional, default `false`. At most one live row. |
 | `units` | Optional. A conflict unit per column: `atomic` (the default), `keyed` or `jsonSchema`. `keyed` and `jsonSchema` need a `json` column. |
 | `excluded` | Optional. Columns that are not content: audit columns and the graph's own columns. |
@@ -227,11 +229,28 @@ row lacked one. Otherwise a revert to a commit written before the gain would
 write the commit's image, which lacks the column, over a row that holds a
 value there, and the value would stay.
 
-An order must be an integer inside +/-(2^53-1), the integers a JavaScript
-number holds exactly; outside it, a browser would sort rows differently from
-the server. An integer of any width outside the range, even one too wide for
-64 bits, is out of range; a number with a fraction or an exponent is not an
-integer.
+### Order
+
+A kind's order column is `integer` or `string`, and its class says which
+every row of the kind holds. Rows sort by order and then by entity key, so
+two rows of one parent may hold one order, and the entity key settles them.
+
+An integer order must be an integer inside +/-(2^53-1), the integers a
+JavaScript number holds exactly; outside it, a browser would sort rows
+differently from the server. An integer of any width outside the range, even
+one too wide for 64 bits, is out of range; a number with a fraction or an
+exponent is not an integer.
+
+A string order is an order key (D137): one or more characters of
+`0-9A-Za-z`, compared by its bytes, so a digit sorts before an uppercase
+letter and that before a lowercase one, and a key sorts before every key it
+begins (`A` before `A0`). Any other string, an empty one, `null` and an
+absent column are refused as `invalid_row`. A key has no range. A row placed
+between two others takes a key between theirs, which
+[`order_keys`](#order_keys) makes, so an insert writes one row where an
+integer order renumbers every later sibling. Two refs that each insert into
+one gap make the same key; merged, the two rows keep it, and no finding or
+conflict says so.
 
 ## Canonical rows
 
@@ -292,7 +311,8 @@ the same.
 
 Every output is deterministic: object members are sorted by name, so a
 tree lists its kinds by name rather than in descriptor order; rows sort by
-order and then entity key; and lists sort by kind, entity key and path.
+order (an integer by its value, an order key by its bytes) and then entity
+key; and lists sort by kind, entity key and path.
 
 ### compose
 
@@ -353,10 +373,14 @@ column, tombstones included.
 value). A whole-entity conflict takes a side. A resolution must match a
 conflict of this merge exactly; one that does not is refused, as are two for
 one unit. A resolved row is checked like an input row, so a resolution that
-leaves the order column missing or not an integer is refused as
-`invalid_row`, and one outside the range as `order_out_of_range`. Taking
-`"base"` for the order of an entity both sides added is such a resolution:
-an add has no base value.
+leaves the order column missing, not an integer, or for a string order not
+an order key, is refused as `invalid_row`, and an integer outside the range
+as `order_out_of_range`. Taking `"base"` for the order of an entity both
+sides added is such a resolution: an add has no base value.
+
+The order column is one atomic unit like any other, whichever its class: a
+move on one side merges with an edit of another unit on the other, and two
+moves of one entity to different orders conflict at `/<order column>`.
 
 `merged` is a tree of every entity's result: the winning row, a winning
 delete's tombstone when that side has one, or, for a unit-level merge, ours'
@@ -419,9 +443,62 @@ Input `{"descriptor", "tree"}`, output `{"findings"}`, empty for a valid
 tree. It checks, per kind: one row per entity key (`duplicate_entity_key`),
 at most one live row of a singleton kind (`singleton`, with no `entityKey`),
 every live row's parent live in the tree (`absent_parent`), no parent cycles
-(`parent_cycle`, one per entity on a cycle), and every order in range
-(`order_out_of_range`). A finding is `{"code", "kind", "entityKey"?,
-"message"}`.
+(`parent_cycle`, one per entity on a cycle), and every integer order in
+range (`order_out_of_range`). Equal orders under one parent are no finding.
+A finding is `{"code", "kind", "entityKey"?, "message"}`.
+
+### order_keys
+
+Input `{"before"?, "after"?, "count"}`, output `{"keys"}`. It takes no
+descriptor.
+
+Makes `count` order keys that sort strictly between `before` and `after`,
+lowest first. A bound that is absent or `null` is the start or the end.
+`count` is an integer from 0 to 1000000.
+
+Read as the digits of a base 62 fraction (`0` is 0, `z` is 61), a key that
+is below another by value is below it by its bytes. The keys are the
+fractions that divide the gap between the bounds' values evenly: with `n`
+keys wanted, the core takes the fewest digits at which more than `n` steps
+of that last digit lie between the bounds, and key `i` (from 1) is the
+lower bound, cut to those digits, plus `floor(i * steps / (n + 1))` steps.
+Trailing zeros are then dropped, so each key is as short as it can be and
+no key made here ends in `0`. One key between the start and the end is `V`;
+three are `F`, `V` and `k`; one between `V` and `W` is `VV`.
+
+A gap whose bounds have one value holds no such fraction: `after` not above
+`before`, or `after` being `before` followed by zeros (`A` and `A0`), or an
+`after` of zeros alone with no `before`. It is refused as `no_order_key`.
+Keys made here never meet that, since none ends in `0`; a key written by
+hand can. A key appended after the last one halves what is left of the gap
+to the end, so a list built only by appends gains a character about every
+six rows; `order_keys` for the whole list, saved once, spaces it evenly
+again.
+
+### arrange
+
+Input `{"descriptor", "tree", "kind", "parent"?, "keys"}`, output `{"rows"}`.
+
+`keys` are the entity keys of one parent's live children of `kind` in
+`tree`, in the order wanted: the rows of the kind whose parent key is
+`parent`, or that have none when `parent` is absent or `null`. `rows` are
+the children that need a new order key to read in that order, each as an
+engine writes it back (every content column the descriptor declares, with
+the new key in the order column), in the order wanted.
+
+The core keeps the longest run of children already in order, the longest
+subsequence of `keys` whose rows rise by order key and then entity key (of
+several, the one a patience sort finds, which the vectors pin), and gives
+each run of other children keys between its kept neighbors' with
+`order_keys`. When no key lies between two kept neighbors, which hold one
+value, the later neighbor gives its key up and the run takes keys up to the
+next kept one. A list already in order returns no rows.
+
+The kind's order must be a string: an integer order, or none, is refused as
+`order_not_a_key`, since a caller saves an integer order itself. `keys` must
+be exactly the parent's live children, each once: a key that is not one, a
+tombstoned child, a child left out, a key twice, or a `parent` for a kind
+without a parent edge is refused as `invalid_arrangement`.
 
 ## Errors
 
@@ -434,9 +511,12 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 | `invalid_request` | The input is not an object, a member is missing or unknown, or a tree is not an object of arrays. |
 | `invalid_descriptor` | The descriptor is malformed, is not version 3, or breaks a rule above. |
 | `unknown_kind` | A tree names a kind the descriptor lacks. |
-| `invalid_row` | A row is not an object, or its key, tombstone, parent key or order has the wrong type. |
+| `invalid_row` | A row is not an object, or its key, tombstone, parent key or order has the wrong type, or its string order is not an order key. |
 | `duplicate_entity_key` | Two rows of a kind share an entity key (every operation but `validate`, which reports it). |
-| `order_out_of_range` | An order outside +/-(2^53-1) (every operation but `validate`, which reports it). |
+| `order_out_of_range` | An integer order outside +/-(2^53-1) (every operation but `validate`, which reports it). |
+| `no_order_key` | `order_keys` bounds with no key between them. |
+| `order_not_a_key` | `arrange` of a kind whose order is not a string. |
+| `invalid_arrangement` | `arrange` keys that are not exactly the parent's live children. |
 | `invalid_resolution` | A resolution is malformed, names an unknown kind, or repeats a unit. |
 | `unmatched_resolution` | A resolution matches no conflict of the merge. |
 | `internal` | The core panicked (a bug). |
@@ -444,13 +524,28 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 ## Engine and storage
 
 An engine runs a graph's operations (D19): create a primary line, branch,
-save, commit, seal, merge, rebase, revert, release, released, materialize,
-compose, diff, history, discard and sweep. It drives the core through its
+save, arrange, commit, seal, merge, rebase, revert, release, released,
+materialize, compose, diff, history, entity history, discard and sweep. It
+drives the core through its
 language's binding and reaches storage only through a storage adapter,
 which holds the transaction of each operation and returns canonical rows.
 
 Every engine keeps the same rules. A primary line takes writes only from
-merge. A root's release pointer names a tagged commit and is fenced by its
+merge. A release of a graph with a kind that names a `releasedTable` also
+rewrites that kind's released rows of the root, in the release's
+transaction ([Released rows](#released-rows)). Arrange (D137) writes through a change set as save does: it composes
+the ref, asks the core's `arrange` which of one parent's children need a new
+order key, writes each as the ref's own row, and moves the ref's version,
+also when nothing moved. Each engine also offers the core's `order_keys`,
+which reads no storage. EntityHistory (D138) lists the commits of a root's
+primary line that changed one entity, newest first, each with the
+operation of its patch of the entity (`ADD`, `UPDATE` or `DELETE`): the
+engine reads the root's primary lines from the adapter (`PrimaryRefs`: its
+refs with no parent that are not discarded, in the order they were
+created), each line's commits as History does, at most the walk ceiling of
+them, and the entity's patches among those commits (`EntityPatches`). It
+reads no tree, takes no actor, and lists nothing for a root with no
+primary line or an entity no commit of one changed. A root's release pointer names a tagged commit and is fenced by its
 version (0 for the first release); a release writes no member rows. A
 rebase merges the parent's head into a change set against its base, keeps
 as rows only the entities that differ from the new base, moves the base
@@ -514,11 +609,64 @@ version. An engine's errors have stable codes, shared by every language:
 | `invalid_tree` | A commit whose tree `validate` finds wrong. |
 | `root_mismatch` | Two refs, or a ref and a commit, of different roots. |
 | `merge_into_itself` | A merge whose source is its target. |
-| `primary_merge_only` | A save, commit, seal or revert on a primary line. |
+| `primary_merge_only` | A save, arrange, commit, seal or revert on a primary line. |
 | `not_tagged` | A release of a commit that is not tagged. |
 | `no_parent` | A rebase of a primary line. |
 
-An input the core refuses keeps the core's code (`unmatched_resolution`).
+An input the core refuses keeps the core's code (`unmatched_resolution`,
+`invalid_arrangement`, `order_not_a_key`, `no_order_key`).
+
+### Released rows
+
+A kind whose descriptor names a `releasedTable` keeps the rows of each
+root's released tree in that table (D139), so what is released can be
+indexed, searched, joined and paged without walking commits. Release owns
+the rows. In its transaction, before it moves the pointer, the engine reads
+the commit the root's release names; after the move it diffs that commit's
+tree against the new one's with the core's `diff` and hands each such kind
+its part to the adapter's `WriteReleased` (`writeReleased`,
+`write_released`): the rows of the entities added or changed, and the keys
+of the ones deleted. An entity the release did not change keeps the row an
+earlier release wrote, with that release's commit and sequence, which after
+a rollback can be a later release than the pointer names. A root's
+first release has no commit before it, so it writes the whole tree; a
+release of the commit already released does too, after deleting the root's
+rows, which rebuilds them when a kind gains a `releasedTable` after its
+roots were released, or when the table was written by hand. A release that
+is refused (a stale version, an untagged commit) writes nothing, and a
+graph with no such kind reads and writes nothing more than before. Sweep
+leaves the tables alone.
+
+On Postgres the released table is a table of the schema, as the sql
+generator writes it for `@graphMember({ released: true })`: the kind's
+content columns under their names and with their types, the kind's `root`
+column, which references the root and is deleted with it, its `key`
+column, `commit_id`, `sequence`, and a row id of its own, with a unique
+index on the root and the entity key. The adapter writes a release's rows
+in one statement, each column from the canonical row as it writes a member
+row's, and takes the content columns from the descriptor: the kind's
+`columns` less its role columns and `excluded`.
+
+On SQLite the fixed layout has no table per kind, so released rows live in
+one more table, `released`, which is not among the layout's nine: a graph
+needs it only when a kind names a `releasedTable`. The released layout
+function (`sqliteReleasedLayout`, `ReleasedLayout`, `released_layout`)
+returns its one statement, and `createTables` runs it for such a graph.
+
+| Table | Columns | Keys and indexes |
+|---|---|---|
+| `released` | `graph`, `kind`, `root_id`, `entity_key`, `commit_id`, `sequence`, `data` | primary key `(graph, kind, root_id, entity_key)`; `commit_id` references a commit |
+
+`data` is the canonical JSON object of the kind's content columns, a
+column the row lacks as `null`. The adapter refuses a release's commit that
+is another graph's or another root's, as it does the pointer's; on
+Postgres the engine has checked the commit's root, and the table's foreign
+keys hold the rest. A name function is asked to name `released` only by
+the released layout function and by an adapter of a graph that keeps
+released rows, so a host that names the layout's nine tables alone, as a
+D16 behavior does, serves every other graph unchanged. The layout has no
+root table, so nothing deletes a root's released rows with it: they stay
+until a release rewrites them.
 
 ### SQLite
 
@@ -821,6 +969,7 @@ sweep runs.
 | `createPrimary` | `root`, `name` | CreatePrimary |
 | `branch` | `from`, `name` | Branch |
 | `save` | `ref`, `edits`: `{"<kind>": {"upsert": [row], "delete": [key], "unset": [key]}}` | Save |
+| `arrange` | `ref`, `kind`, `parent` (an entity key; absent for the rows with no parent), `keys` (entity keys, in the order wanted) | Arrange |
 | `commit` | `ref`, `message`, `tag` | Commit |
 | `seal` | `ref` | Seal |
 | `merge` | `source`, `target`, `resolutions` (the core's), `message`, `tag` | Merge |
@@ -834,11 +983,12 @@ sweep runs.
 | `compose` | `ref` | Compose |
 | `diff` | `from`, `to` | Diff |
 | `history` | `ref` | History |
+| `entityHistory` | `root`, `kind`, `key` (an entity key) | EntityHistory |
 | `discard` | `ref` | Discard |
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres and in its canonical form on SQLite | The runner's backend's statement on the scenario's database; with `rows` expected, a query whose rows the step returns |
+| `sql` | `statement`: `{"<backend>": "<statement>"}`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text on Postgres and in its canonical form on SQLite | The runner's backend's statement on the scenario's database; with `rows` expected, a query whose rows the step returns. The released scenario reads the fixture's `part_released` so, and `graph_released` on SQLite |
 
 An `sql` step's `statement` is an object of one statement per backend,
 `{"postgres": "...", "sqlite": "..."}`; a `null` statement is none. On any
@@ -846,7 +996,10 @@ step that has one, a runner refuses a plain string, a statement for a
 backend it does not know, and a statement that is not text (`null`
 included). It refuses an `sql` step it runs that has no statement for its
 backend, so no step is skipped silently; a step it skips needs none. Every
-`sql` step gives both. A `postgres` statement numbers its placeholders `$1`
+`sql` step gives both, but one that lists its backends: the enqueue
+scenario's read the queues the fixture's graph enqueues its commits and its
+releases on (D138), by triggers the sql generator writes, which the fixed
+layout does not have. A `postgres` statement numbers its placeholders `$1`
 and takes UUIDs hyphenated; a `sqlite` statement is written against the
 SQLite adapter's layout under its default names (`graph_ref`,
 `graph_member_history`), numbers its placeholders `?1` and takes UUIDs in
@@ -860,10 +1013,11 @@ succeed.
 | `error` | The step fails with this code. |
 | `ref` | The returned ref: `version`, `name`, `sealed`, and `parent`, `base` and `head` by name (`null` for none). |
 | `commit` | The commit written, `null` for none: `ref`, `parent` by name, `message`, `sequence` (`null` untagged), `schemaEpoch`, `contentHash` or `contentHashOf` (the hash a named commit recorded). |
-| `saved`, `tree` | Save's rows, or a read's tree: every kind with rows, each kind's rows in order, and each row's listed columns (a listed `null` also matches an absent column). |
+| `saved`, `tree` | Save's or Arrange's rows, or a read's tree: every kind with rows, each kind's rows in order, and each row's listed columns (a listed `null` also matches an absent column). |
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
+| `entityHistory` | EntityHistory's entries, in order and exactly: each `{"commit", "operation"}`, the commit by name. |
 | `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`); on SQLite, where a column keeps its type, a column that is not text or `NULL` is refused. |
 | `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
 | `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
@@ -878,6 +1032,8 @@ int32_t vg_merge(...);   /* same signature */
 int32_t vg_diff(...);
 int32_t vg_content_hash(...);
 int32_t vg_validate(...);
+int32_t vg_order_keys(...);
+int32_t vg_arrange(...);
 void vg_free(uint8_t *ptr, size_t len);
 /* wasm32 only */
 uint8_t *vg_alloc(size_t len);
