@@ -924,8 +924,9 @@ func convertTypeToTable(
 				InTransaction:    idx.Concurrently != nil && !*idx.Concurrently,
 				With:             sqlutil.IndexWith(idx),
 			},
-			keys: indexKeys,
-			name: idx.Name,
+			keys:   indexKeys,
+			name:   idx.Name,
+			origin: idx.Origin,
 		})
 	}
 	indexes, err := assignIndexNames(typeDef, pending)
@@ -1332,11 +1333,18 @@ type pendingIndex struct {
 	index Index
 	keys  []string
 	name  string
+	// origin is the expansion that added the index (ir.IndexDef.Origin),
+	// "" for the author's own.
+	origin string
 }
 
 // indexName builds the identifier for one declared index of typeDef
-// (sqlutil.IndexNameIn).
+// (sqlutil.IndexNameIn); an index an expansion added, which no author can
+// name, is shortened to fit instead of refused (sqlutil.GeneratedIndexNameIn).
 func indexName(typeDef *ir.TypeDef, p pendingIndex) (string, error) {
+	if p.origin != "" {
+		return sqlutil.GeneratedIndexNameIn(typeDef, p.keys, p.name, p.index.Unique)
+	}
 	return sqlutil.IndexNameIn(typeDef, p.keys, p.name, p.index.Unique)
 }
 
