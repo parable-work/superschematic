@@ -46,6 +46,20 @@ func recipeGraph() *ir.Schema {
 	return schema
 }
 
+// graphQueue is a queue a graph may enqueue on: root, commit, and a
+// nullable ref and sequence.
+func graphQueue() *ir.TypeDef {
+	return &ir.TypeDef{
+		Name: "RecipeChanged", Role: ir.RoleEmbeddedStruct, Owner: "src/recipe.schema.ts", Queue: &ir.QueueDef{},
+		Fields: []*ir.FieldDef{
+			{Name: "root", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "commit", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "ref", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+			{Name: "sequence", TypeRef: ir.TypeRef{Name: "Generic.Int64"}},
+		},
+	}
+}
+
 // TestVersionGraphDeclarations runs every version graph rule once where it
 // holds and once where it breaks. A case with no want must verify clean.
 func TestVersionGraphDeclarations(t *testing.T) {
@@ -337,14 +351,103 @@ func TestVersionGraphDeclarations(t *testing.T) {
 			want:   `Ingredient: @graphMember parent.key "quantity" must be a UUID field`,
 		},
 		{
-			name:   "an order field that is not Int64",
-			mutate: func(s *ir.Schema) { s.Types["Step"].Fields[2].TypeRef.Name = "string" },
-			want:   `Step: @graphMember order "position" must name a Generic.Int64 field`,
+			name:   "an order field that is not Int64 or a string",
+			mutate: func(s *ir.Schema) { s.Types["Step"].Fields[2].TypeRef.Name = "number" },
+			want:   `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
+		},
+		{
+			name: "an order field that is a list of strings",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields[2].TypeRef.Name = "string"
+				s.Types["Step"].Fields[2].TypeRef.IsArray = true
+			},
+			want: `Step: @graphMember order "position" must name a Generic.Int64 field or a string field`,
+		},
+		{
+			name: "a graph that enqueues on a commit and on a release",
+			mutate: func(s *ir.Schema) {
+				s.Types["RecipeChanged"] = graphQueue()
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+				s.Types["Recipe"].VersionGraph.EnqueueOnRelease = "RecipeChanged"
+			},
+		},
+		{
+			name:   "enqueueOnCommit that names no queue",
+			mutate: func(s *ir.Schema) { s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "Step" },
+			want:   `Recipe: @versionGraph enqueueOnCommit names Step, which is not a @queue class of this schema`,
+		},
+		{
+			name: "a queue whose message has no commit",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields = q.Fields[:1]
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged has no commit field`,
+		},
+		{
+			name: "a release's queue with a required ref",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields[2].Required = true
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnRelease = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnRelease: RecipeChanged.ref must be a Identity.UUID, and Nullable for a release`,
+		},
+		{
+			name: "a queue with a required sequence",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields[3].Required = true
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged.sequence must be a Nullable<Generic.Int64>`,
+		},
+		{
+			name: "a queue with a field the trigger cannot set",
+			mutate: func(s *ir.Schema) {
+				q := graphQueue()
+				q.Fields = append(q.Fields, &ir.FieldDef{Name: "reason", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
+				s.Types["RecipeChanged"] = q
+				s.Types["Recipe"].VersionGraph.EnqueueOnCommit = "RecipeChanged"
+			},
+			want: `Recipe: @versionGraph enqueueOnCommit: RecipeChanged.reason is required and has no default`,
+		},
+		{
+			name:   "a member that keeps its released rows",
+			mutate: func(s *ir.Schema) { s.Types["Step"].GraphMember.Released = true },
+		},
+		{
+			name: "a released member whose table the schema already defines",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Enums["StepReleased"] = &ir.EnumDef{Name: "StepReleased"}
+			},
+			want: `Step: @graphMember released adds StepReleased, which the schema already defines`,
+		},
+		{
+			name: "a released member with a content field its table adds",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "sequence", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true})
+			},
+			want: `Step: field sequence collides with the field @graphMember released adds to StepReleased`,
+		},
+		{
+			name: "a released member with an encrypted content field",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].GraphMember.Released = true
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Required: true, EncryptedAtRest: true})
+			},
+			want: `Step: field secret is Encrypted<T>, whose envelope is bound to its row, and @graphMember released would copy it to StepReleased`,
 		},
 		{
 			name:   "an order that names no field",
 			mutate: func(s *ir.Schema) { s.Types["Step"].GraphMember.Order = "rank" },
-			want:   `Step: @graphMember order "rank" must name a Generic.Int64 field`,
+			want:   `Step: @graphMember order "rank" must name a Generic.Int64 field or a string field`,
 		},
 
 		// Conflict units.

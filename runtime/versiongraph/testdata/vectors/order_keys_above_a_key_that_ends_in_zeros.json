@@ -1,0 +1,14 @@
+{
+  "name": "order_keys_above_a_key_that_ends_in_zeros",
+  "op": "order_keys",
+  "input": {
+    "after": "A001",
+    "before": "A00",
+    "count": 1
+  },
+  "expect": {
+    "keys": [
+      "A000V"
+    ]
+  }
+}

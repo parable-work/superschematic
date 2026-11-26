@@ -8,11 +8,14 @@ import (
 )
 
 // pgType is a Postgres column type split into its base name, its
-// modifiers and whether it is an array.
+// modifiers, whether it is an array and the collation it names.
 type pgType struct {
 	base  string // "VARCHAR", "NUMERIC", "TEXT"
 	mods  []int  // VARCHAR(80) -> [80]; NUMERIC(10,2) -> [10 2]
 	array bool
+	// collation is the COLLATE clause's name as written, `"C"` for a
+	// string order key (D137), or "" for the database's default.
+	collation string
 }
 
 var pgTypeAliases = map[string]string{
@@ -31,15 +34,23 @@ var pgTypeAliases = map[string]string{
 
 var pgTypePattern = regexp.MustCompile(`^([A-Z][A-Z0-9_ ]*?)\s*(?:\(([0-9,\s]*)\))?((?:\[\])*)$`)
 
+// pgCollatePattern is a type's COLLATE clause, which follows the type.
+var pgCollatePattern = regexp.MustCompile(`(?i)^(.*?)\s+COLLATE\s+("[^"]+"|[A-Za-z_][A-Za-z0-9_]*)$`)
+
 // parsePGType reads a type as the model spells it. A type it cannot read
 // keeps its whole spelling as its base, so it converts only to itself.
 func parsePGType(s string) pgType {
-	norm := strings.ToUpper(strings.Join(strings.Fields(s), " "))
+	s = strings.Join(strings.Fields(s), " ")
+	collation := ""
+	if m := pgCollatePattern.FindStringSubmatch(s); m != nil {
+		s, collation = m[1], m[2]
+	}
+	norm := strings.ToUpper(s)
 	m := pgTypePattern.FindStringSubmatch(norm)
 	if m == nil {
-		return pgType{base: norm}
+		return pgType{base: norm, collation: collation}
 	}
-	t := pgType{base: strings.TrimSpace(m[1]), array: m[3] != ""}
+	t := pgType{base: strings.TrimSpace(m[1]), array: m[3] != "", collation: collation}
 	if alias, ok := pgTypeAliases[t.base]; ok {
 		t.base = alias
 	}
@@ -47,7 +58,7 @@ func parsePGType(s string) pgType {
 		for _, part := range strings.Split(m[2], ",") {
 			n, err := strconv.Atoi(strings.TrimSpace(part))
 			if err != nil {
-				return pgType{base: norm}
+				return pgType{base: norm, collation: collation}
 			}
 			t.mods = append(t.mods, n)
 		}
@@ -56,6 +67,12 @@ func parsePGType(s string) pgType {
 }
 
 func (t pgType) equal(o pgType) bool {
+	return t.sameStorage(o) && t.collation == o.collation
+}
+
+// sameStorage reports whether two types store their values alike: the
+// same base, modifiers and array, whatever their collations.
+func (t pgType) sameStorage(o pgType) bool {
 	if t.base != o.base || t.array != o.array || len(t.mods) != len(o.mods) {
 		return false
 	}
@@ -97,13 +114,19 @@ func pgConvert(from, to string) conversion {
 	if f.equal(t) {
 		return conversion{kind: convertSame}
 	}
+	if f.sameStorage(t) {
+		// Only the collation changes: every value stays, and Postgres
+		// rebuilds the column's indexes in the new order.
+		return conversion{kind: convertRewrite}
+	}
 	if f.array != t.array {
 		return conversion{kind: convertImpossible}
 	}
 	c := convertScalar(f, t)
 	// Postgres converts an array element by element; treat a change no
-	// element needs a rewrite for as one anyway.
-	if f.array && c.kind == convertCoercible {
+	// element needs a rewrite for as one anyway. A change of collation
+	// rebuilds the column's indexes, so it keeps no index as it is.
+	if (f.array || f.collation != t.collation) && c.kind == convertCoercible {
 		c.kind = convertRewrite
 	}
 	return c

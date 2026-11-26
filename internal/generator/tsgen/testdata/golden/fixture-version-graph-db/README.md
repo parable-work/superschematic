@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Part, PartReleased, Recipe, RecipeCommit, RecipeCommitted, RecipePatch, RecipePublished, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -71,6 +71,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - `types/` - Pure TypeScript types (no runtime); use `@schemas/fixture-version-graph-db-types/types` for zero-runtime imports
 - `validators/` - Validation functions; use `@schemas/fixture-version-graph-db-types/validators/scalars/<name>` for granular imports
 - `mask/` - Secret-masking helpers for types with @secret fields
+- `orm.ts` - the repositories of the database's tables; the repository of a graph member's released rows only reads them, with no create, update, upsert or delete, since the graph's release owns the rows and rewrites them (D139): `partReleased`, the released rows of `Part`
 - `index.ts` - Main export (re-exports all; backward compatible)
 
 ## Type System
@@ -127,7 +128,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 - **RecipeEntityKind** - The entity kinds of the Recipe version graph.
-  - Values: `Cover`, `Ingredient`, `Note`, `Step`, `Tasting`, `Utensil`
+  - Values: `Cover`, `Ingredient`, `Note`, `Part`, `Step`, `Tasting`, `Utensil`
 
 - **RecipePatchOperation** - What a patch of the Recipe version graph does to one entity.
   - Values: `Add`, `Update`, `Delete`
@@ -138,7 +139,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (12)
+### Types (16)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -147,11 +148,24 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **Note** - A cook's note, threaded under another note.
 
-- **Recipe** - A recipe: the stable identity its steps and ingredients are versioned under.
+- **Part** - A part of the recipe's write-up, nested under another part. Its rank is
+a string order key, so Arrange places it among its siblings, and the
+parts a recipe has released are kept in a table of their own, with the
+index a reader of them uses.
+
+- **PartReleased** - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+
+- **Recipe** - A recipe: the stable identity its steps and ingredients are versioned
+under. Its commits and its releases each enqueue a message.
 
 - **RecipeCommit** - A commit of the Recipe version graph: the exact row versions one ref sealed.
 
+- **RecipeCommitted** - Sent for each commit of a recipe's graph, in the transaction that wrote
+it: a worker handles one recipe's commits at a time.
+
 - **RecipePatch** - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
+
+- **RecipePublished** - Sent when a recipe's release moves to another commit.
 
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
 

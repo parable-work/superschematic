@@ -125,7 +125,77 @@ impl Default for Note {
     }
 }
 
-/// A recipe: the stable identity its steps and ingredients are versioned under.
+fn default_part_deleted_on_ref() -> bool {
+    false
+}
+
+/// A part of the recipe's write-up, nested under another part. Its rank is
+/// a string order key, so Arrange places it among its siblings, and the
+/// parts a recipe has released are kept in a table of their own, with the
+/// index a reader of them uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Part {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    #[serde(default, rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(default, rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    /// The ref this row overrides the entity on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<RecipeRef>,
+    /// True when the row deletes the entity on its ref.
+    #[serde(default = "default_part_deleted_on_ref", rename = "deletedOnRef")]
+    pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}
+
+impl Default for Part {
+    fn default() -> Self {
+        Self {
+            id: None,
+            recipe: None,
+            parent_key: None,
+            rank: Default::default(),
+            heading: Default::default(),
+            entity_key: None,
+            r#ref: None,
+            deleted_on_ref: default_part_deleted_on_ref(),
+            version: Default::default(),
+        }
+    }
+}
+
+/// The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartReleased {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The root whose released tree holds the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    /// The entity's logical identity, as its rows on every ref hold it.
+    #[serde(rename = "entityKey")]
+    pub entity_key: IdentityUUID,
+    #[serde(default, rename = "parentKey", skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<IdentityUUID>,
+    pub rank: String,
+    pub heading: String,
+    /// The released commit that last wrote the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<RecipeCommit>,
+    /// That commit's sequence: the published version whose release last wrote the row.
+    pub sequence: GenericInt64,
+}
+
+/// A recipe: the stable identity its steps and ingredients are versioned
+/// under. Its commits and its releases each enqueue a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recipe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +232,18 @@ pub struct RecipeCommit {
     pub created_by: IdentityUUID,
 }
 
+/// Sent for each commit of a recipe's graph, in the transaction that wrote
+/// it: a worker handles one recipe's commits at a time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeCommitted {
+    pub root: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<IdentityUUID>,
+    pub commit: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<GenericInt64>,
+}
+
 /// One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipePatch {
@@ -178,6 +260,13 @@ pub struct RecipePatch {
     #[serde(rename = "entityVersion")]
     pub entity_version: GenericInt64,
     pub operation: RecipePatchOperation,
+}
+
+/// Sent when a recipe's release moves to another commit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipePublished {
+    pub root: IdentityUUID,
+    pub commit: IdentityUUID,
 }
 
 /// A line of the Recipe version graph: a primary line when parentRef is null, else a change set.

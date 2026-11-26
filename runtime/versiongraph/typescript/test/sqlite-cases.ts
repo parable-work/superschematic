@@ -1,7 +1,9 @@
 // The SQLite adapter's own rules, which the scenarios do not reach or reach
 // only in passing: the version fences of refs and release pointers, a taken
-// name and a discarded ref's name free again, the history it writes, STRICT
-// tables and foreign keys, two graphs in one file, the name function, the
+// name and a discarded ref's name free again, the history it writes, the
+// released rows it rewrites, a root's primary lines and an entity's
+// patches, STRICT tables and foreign keys, two graphs in
+// one file, the name function, the
 // clock, its ids, the write lock a second connection waits on, the caller's
 // transaction, D16's rules for a behavior's SQL, the canonical vectors as a
 // round trip, and the bindings. Each case takes the binding it opens
@@ -36,6 +38,8 @@ import {
   SqliteAdapter,
   SqliteError,
   sqliteLayout,
+  sqliteReleasedLayout,
+  sqliteReleasedTable,
   sqliteTables,
   type SqliteClient,
   type SqliteOptions,
@@ -465,6 +469,306 @@ export const cases: Case[] = [
     },
   },
   {
+    name: "writeReleased rewrites one kind's released rows of one root: a replace, upserts by entity key and deletes, and no other root's, kind's or graph's",
+    run(binding) {
+      const s = setup(binding);
+      using([s], () => {
+        const other = new SqliteAdapter(descriptor, { graph: "menu" }).storage(s.client);
+        const mine = s.storage.transact((tx) => refAndCommit(tx));
+        const soup = s.storage.transact((tx) => refAndCommit(tx, "Soup"));
+        const theirs = other.transact((tx) => refAndCommit(tx));
+        const second = s.storage.transact((tx) =>
+          tx.insertCommit({
+            root: bread,
+            ref: mine.ref.id,
+            parent: mine.commit,
+            message: "",
+            schemaEpoch: 1,
+            contentHash: "0".repeat(64),
+            sequence: tx.nextSequence(bread),
+            actor: cook,
+          }),
+        ).id;
+        // A row as the engine hands it over: the canonical row of a tree,
+        // role columns and all.
+        const part = (key: string, heading: string, parent: string | null = null): string =>
+          JSON.stringify({ _version: 3, deleted_on_ref: false, entity_key: key, heading, id: "Row", parent_key: parent, rank: "V", recipe_id: bread, ref_id: "Ref" });
+        const data = (heading: string, parent: string | null = null): string => JSON.stringify({ heading, parent_key: parent, rank: "V" });
+        const rows = (): unknown[][] =>
+          s.client
+            .all(`SELECT graph, kind, root_id, entity_key, commit_id, sequence, data FROM "graph_released" ORDER BY graph, kind, root_id, entity_key`)
+            .map((r) => [r["graph"], r["kind"], r["root_id"], r["entity_key"], r["commit_id"], Number(r["sequence"]), r["data"]]);
+        const write = (storage: SyncStorage, root: string, commit: string, sequence: number, replace: boolean, upsert: string[], del: string[] = []): void => {
+          const wrote: unknown = storage.transact((tx) => tx.writeReleased("part", { root, commit, sequence, replace, upsert, delete: del }));
+          assert.equal(wrote, undefined);
+        };
+        // A first release replaces nothing and writes the tree. data holds
+        // the content columns alone, null for the parent a row lacks.
+        write(s.storage, bread, mine.commit, 1, true, [part("Mix", "Mix"), part("Bake", "Bake", "Mix"), '{"entity_key": "Rest", "heading": "Rest", "rank": "k"}']);
+        const first = [
+          ["recipe", "part", bread, "Bake", mine.commit, 1, data("Bake", "Mix")],
+          ["recipe", "part", bread, "Mix", mine.commit, 1, data("Mix")],
+          ["recipe", "part", bread, "Rest", mine.commit, 1, '{"heading":"Rest","parent_key":null,"rank":"k"}'],
+        ];
+        assert.deepEqual(rows(), first);
+        // Another root's rows, and another graph's of the same root and key.
+        write(s.storage, "Soup", soup.commit, 1, true, [part("Mix", "Stock")]);
+        write(other, bread, theirs.commit, 1, true, [part("Mix", "Menu")]);
+        const others = [
+          ["menu", "part", bread, "Mix", theirs.commit, 1, data("Menu")],
+          ["recipe", "part", "Soup", "Mix", soup.commit, 1, data("Stock")],
+        ];
+        const all = (mine: unknown[][]): unknown[][] => [others[0]!, ...mine, others[1]!];
+        assert.deepEqual(rows(), all(first));
+        // A later release: an upsert of a row the root has takes the new
+        // commit, sequence and data, one of a new entity is added, a delete
+        // removes its row and one of an entity the root lacks does nothing.
+        // A row it does not name keeps what an earlier release wrote. An
+        // entity key given hyphenated is stored in its canonical form.
+        write(s.storage, bread, second, 2, false, [part("Mix", "Mix well"), part(uuidHyphenated("Knead"), "Knead")], ["Bake", "Missing"]);
+        const later = [
+          ["recipe", "part", bread, "Knead", second, 2, data("Knead")],
+          ["recipe", "part", bread, "Mix", second, 2, data("Mix well")],
+          first[2]!,
+        ];
+        assert.deepEqual(rows(), all(later));
+        // What it refuses, each leaving every row as it was: a kind that
+        // keeps no released table, an unknown kind, a commit of another
+        // root or of another graph, and a row that is no object or has no
+        // entity key, after the replace that came before it.
+        const refuses = (what: string, pattern: RegExp, fn: (tx: SyncTx) => unknown) => {
+          assert.match(String(thrown(() => s.storage.transact(fn))), pattern, what);
+          assert.deepEqual(rows(), all(later), what);
+        };
+        const release = { root: bread, commit: second, sequence: 2, replace: true, upsert: [part("Mix", "Mix")], delete: [] };
+        refuses("a kind without a released table", /sqlite: write the released step rows: kind "step" keeps no released table/, (tx) => tx.writeReleased("step", release));
+        refuses("an unknown kind", /sqlite: unknown kind "crumb"/, (tx) => tx.writeReleased("crumb", release));
+        refuses("another root's commit", /is not a commit of root/, (tx) => tx.writeReleased("part", { ...release, commit: soup.commit }));
+        refuses("another graph's commit", /is not a commit of root/, (tx) => tx.writeReleased("part", { ...release, commit: theirs.commit }));
+        refuses("a row that is not an object", /a released part row is a JSON object/, (tx) => tx.writeReleased("part", { ...release, upsert: ["[]"] }));
+        refuses("a row without an entity key", /the released part row's entity key is a string/, (tx) =>
+          tx.writeReleased("part", { ...release, upsert: [part("Mix", "Mix"), '{"heading": "Lost", "rank": "V"}'] }),
+        );
+        refuses("a value that is not its column's class", /column rank/, (tx) => tx.writeReleased("part", { ...release, upsert: ['{"entity_key": "Mix", "rank": 7}'] }));
+        // A replace with no rows clears the root's rows of the kind, and
+        // no other root's or graph's.
+        write(s.storage, bread, second, 2, true, []);
+        assert.deepEqual(rows(), others);
+        // The table's commit is a commit: a row naming none is refused.
+        const err = thrown(() =>
+          s.client.run(`INSERT INTO "graph_released" (graph, kind, root_id, entity_key, commit_id, sequence, data) VALUES ('recipe', 'part', 'Bread', 'Mix', 'Missing', 1, '{}')`),
+        );
+        assert.ok(err instanceof SqliteError, String(err));
+      });
+    },
+  },
+  {
+    name: "a graph with no kind that keeps its released rows has no released table, and its release reads and writes nothing more",
+    run(binding) {
+      const d = JSON.parse(descriptor) as { kinds: { releasedTable?: string }[] };
+      for (const k of d.kinds) {
+        delete k.releasedTable;
+      }
+      const plain = JSON.stringify(d);
+      const db = binding.open(":memory:");
+      try {
+        const ran: string[] = [];
+        const logged: SqliteClient = {
+          exec: (sql) => db.client.exec!(sql),
+          run: (sql, params) => (ran.push(sql), db.client.run(sql, params)),
+          get: (sql, params) => (ran.push(sql), db.client.get(sql, params)),
+          all: (sql, params) => (ran.push(sql), db.client.all(sql, params)),
+        };
+        const adapter = new SqliteAdapter(plain, { graph });
+        adapter.createTables(logged);
+        const tables = db.client.all(`SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name`).map((r) => r["name"]);
+        assert.deepEqual(tables, sqliteTables.map(defaultTableName).sort());
+        const storage = adapter.storage(logged);
+        const engine = new SyncEngine(core, plain, storage, { schemaEpoch: 1, snapshotEvery: 3 });
+        const main = engine.createPrimary(cook, bread, "main");
+        let draft = engine.branch(cook, main.id, "draft");
+        draft = engine.save(cook, draft.id, draft.version, { part: { upsert: ['{"entity_key": "Intro", "rank": "V", "heading": "Intro"}'] } }).ref;
+        engine.commit(cook, draft.id, draft.version);
+        const merged = engine.merge(cook, draft.id, main.id, main.version, [], { tag: true });
+        ran.length = 0;
+        assert.equal(engine.release(cook, bread, merged.commit!.id, 0).version, 1);
+        // The commit and its snapshot's check, the commit's root check, the
+        // pointer and its image: no read of the pointer before the write.
+        assert.equal(ran.filter((sql) => sql.includes(`"graph_release"`)).length, 1, ran.join("\n"));
+        assert.ok(ran.every((sql) => !sql.includes("graph_released")));
+        assert.match(String(thrown(() => storage.transact((tx) => tx.writeReleased("part", { root: bread, commit: merged.commit!.id, sequence: 1, replace: true, upsert: [], delete: [] })))), /keeps no released table/);
+        // The released layout is one statement, which a caller may run
+        // itself, more than once.
+        const layout = sqliteReleasedLayout();
+        assert.equal(layout.length, 1);
+        assert.ok(!sqliteLayout().includes(layout[0]!));
+        db.client.run(layout[0]!);
+        db.client.run(layout[0]!);
+        assert.deepEqual(db.client.all(`SELECT name FROM pragma_table_info('graph_released') ORDER BY cid`).map((r) => r["name"]), [
+          "graph",
+          "kind",
+          "root_id",
+          "entity_key",
+          "commit_id",
+          "sequence",
+          "data",
+        ]);
+      } finally {
+        db.close();
+      }
+    },
+  },
+  {
+    name: "the released table is named only where it is kept: a name function for the layout's nine tables serves the layout and a graph that keeps no released rows",
+    run(binding) {
+      // A name function as a host builds one from the tables it declares:
+      // it has no name for the released table, or throws for it.
+      const asked: string[] = [];
+      const none = (local: string): string => {
+        asked.push(local);
+        return local === sqliteReleasedTable ? "" : `vg_${local}`;
+      };
+      const throws = (local: string): string => {
+        if (local === sqliteReleasedTable) {
+          throw new Error("the host declares no released table");
+        }
+        return `vg_${local}`;
+      };
+      const d = JSON.parse(descriptor) as { kinds: { releasedTable?: string }[] };
+      for (const k of d.kinds) {
+        delete k.releasedTable;
+      }
+      const plain = JSON.stringify(d);
+      for (const nine of [none, throws]) {
+        asked.length = 0;
+        assert.equal(sqliteLayout(nine).length, sqliteLayout().length);
+        assert.ok(!asked.includes(sqliteReleasedTable), "the layout asks for no released table");
+        // A graph that keeps no released rows: its adapter is built, makes
+        // its tables and runs a release without asking for the table.
+        const db = binding.open(":memory:");
+        try {
+          const adapter = new SqliteAdapter(plain, { graph, tableName: nine });
+          adapter.createTables(db.client);
+          const engine = new SyncEngine(core, plain, adapter.storage(db.client), { schemaEpoch: 1, snapshotEvery: 3 });
+          const main = engine.createPrimary(cook, bread, "main");
+          let draft = engine.branch(cook, main.id, "draft");
+          draft = engine.save(cook, draft.id, draft.version, { part: { upsert: ['{"entity_key": "Intro", "rank": "V", "heading": "Intro"}'] } }).ref;
+          engine.commit(cook, draft.id, draft.version);
+          const merged = engine.merge(cook, draft.id, main.id, main.version, [], { tag: true });
+          assert.equal(engine.release(cook, bread, merged.commit!.id, 0).version, 1);
+          assert.ok(!asked.includes(sqliteReleasedTable), "an adapter of a graph that keeps no released rows asks for no released table");
+          const tables = db.client.all(`SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name`).map((r) => r["name"]);
+          assert.deepEqual(tables, sqliteTables.map((local) => `vg_${local}`).sort());
+        } finally {
+          db.close();
+        }
+      }
+      // The released layout, and an adapter of the fixture's graph, whose
+      // part keeps its released rows, ask for the tenth and refuse a
+      // function that does not name it.
+      assert.match(String(thrown(() => sqliteReleasedLayout(none))), /TypeError: sqlite: the table name function named "released" ""/);
+      assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, tableName: none }))), /TypeError: sqlite: the table name function named "released" ""/);
+      assert.match(String(thrown(() => sqliteReleasedLayout(throws))), /the host declares no released table/);
+      assert.match(String(thrown(() => new SqliteAdapter(descriptor, { graph, tableName: throws }))), /the host declares no released table/);
+    },
+  },
+  {
+    name: "primaryRefs reads a root's live primary lines in the order they were created, and entityPatches one entity's patches among commits",
+    run(binding) {
+      let now = 1_800_000_000_000_000;
+      const clock = () => now++;
+      const s = setup(binding, { clock });
+      using([s], () => {
+        const other = new SqliteAdapter(descriptor, { graph: "menu", clock }).storage(s.client);
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs(bread)), []);
+        const line = (storage: SyncStorage, root: string, name: string, parent: string | null = null): Ref =>
+          storage.transact((tx) => tx.createRef({ root, parent, base: null, name, actor: cook }));
+        const main = line(s.storage, bread, "main");
+        line(s.storage, bread, "draft", main.id);
+        const dropped = line(s.storage, bread, "dropped");
+        const second = line(s.storage, bread, "second");
+        const soup = line(s.storage, "Soup", "main");
+        const theirs = line(other, bread, "main");
+        s.storage.transact((tx) => tx.discardRef(dropped.id, dropped.version, cook));
+        // Not a change set, a discarded line, another root's or another
+        // graph's, and the oldest first.
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs(bread)), [main, second]);
+        assert.deepEqual(s.storage.transact((tx) => tx.primaryRefs("Soup")), [soup]);
+        assert.deepEqual(other.transact((tx) => tx.primaryRefs(bread)), [theirs]);
+        assert.deepEqual(other.transact((tx) => tx.primaryRefs("Soup")), []);
+        // Two lines of one time read by id.
+        const frozen = new SqliteAdapter(descriptor, { graph: "frozen", clock: () => 7 }).storage(s.client);
+        const twins = [line(frozen, bread, "a"), line(frozen, bread, "b")].sort((a, b) => (a.id < b.id ? -1 : 1));
+        assert.deepEqual(frozen.transact((tx) => tx.primaryRefs(bread)), twins);
+
+        const patch = (kind: string, entityKey: string, operation: "ADD" | "UPDATE" | "DELETE") => ({ commit: "", kind, entityKey, entityId: "Row", entityVersion: 1, operation });
+        const write = (storage: SyncStorage, ref: Ref, all: ReturnType<typeof patch>[][]): string[] =>
+          storage.transact((tx) => {
+            const ids: string[] = [];
+            for (const patches of all) {
+              const commit = tx.insertCommit({
+                root: ref.root,
+                ref: ref.id,
+                parent: ids[ids.length - 1] ?? null,
+                message: "",
+                schemaEpoch: 1,
+                contentHash: "0".repeat(64),
+                sequence: null,
+                actor: cook,
+              });
+              tx.insertPatches(commit.id, patches);
+              ids.push(commit.id);
+            }
+            return ids;
+          });
+        const commits = write(s.storage, main, [
+          [patch("part", "Mix", "ADD"), patch("step", "Mix", "ADD"), patch("part", "Bake", "ADD")],
+          [patch("part", "Bake", "UPDATE")],
+          [patch("part", "Mix", "DELETE")],
+        ]);
+        const menu = write(other, theirs, [[patch("part", "Mix", "ADD")]]);
+        const read = (storage: SyncStorage, among: string[], kind: string, key: string): unknown[][] =>
+          storage
+            .transact((tx) => tx.entityPatches(among, kind, key))
+            .map((p) => [among.indexOf(p.commit), p.kind, p.entityKey, p.entityId, p.entityVersion, p.operation])
+            .sort((a, b) => Number(a[0]) - Number(b[0]));
+        assert.deepEqual(read(s.storage, commits, "part", "Mix"), [
+          [0, "part", "Mix", "Row", 1, "ADD"],
+          [2, "part", "Mix", "Row", 1, "DELETE"],
+        ]);
+        // Another kind's entity of the same key, another entity, a commit
+        // it was not given, and another graph's commit are left out.
+        assert.deepEqual(read(s.storage, commits, "step", "Mix"), [[0, "step", "Mix", "Row", 1, "ADD"]]);
+        assert.deepEqual(read(s.storage, commits, "part", "Bake"), [
+          [0, "part", "Bake", "Row", 1, "ADD"],
+          [1, "part", "Bake", "Row", 1, "UPDATE"],
+        ]);
+        assert.deepEqual(read(s.storage, [commits[1]!, commits[2]!], "part", "Mix"), [[1, "part", "Mix", "Row", 1, "DELETE"]]);
+        assert.deepEqual(read(s.storage, commits, "part", "Rest"), []);
+        assert.deepEqual(read(s.storage, commits, "cover", "Mix"), []);
+        assert.deepEqual(read(s.storage, menu, "part", "Mix"), []);
+        assert.deepEqual(read(other, [...menu, ...commits], "part", "Mix"), [[0, "part", "Mix", "Row", 1, "ADD"]]);
+        assert.deepEqual(read(s.storage, [], "part", "Mix"), []);
+        assert.match(String(thrown(() => s.storage.transact((tx) => tx.entityPatches(commits, "crumb", "Mix")))), /sqlite: unknown kind "crumb"/);
+        // The engine reads an entity's history from them: the line's
+        // commits that hold a patch of it, newest first.
+        assert.deepEqual(
+          s.storage.transact((tx) => tx.updateRef({ id: main.id, version: main.version, head: commits[2]!, base: null, seal: false, actor: cook })).head,
+          commits[2],
+        );
+        assert.deepEqual(
+          s.engine.entityHistory(bread, "part", "Mix").map((change) => [commits.indexOf(change.commit.id), change.operation]),
+          [
+            [2, "DELETE"],
+            [0, "ADD"],
+          ],
+        );
+        assert.deepEqual(s.engine.withWalkCeiling(2).entityHistory(bread, "part", "Mix").map((change) => change.operation), ["DELETE"]);
+        assert.deepEqual(s.engine.entityHistory("Soup", "part", "Mix"), []);
+      });
+    },
+  },
+  {
     name: "a unique index backs each key the adapter's own reads keep unique",
     run(binding) {
       const s = setup(binding);
@@ -691,7 +995,9 @@ export const cases: Case[] = [
       using([s], () => {
         const objects = s.client.all(`SELECT type, name, tbl_name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`);
         const tables = objects.filter((o) => o["type"] === "table").map((o) => o["name"]);
-        assert.deepEqual(tables, sqliteTables.map(tableName).sort());
+        // The fixture's part keeps its released rows, so the graph has the
+        // released table too.
+        assert.deepEqual(tables, [...sqliteTables, sqliteReleasedTable].map(tableName).sort());
         for (const o of objects) {
           assert.match(String(o["name"]), /^vg_[a-z_]+$/, `${String(o["type"])} ${String(o["name"])} is named by the function`);
           assert.match(String(o["tbl_name"]), /^vg_/);
@@ -702,7 +1008,7 @@ export const cases: Case[] = [
         s.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] } });
         assert.equal(s.client.get(`SELECT count(*) AS n FROM "vg_member"`)?.["n"], 1);
         // The layout's statements name each object with the function, and the default's start with graph_.
-        for (const statement of sqliteLayout()) {
+        for (const statement of [...sqliteLayout(), ...sqliteReleasedLayout()]) {
           assert.match(statement, /^CREATE (UNIQUE )?(TABLE|INDEX) IF NOT EXISTS "graph_[a-z_]+" /);
         }
       });
@@ -1008,11 +1314,22 @@ export const cases: Case[] = [
         const main = inCallerTransaction(db.client, () => engine.createPrimary(cook, bread, "main"));
         const draft = inCallerTransaction(db.client, () => engine.branch(cook, main.id, "draft"));
         const saved = inCallerTransaction(db.client, () =>
-          engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Mix", "Mix")] }, utensil: { upsert: ['{"entity_key": "Whisk", "name": "whisk"}'] } }),
+          engine.save(cook, draft.id, draft.version, {
+            part: { upsert: ['{"entity_key": "Intro", "rank": "V", "heading": "Intro"}'] },
+            step: { upsert: [stepRow("Mix", "Mix")] },
+            utensil: { upsert: ['{"entity_key": "Whisk", "name": "whisk"}'] },
+          }),
         );
         const committed = inCallerTransaction(db.client, () => engine.commit(cook, draft.id, saved.ref.version));
         const merged = inCallerTransaction(db.client, () => engine.merge(cook, draft.id, main.id, main.version, [], { tag: true }));
         inCallerTransaction(db.client, () => engine.release(cook, bread, merged.commit!.id, 0));
+        // The release wrote the part's released row, as a behavior's write.
+        const released = `"${behaviorTable(sqliteReleasedTable)}"`;
+        assert.ok(ran.some(({ sql }) => sql.startsWith(`INSERT INTO ${released} `)));
+        assert.deepEqual(
+          db.client.all(`SELECT entity_key, commit_id, data FROM ${released}`).map((r) => ({ ...r })),
+          [{ entity_key: "Intro", commit_id: merged.commit!.id, data: '{"heading":"Intro","parent_key":null,"rank":"V"}' }],
+        );
         inCallerTransaction(db.client, () => engine.sweep({ actor: cook }));
         // Reads run as a behavior's read: only SELECT.
         const reader = new SyncEngine(core, descriptor, adapter.storage(checkedClient(db.client, "read", ran)), { schemaEpoch: 1, snapshotEvery: 3 });
@@ -1041,7 +1358,7 @@ export const cases: Case[] = [
   {
     name: "the layout's statements pass D16's checks for a behavior's migration, and create only the behavior's own tables and indexes",
     run(binding) {
-      const statements = sqliteLayout(behaviorTable);
+      const statements = [...sqliteLayout(behaviorTable), ...sqliteReleasedLayout(behaviorTable)];
       assert.equal(statements.length, new Set(statements).size);
       for (const statement of statements) {
         assert.equal(sqlRefusal(statement, behaviorPrefix, "migrate"), undefined, statement);

@@ -1676,7 +1676,643 @@ func NoteFromYAMLNonStrict(data []byte) (*Note, error) {
 	return decoded, nil
 }
 
-// Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
+// Part - A part of the recipe's write-up, nested under another part. Its rank is
+// a string order key, so Arrange places it among its siblings, and the
+// parts a recipe has released are kept in a table of their own, with the
+// index a reader of them uses.
+type Part struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Recipe Recipe `json:"recipe"`
+
+	ParentKey *IdentityUUID `json:"parentKey,omitempty"`
+
+	Rank string `json:"rank"`
+
+	Heading string `json:"heading"`
+
+	EntityKey *IdentityUUID `json:"entityKey,omitempty"`
+
+	Ref RecipeRef `json:"ref"`
+
+	DeletedOnRef bool `json:"deletedOnRef"`
+
+	Version int64 `json:"_version"`
+}
+
+// NewPart returns a Part with @default values from the schema applied.
+// Fields without a declared default are left at their Go zero value.
+func NewPart() *Part {
+	return &Part{
+		DeletedOnRef: false,
+	}
+}
+
+// applyDefaults seeds the declared @default values on the receiver. Existing
+// non-zero / wrapper-set fields are preserved so this is safe to call before
+// json.Unmarshal: keys present in the payload overwrite the defaults, while
+// keys absent from the payload retain them.
+func (t *Part) applyDefaults() {
+	if t == nil {
+		return
+	}
+	var zeroDeletedOnRef bool
+	if t.DeletedOnRef == zeroDeletedOnRef {
+		t.DeletedOnRef = false
+	}
+
+}
+
+// MaskSecrets returns a copy of Part with secret fields cleared.
+func (t *Part) MaskSecrets() *Part {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Part{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.ParentKey = t.ParentKey
+
+	masked.Rank = t.Rank
+
+	masked.Heading = t.Heading
+
+	masked.EntityKey = t.EntityKey
+
+	maskedValueRef := t.Ref.MaskSecrets()
+	if maskedValueRef != nil {
+		masked.Ref = *maskedValueRef
+	}
+
+	masked.DeletedOnRef = t.DeletedOnRef
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys Part's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Part) JSONFieldNames() []string {
+	return []string{"id", "recipe", "parentKey", "rank", "heading", "entityKey", "ref", "deletedOnRef", "_version"}
+}
+
+// Validate validates all fields in Part
+func (t *Part) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate parentKey (optional)
+
+	// Validate optional pointer field
+	if t.ParentKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.ParentKey, false); !valid {
+			errors.SetFieldErrors("parentKey", fieldErrs)
+		}
+	}
+
+	// Validate entityKey (optional)
+
+	// Validate optional pointer field
+	if t.EntityKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.EntityKey, false); !valid {
+			errors.SetFieldErrors("entityKey", fieldErrs)
+		}
+	}
+
+	// Validate ref (required nested type)
+
+	if fieldErrs := t.Ref.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ref", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Part to JSON
+func (t *Part) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Part
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals Part from JSON with validation
+func (t *Part) UnmarshalJSON(data []byte) error {
+	// Apply @default values first; standard json decoding preserves these
+	// for any keys absent from the payload while overwriting them when
+	// a value is provided explicitly.
+	t.applyDefaults()
+	type Alias Part
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Part into a map representation.
+func (t *Part) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Part to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Part to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Part from a map using lenient decoding.
+func (t *Part) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Part from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Part from a map and rejects unknown fields.
+func (t *Part) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Part from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Part from JSON and rejects unknown fields.
+func (t *Part) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Part from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Part from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Part from JSON using lenient decoding.
+func (t *Part) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Part from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Part from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Part from YAML and rejects unknown fields.
+func (t *Part) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Part from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Part from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Part from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Part from YAML using lenient decoding.
+func (t *Part) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Part from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Part from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Part from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// PartFromMap builds Part from a map using lenient decoding.
+func PartFromMap(value map[string]any) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromMapStrict builds Part from a map and rejects unknown fields.
+func PartFromMapStrict(value map[string]any) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromJSON builds Part from JSON and rejects unknown fields.
+func PartFromJSON(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromJSONNonStrict builds Part from JSON using lenient decoding.
+func PartFromJSONNonStrict(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromYAML builds Part from YAML and rejects unknown fields.
+func PartFromYAML(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartFromYAMLNonStrict builds Part from YAML using lenient decoding.
+func PartFromYAMLNonStrict(data []byte) (*Part, error) {
+	decoded := &Part{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleased - The released rows of Part: what each root's release of the Recipe version graph holds of it. A release rewrites them.
+type PartReleased struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Recipe Recipe `json:"recipe"`
+
+	EntityKey IdentityUUID `json:"entityKey"`
+
+	ParentKey *IdentityUUID `json:"parentKey,omitempty"`
+
+	Rank string `json:"rank"`
+
+	Heading string `json:"heading"`
+
+	Commit RecipeCommit `json:"commit"`
+
+	Sequence GenericInt64 `json:"sequence"`
+}
+
+// MaskSecrets returns a copy of PartReleased with secret fields cleared.
+func (t *PartReleased) MaskSecrets() *PartReleased {
+	if t == nil {
+		return nil
+	}
+
+	masked := &PartReleased{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.EntityKey = t.EntityKey
+
+	masked.ParentKey = t.ParentKey
+
+	masked.Rank = t.Rank
+
+	masked.Heading = t.Heading
+
+	maskedValueCommit := t.Commit.MaskSecrets()
+	if maskedValueCommit != nil {
+		masked.Commit = *maskedValueCommit
+	}
+
+	masked.Sequence = t.Sequence
+
+	return masked
+}
+
+// JSONFieldNames are the keys PartReleased's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*PartReleased) JSONFieldNames() []string {
+	return []string{"id", "recipe", "entityKey", "parentKey", "rank", "heading", "commit", "sequence"}
+}
+
+// Validate validates all fields in PartReleased
+func (t *PartReleased) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate entityKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.EntityKey, true); !valid {
+		errors.SetFieldErrors("entityKey", fieldErrs)
+	}
+
+	// Validate parentKey (optional)
+
+	// Validate optional pointer field
+	if t.ParentKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.ParentKey, false); !valid {
+			errors.SetFieldErrors("parentKey", fieldErrs)
+		}
+	}
+
+	// Validate commit (required nested type)
+
+	if fieldErrs := t.Commit.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("commit", fieldErrs)
+	}
+
+	// Validate sequence (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Sequence, true); !valid {
+		errors.SetFieldErrors("sequence", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals PartReleased to JSON
+func (t *PartReleased) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias PartReleased
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals PartReleased from JSON with validation
+func (t *PartReleased) UnmarshalJSON(data []byte) error {
+	type Alias PartReleased
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts PartReleased into a map representation.
+func (t *PartReleased) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert PartReleased to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert PartReleased to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes PartReleased from a map using lenient decoding.
+func (t *PartReleased) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode PartReleased from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes PartReleased from a map and rejects unknown fields.
+func (t *PartReleased) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes PartReleased from JSON and rejects unknown fields.
+func (t *PartReleased) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes PartReleased from JSON using lenient decoding.
+func (t *PartReleased) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode PartReleased from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode PartReleased from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes PartReleased from YAML and rejects unknown fields.
+func (t *PartReleased) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode PartReleased from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes PartReleased from YAML using lenient decoding.
+func (t *PartReleased) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode PartReleased from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode PartReleased from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode PartReleased from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// PartReleasedFromMap builds PartReleased from a map using lenient decoding.
+func PartReleasedFromMap(value map[string]any) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromMapStrict builds PartReleased from a map and rejects unknown fields.
+func PartReleasedFromMapStrict(value map[string]any) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromJSON builds PartReleased from JSON and rejects unknown fields.
+func PartReleasedFromJSON(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromJSONNonStrict builds PartReleased from JSON using lenient decoding.
+func PartReleasedFromJSONNonStrict(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromYAML builds PartReleased from YAML and rejects unknown fields.
+func PartReleasedFromYAML(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// PartReleasedFromYAMLNonStrict builds PartReleased from YAML using lenient decoding.
+func PartReleasedFromYAMLNonStrict(data []byte) (*PartReleased, error) {
+	decoded := &PartReleased{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// Recipe - A recipe: the stable identity its steps and ingredients are versioned
+// under. Its commits and its releases each enqueue a message.
 type Recipe struct {
 	Id *IdentityUUID `json:"id,omitempty"`
 
@@ -2253,6 +2889,275 @@ func RecipeCommitFromYAMLNonStrict(data []byte) (*RecipeCommit, error) {
 	return decoded, nil
 }
 
+// RecipeCommitted - Sent for each commit of a recipe's graph, in the transaction that wrote
+// it: a worker handles one recipe's commits at a time.
+type RecipeCommitted struct {
+	Root IdentityUUID `json:"root"`
+
+	Ref *IdentityUUID `json:"ref,omitempty"`
+
+	Commit IdentityUUID `json:"commit"`
+
+	Sequence *GenericInt64 `json:"sequence,omitempty"`
+}
+
+// MaskSecrets returns a copy of RecipeCommitted with secret fields cleared.
+func (t *RecipeCommitted) MaskSecrets() *RecipeCommitted {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RecipeCommitted{}
+
+	masked.Root = t.Root
+
+	masked.Ref = t.Ref
+
+	masked.Commit = t.Commit
+
+	masked.Sequence = t.Sequence
+
+	return masked
+}
+
+// JSONFieldNames are the keys RecipeCommitted's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipeCommitted) JSONFieldNames() []string {
+	return []string{"root", "ref", "commit", "sequence"}
+}
+
+// Validate validates all fields in RecipeCommitted
+func (t *RecipeCommitted) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate root (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.Root, true); !valid {
+		errors.SetFieldErrors("root", fieldErrs)
+	}
+
+	// Validate ref (optional)
+
+	// Validate optional pointer field
+	if t.Ref != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Ref, false); !valid {
+			errors.SetFieldErrors("ref", fieldErrs)
+		}
+	}
+
+	// Validate commit (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.Commit, true); !valid {
+		errors.SetFieldErrors("commit", fieldErrs)
+	}
+
+	// Validate sequence (optional)
+
+	// Validate optional pointer field
+	if t.Sequence != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Sequence, false); !valid {
+			errors.SetFieldErrors("sequence", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RecipeCommitted to JSON
+func (t *RecipeCommitted) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RecipeCommitted
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RecipeCommitted from JSON with validation
+func (t *RecipeCommitted) UnmarshalJSON(data []byte) error {
+	type Alias RecipeCommitted
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RecipeCommitted into a map representation.
+func (t *RecipeCommitted) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RecipeCommitted to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RecipeCommitted to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RecipeCommitted from a map using lenient decoding.
+func (t *RecipeCommitted) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeCommitted from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RecipeCommitted from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RecipeCommitted from a map and rejects unknown fields.
+func (t *RecipeCommitted) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeCommitted from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RecipeCommitted from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RecipeCommitted from JSON and rejects unknown fields.
+func (t *RecipeCommitted) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeCommitted from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeCommitted from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeCommitted from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RecipeCommitted from JSON using lenient decoding.
+func (t *RecipeCommitted) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeCommitted from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeCommitted from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeCommitted from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RecipeCommitted from YAML and rejects unknown fields.
+func (t *RecipeCommitted) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeCommitted from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeCommitted from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeCommitted from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RecipeCommitted from YAML using lenient decoding.
+func (t *RecipeCommitted) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeCommitted from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeCommitted from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeCommitted from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RecipeCommittedFromMap builds RecipeCommitted from a map using lenient decoding.
+func RecipeCommittedFromMap(value map[string]any) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeCommittedFromMapStrict builds RecipeCommitted from a map and rejects unknown fields.
+func RecipeCommittedFromMapStrict(value map[string]any) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeCommittedFromJSON builds RecipeCommitted from JSON and rejects unknown fields.
+func RecipeCommittedFromJSON(data []byte) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeCommittedFromJSONNonStrict builds RecipeCommitted from JSON using lenient decoding.
+func RecipeCommittedFromJSONNonStrict(data []byte) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeCommittedFromYAML builds RecipeCommitted from YAML and rejects unknown fields.
+func RecipeCommittedFromYAML(data []byte) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeCommittedFromYAMLNonStrict builds RecipeCommitted from YAML using lenient decoding.
+func RecipeCommittedFromYAMLNonStrict(data []byte) (*RecipeCommitted, error) {
+	decoded := &RecipeCommitted{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // RecipePatch - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
 type RecipePatch struct {
 	Id *IdentityUUID `json:"id,omitempty"`
@@ -2544,6 +3449,248 @@ func RecipePatchFromYAML(data []byte) (*RecipePatch, error) {
 // RecipePatchFromYAMLNonStrict builds RecipePatch from YAML using lenient decoding.
 func RecipePatchFromYAMLNonStrict(data []byte) (*RecipePatch, error) {
 	decoded := &RecipePatch{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublished - Sent when a recipe's release moves to another commit.
+type RecipePublished struct {
+	Root IdentityUUID `json:"root"`
+
+	Commit IdentityUUID `json:"commit"`
+}
+
+// MaskSecrets returns a copy of RecipePublished with secret fields cleared.
+func (t *RecipePublished) MaskSecrets() *RecipePublished {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RecipePublished{}
+
+	masked.Root = t.Root
+
+	masked.Commit = t.Commit
+
+	return masked
+}
+
+// JSONFieldNames are the keys RecipePublished's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RecipePublished) JSONFieldNames() []string {
+	return []string{"root", "commit"}
+}
+
+// Validate validates all fields in RecipePublished
+func (t *RecipePublished) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate root (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.Root, true); !valid {
+		errors.SetFieldErrors("root", fieldErrs)
+	}
+
+	// Validate commit (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.Commit, true); !valid {
+		errors.SetFieldErrors("commit", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RecipePublished to JSON
+func (t *RecipePublished) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RecipePublished
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RecipePublished from JSON with validation
+func (t *RecipePublished) UnmarshalJSON(data []byte) error {
+	type Alias RecipePublished
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RecipePublished into a map representation.
+func (t *RecipePublished) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RecipePublished to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RecipePublished to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RecipePublished from a map using lenient decoding.
+func (t *RecipePublished) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipePublished from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RecipePublished from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RecipePublished from a map and rejects unknown fields.
+func (t *RecipePublished) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipePublished from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RecipePublished from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RecipePublished from JSON and rejects unknown fields.
+func (t *RecipePublished) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipePublished from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipePublished from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipePublished from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RecipePublished from JSON using lenient decoding.
+func (t *RecipePublished) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipePublished from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipePublished from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipePublished from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RecipePublished from YAML and rejects unknown fields.
+func (t *RecipePublished) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipePublished from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipePublished from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipePublished from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RecipePublished from YAML using lenient decoding.
+func (t *RecipePublished) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipePublished from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipePublished from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipePublished from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RecipePublishedFromMap builds RecipePublished from a map using lenient decoding.
+func RecipePublishedFromMap(value map[string]any) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublishedFromMapStrict builds RecipePublished from a map and rejects unknown fields.
+func RecipePublishedFromMapStrict(value map[string]any) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublishedFromJSON builds RecipePublished from JSON and rejects unknown fields.
+func RecipePublishedFromJSON(data []byte) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublishedFromJSONNonStrict builds RecipePublished from JSON using lenient decoding.
+func RecipePublishedFromJSONNonStrict(data []byte) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublishedFromYAML builds RecipePublished from YAML and rejects unknown fields.
+func RecipePublishedFromYAML(data []byte) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipePublishedFromYAMLNonStrict builds RecipePublished from YAML using lenient decoding.
+func RecipePublishedFromYAMLNonStrict(data []byte) (*RecipePublished, error) {
+	decoded := &RecipePublished{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

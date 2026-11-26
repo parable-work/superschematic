@@ -2,14 +2,16 @@
 // scenario (test/replay.ts) does not reach: each source initSync takes, an
 // error a storage call throws back into an operation and caught where the
 // operation catches it, under both drivers, a SyncEngine's plain values and
-// errors, its refusal of storage that returns promises, and every
-// operation's refusal of an actor or an id before a transaction begins.
+// errors, its refusal of storage that returns promises, every operation's
+// refusal of an actor or an id before a transaction begins, and orderKeys.
 // None of it needs a database.
 import { expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   Engine,
+  errorCode,
   NotFoundError,
+  orderKeys,
   SyncEngine,
   VersionConflictError,
   type Ref,
@@ -276,6 +278,7 @@ const refusals: Record<string, { args: unknown[]; error: string }> = {
   createPrimary: { args: ["", root, "main"], error: "NoActorError" },
   branch: { args: ["", "Main", "draft"], error: "NoActorError" },
   save: { args: ["", "Draft", 1, {}], error: "NoActorError" },
+  arrange: { args: ["", "Draft", 1, "part", "Dough", ["Mix"]], error: "NoActorError" },
   commit: { args: ["", "Draft", 1], error: "NoActorError" },
   seal: { args: ["", "Draft", 1], error: "NoActorError" },
   merge: { args: ["", "Draft", "Main", 1], error: "NoActorError" },
@@ -287,6 +290,7 @@ const refusals: Record<string, { args: unknown[]; error: string }> = {
   compose: { args: ["not a uuid!"], error: "CanonicalError" },
   diff: { args: ["Tagged", "not a uuid!"], error: "CanonicalError" },
   history: { args: ["not a uuid!"], error: "CanonicalError" },
+  entityHistory: { args: ["Bread", "part", "not a uuid!"], error: "CanonicalError" },
   discard: { args: ["", "Draft", 1], error: "NoActorError" },
   sweep: { args: [{ actor: "" }], error: "NoActorError" },
 };
@@ -333,6 +337,52 @@ test("a refused actor or id opens no transaction: Engine rejects and SyncEngine 
     ),
   );
   expect([syncTransactions.count, asyncTransactions.count]).toEqual([0, 0]);
+});
+
+// arrange checks its kind, its parent and each of its keys before a
+// transaction begins too. A parent that is absent, null or empty is none,
+// so it passes the check and the operation reaches its transaction.
+test("arrange refuses an unknown kind, and a parent or a key that is not a UUID, before a transaction begins", async () => {
+  const cases: [unknown[], string][] = [
+    [[actor, "Draft", 1, "crumb", "Dough", ["Mix"]], 'engine: unknown kind "crumb"'],
+    [[actor, "Draft", 1, "part", "not a uuid!", ["Mix"]], "engine: id: "],
+    [[actor, "Draft", 1, "part", "Dough", ["Mix", "not a uuid!"]], "engine: entity key: "],
+  ];
+  const transactions = { count: 0 };
+  const sync = new SyncEngine(initSync(), descriptor, syncStorage({}, [], transactions)) as unknown as Operations;
+  const engine = new Engine(await init(), descriptor, asyncStorage({}, [], transactions)) as unknown as Operations;
+  for (const [args, message] of cases) {
+    expect(() => sync.arrange!(...args)).toThrow(message);
+    await expect(engine.arrange!(...args) as Promise<unknown>).rejects.toThrow(message);
+  }
+  expect(transactions.count).toBe(0);
+  for (const parent of [undefined, null, ""]) {
+    expect(() => sync.arrange!(actor, "Draft", 1, "part", parent, ["Mix"])).toThrow("the test answers no lockRef");
+  }
+  expect(transactions.count).toBe(3);
+});
+
+// orderKeys needs a core and no storage. An empty bound is an absent one,
+// and a refusal keeps the core's code.
+test("orderKeys makes the core's order keys, an empty bound being the start or the end", () => {
+  const graph = initSync();
+  expect(orderKeys(graph, undefined, undefined, 3)).toEqual(graph.orderKeys({ count: 3 }).keys);
+  expect(orderKeys(graph, null, "", 3)).toEqual(["F", "V", "k"]);
+  expect(orderKeys(graph, "", "F", 1)).toEqual(graph.orderKeys({ after: "F", count: 1 }).keys);
+  expect(orderKeys(graph, "F", null, 2)).toEqual(graph.orderKeys({ before: "F", count: 2 }).keys);
+  const [between] = orderKeys(graph, "F", "V", 1);
+  expect("F" < between! && between! < "V").toBe(true);
+  expect(orderKeys(graph, "F", "V", 0)).toEqual([]);
+  let refused: unknown;
+  try {
+    orderKeys(graph, "V", "F", 1);
+  } catch (err) {
+    refused = err;
+  }
+  expect(errorCode(refused)).toBe("no_order_key");
+  // A core whose typed operations read JSON another way gives the same keys.
+  const other = initSync(wasmBytes, { parse: (text) => ({ parsed: text }) });
+  expect(orderKeys(other, null, null, 3)).toEqual(["F", "V", "k"]);
 });
 
 // A SyncTx must return its values, not promises of them. Its methods with no

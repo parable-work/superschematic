@@ -1,7 +1,8 @@
 //! The C ABI, shared by the Go binding (cgo over the static archive) and the
 //! browser (the same exports built for `wasm32-unknown-unknown`).
 //!
-//! Each operation is `vg_<op>(in_ptr, in_len, out_ptr, out_len) -> i32`: the
+//! Each operation (`compose`, `merge`, `diff`, `content_hash`, `validate`,
+//! `order_keys`, `arrange`) is `vg_<op>(in_ptr, in_len, out_ptr, out_len) -> i32`: the
 //! input is `in_len` bytes of JSON at `in_ptr`, and the core writes a pointer
 //! to its output document and the document's length through `out_ptr` and
 //! `out_len`. It returns [`VG_OK`] with the operation's output, [`VG_ERROR`]
@@ -157,6 +158,34 @@ pub unsafe extern "C" fn vg_validate(
     call(Op::Validate, in_ptr, in_len, out_ptr, out_len)
 }
 
+/// `order_keys`: `{"before"?, "after"?, "count"}`.
+///
+/// # Safety
+/// As [`vg_compose`].
+#[no_mangle]
+pub unsafe extern "C" fn vg_order_keys(
+    in_ptr: *const u8,
+    in_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    call(Op::OrderKeys, in_ptr, in_len, out_ptr, out_len)
+}
+
+/// `arrange`: `{"descriptor", "tree", "kind", "parent"?, "keys"}`.
+///
+/// # Safety
+/// As [`vg_compose`].
+#[no_mangle]
+pub unsafe extern "C" fn vg_arrange(
+    in_ptr: *const u8,
+    in_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    call(Op::Arrange, in_ptr, in_len, out_ptr, out_len)
+}
+
 /// Release an output document.
 ///
 /// # Safety
@@ -218,7 +247,7 @@ mod tests {
     #[test]
     fn every_export_returns_its_document() {
         let tree = r#"{"step":[{"id":"r1","entity_key":"k1","ref":"a","deleted_on_ref":false,"_version":1,"title":"Boil"}]}"#;
-        let cases: [(Export, String); 5] = [
+        let cases: [(Export, String); 7] = [
             (
                 vg_compose,
                 format!(r#"{{"descriptor":{DESCRIPTOR},"base":{tree},"overlay":{{}}}}"#),
@@ -240,6 +269,14 @@ mod tests {
             (
                 vg_validate,
                 format!(r#"{{"descriptor":{DESCRIPTOR},"tree":{tree}}}"#),
+            ),
+            (vg_order_keys, r#"{"count":2}"#.to_owned()),
+            (
+                vg_arrange,
+                format!(
+                    r#"{{"descriptor":{ORDERED},"tree":{{}},"kind":"step","keys":[]}}"#,
+                    ORDERED = DESCRIPTOR.replace(r#""history""#, r#""order":"title","history""#)
+                ),
             ),
         ];
         for (export, input) in cases {

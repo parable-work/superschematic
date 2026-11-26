@@ -6,14 +6,34 @@ import {
   Relation,
   conflictUnit,
   graphMember,
+  index,
   jsonField,
   key,
+  queue,
   versionGraph,
   versioned
 } from "@superschematic/db";
 
-// A recipe: the stable identity its steps and ingredients are versioned under.
-@versionGraph({ schemaEpoch: 1, snapshotEvery: 3 })
+// Sent for each commit of a recipe's graph, in the transaction that wrote
+// it: a worker handles one recipe's commits at a time.
+@queue({ key: "root", serialize: true })
+export abstract class RecipeCommitted {
+  root: Identity.UUID;
+  ref: Nullable<Identity.UUID>;
+  commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
+}
+
+// Sent when a recipe's release moves to another commit.
+@queue({ key: "root", serialize: true })
+export abstract class RecipePublished {
+  root: Identity.UUID;
+  commit: Identity.UUID;
+}
+
+// A recipe: the stable identity its steps and ingredients are versioned
+// under. Its commits and its releases each enqueue a message.
+@versionGraph({ schemaEpoch: 1, snapshotEvery: 3, enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })
 export abstract class Recipe {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -68,6 +88,22 @@ export abstract class Note {
   recipe: Relation<Recipe>;
   replyTo: Nullable<Identity.UUID>;
   body: string;
+}
+
+// A part of the recipe's write-up, nested under another part. Its rank is
+// a string order key, so Arrange places it among its siblings, and the
+// parts a recipe has released are kept in a table of their own, with the
+// index a reader of them uses.
+@versioned
+@index<Part>(["parentKey", "rank"])
+@graphMember({ graph: Recipe, parent: { key: "parentKey", of: Part }, order: "rank", released: true })
+export abstract class Part {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  parentKey: Nullable<Identity.UUID>;
+  rank: string;
+  heading: string;
 }
 
 // The recipe's cover photo: at most one per ref.

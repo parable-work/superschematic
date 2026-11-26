@@ -20,6 +20,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/graphops"
 	"github.com/parable-work/superschematic/internal/loader/idempotency"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
@@ -426,8 +427,9 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 }
 
 // databaseFor reads the API's database (ir.Schema.Database), whose tables
-// its @behaviorOperations sets and @behaviorWorker classes name (D103) and
-// its @tableOperation operations read and write (D106):
+// its @behaviorOperations sets and @behaviorWorker classes name (D103),
+// its @tableOperation operations read and write (D106) and whose version
+// graphs its @graphOperations sets serve (D138):
 // authDB when the database is the authDb and it is read already, else
 // through the dependency loader (WithDependencyLoader) or as the service
 // of that name beside this one. It reads nothing for a schema with no such
@@ -447,6 +449,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 	for _, set := range schema.OperationSets {
 		if set.IsBehaviorOperations() {
 			why = "whose tables its @behaviorOperations sets name"
+		}
+		if set.IsGraphOperations() {
+			why = "whose version graphs its @graphOperations sets serve"
 		}
 	}
 	if schema.HasTableOperations() {
@@ -653,6 +658,19 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// operation meets.
 	if verify.CheckBehaviorOperations(schema, vin).Err() == nil {
 		added, err := behaviorops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The operations of a version graph join their @graphOperations sets
+	// the same way (D138), with the types they take and return.
+	if verify.CheckGraphOperations(schema, vin).Err() == nil {
+		added, err := graphops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
 		}

@@ -338,6 +338,13 @@ type TypeScriptServer struct {
 	// WebAssembly module and emits its dist/.
 	Rules bool
 
+	// VersionGraphPool is the name the entrypoint imports the version-graph
+	// package's pgPool as (Naming.VersionGraphNpmPackage's ./postgres
+	// entry), which each graph's facade is built over, when an API the
+	// server serves has a @graphOperations set (D138); empty otherwise. The
+	// package then depends on the version-graph package.
+	VersionGraphPool string
+
 	// Docker is the Dockerfile's plan, nil when none is written, and
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
@@ -529,6 +536,12 @@ type TypeScriptAPI struct {
 	// a deriver's API, which mount no routes.
 	Behaviors bool
 
+	// Graphs are the version graphs whose operations the API serves
+	// (D138): main.ts hands the router each one's facade, built over
+	// Database's pool, as RouterOptions.graphs. None for a job's, a
+	// worker's and a deriver's API.
+	Graphs []TypeScriptGraphUse
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -659,6 +672,11 @@ type TypeScriptDatabase struct {
 	ORM        string
 	ORMModule  string
 	ORMPackage string
+
+	// Graphs are the facades of the database's version graphs the
+	// entrypoint imports (D138), from the ./versiongraph entry of its
+	// TypeScript types package, each once.
+	Graphs []*TypeScriptGraph
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -1042,6 +1060,18 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 		}
+		if o.HasGraphs() && !background && api.Database != nil {
+			// The router runs a version graph's operations (D138) through
+			// the graph's facade, which the entrypoint builds over the
+			// database's pool.
+			if s.VersionGraphPool == "" {
+				s.VersionGraphPool = taken.take("versionGraphPool")
+			}
+			for _, set := range o.GraphSets {
+				graph := api.Database.graph(set.Facade, o.GraphFacadeModule(), taken)
+				api.Graphs = append(api.Graphs, TypeScriptGraphUse{Member: set.Member, Graph: graph, Pool: s.VersionGraphPool})
+			}
+		}
 		if o.RouterNeedsORM() && !background {
 			// The router runs the behavior operations (D103) and the
 			// table operations (D106) through the repositories.
@@ -1278,6 +1308,15 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its behavior operations (D103) and its table operations (D106)
 		// run through the repositories Deps holds.
 		out = append(out, "orm: "+a.Deps+".orm")
+	}
+	if len(a.Graphs) > 0 {
+		// Its graph operations (D138) run through each graph's facade,
+		// built over the database's pool.
+		members := make([]string, 0, len(a.Graphs))
+		for _, use := range a.Graphs {
+			members = append(members, fmt.Sprintf("%s: new %s(%s(%s))", use.Member, use.Graph.Class, use.Pool, a.Database.Var))
+		}
+		out = append(out, "graphs: { "+strings.Join(members, ", ")+" }")
 	}
 	return out
 }
@@ -1559,6 +1598,11 @@ func (s *TypeScriptServer) planPackage() {
 		// Which run a behavior through the behaviors' core (D103).
 		deps[s.Naming.RulesNpmPackage] = "*"
 	}
+	if s.VersionGraphPool != "" {
+		// The entrypoint builds a graph's facade over the version-graph
+		// package's Postgres client (D138).
+		deps[s.Naming.VersionGraphNpmPackage] = "*"
+	}
 	for _, e := range s.Engines {
 		// main.ts opens the engine through the engine's ./server entry, with
 		// the engine document of the database's types (D58).
@@ -1608,6 +1652,12 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	if in.Paths.HTTPRuntimeTypeScript == "" {
 		return nil, "the naming file's [paths] http_runtime_typescript is unset, and the image builds the HTTP runtime's package from a checkout, since none is published yet; set it to a superschematic checkout's runtime/http/typescript", nil
+	}
+	if s.servesGraphs() {
+		// A graph's facade loads the version-graph core's WebAssembly module,
+		// which no published package ships and no stage of the image
+		// builds yet.
+		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships and the generated image does not build yet; run it from the checkout, or build its image from a Dockerfile of the project's own", s.Kind, s.Naming.VersionGraphNpmPackage), nil
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {

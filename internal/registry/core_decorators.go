@@ -293,6 +293,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// class form: the routes run no implementation that could check what
 	// the caller owns.
 	specs = append(specs, behaviorOperationsDecorator(), behaviorWorkerDecorator())
+	// A version graph's operations (D138), on a class with no members
+	// (core_graph_operations.go), which takes the same clause.
+	specs = append(specs, graphOperationsDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{

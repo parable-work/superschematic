@@ -3,7 +3,9 @@
 //! `postgres` client: an engine with no storage of its own runs each
 //! operation through `Engine::run_on` over a storage bound for the call,
 //! inside the host's transaction, and the host's commit keeps the call's
-//! writes and its rollback undoes them. The Postgres tests read
+//! writes and its rollback undoes them. The layout's released rows (D139)
+//! and the reads an entity's history is built from (D138) are held to the
+//! cases every adapter takes, in both dialects. The Postgres tests read
 //! SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL and skip without it.
 //!
 //! The synchronous `postgres` client blocks on a runtime of its own, so
@@ -17,8 +19,9 @@ use serde_json::json;
 use superschematic_versiongraph_engine::fixed::{
     self, ClientError, Dialect, FixedLayout, HostClient, HostTx, Options, SqlValue,
 };
+use superschematic_versiongraph_engine::storage::ReleasedWrite;
 use superschematic_versiongraph_engine::{
-    CommitOptions, Edits, Engine, Error, KindEdits, Options as EngineOptions, Ref,
+    ready, CommitOptions, Edits, Engine, Error, KindEdits, Options as EngineOptions, Ref,
 };
 
 use support::hosts::{PostgresHost, PostgresSchema};
@@ -244,4 +247,248 @@ fn a_hosts_transaction_on_postgres_runs_each_operation_inside_it() {
         .expect("the call goes on");
     assert_eq!(ref_names(&mut host), ["draft", "main", "main"]);
     tx.commit().expect("commit the third call");
+}
+
+/// The fixed layout's adapter of graph `graph`, in `dialect`.
+fn adapter_of(dialect: Dialect, graph: &str) -> Arc<FixedLayout> {
+    let options = Options {
+        graph: graph.to_owned(),
+        ..Options::default()
+    };
+    Arc::new(
+        FixedLayout::with_dialect(dialect, &support::descriptor(), options)
+            .expect("the fixture's adapter"),
+    )
+}
+
+/// Every released part of a graph, as the host reads them from the released
+/// table under its default name. Each row's `data` is the canonical object
+/// of the part's content columns alone, its members sorted, a column the
+/// row lacked null.
+fn released_parts(host: &mut dyn HostTx, graph: &str) -> Vec<support::ReleasedPart> {
+    let args = [
+        SqlValue::Text(graph.to_owned()),
+        SqlValue::Text("part".to_owned()),
+    ];
+    host.query(
+        "SELECT root_id, entity_key, commit_id, sequence, data FROM \"graph_released\" WHERE graph = ? AND kind = ?",
+        &args,
+    )
+    .expect("read the released rows")
+    .into_iter()
+    .map(|row| match row.as_slice() {
+        [SqlValue::Text(root), SqlValue::Text(key), SqlValue::Text(commit), SqlValue::Int(sequence), SqlValue::Text(data)] =>
+        {
+            let members: serde_json::Value = serde_json::from_str(data).expect("data is JSON");
+            let text = |name: &str| members[name].as_str().map(str::to_owned);
+            let part = support::ReleasedPart {
+                root: root.clone(),
+                key: key.clone(),
+                heading: text("heading").expect("a heading"),
+                rank: text("rank").expect("a rank"),
+                parent: text("parent_key"),
+                commit: commit.clone(),
+                sequence: *sequence,
+            };
+            let canonical =
+                json!({"heading": part.heading, "parent_key": part.parent, "rank": part.rank});
+            assert_eq!(*data, canonical.to_string(), "the data of {key}");
+            part
+        }
+        other => panic!("a released row is {other:?}"),
+    })
+    .collect()
+}
+
+/// Runs one `write_released` of an adapter in a transaction of its own
+/// inside the host's.
+fn write_released(
+    adapter: &Arc<FixedLayout>,
+    host: &mut dyn HostTx,
+    kind: &str,
+    write: ReleasedWrite,
+) -> Result<(), Error> {
+    let storage = adapter.bind(HostClient::new(host));
+    ready(support::write_released(&storage, kind, write)).expect("one poll")
+}
+
+/// `write_released` on the fixed layout (D139), inside a host's
+/// transaction: the cases every adapter is held to, each row's `data` the
+/// canonical object of its content columns; then what the layout alone
+/// refuses, a commit of another root and a commit of another graph; and
+/// another graph's rows of the same root and kind, which a replace leaves.
+fn released_rows(dialect: Dialect, host: &mut dyn HostTx) {
+    fn commits(adapter: &Arc<FixedLayout>, host: &mut dyn HostTx) -> ([String; 2], String) {
+        let storage = adapter.bind(HostClient::new(host));
+        ready(support::released_commits(&storage))
+            .expect("one poll")
+            .expect("the commits")
+    }
+    let (recipe, menu) = (adapter_of(dialect, "recipe"), adapter_of(dialect, "menu"));
+    // Another graph of the same tables, with a row of the same root, kind
+    // and entity.
+    let (menu_bread, _) = commits(&menu, host);
+    let of_menu = |commit: &str| ReleasedWrite {
+        root: "Bread".to_owned(),
+        commit: commit.to_owned(),
+        sequence: 1,
+        replace: true,
+        upsert: vec![json!({"entity_key": "Mix", "rank": "V", "heading": "Today's menu"})],
+        ..ReleasedWrite::default()
+    };
+    write_released(&menu, host, "part", of_menu(&menu_bread[0]))
+        .expect("write another graph's row");
+    let menus = released_parts(host, "menu");
+    assert_eq!(menus.len(), 1, "{menus:?}");
+
+    let (bread, soup) = commits(&recipe, host);
+    for case in support::released_cases(&bread, &soup) {
+        let result = write_released(&recipe, host, case.kind, case.write.clone());
+        support::check_released(&case, result, released_parts(host, "recipe"));
+    }
+    let left = released_parts(host, "recipe");
+    let missing = "Missing".to_owned();
+    for (what, adapter, commit) in [
+        ("a commit of another root", &recipe, &soup),
+        ("a commit of another graph", &menu, &bread[0]),
+        ("a commit that does not exist", &recipe, &missing),
+    ] {
+        match write_released(adapter, host, "part", of_menu(commit)) {
+            Err(error) => assert!(
+                error.to_string().contains("is not a commit of root"),
+                "{what}: {error}"
+            ),
+            Ok(()) => panic!("{what}: written"),
+        }
+    }
+    assert_eq!(released_parts(host, "recipe"), left);
+    assert_eq!(released_parts(host, "menu"), menus);
+}
+
+#[cfg(feature = "rusqlite")]
+#[test]
+fn write_released_rewrites_one_roots_rows_of_a_kind_on_sqlite() {
+    use superschematic_versiongraph_engine::sqlite;
+    use support::hosts::RusqliteHost;
+
+    let mut connection = rusqlite::Connection::open_in_memory().expect("open a database");
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .expect("foreign keys on");
+    let name = &fixed::default_table_name;
+    let released = sqlite::released_layout(name).expect("the released layout");
+    for statement in sqlite::layout(name)
+        .expect("the layout")
+        .into_iter()
+        .chain(released)
+    {
+        connection
+            .execute_batch(&statement)
+            .expect("create the layout");
+    }
+    let tx = connection.transaction().expect("the host's transaction");
+    released_rows(Dialect::Sqlite, &mut RusqliteHost { connection: &tx });
+    tx.commit().expect("commit");
+}
+
+#[test]
+fn write_released_rewrites_one_roots_rows_of_a_kind_on_the_fixed_layout_on_postgres() {
+    let Some(dsn) = support::database(
+        "write_released_rewrites_one_roots_rows_of_a_kind_on_the_fixed_layout_on_postgres",
+    ) else {
+        return;
+    };
+    let schema = PostgresSchema::create(&dsn, "vg_rust_host");
+    let mut client = schema.connect();
+    // The released table's statement runs again without harm, as the
+    // layout's do.
+    let name = &fixed::default_table_name;
+    let mut layout = fixed::layout(Dialect::Postgres, name).expect("the layout");
+    layout.extend(fixed::released_layout(Dialect::Postgres, name).expect("the released layout"));
+    for _ in 0..2 {
+        let mut tx = client.transaction().expect("a transaction");
+        for statement in &layout {
+            tx.batch_execute(statement).expect("create the layout");
+        }
+        tx.commit().expect("commit the layout");
+    }
+    let mut tx = client.transaction().expect("the host's transaction");
+    released_rows(
+        Dialect::Postgres,
+        &mut PostgresHost {
+            transaction: &mut tx,
+        },
+    );
+    tx.commit().expect("commit");
+}
+
+/// The fixed layout's two reads an entity's history is built from (D138),
+/// inside a host's transaction: the cases every adapter is held to, over an
+/// adapter whose clock moves at each read, so the refs it writes were
+/// created at different times. They run in another graph of the same
+/// tables first, whose lines of the same roots the second run does not
+/// read.
+fn entity_reads(dialect: Dialect, host: &mut dyn HostTx) {
+    for graph in ["menu", "recipe"] {
+        let now = std::sync::atomic::AtomicI64::new(1_800_000_000_000_000);
+        let options = Options {
+            graph: graph.to_owned(),
+            clock: Some(Arc::new(move || {
+                now.fetch_add(1_000_000, std::sync::atomic::Ordering::SeqCst)
+            })),
+            ..Options::default()
+        };
+        let adapter = Arc::new(
+            FixedLayout::with_dialect(dialect, &support::descriptor(), options)
+                .expect("the fixture's adapter"),
+        );
+        let storage = adapter.bind(HostClient::new(&mut *host));
+        ready(support::check_entity_reads(&storage)).expect("one poll");
+    }
+}
+
+#[cfg(feature = "rusqlite")]
+#[test]
+fn primary_refs_and_entity_patches_read_an_entitys_history_on_sqlite() {
+    use superschematic_versiongraph_engine::sqlite;
+    use support::hosts::RusqliteHost;
+
+    let mut connection = rusqlite::Connection::open_in_memory().expect("open a database");
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .expect("foreign keys on");
+    for statement in sqlite::layout(&fixed::default_table_name).expect("the layout") {
+        connection
+            .execute_batch(&statement)
+            .expect("create the layout");
+    }
+    let tx = connection.transaction().expect("the host's transaction");
+    entity_reads(Dialect::Sqlite, &mut RusqliteHost { connection: &tx });
+    tx.commit().expect("commit");
+}
+
+#[test]
+fn primary_refs_and_entity_patches_read_an_entitys_history_on_the_fixed_layout_on_postgres() {
+    let Some(dsn) = support::database(
+        "primary_refs_and_entity_patches_read_an_entitys_history_on_the_fixed_layout_on_postgres",
+    ) else {
+        return;
+    };
+    let schema = PostgresSchema::create(&dsn, "vg_rust_host");
+    let mut client = schema.connect();
+    let mut tx = client.transaction().expect("a transaction");
+    for statement in
+        fixed::layout(Dialect::Postgres, &fixed::default_table_name).expect("the layout")
+    {
+        tx.batch_execute(&statement).expect("create the layout");
+    }
+    tx.commit().expect("commit the layout");
+    let mut tx = client.transaction().expect("the host's transaction");
+    entity_reads(
+        Dialect::Postgres,
+        &mut PostgresHost {
+            transaction: &mut tx,
+        },
+    );
+    tx.commit().expect("commit");
 }

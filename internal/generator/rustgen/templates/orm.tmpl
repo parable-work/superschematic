@@ -27,6 +27,13 @@
 //!
 //! {{.Type}} has no repository on SQLite: {{.Reason}}.
 {{- end}}
+{{- range .ORM.Tables}}
+{{- if .ReadOnly}}
+//!
+//! `{{.Type}}` holds the released rows of `{{.ReleasedOf}}`, which the graph's
+//! release owns (D139): its repository reads them and has no write.
+{{- end}}
+{{- end}}
 {{- if .BindsRules}}
 //!
 //! {{sentenceList .ORM.RulesTables}} compose{{if eq (len .ORM.RulesTables) 1}}s{{end}} behaviors (D103): a create, an
@@ -99,6 +106,7 @@ pub struct {{.Type}}Row {
     pub {{.Name}}: {{.Type}},
 {{- end}}
 }
+{{- if not .ReadOnly}}
 
 /// What a create of a row of `{{.Type}}` sets; a member left unset takes its
 /// column's default, or the schema's.
@@ -126,8 +134,9 @@ pub struct {{.Type}}Update {
     pub {{.Name}}: Option<{{.Type}}>,
 {{- end}}
 }
+{{- end}}
 
-/// The rows of `{{.Type}}` a read or a write finds: each member set is one
+/// The rows of `{{.Type}}` a read{{if not .ReadOnly}} or a write{{end}} finds: each member set is one
 /// condition, all of them ANDed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct {{.Type}}Filter {
@@ -320,9 +329,58 @@ pub mod postgres {
     use deadpool_postgres::GenericClient;
 {{- end}}
 {{range .ORM.Tables}}
+{{- if .ReadOnly}}
+    /// The repository of `{{.Type}}` on a Postgres client, which only reads:
+    /// the table holds the released rows of `{{.ReleasedOf}}`, and the graph's
+    /// release owns them (D139).
+    pub struct {{.Type}}Repository<'a, C>(
+        // The table has no create and no update, so the runtime's
+        // repository is given `()` for what each sets.
+        orm::postgres::Typed<'a, C, {{.Type}}Row, (), (), {{.Type}}Filter, {{.KeyType}}>,
+    );
+
+    impl<C: {{if $.BindsRules}}CoreClient{{else}}GenericClient + Sync{{end}}> {{.Type}}Repository<'_, C> {
+        /// The row whose key is `key`; [`Error::NotFound`] when there is
+        /// none.
+        pub async fn get_one(&self, key: &{{.KeyType}}) -> Result<{{.Type}}Row, orm::Error> {
+            self.0.get_one(key).await
+        }
+
+        /// The first row `filter` finds, in the options' order, or none.
+        pub async fn find_one(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &FindOptions,
+        ) -> Result<Option<{{.Type}}Row>, orm::Error> {
+            self.0.find_one(filter, options).await
+        }
+
+        /// The rows `filter` finds, in the options' order, a limit of them
+        /// at a time, and how many it finds in all, unless the options skip
+        /// the count.
+        pub async fn find_many(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &FindOptions,
+        ) -> Result<Found<{{.Type}}Row>, orm::Error> {
+            self.0.find_many(filter, options).await
+        }
+
+        /// A page of the rows `filter` finds, in the sort's order, after the
+        /// key of the page before (D60, amended).
+        pub async fn find_page(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &PageOptions,
+        ) -> Result<RowPage<{{.Type}}Row>, orm::Error> {
+            self.0.find_page(filter, options).await
+        }
+    }
+{{- else}}
     /// The repository of `{{.Type}}` on a Postgres client.
     pub type {{.Type}}Repository<'a, C> =
         orm::postgres::Typed<'a, C, {{.Type}}Row, {{.Type}}Create, {{.Type}}Update, {{.Type}}Filter, {{.KeyType}}>;
+{{- end}}
 {{end}}
 {{- if .BindsRules}}
     /// What runs the behaviors of the tables that compose them on
@@ -596,9 +654,10 @@ pub mod postgres {
             &self.0
         }
 {{range .ORM.Tables}}
-        /// The repository of `{{.Type}}`.
+        /// The repository of `{{.Type}}`{{if .ReadOnly}}, which only reads: the graph's
+        /// release owns the rows (D139){{end}}.
         pub fn {{.Fn}}(&self) -> Result<{{.Type}}Repository<'_, C>, orm::Error> {
-            self.0.typed("{{.Type}}")
+            self.0.typed("{{.Type}}"){{if .ReadOnly}}.map({{.Type}}Repository){{end}}
         }
 {{- $table := .}}
 {{- range .Uses}}
@@ -639,9 +698,58 @@ pub mod sqlite {
     use rules::adapter;
 {{- end}}
 {{range .ORM.Tables}}
+{{- if .ReadOnly}}
+    /// The repository of `{{.Type}}` on a SQLite connection, which only reads:
+    /// the table holds the released rows of `{{.ReleasedOf}}`, and the graph's
+    /// release owns them (D139).
+    pub struct {{.Type}}Repository<'a>(
+        // The table has no create and no update, so the runtime's
+        // repository is given `()` for what each sets.
+        orm::sqlite::Typed<'a, {{.Type}}Row, (), (), {{.Type}}Filter, {{.KeyType}}>,
+    );
+
+    impl {{.Type}}Repository<'_> {
+        /// The row whose key is `key`; [`Error::NotFound`] when there is
+        /// none.
+        pub fn get_one(&self, key: &{{.KeyType}}) -> Result<{{.Type}}Row, orm::Error> {
+            self.0.get_one(key)
+        }
+
+        /// The first row `filter` finds, in the options' order, or none.
+        pub fn find_one(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &FindOptions,
+        ) -> Result<Option<{{.Type}}Row>, orm::Error> {
+            self.0.find_one(filter, options)
+        }
+
+        /// The rows `filter` finds, in the options' order, a limit of them
+        /// at a time, and how many it finds in all, unless the options skip
+        /// the count.
+        pub fn find_many(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &FindOptions,
+        ) -> Result<Found<{{.Type}}Row>, orm::Error> {
+            self.0.find_many(filter, options)
+        }
+
+        /// A page of the rows `filter` finds, in the sort's order, after the
+        /// key of the page before (D60, amended).
+        pub fn find_page(
+            &self,
+            filter: Option<&{{.Type}}Filter>,
+            options: &PageOptions,
+        ) -> Result<RowPage<{{.Type}}Row>, orm::Error> {
+            self.0.find_page(filter, options)
+        }
+    }
+{{- else}}
     /// The repository of `{{.Type}}` on a SQLite connection.
     pub type {{.Type}}Repository<'a> =
         orm::sqlite::Typed<'a, {{.Type}}Row, {{.Type}}Create, {{.Type}}Update, {{.Type}}Filter, {{.KeyType}}>;
+{{- end}}
 {{end}}
 {{- if .BindsRules}}
     /// What runs the behaviors of the tables that compose them on SQLite
@@ -885,9 +993,10 @@ pub mod sqlite {
             &self.0
         }
 {{range .ORM.Tables}}
-        /// The repository of `{{.Type}}`.
+        /// The repository of `{{.Type}}`{{if .ReadOnly}}, which only reads: the graph's
+        /// release owns the rows (D139){{end}}.
         pub fn {{.Fn}}(&self) -> Result<{{.Type}}Repository<'_>, orm::Error> {
-            self.0.typed("{{.Type}}")
+            self.0.typed("{{.Type}}"){{if .ReadOnly}}.map({{.Type}}Repository){{end}}
         }
 {{- $table := .}}
 {{- range .Uses}}

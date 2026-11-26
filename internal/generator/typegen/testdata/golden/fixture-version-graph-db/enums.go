@@ -49,6 +49,9 @@ const (
 	// RecipeEntityKindNote
 	RecipeEntityKind_Note RecipeEntityKind = "note"
 
+	// RecipeEntityKindPart
+	RecipeEntityKind_Part RecipeEntityKind = "part"
+
 	// RecipeEntityKindStep
 	RecipeEntityKind_Step RecipeEntityKind = "step"
 
@@ -75,6 +78,9 @@ func (e RecipeEntityKind) IsValid() bool {
 		return true
 
 	case RecipeEntityKind_Note:
+		return true
+
+	case RecipeEntityKind_Part:
 		return true
 
 	case RecipeEntityKind_Step:
@@ -108,6 +114,7 @@ func (RecipeEntityKind) Values() []RecipeEntityKind {
 		RecipeEntityKind_Cover,
 		RecipeEntityKind_Ingredient,
 		RecipeEntityKind_Note,
+		RecipeEntityKind_Part,
 		RecipeEntityKind_Step,
 		RecipeEntityKind_Tasting,
 		RecipeEntityKind_Utensil,

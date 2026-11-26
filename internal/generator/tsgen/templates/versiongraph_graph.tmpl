@@ -129,7 +129,7 @@ const {{lowerFirst $g.Name}}Graph: FacadeGraph<{{$g.Name}}Kinds> = {
  * through a ref takes the ref's expected version and fails with
  * VersionConflictError when the ref has moved on.
  */
-export class {{$g.Name}}Graph extends VersionGraphFacade<{{$g.Name}}Kinds, {{$g.Name}}EntityKind, {{$g.Name}}PatchOperation> {
+export class {{$g.Name}}Graph extends VersionGraphFacade<{{$g.Name}}Kinds, {{$g.Name}}EntityKind, {{$g.Name}}PatchOperation, {{$g.Ordered}}> {
   constructor(client: Client, options: FacadeOptions = {}) {
     super({{lowerFirst $g.Name}}Graph, client, options);
   }

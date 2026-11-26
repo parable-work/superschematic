@@ -76,12 +76,12 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the generated facade's tests: %v\n%s", err, out)
 	}
-	for _, name := range []string{"test_facade_keeps_every_class", "test_facade_merges_releases_rebases_and_sweeps"} {
+	for _, name := range []string{"test_facade_keeps_every_class", "test_facade_arranges_a_kind_ordered_by_a_string_key", "test_facade_merges_releases_rebases_and_sweeps"} {
 		if !strings.Contains(string(out), name+" PASSED") {
 			t.Fatalf("the generated package did not pass %s:\n%s", name, out)
 		}
 	}
-	t.Logf("the generated package passed test_facade_keeps_every_class and test_facade_merges_releases_rebases_and_sweeps against Postgres")
+	t.Logf("the generated package passed its three facade tests against Postgres")
 }
 
 // versionGraphFacadeTest is the pytest file that imports the generated
@@ -95,7 +95,7 @@ import psycopg
 import pytest
 from psycopg.conninfo import make_conninfo
 
-from MODULE.types import Step, Tasting
+from MODULE.types import Part, Step, Tasting
 from MODULE.versiongraph_recipe import RecipeEdits, RecipeGraph
 from superschematic_versiongraph.facade import (
     CommitOptions,
@@ -236,6 +236,65 @@ def land(g, main, name, edits, options=CommitOptions()):
     saved = g.save(draft.id, draft.version, edits)
     g.commit(draft.id, saved.ref.version)
     return g.merge(draft.id, main, version(g, main), options=options)
+
+
+def test_facade_arranges_a_kind_ordered_by_a_string_key(graph):
+    """A kind ordered by a string key (D137): parts saved under the keys
+    order_keys makes, and one moved with arrange, which writes that row
+    alone."""
+    g, sql = graph
+    main = g.create_primary(BREAD, "main")
+    draft = g.branch(main.id, "parts")
+    keys = g.order_keys(None, None, 3)
+    assert keys == ["F", "V", "k"]
+    assert g.order_keys("V", "W", 1) == ["VV"]
+    with pytest.raises(Exception) as none:
+        g.order_keys("V", "V", 1)
+    assert error_code(none.value) == "no_order_key"
+
+    def part(heading, rank):
+        return Part.model_validate_json(json.dumps({"heading": heading, "rank": rank}))
+
+    saved = g.save(
+        draft.id,
+        draft.version,
+        RecipeEdits(part=TypedKindEdits(upsert=[part("Mix", keys[0]), part("Knead", keys[1]), part("Bake", keys[2])])),
+    )
+    mix, knead, bake = (p.entity_key for p in saved.saved.part)
+    arranged = g.arrange(draft.id, saved.ref.version, "part", None, [bake, mix, knead])
+    assert [(p.heading, p.rank) for p in arranged.saved.part] == [("Bake", "7")]
+    assert arranged.ref.version == saved.ref.version + 1
+    assert [p.heading for p in g.compose(draft.id).part] == ["Bake", "Mix", "Knead"]
+    with pytest.raises(Exception) as lacking:
+        g.arrange(draft.id, arranged.ref.version, "part", None, [bake, mix])
+    assert error_code(lacking.value) == "invalid_arrangement"
+    with pytest.raises(Exception) as integer:
+        g.arrange(draft.id, arranged.ref.version, "step", None, [])
+    assert error_code(integer.value) == "order_not_a_key"
+    with pytest.raises(Exception) as primary:
+        g.arrange(main.id, main.version, "part", None, [])
+    assert error_code(primary.value) == "primary_merge_only"
+
+    # Part keeps its released rows (D139): a release writes them into
+    # part_released, in its transaction.
+    g.commit(draft.id, arranged.ref.version, CommitOptions("parts"))
+    merged = g.merge(draft.id, main.id, main.version, options=CommitOptions("parts", True))
+
+    def released():
+        return sql.execute(
+            "SELECT heading, rank, sequence, commit_id::text FROM part_released WHERE recipe_id = %s::uuid ORDER BY rank",
+            [BREAD],
+        ).fetchall()
+
+    assert released() == []
+    g.release(BREAD, merged.commit.id, 0)
+    # An entity's history is the primary line's commits that changed it
+    # (D138): the merge added Bake.
+    history = g.entity_history(BREAD, "part", bake)
+    assert [(change.commit.id, change.operation) for change in history] == [(merged.commit.id, "ADD")]
+    assert g.entity_history(BREAD, "step", bake) == []
+    commit = sql.execute("SELECT commit_id::text FROM recipe_release WHERE root_id = %s::uuid", [BREAD]).fetchone()[0]
+    assert released() == [("Bake", "7", 1, commit), ("Mix", "F", 1, commit), ("Knead", "V", 1, commit)]
 
 
 def test_facade_merges_releases_rebases_and_sweeps(graph):

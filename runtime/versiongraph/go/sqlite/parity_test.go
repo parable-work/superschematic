@@ -58,10 +58,10 @@ func quoteIdentifier(name string) string {
 func dumpDatabase(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var lines []string
-	for _, statement := range must(sqlite.Layout(nil))(t) {
+	for _, statement := range append(must(sqlite.Layout(nil))(t), must(sqlite.ReleasedLayout(nil))(t)...) {
 		lines = append(lines, statement+";")
 	}
-	for _, local := range sqlite.Tables() {
+	for _, local := range append(sqlite.Tables(), sqlite.ReleasedTable) {
 		name := sqlite.DefaultTableName(local)
 		var columns []string
 		rows := must(db.Query("SELECT name FROM pragma_table_info(?1) ORDER BY cid", name))(t)
@@ -74,8 +74,11 @@ func dumpDatabase(t *testing.T, db *sql.DB) string {
 		}
 		_ = rows.Close()
 		key := "id"
-		if strings.HasSuffix(local, "_history") {
+		switch {
+		case strings.HasSuffix(local, "_history"):
 			key = "history_id"
+		case local == sqlite.ReleasedTable:
+			key = "graph, kind, root_id, entity_key"
 		}
 		rows = must(db.Query(`SELECT * FROM ` + quoteIdentifier(name) + ` ORDER BY ` + key))(t)
 		for rows.Next() {
@@ -241,7 +244,16 @@ func TestWriteParity(t *testing.T) {
 		"utensil": {Upsert: rawRows(`{"entity_key":"Knife","name":"Bread knife"}`, `{"entity_key":"Board","name":"Bread board"}`)},
 	}))(t).Ref
 	dinner = must(i.Commit(ctx, ann, dinner.ID, dinner.Version, engine.CommitOptions{Message: "dinner"}))(t).Ref
-	merged(i.Merge(ctx, ann, dinner.ID, lunch.ID, lunch.Version, nil, engine.CommitOptions{Message: "supper", Tag: true}))
+	lunch = merged(i.Merge(ctx, ann, dinner.ID, lunch.ID, lunch.Version, nil, engine.CommitOptions{Message: "supper", Tag: true})).Ref
+	// A part, whose order is a string key and whose kind keeps its
+	// released rows: committed, merged as a tagged commit and released,
+	// which writes its released row.
+	dinner = must(i.Save(ctx, ann, dinner.ID, dinner.Version, engine.Edits{
+		"part": {Upsert: rawRows(`{"entity_key":"Intro","rank":"V","heading":"Before you start"}`)},
+	}))(t).Ref
+	dinner = must(i.Commit(ctx, ann, dinner.ID, dinner.Version, engine.CommitOptions{Message: "intro"}))(t).Ref
+	intro := merged(i.Merge(ctx, ann, dinner.ID, lunch.ID, lunch.Version, nil, engine.CommitOptions{Message: "intro", Tag: true}))
+	must(i.Release(ctx, ann, bread, intro.Commit.ID, 1))(t)
 
 	got := dumpDatabase(t, db)
 	want := string(must(os.ReadFile(filepath.Join(vectorsDir, "typescript.sql")))(t))

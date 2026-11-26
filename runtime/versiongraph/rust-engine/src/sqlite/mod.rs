@@ -15,7 +15,7 @@ pub use binding::Rusqlite;
 
 pub use crate::fixed::{
     default_table_name, micros_to_date_time, Client, ClientError, Clock, Conn, Options, SqlValue,
-    TableName, MAX_MICROS, TABLES,
+    TableName, MAX_MICROS, RELEASED_TABLE, TABLES,
 };
 use crate::fixed::{failed, Dialect, FixedLayout, FixedStorage};
 use crate::Error;
@@ -55,6 +55,15 @@ pub const JSON_PROBE: &str = "SELECT json_extract(p.value, '$[0]') FROM json_eac
 /// them in either dialect.
 pub fn layout(table_name: &dyn Fn(&str) -> String) -> Result<Vec<String>, Error> {
     crate::fixed::layout(Dialect::Sqlite, table_name)
+}
+
+/// The statement that creates the released table (D139) on SQLite, under
+/// the name `table_name` gives it: one `CREATE TABLE IF NOT EXISTS`, apart
+/// from [`layout`], for a graph with a kind whose descriptor names a
+/// `releasedTable`. [`FixedLayout::create_tables`] runs it for such a
+/// graph; [`crate::fixed::released_layout`] gives it in either dialect.
+pub fn released_layout(table_name: &dyn Fn(&str) -> String) -> Result<Vec<String>, Error> {
+    crate::fixed::released_layout(Dialect::Sqlite, table_name)
 }
 
 /// Parses SQLite's version text (`3.46.1`) as `(major, minor, patch)`.

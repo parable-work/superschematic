@@ -364,7 +364,16 @@ export interface GraphMemberConfig {
   graph: string;
   order?: string;
   parent?: GraphParent;
+  released?: boolean;
   singleton?: boolean;
+}
+
+export interface GraphOperationsConfig {
+  by?: string[];
+  operations?: string[];
+  overridePermission?: string;
+  permissions?: { [key: string]: string[] };
+  type: string;
 }
 
 export interface GraphParent {
@@ -532,6 +541,7 @@ export interface OperationSet {
   description?: string;
   encrypted?: boolean;
   extensions?: Extensions;
+  graphOperations?: GraphOperationsConfig;
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
@@ -549,6 +559,7 @@ export interface OperationSetFile {
   description?: string;
   encrypted?: boolean;
   extensions?: Extensions;
+  graphOperations?: GraphOperationsConfig;
   kind: 'OperationSet';
   middleware?: MiddlewareConfig;
   name: string;
@@ -938,6 +949,8 @@ export interface UserTrait {
 }
 
 export interface VersionGraphConfig {
+  enqueueOnCommit?: string;
+  enqueueOnRelease?: string;
   name?: string;
   schemaEpoch?: number;
   snapshotEvery?: number;

@@ -1,0 +1,76 @@
+{
+  "name": "entity_history",
+  "description": "An entity's history lists the commits of its root's primary line that changed it, newest first, each with what it did: the commit that added it, each that updated it, the one that deleted it and the one that brought it back. A commit that changed other entities alone, a change set's own commits, an entity no commit changed, another kind's entity of the same key and another root's are not in it; a root with no primary line has none.",
+  "roots": ["Bread", "Soup", "Stew"],
+  "steps": [
+    {"op": "entityHistory", "root": "Stew", "kind": "part", "key": "Mix", "expect": {"entityHistory": []}},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "expect": {"entityHistory": []}},
+
+    {"op": "branch", "from": "main", "name": "write", "as": "write"},
+    {"op": "save", "ref": "write", "edits": {
+      "part": {"upsert": [
+        {"entity_key": "Mix", "parent_key": null, "rank": "F", "heading": "Mix"},
+        {"entity_key": "Bake", "parent_key": null, "rank": "k", "heading": "Bake"}
+      ]},
+      "step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}
+    }},
+    {"op": "commit", "ref": "write", "as": "draft1"},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "expect": {"entityHistory": []}},
+    {"op": "merge", "source": "write", "target": "main", "tag": true, "as": "c1"},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "expect": {"entityHistory": [{"commit": "c1", "operation": "ADD"}]}},
+
+    {"op": "branch", "from": "main", "name": "edit", "as": "edit"},
+    {"op": "save", "ref": "edit", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "F", "heading": "Mix well"}
+    ]}}},
+    {"op": "commit", "ref": "edit"},
+    {"op": "merge", "source": "edit", "target": "main", "as": "c2"},
+
+    {"op": "branch", "from": "main", "name": "bake", "as": "bake"},
+    {"op": "save", "ref": "bake", "edits": {"part": {"upsert": [
+      {"entity_key": "Bake", "parent_key": null, "rank": "k", "heading": "Bake hot"}
+    ]}}},
+    {"op": "commit", "ref": "bake"},
+    {"op": "merge", "source": "bake", "target": "main", "as": "c3"},
+
+    {"op": "branch", "from": "main", "name": "drop", "as": "drop"},
+    {"op": "save", "ref": "drop", "edits": {"part": {"delete": ["Mix"]}}},
+    {"op": "commit", "ref": "drop"},
+    {"op": "merge", "source": "drop", "target": "main", "as": "c4"},
+
+    {"op": "branch", "from": "main", "name": "back", "as": "back"},
+    {"op": "save", "ref": "back", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": "Mix again"}
+    ]}}},
+    {"op": "commit", "ref": "back"},
+    {"op": "merge", "source": "back", "target": "main", "tag": true, "as": "c5"},
+
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "expect": {"entityHistory": [
+      {"commit": "c5", "operation": "ADD"},
+      {"commit": "c4", "operation": "DELETE"},
+      {"commit": "c2", "operation": "UPDATE"},
+      {"commit": "c1", "operation": "ADD"}
+    ]}},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Bake", "expect": {"entityHistory": [
+      {"commit": "c3", "operation": "UPDATE"},
+      {"commit": "c1", "operation": "ADD"}
+    ]}},
+    {"op": "entityHistory", "root": "Bread", "kind": "step", "key": "Mix", "expect": {"entityHistory": [{"commit": "c1", "operation": "ADD"}]}},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Rest", "expect": {"entityHistory": []}},
+    {"op": "entityHistory", "root": "Soup", "kind": "part", "key": "Mix", "expect": {"entityHistory": []}},
+
+    {"op": "createPrimary", "root": "Soup", "name": "main", "as": "soup"},
+    {"op": "branch", "from": "soup", "name": "stock", "as": "stock"},
+    {"op": "save", "ref": "stock", "edits": {"part": {"upsert": [
+      {"entity_key": "Mix", "parent_key": null, "rank": "V", "heading": "Make the stock"}
+    ]}}},
+    {"op": "commit", "ref": "stock"},
+    {"op": "merge", "source": "stock", "target": "soup", "as": "s1"},
+    {"op": "entityHistory", "root": "Soup", "kind": "part", "key": "Mix", "expect": {"entityHistory": [{"commit": "s1", "operation": "ADD"}]}},
+    {"op": "entityHistory", "root": "Bread", "kind": "part", "key": "Mix", "walkCeiling": 2, "expect": {"entityHistory": [
+      {"commit": "c5", "operation": "ADD"},
+      {"commit": "c4", "operation": "DELETE"}
+    ]}}
+  ]
+}

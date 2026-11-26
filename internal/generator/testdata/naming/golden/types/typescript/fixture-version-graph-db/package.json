@@ -38,6 +38,10 @@
       "types": "./versiongraph/index.ts",
       "import": "./versiongraph/index.ts"
     },
+    "./queues": {
+      "types": "./queues.ts",
+      "import": "./queues.ts"
+    },
     "./orm": {
       "types": "./orm.ts",
       "import": "./orm.ts"

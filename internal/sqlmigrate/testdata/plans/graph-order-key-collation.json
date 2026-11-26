@@ -1,0 +1,119 @@
+{
+  "dialect": "postgres",
+  "from": "61d0ac2fd1d8f4338daa12bde88b9f2a69a702f2b3004984d340732bc8dcaa7b",
+  "hash": "e02f6c9d79e22a39b899f0992e90f94054c61dd2b378b358973a3a08e26b7e90",
+  "service": "fixture-version-graph-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/part/column/heading",
+          "reason": "The change rewrites part and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/part/column/heading"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/part/column/heading",
+          "reason": "Part.heading changes from TEXT to TEXT COLLATE \"C\": servers built from the previous version still read and write TEXT.",
+          "subject": "table/part/column/heading"
+        },
+        {
+          "class": "history",
+          "id": "history:table/part/column/heading",
+          "reason": "part is versioned: images recorded before this change keep Part.heading as TEXT, which the history readers read as TEXT COLLATE \"C\". Part.heading is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch rose from 1 to 2.",
+          "subject": "table/part/column/heading"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE part\n  ALTER COLUMN heading TYPE TEXT COLLATE \"C\" USING heading::TEXT COLLATE \"C\""
+      ],
+      "subject": "table/part/column/heading",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/part/column/rank",
+          "reason": "The change rewrites part and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/part/column/rank"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/part/column/rank",
+          "reason": "Part.rank changes from TEXT COLLATE \"C\" to TEXT: servers built from the previous version still read and write TEXT COLLATE \"C\".",
+          "subject": "table/part/column/rank"
+        },
+        {
+          "class": "history",
+          "id": "history:table/part/column/rank",
+          "reason": "part is versioned: images recorded before this change keep Part.rank as TEXT COLLATE \"C\", which the history readers read as TEXT. Part.rank is content of version graph Recipe: commits made before this change hash and merge rows of the old shape. The graph's schemaEpoch rose from 1 to 2.",
+          "subject": "table/part/column/rank"
+        }
+      ],
+      "index": 2,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE part\n  ALTER COLUMN rank TYPE TEXT USING rank::TEXT"
+      ],
+      "subject": "table/part/column/rank",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/part_released/column/heading",
+          "reason": "The change rewrites part_released and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/part_released/column/heading"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/part_released/column/heading",
+          "reason": "PartReleased.heading changes from TEXT to TEXT COLLATE \"C\": servers built from the previous version still read and write TEXT.",
+          "subject": "table/part_released/column/heading"
+        }
+      ],
+      "index": 3,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE part_released\n  ALTER COLUMN heading TYPE TEXT COLLATE \"C\" USING heading::TEXT COLLATE \"C\""
+      ],
+      "subject": "table/part_released/column/heading",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/part_released/column/rank",
+          "reason": "The change rewrites part_released and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/part_released/column/rank"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/part_released/column/rank",
+          "reason": "PartReleased.rank changes from TEXT COLLATE \"C\" to TEXT: servers built from the previous version still read and write TEXT COLLATE \"C\".",
+          "subject": "table/part_released/column/rank"
+        }
+      ],
+      "index": 4,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE part_released\n  ALTER COLUMN rank TYPE TEXT USING rank::TEXT"
+      ],
+      "subject": "table/part_released/column/rank",
+      "transactional": true
+    }
+  ],
+  "to": "9b392198dc5208277909789b3e899700509deda236eb400b141b9b02620fc406",
+  "toModel": null,
+  "version": 1
+}

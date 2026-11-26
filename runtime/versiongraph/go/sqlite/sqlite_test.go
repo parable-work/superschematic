@@ -986,8 +986,10 @@ func TestNameFunction(t *testing.T) {
 		}
 	}
 	_ = rows.Close()
+	// The fixture's part keeps its released rows, so the graph has the
+	// released table beside the layout's nine.
 	var want []string
-	for _, table := range sqlite.Tables() {
+	for _, table := range append(sqlite.Tables(), sqlite.ReleasedTable) {
 		want = append(want, name(table))
 	}
 	sort.Strings(want)
@@ -1291,4 +1293,33 @@ func TestSavepoints(t *testing.T) {
 	must(in(s.storage, func(ctx context.Context, tx storage.Tx) (struct{}, error) {
 		return struct{}{}, create(ctx, tx, "later")
 	}))(t)
+}
+
+// TestReleasedTableIsNamedOnlyWhereItIsKept: a name function that names the
+// layout's nine tables alone serves the layout and a graph with no kind
+// that keeps its released rows (D139); the released layout, and a graph
+// with such a kind, ask it for the tenth.
+func TestReleasedTableIsNamedOnlyWhereItIsKept(t *testing.T) {
+	nine := func(local string) string {
+		if local == sqlite.ReleasedTable {
+			return ""
+		}
+		return "vg_" + local
+	}
+	if _, err := sqlite.Layout(nine); err != nil {
+		t.Fatalf("the layout under a name function with no name for the released table: %v", err)
+	}
+	if _, err := sqlite.ReleasedLayout(nine); err == nil {
+		t.Fatal("the released layout took a name function with no name for its table")
+	}
+	descriptor := descriptorDoc(t)
+	if _, err := sqlite.New(must(json.Marshal(descriptor))(t), sqlite.Options{Graph: "recipe", TableName: nine}); err == nil {
+		t.Fatal("an adapter of a graph that keeps released rows took a name function with no name for their table")
+	}
+	for _, kind := range descriptor["kinds"].([]any) {
+		delete(kind.(map[string]any), "releasedTable")
+	}
+	if _, err := sqlite.New(must(json.Marshal(descriptor))(t), sqlite.Options{Graph: "recipe", TableName: nine}); err != nil {
+		t.Fatalf("an adapter of a graph that keeps no released rows: %v", err)
+	}
 }

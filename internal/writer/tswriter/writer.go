@@ -146,7 +146,7 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api", "FilterBy": "@superschematic/api",
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
-	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api",
+	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api", "graphOperations": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api",
 	// @superschematic/schema-config
@@ -667,7 +667,7 @@ func equalOptionalInt64(left, right *int64) bool {
 }
 
 // sortedTypes returns type names topologically sorted so heritage, @source,
-// @graphMember and @enqueueOnChange targets, and the classes a Stack
+// @graphMember, @enqueueOnChange and @versionGraph queue targets, and the classes a Stack
 // declaration names, are declared before the classes that reference them
 // (decorator arguments and extends clauses are value positions in
 // TypeScript: forward references do not compile). The @environment classes come last, in declaration order
@@ -716,6 +716,15 @@ func (e *emitter) sortedTypes() []string {
 		for _, change := range def.EnqueueOnChange {
 			if _, ok := e.doc.Types[change.Queue]; ok && change.Queue != name {
 				d = append(d, change.Queue)
+			}
+		}
+		// @versionGraph's enqueueOnCommit and enqueueOnRelease name their
+		// queues' classes as values (D138).
+		if graph := def.VersionGraph; graph != nil {
+			for _, queue := range []string{graph.EnqueueOnCommit, graph.EnqueueOnRelease} {
+				if _, ok := e.doc.Types[queue]; ok && queue != name {
+					d = append(d, queue)
+				}
 			}
 		}
 		// A Stack declaration names a declared deployable by its class.

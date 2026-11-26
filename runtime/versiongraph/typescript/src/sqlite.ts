@@ -16,7 +16,10 @@
 // descriptor as one canonical JSON object, data. Foreign keys check every
 // edge inside the layout; there is no root table, so nothing checks a root
 // but the adapter, which refuses a write whose ref or commit is another
-// graph's or another root's.
+// graph's or another root's. A graph with a kind that keeps its released
+// rows (D139) has a tenth table, released, which sqliteReleasedLayout
+// creates: one row per entity of a kind of a root, its content columns as
+// one canonical JSON object.
 //
 // SQLite has no triggers a behavior may declare and none that can assign
 // NEW, so the adapter does what Postgres's triggers do, in the statements of
@@ -55,6 +58,7 @@ import {
   type Ref,
   type RefUpdate,
   type Release,
+  type ReleasedWrite,
   type ReleaseWrite,
   type RowWrite,
   type SnapshotEntry,
@@ -210,6 +214,13 @@ export const sqliteTables = [
   "member_history",
 ] as const;
 
+/**
+ * The local name of the table that holds released rows (D139). It is not
+ * among sqliteTables: sqliteReleasedLayout creates it, for a graph with a
+ * kind that keeps its released rows.
+ */
+export const sqliteReleasedTable = "released";
+
 /** Configure a SqliteAdapter. */
 export interface SqliteOptions {
   /** The graph's name, which every row of the graph carries. Required, and not empty. */
@@ -247,6 +258,10 @@ interface Kind {
   exclude: ReadonlySet<string>;
   actor: string | undefined;
   retentionDays: number | undefined;
+  /** True for a kind that keeps its released rows (D139). */
+  released: boolean;
+  /** The kind's content columns, sorted: what a released row's data holds. */
+  content: string[];
 }
 
 /** What the adapter reads of a graph descriptor. */
@@ -260,6 +275,9 @@ interface DescriptorDoc {
     root?: string;
     tombstone?: string;
     version?: string;
+    author?: string;
+    excluded?: string[];
+    releasedTable?: string;
     history?: { retentionDays?: number; exclude?: string[]; actor?: string };
     columns?: Record<string, string>;
   }[];
@@ -283,6 +301,12 @@ interface AdapterConfig {
   graph: string;
   tableName: TableName;
   tables: Tables;
+  /**
+   * The released table, quoted, for a graph with a kind that keeps its
+   * released rows (D139); undefined for any other, whose name function is
+   * never asked for it.
+   */
+  released: string | undefined;
   clock: () => number;
   callerTransaction: boolean;
   kinds: Map<string, Kind>;
@@ -323,6 +347,32 @@ function tablesOf(tableName: TableName): Tables {
     member: nameOf(tableName, "member"),
     memberHistory: nameOf(tableName, "member_history"),
   };
+}
+
+/**
+ * The statement that creates the released table (D139), under the name
+ * tableName gives it (defaultTableName when absent). It is apart from
+ * sqliteLayout, whose nine tables every graph has: a graph needs this one
+ * only when a kind of its descriptor names a releasedTable, and
+ * SqliteAdapter.createTables creates it then. A released row holds its
+ * kind's content columns as one canonical JSON object, data, with the commit
+ * and the sequence of the release that wrote it, one row per entity of a
+ * kind of a root.
+ *
+ * The name function is asked for the released table only here and by an
+ * adapter of a graph that keeps released rows, so one that names the
+ * layout's nine tables alone serves sqliteLayout and every other graph.
+ */
+export function sqliteReleasedLayout(tableName: TableName = defaultTableName): string[] {
+  const t = tablesOf(tableName);
+  const released = nameOf(tableName, sqliteReleasedTable);
+  return [
+    `CREATE TABLE IF NOT EXISTS ${released} (` +
+      `graph TEXT NOT NULL, kind TEXT NOT NULL, root_id TEXT NOT NULL, entity_key TEXT NOT NULL, ` +
+      `commit_id TEXT NOT NULL REFERENCES ${t.commit} (id), sequence INTEGER NOT NULL, data TEXT NOT NULL, ` +
+      `PRIMARY KEY (graph, kind, root_id, entity_key)` +
+      `) STRICT`,
+  ];
 }
 
 /**
@@ -414,8 +464,9 @@ export class SqliteAdapter {
   /**
    * Reads a graph's descriptor (version 3, as JSON text or an object). The
    * adapter reads only its kinds: each kind's role columns (the root among
-   * them), its columns' value classes and its history; the tables the
-   * descriptor names are the Postgres adapter's.
+   * them), its columns' value classes, its history, and whether it names a
+   * releasedTable; the tables the descriptor names are the Postgres
+   * adapter's.
    */
   constructor(descriptor: string | Descriptor, options: SqliteOptions) {
     const d = (typeof descriptor === "string" ? JSON.parse(descriptor) : descriptor) as unknown as DescriptorDoc;
@@ -433,6 +484,7 @@ export class SqliteAdapter {
       graph: options.graph,
       tableName,
       tables: tablesOf(tableName),
+      released: undefined,
       clock: options.clock ?? systemClock,
       callerTransaction: options.callerTransaction === true,
       kinds: new Map(),
@@ -465,6 +517,12 @@ export class SqliteAdapter {
       }
       const roleColumns = new Set(roles.map(([, column]) => column!));
       const exclude = new Set(history.exclude);
+      const data = Object.keys(columns)
+        .filter((column) => !roleColumns.has(column))
+        .sort(compareCodePoints);
+      // The content columns, as the core reads them: every column that is
+      // not a role column, the author among them, and is not excluded.
+      const notContent = new Set<string | undefined>([k.author, ...(k.excluded ?? [])]);
       config.kinds.set(k.kind!, {
         name: k.kind!,
         key: k.key!,
@@ -474,28 +532,39 @@ export class SqliteAdapter {
         tombstone: k.tombstone!,
         version: k.version!,
         columns,
-        data: Object.keys(columns)
-          .filter((column) => !roleColumns.has(column))
-          .sort(compareCodePoints),
+        data,
         exclude,
         actor: history.actor,
         retentionDays: history.retentionDays,
+        released: typeof k.releasedTable === "string" && k.releasedTable !== "",
+        content: data.filter((column) => !notContent.has(column)),
       });
+    }
+    // Only a graph that keeps released rows asks the name function for
+    // their table.
+    if ([...config.kinds.values()].some((k) => k.released)) {
+      config.released = nameOf(tableName, sqliteReleasedTable);
     }
     configs.set(this, config);
   }
 
   /**
    * Creates the layout's tables and indexes where they are missing
-   * (sqliteLayout), in one transaction: its own on the connection, or the
-   * caller's when the adapter runs in the caller's transaction. It first
-   * refuses a SQLite the adapter cannot run on (minSqliteVersion).
+   * (sqliteLayout), and the released table (sqliteReleasedLayout) when a
+   * kind of the graph keeps its released rows, in one transaction: its own
+   * on the connection, or the caller's when the adapter runs in the caller's
+   * transaction. It first refuses a SQLite the adapter cannot run on
+   * (minSqliteVersion).
    */
   createTables(client: SqliteClient): void {
     const config = configs.get(this)!;
     checkSqlite(config, client);
+    const statements = sqliteLayout(config.tableName);
+    if (config.released !== undefined) {
+      statements.push(...sqliteReleasedLayout(config.tableName));
+    }
     transact(config, client, () => {
-      for (const statement of sqliteLayout(config.tableName)) {
+      for (const statement of statements) {
         client.run(statement);
       }
     });
@@ -804,6 +873,17 @@ function scanCommit(row: SqliteRow): Commit {
     createdAt: microsToDateTime(int(row["created_at"], "created_at")),
     createdBy: text(row["created_by"], "created_by"),
     snapshot: int(row["snapshot"], "snapshot") === 1,
+  };
+}
+
+function scanPatch(row: SqliteRow): Patch {
+  return {
+    commit: text(row["commit_id"], "commit_id"),
+    kind: text(row["entity_kind"], "entity_kind"),
+    entityKey: text(row["entity_key"], "entity_key"),
+    entityId: text(row["entity_id"], "entity_id"),
+    entityVersion: int(row["entity_version"], "entity_version"),
+    operation: text(row["operation"], "operation") as Patch["operation"],
   };
 }
 
@@ -1377,6 +1457,30 @@ class SqliteTx implements SyncTx {
     }
   }
 
+  primaryRefs(root: string): Ref[] {
+    return this.#refs(
+      `SELECT ${refColumns} FROM ${this.#a.tables.ref} ` +
+        `WHERE graph = ?1 AND root_id = ?2 AND parent_ref_id IS NULL AND deleted_at IS NULL ORDER BY created_at, id`,
+      [this.#a.graph, root],
+    );
+  }
+
+  entityPatches(commits: readonly string[], kindName: string, entityKey: string): Patch[] {
+    if (commits.length === 0) {
+      return [];
+    }
+    const k = this.#kind(kindName);
+    try {
+      return this.#all(
+        `SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM ${this.#a.tables.patch} ` +
+          `WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2)) AND entity_kind = ?3 AND entity_key = ?4`,
+        [this.#a.graph, "[" + commits.map(writeJsonString).join(",") + "]", k.name, entityKey],
+      ).map(scanPatch);
+    } catch (err) {
+      throw withContext("read an entity's patches", err);
+    }
+  }
+
   patches(commits: readonly string[]): Patch[] {
     if (commits.length === 0) {
       return [];
@@ -1386,14 +1490,7 @@ class SqliteTx implements SyncTx {
         `SELECT commit_id, entity_kind, entity_key, entity_id, entity_version, operation FROM ${this.#a.tables.patch} ` +
           `WHERE graph = ?1 AND commit_id IN (SELECT value FROM json_each(?2))`,
         [this.#a.graph, "[" + commits.map(writeJsonString).join(",") + "]"],
-      ).map((row) => ({
-        commit: text(row["commit_id"], "commit_id"),
-        kind: text(row["entity_kind"], "entity_kind"),
-        entityKey: text(row["entity_key"], "entity_key"),
-        entityId: text(row["entity_id"], "entity_id"),
-        entityVersion: int(row["entity_version"], "entity_version"),
-        operation: text(row["operation"], "operation") as Patch["operation"],
-      }));
+      ).map(scanPatch);
     } catch (err) {
       throw withContext("read patches", err);
     }
@@ -1538,6 +1635,63 @@ class SqliteTx implements SyncTx {
       return release;
     } catch (err) {
       throw withContext("write the release", err);
+    }
+  }
+
+  writeReleased(kindName: string, write: ReleasedWrite): undefined {
+    const k = this.#kind(kindName);
+    try {
+      this.#writeReleased(k, write);
+    } catch (err) {
+      throw withContext(`write the released ${k.name} rows`, err);
+    }
+    return undefined;
+  }
+
+  #writeReleased(k: Kind, write: ReleasedWrite): void {
+    const released = this.#a.released;
+    if (!k.released || released === undefined) {
+      throw new Error(`kind ${JSON.stringify(k.name)} keeps no released table`);
+    }
+    this.#requireCommit(write.commit, write.root, "the release's commit");
+    if (write.replace) {
+      this.#run(`DELETE FROM ${released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3`, [this.#a.graph, k.name, write.root]);
+    }
+    for (const key of write.delete) {
+      this.#run(`DELETE FROM ${released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4`, [
+        this.#a.graph,
+        k.name,
+        write.root,
+        key,
+      ]);
+    }
+    for (const row of write.upsert) {
+      const parsed = parseJson(row);
+      if (!isJsonObject(parsed)) {
+        throw new Error(`a released ${k.name} row is a JSON object`);
+      }
+      const canonical = (column: string): string => {
+        try {
+          return canonicalOf(k.columns[column]!, parsed.get(column) ?? null);
+        } catch (err) {
+          throw withContext(`column ${column}`, err);
+        }
+      };
+      const key = JSON.parse(canonical(k.key)) as unknown;
+      if (typeof key !== "string" || key === "") {
+        throw new Error(`the released ${k.name} row's entity key is a string`);
+      }
+      // Every content column, null where the row lacks it.
+      const data = new Map<string, string>();
+      for (const column of k.content) {
+        data.set(column, canonical(column));
+      }
+      this.#run(
+        `INSERT INTO ${released} (graph, kind, root_id, entity_key, commit_id, sequence, data) ` +
+          `VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET ` +
+          `commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data`,
+        [this.#a.graph, k.name, write.root, key, write.commit, write.sequence, writeObject(data)],
+      );
     }
   }
 

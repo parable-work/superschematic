@@ -1,0 +1,12 @@
+{
+  "name": "order_keys_count_of_zero_is_no_keys",
+  "op": "order_keys",
+  "input": {
+    "after": "k",
+    "before": "F",
+    "count": 0
+  },
+  "expect": {
+    "keys": []
+  }
+}

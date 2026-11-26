@@ -62,7 +62,7 @@ var (
 	// ErrMergeIntoItself is returned by a merge whose source is its target.
 	ErrMergeIntoItself = errors.New("a ref cannot be merged into itself")
 
-	// ErrPrimaryMergeOnly is returned by a Save, Commit, Seal or Revert on
+	// ErrPrimaryMergeOnly is returned by a Save, Arrange, Commit, Seal or Revert on
 	// a primary line, which takes writes only from Merge.
 	ErrPrimaryMergeOnly = errors.New("a primary line takes writes only from a merge")
 

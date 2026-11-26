@@ -86,7 +86,7 @@ export class MergeIntoItselfError extends named(
   "a ref cannot be merged into itself",
 ) {}
 
-/** A save, commit, seal or revert on a primary line, which takes writes only from a merge. */
+/** A save, arrange, commit, seal or revert on a primary line, which takes writes only from a merge. */
 export class PrimaryMergeOnlyError extends named(
   "primary_merge_only",
   "PrimaryMergeOnlyError",

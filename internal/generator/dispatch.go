@@ -613,6 +613,19 @@ func (r run) warnGoTableOperationsUnserved() error {
 	return nil
 }
 
+// warnGraphOperationsUnserved warns, once for each @graphOperations set of
+// the API, that the server of language writes no handlers for a version
+// graph's operations yet (D138): the TypeScript server serves them, and
+// on the Go and the Rust servers each stays a method of the
+// implementation's interface, to be written by hand over the graph's
+// generated facade.
+func (r run) warnGraphOperationsUnserved(language string) {
+	for _, set := range apigen.UnservedGraphSets(r.Schema) {
+		r.Warnf("%s: the %s server writes no handlers for %s, a @graphOperations set of %s's version graph (D138): its %d operations (%s) each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them",
+			r.Config.Name, language, set.Set, set.Root, len(set.Operations), strings.Join(set.Operations, ", "))
+	}
+}
+
 // generateAPI dispatches API server generation by implementation language.
 func (r run) generateAPI() error {
 	if proto := r.Outputs.API.Protocol; proto != APIProtocolREST {
@@ -623,6 +636,7 @@ func (r run) generateAPI() error {
 		if err := r.warnGoTableOperationsUnserved(); err != nil {
 			return err
 		}
+		r.warnGraphOperationsUnserved("Go")
 		return r.generateGoAPI()
 	case APILanguageRust:
 		return r.generateRustAPI()
@@ -1877,6 +1891,7 @@ func (r run) generateRustAPI() error {
 		r.Warnf("%s: the Rust server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
 			r.Config.Name, op.Operation, op.Reason)
 	}
+	r.warnGraphOperationsUnserved("Rust")
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if err := rustrestgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {

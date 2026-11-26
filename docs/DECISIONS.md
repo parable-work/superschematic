@@ -1436,77 +1436,73 @@ meant to land as one change:
 Sign-in through an identity provider is not among them. It is its own
 decision.
 
-## D137. A graph member's order may be a string key, so an insert writes one row and two inserts into one gap merge (D17 amended)
-
-A member's `order` is a `Generic.Int64` field, and the core merges it as
-any other content column. An insert between two siblings therefore
-renumbers every later sibling. On a change set each renumbered row is an
-override row of its own, and a merge reports each as changed on both sides
-when the other side inserted too. A tree of forty parts with one part
-added near its head writes thirty-eight rows that say nothing, and
-conflicts with anyone who did the same.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `order` names a `Generic.Int64` field or a string field. A string order is a key: one or more characters of `0-9A-Za-z`, compared by its bytes. The descriptor declares the column's class `string`, and its version stays 3, since a descriptor that was valid means what it meant. | A sequence merge in the core that renumbers integers, which removes the conflicts and still writes every later sibling; a float, which runs out of digits between two neighbors; a scalar of its own, which waits on superscalar; descriptor version 4, which changes every engine and every generated descriptor for a member nothing reads differently |
-| Rows sort by order, then by entity key, as they do now. Two rows of one parent may hold one key, and the entity key settles them: it is what two inserts into one gap on two refs produce. `validate` adds no finding for it. Its range finding applies to an integer order alone. | Refusing equal keys, which turns two inserts into a conflict again |
-| The core gains an operation, `order_keys`, `{before?, after?, count}` to `{keys}`: `count` keys that sort strictly between `before` and `after`, evenly spread, each as short as it can be. An absent bound is the start or the end. It is in the core so that every language makes the same keys, and the vectors hold it to that. | A helper per language, which four implementations would have to keep equal |
-| Each engine gains `Arrange(ref, version, kind, parent, keys)`: the entity keys of one parent's children in the order wanted. It keeps the longest run that is already in order and gives new order keys to the rest alone, as the ref's override rows. A list that is not exactly the parent's live children is refused. The generated facades expose it and `OrderKeys`. | Leaving the choice of which rows to rewrite to each application |
-| Merge keeps its rules. The order column is one atomic unit of its row: a move on one side merges with an edit of another unit on the other, and two moves of one entity to different keys conflict on that column. | A rule of its own for order |
-
-Build: the core (`descriptor.rs`, `tree.rs`, `validate.rs`, a new
-operation and its vectors), the loader's check
-(`internal/loader/verify/versiongraph.go`), the four engines and their
-facades, the scenarios, and the reference page.
-
 ## D138. `@graphOperations(Root)` serves a version graph's operations as routes with no implementation method, and a graph's commits and releases can enqueue (D17, D103, D106 amended)
 
-A graph's operations reach an application through the generated facade,
-which is a library. Every route over them is written by hand: load the
-root, check who may, call the facade, map its refusals to answers. A
-behavior's operations do not ask that: `@behaviorOperations(Table)` adds
-their routes.
+Built: `@graphOperations(Root, { operations?, permissions?, by?,
+overridePermission? })`, which the loader expands into a route per
+operation with generated inputs and results, in the OpenAPI, the SDKs and
+the MCP tools, served by the generated TypeScript server
+(`runtime/http/typescript/src/graph-routes.ts`); the root read first, a
+ref or a commit held to its root, the row rule and the engine's refusals
+as problems (`docs/src/content/docs/guides/api-routes.mdx`, "A version
+graph's operations"); `EntityHistory` in the four engines and facades,
+with the scenario `entity_history`; and `@versionGraph({ enqueueOnCommit,
+enqueueOnRelease })`, as `@enqueueOnChange` triggers on the commit and
+release tables, with the scenario `enqueue`. Past the text: a sixteenth
+route, `compose` (`GET {roots}/{id}/refs/{ref}/tree`), since a client that
+edits a change set must read it; `branch` with no `from` branches the
+root's primary line and creates it, named `main`, for a root that has
+none, since no route creates one; `revert` is under the row rule with the
+six the text lists, since it writes a change set too, and so is a
+`merge`'s target when it is a change set, since the merge writes it; a
+primary line is never discarded through the routes (409
+`primary_merge_only`), since the next branch would make it again, empty,
+though the engines' `Discard` still retires one, which a root with several
+primary lines may need; a release's `commit` and a revert's `toCommit` of
+another root are 404, as a path's commit is; and every operation is an MCP
+tool without `@mcp` on the class, as a behavior set's are. The commits
+that built it name D138.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| A class of an API schema decorated `@graphOperations(Root, { operations?, permissions?, by?, overridePermission? })` declares a set, as `@behaviorOperations` does. The loader adds a route per operation: `branch`, `save`, `arrange`, `commit`, `seal`, `merge`, `rebase`, `revert`, `discard`, `release`, `released`, `materialize`, `diff`, `history` and `entityHistory`. `operations` narrows the set to those it lists. | A route per operation declared by hand, each a method with no body; a route for every graph of a database unasked |
-| The paths sit under the root's plural, named for its key: `POST {roots}/{id}/refs` (branch), `PUT {roots}/{id}/refs/{ref}/edits` (save), `POST {roots}/{id}/refs/{ref}/{arrange,commit,seal,merge,rebase,revert,discard}`, `GET {roots}/{id}/refs/{ref}/history`, `POST {roots}/{id}/release`, `GET {roots}/{id}/released`, `GET {roots}/{id}/commits/{commit}` (materialize), `GET {roots}/{id}/diff` with `from` and `to`, and `GET {roots}/{id}/entities/{kind}/{key}/history`. | Paths the declaration writes out, which every set would repeat |
-| The inputs and results are generated types: each kind's edits and rows are typed from the member's content columns, as the facade's are, and the rest are the facade's own (a ref, a commit, a conflict with its base, ours, theirs and authors, a resolution). They are in the OpenAPI and in every SDK. | An untyped JSON body |
-| A route runs every step an implemented route runs. The class's `@requirePermission` covers the set, and `permissions` names a permission list per operation that replaces it. `by: ["createdBy"]` keeps the operations that write a change set (save, arrange, commit, seal, rebase, discard) to the ref's creator, and `overridePermission` admits a holder past it, as a table operation's row rule does. The actor of the graph's writes is the caller's subject. | The application's policy written in a handler |
-| A route reads the root through its repository first: an absent root, or one that is soft-deleted, is 404. | Operating on a deleted root's graph |
-| A refusal of the engine is a problem: not found is 404; a stale `version`, a sealed ref, a write to a primary line and a newer schema epoch are 409, each with its code; a refused input is 422 with the core's findings. A merge or a rebase that finds conflicts answers 200 with them and writes nothing, as the facade returns them. | One status for every refusal |
-| Each engine gains `EntityHistory(root, kind, key)`: the commits of the primary line that changed the entity, newest first, each with the change's operation. | Walking `History` and `Diff` per commit in the application |
-| `@versionGraph({ enqueueOnCommit?, enqueueOnRelease? })` names a `@queue` class each. A row written to the graph's commit table, or a release pointer moved, enqueues `{root, ref?, commit, sequence?}` by the trigger `@enqueueOnChange` writes, in the transaction that made it. | An enqueue the application remembers to make after each call |
-| `@mcp` on the set makes each operation a tool. | |
-| A save that needs the application's code, such as one that parses an uploaded file into rows, stays a hand-written operation that calls the facade. | A hook inside the generated route |
-| Built for the TypeScript server first. The entry keeps the Rust and Go servers until they serve the set. | Waiting for three servers |
-
-Build: the registry and the loader (the set's expansion beside
-`@behaviorOperations`), `ir`, `apigen`, `tsrestgen`,
-`runtime/http/typescript` (a `graph-routes.ts` beside
-`behavior-routes.ts`), the OpenAPI, the four engines (`EntityHistory`),
-`sqlgen` (the two triggers), the API routes guide and the reference.
+Left: the Go and Rust servers do not serve the set: each operation stays
+a method of the implementation to write by hand, with the same route and
+types, and the build says so. A TypeScript server that serves a set gets
+no Dockerfile from a stack's build, since no stage of the image builds
+the version-graph core's wasm module. The Workers entry takes the same
+options and is untested. The generated types are not compiled in the
+Python and Rust SDKs. A release's message carries no sequence, which the
+release pointer does not hold, and the SQLite layout, which has no
+trigger, enqueues nothing.
 
 ## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
 
-What a graph has released is read through `Released` or `Materialize`,
-which walk commits. A member table holds each ref's rows, not the
-released ones, so nothing can index, search, join or page "what is
-published". An application that needs to copies the released rows into a
-table by hand at each release.
+Built: `@graphMember({ released: true })` and the `<Member>Released` table
+the loader adds, with the member's content fields, indexes and its
+relation to the root; the descriptor's `kinds[].releasedTable`; `Release`
+rewriting the root's rows in its transaction, in the four engines, on
+Postgres and on the SQLite layout, which gains an optional tenth table,
+`released`; the scenario `released`; a read-only repository in the Go,
+TypeScript and Rust ORMs; and a `@tableOperation` write of the table
+refused (`docs/src/content/docs/reference/version-graphs.md`, "Released
+rows", and `runtime/versiongraph/README.md`). The table's key is a row id
+of its own with a unique index on the root and the entity key, since a
+table has one key column; `Release` of the commit already released
+rewrites every row of the root, which backfills a member that gains
+`released`; and a released member with an `Encrypted<T>` content field is
+refused. The commit that built it names D139.
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| `@graphMember({ graph, released: true })` adds a table, `<member>_released` (`<Member>Released`): the member's content columns, the root's key, the entity key, and the commit and sequence of the release. Its key is the root and the entity key. It references the root and is deleted with it. It is not `@versioned` and no ref overlays it. | A view over the member's history joined to the release pointer, which no search index covers; a materialized view, which refreshes whole; the application's own copy |
-| `Release` rewrites that root's rows in its own transaction, from the diff between the commit released before and the new one: adds and updates are upserts, deletes are deletes. A first release inserts the tree. | A job that copies after the fact, which readers see late |
-| The table carries what the member declares that a read uses: its `@searchField` fields, its `@index` and `@unique` indexes that name content columns alone, and its vectors. | Declaring them twice |
-| To the ORM it is a table that is read: a repository with reads and lists, projections over it, and `@tableOperation` reads and lists. The repository has no writes. A raw SQL write is not refused; the docs say `Release` owns the rows. | A trigger that refuses writes |
-| The descriptor gains `kinds[].releasedTable`, which the core does not read and a storage adapter does. `Sweep` leaves the table alone. | |
-
-Build: the loader (`internal/loader/versiongraph/expand.go` and its
-check), `graphdesc`, the Postgres and SQLite adapters of the four engines,
-the scenarios, the ORM generators' read-only repository, and the reference
-page.
+Left: the TypeScript repository of a released table is read-only in its
+type alone. `repositories()` in `runtime/http/typescript/src/orm.ts`
+builds one class for every table, so the object still carries the writes;
+it exposes the reads alone when `TableDefinition` takes a `readOnly` flag
+and tsgen writes it. No fixture declares a projection over a released
+table or a `@tableOperation` read or list of one: they go through the
+paths every table has, untested here. A soft delete of the root leaves its
+released rows, which only a hard delete removes: the released
+repositories do not yet leave out the rows of a soft-deleted root, and a
+soft delete does not clear them. Either is a change to the three ORMs (or
+a trigger the sql generator writes), and a restore of the root has to see
+the rows again, so until then a reader of a released table filters on its
+root as it would on any child table.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 

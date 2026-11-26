@@ -177,6 +177,13 @@ type TypeDef struct {
 	// Nil for every other type. See [GraphMemberConfig].
 	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
 
+	// ReleasedOf names the graph member whose released rows this table
+	// holds (D139): the table the loader adds for a member with
+	// @graphMember({ released: true }). The graph's Release owns its rows,
+	// so the ORMs read it and write nothing to it. Empty for every other
+	// type. It is not part of the data forms: the expansion adds it.
+	ReleasedOf string `json:"releasedOf,omitempty" yaml:"releasedOf,omitempty" jsonschema:"-"`
+
 	// User marks the DB table whose rows are the project's users, the core
 	// User trait (D50). Nil for every other type. See [UserTrait].
 	User *UserTrait `json:"user,omitempty" yaml:"user,omitempty"`
@@ -655,6 +662,13 @@ type FieldDef struct {
 	// authored operation. The data forms have no key for it. See
 	// [BehaviorOperation].
 	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
+
+	// GraphOperation marks an operation the loader added for a
+	// @graphOperations set (D138): a server whose generator writes graph
+	// handlers routes it to one that runs it through the graph's facade.
+	// Nil for every authored operation. The data forms have no key for
+	// it. See [GraphOperation].
+	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
 
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build

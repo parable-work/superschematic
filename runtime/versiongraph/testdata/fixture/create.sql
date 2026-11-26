@@ -48,6 +48,36 @@ CREATE TABLE note (
 
 COMMENT ON TABLE note IS 'A cook''s note, threaded under another note.';
 
+CREATE TABLE part (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  recipe_id UUID NOT NULL,
+  parent_key UUID,
+  rank TEXT COLLATE "C" NOT NULL,
+  heading TEXT NOT NULL,
+  entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
+  ref_id UUID NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
+  _version BIGINT DEFAULT 1 NOT NULL
+);
+
+COMMENT ON TABLE part IS 'A part of the recipe''s write-up, nested under another part. Its rank is
+a string order key, so Arrange places it among its siblings, and the
+parts a recipe has released are kept in a table of their own, with the
+index a reader of them uses.';
+
+CREATE TABLE part_released (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  recipe_id UUID NOT NULL,
+  entity_key UUID NOT NULL,
+  parent_key UUID,
+  rank TEXT COLLATE "C" NOT NULL,
+  heading TEXT NOT NULL,
+  commit_id UUID NOT NULL,
+  "sequence" BIGINT NOT NULL
+);
+
+COMMENT ON TABLE part_released IS 'The released rows of Part: what each root''s release of the Recipe version graph holds of it. A release rewrites them.';
+
 CREATE TABLE recipe (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   title TEXT NOT NULL,
@@ -55,7 +85,8 @@ CREATE TABLE recipe (
   created_by UUID NOT NULL
 );
 
-COMMENT ON TABLE recipe IS 'A recipe: the stable identity its steps and ingredients are versioned under.';
+COMMENT ON TABLE recipe IS 'A recipe: the stable identity its steps and ingredients are versioned
+under. Its commits and its releases each enqueue a message.';
 
 CREATE TABLE recipe_commit (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -80,7 +111,7 @@ CREATE TABLE recipe_patch (
   entity_id UUID NOT NULL,
   entity_version BIGINT NOT NULL,
   operation TEXT NOT NULL,
-  CONSTRAINT ck_recipe_patch_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil')),
+  CONSTRAINT ck_recipe_patch_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'part', 'step', 'tasting', 'utensil')),
   CONSTRAINT ck_recipe_patch_operation CHECK (operation IN ('ADD', 'UPDATE', 'DELETE'))
 );
 
@@ -125,7 +156,7 @@ CREATE TABLE recipe_snapshot_entry (
   entity_key UUID NOT NULL,
   entity_id UUID NOT NULL,
   entity_version BIGINT NOT NULL,
-  CONSTRAINT ck_recipe_snapshot_entry_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil'))
+  CONSTRAINT ck_recipe_snapshot_entry_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'part', 'step', 'tasting', 'utensil'))
 );
 
 COMMENT ON TABLE recipe_snapshot_entry IS 'One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.';
@@ -188,6 +219,41 @@ CREATE TABLE utensil (
 COMMENT ON TABLE utensil IS 'A utensil the recipe needs, keyed by a plain UUID rather than an
 AutoGenerate one.';
 
+CREATE TABLE recipe_committed_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  root UUID NOT NULL,
+  ref UUID,
+  "commit" UUID NOT NULL,
+  "sequence" BIGINT,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE recipe_committed_queue IS 'Sent for each commit of a recipe''s graph, in the transaction that wrote
+it: a worker handles one recipe''s commits at a time.';
+
+CREATE TABLE recipe_published_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  root UUID NOT NULL,
+  "commit" UUID NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE recipe_published_queue IS 'Sent when a recipe''s release moves to another commit.';
+
 -- Create history tables for versioned entities
 
 CREATE TABLE cover_history (
@@ -235,6 +301,20 @@ CREATE UNIQUE INDEX uq_note_history_id_version ON note_history (id, _version);
 CREATE INDEX idx_note_history_id_recorded ON note_history (id, recorded_at);
 
 COMMENT ON TABLE note_history IS 'Version history for note';
+
+CREATE TABLE part_history (
+  history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  id UUID NOT NULL,
+  _version BIGINT NOT NULL,
+  operation TEXT NOT NULL,
+  data JSONB NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_part_history_id_version ON part_history (id, _version);
+CREATE INDEX idx_part_history_id_recorded ON part_history (id, recorded_at);
+
+COMMENT ON TABLE part_history IS 'Version history for part';
 
 CREATE TABLE recipe_ref_history (
   history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -348,6 +428,30 @@ ALTER TABLE note
   REFERENCES recipe_ref(id)
   ON DELETE RESTRICT;
 
+ALTER TABLE part
+  ADD CONSTRAINT fk_part_recipe_id
+  FOREIGN KEY (recipe_id)
+  REFERENCES recipe(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE part
+  ADD CONSTRAINT fk_part_ref_id
+  FOREIGN KEY (ref_id)
+  REFERENCES recipe_ref(id)
+  ON DELETE RESTRICT;
+
+ALTER TABLE part_released
+  ADD CONSTRAINT fk_part_released_recipe_id
+  FOREIGN KEY (recipe_id)
+  REFERENCES recipe(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE part_released
+  ADD CONSTRAINT fk_part_released_commit_id
+  FOREIGN KEY (commit_id)
+  REFERENCES recipe_commit(id)
+  ON DELETE CASCADE;
+
 ALTER TABLE recipe_commit
   ADD CONSTRAINT fk_recipe_commit_root_id
   FOREIGN KEY (root_id)
@@ -458,6 +562,14 @@ CREATE UNIQUE INDEX uq_ingredient_entity_ref ON ingredient USING BTREE (entity_k
 
 CREATE UNIQUE INDEX uq_note_entity_ref ON note USING BTREE (entity_key, ref_id);
 
+CREATE INDEX idx_part_parent_key_rank ON part USING BTREE (parent_key, rank);
+
+CREATE UNIQUE INDEX uq_part_entity_ref ON part USING BTREE (entity_key, ref_id);
+
+CREATE UNIQUE INDEX uq_part_released_root_entity ON part_released USING BTREE (recipe_id, entity_key);
+
+CREATE INDEX idx_part_released_parent_key_rank ON part_released USING BTREE (parent_key, rank);
+
 CREATE UNIQUE INDEX uq_recipe_commit_root_sequence ON recipe_commit USING BTREE (root_id, "sequence");
 
 CREATE UNIQUE INDEX uq_recipe_patch_entity ON recipe_patch USING BTREE (commit_id, entity_kind, entity_key);
@@ -477,6 +589,26 @@ CREATE UNIQUE INDEX uq_step_entity_ref ON step USING BTREE (entity_key, ref_id);
 CREATE UNIQUE INDEX uq_tasting_entity_ref ON tasting USING BTREE (entity_key, ref_id);
 
 CREATE UNIQUE INDEX uq_utensil_entity_ref ON utensil USING BTREE (entity_key, ref_id);
+
+CREATE INDEX idx_recipe_committed_queue_due_at ON recipe_committed_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_recipe_committed_queue_claim_expires_at ON recipe_committed_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_committed_queue_updated_at ON recipe_committed_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE INDEX idx_recipe_committed_queue_ready_key ON recipe_committed_queue USING BTREE (root) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_recipe_committed_queue_claimed_key ON recipe_committed_queue USING BTREE (root) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_published_queue_due_at ON recipe_published_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_recipe_published_queue_claim_expires_at ON recipe_published_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_recipe_published_queue_updated_at ON recipe_published_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE INDEX idx_recipe_published_queue_ready_key ON recipe_published_queue USING BTREE (root) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_recipe_published_queue_claimed_key ON recipe_published_queue USING BTREE (root) WHERE state = 'claimed';
 
 -- Create history capture functions and triggers
 
@@ -651,6 +783,49 @@ CREATE TRIGGER trg_note_capture_history_write
 CREATE TRIGGER trg_note_capture_history_delete
   AFTER DELETE ON note
   FOR EACH ROW EXECUTE FUNCTION note_capture_history();
+
+CREATE OR REPLACE FUNCTION part_capture_history() RETURNS trigger AS $$
+BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
+  IF (TG_OP = 'DELETE') THEN
+    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
+    -- the unique history index holds and the latest history row for a deleted key
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
+    INSERT INTO part_history (id, _version, operation, data)
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
+    RETURN OLD;
+  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
+  INSERT INTO part_history (id, _version, operation, data)
+  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_part_bump_version
+  BEFORE UPDATE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
+
+CREATE TRIGGER trg_part_capture_history_write
+  AFTER INSERT OR UPDATE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
+
+CREATE TRIGGER trg_part_capture_history_delete
+  AFTER DELETE ON part
+  FOR EACH ROW EXECUTE FUNCTION part_capture_history();
 
 CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$
 BEGIN
@@ -925,3 +1100,33 @@ CREATE TRIGGER trg_utensil_capture_history_write
 CREATE TRIGGER trg_utensil_capture_history_delete
   AFTER DELETE ON utensil
   FOR EACH ROW EXECUTE FUNCTION utensil_capture_history();
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+
+CREATE OR REPLACE FUNCTION recipe_commit_enqueue_recipe_committed() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of RecipeCommitted after a write to recipe_commit (D80).
+  INSERT INTO recipe_committed_queue (root, ref, "commit", "sequence") VALUES (NEW.root_id, NEW.ref_id, NEW.id, NEW."sequence");
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_recipe_commit_enqueue_recipe_committed
+  AFTER INSERT ON recipe_commit
+  FOR EACH ROW EXECUTE FUNCTION recipe_commit_enqueue_recipe_committed();
+
+CREATE OR REPLACE FUNCTION recipe_release_enqueue_recipe_published() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of RecipePublished after a write to recipe_release (D80).
+  IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO recipe_published_queue (root, "commit") VALUES (NEW.root_id, NEW.commit_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_recipe_release_enqueue_recipe_published
+  AFTER INSERT OR UPDATE ON recipe_release
+  FOR EACH ROW EXECUTE FUNCTION recipe_release_enqueue_recipe_published();
