@@ -18,8 +18,7 @@ Postgres. On openSqlite's file a transaction holds the file's write lock
 from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
 transaction's statements each commit as they run.
 
-The SQLite repositories serve no behaviors' writes, upserts or merges yet:
-a table that composes behaviors is read, and a write of it is refused.
+The SQLite repositories serve no upserts or merges yet.
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
 fields (D85): parseFieldKeys(secret) of @superschematic/http-runtime/sqlite
 reads one under Bun, and a Worker, which has no node:crypto, has none yet.

@@ -34,8 +34,11 @@ layout its database's generated orm.ts embeds.
 
 It exports the generated repositories over a SqlDatabase (orm-sqlite.ts,
 D182), sqliteOrm, which a types package's ./orm/sqlite entry calls, with
-references and attachments (D154) and the audience and grants each read
-keeps to (D156). They import node:async_hooks alone of node:, which a
+references and attachments (D154), the audience and grants each read
+keeps to (D156), and the behaviors' writes, operations, deadlines and
+changes (D186), whose change set D1 applies in one batch; withRulesCore,
+which the entry's createOrm passes the rules package's core through, or a
+Worker's own: createOrm(db, { rules: initSync(wasmModule) }). They import node:async_hooks alone of node:, which a
 Worker has under the nodejs_als flag, for the caller of the operation being
 run.
 */
@@ -46,7 +49,45 @@ export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
 // ./orm/sqlite entry's createOrm calls sqliteOrm, and the predicates and
 // members a read across tables applies on SQLite as on Postgres.
 export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
-export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, ormOfRuntime } from './orm.js';
+export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, ormDialect, ormOfRuntime } from './orm.js';
+// Grants (D156), the calendar (D152) and search across tables (D155) over
+// the repositories, on SQLite and D1 as on Postgres (D186): none of them
+// imports a driver.
+export { GRANT_TOKEN_PREFIX, accessLogOf, activeGrants, grantAuthenticator, grantEnded, grantTokenHash, issueGrant, reachesOf, revokeGrant } from './access.js';
+export type { AccessLog, AccessLogEntry, ActiveGrantsFilter, GrantAuthenticatorOptions, GrantRow, IssueGrantInput } from './access.js';
+export {
+  CALENDAR_FEED,
+  CALENDAR_FEED_DAYS,
+  calendarFeedOf,
+  calendarIcs,
+  calendarMcpTool,
+  calendarReference,
+  calendarRoutes,
+  calendarSourcesOf,
+  callCalendarTool,
+  isCalendarFeed,
+  issueCalendarFeed,
+  readCalendar,
+  revokeCalendarFeed,
+  rotateCalendarFeed,
+} from './calendar.js';
+export type * from './calendar.js';
+export {
+  MAX_INDEXED_TEXT,
+  MAX_SEARCH_WORDS,
+  RRF_K,
+  RRF_WINDOW,
+  callSearchTool,
+  indexSearch,
+  reindexSearch,
+  searchEmbeddingsOf,
+  searchMcpTool,
+  searchRoutes,
+  searchSourcesOf,
+  searchTables,
+  searchWords,
+} from './search-tables.js';
+export type * from './search-tables.js';
 export type * from './orm.js';
 export { RowFeatureError, attachmentBlock, previewObjectOf } from './rowfeatures.js';
 export type * from './rowfeatures.js';
@@ -76,6 +117,7 @@ export {
   spendEvent,
   sqliteRulesStore,
   VETOED_RETRY_SECONDS,
+  withRulesCore,
 } from './rules.js';
 export type {
   ArmedDeadline,
@@ -120,6 +162,7 @@ export type {
   RulesSubTable,
   RulesTable,
   RulesUse,
+  SqliteRulesStoreOptions,
   TableChange,
 } from './rules.js';
 

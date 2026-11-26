@@ -3,12 +3,11 @@
 // on openSqlite's connection to a file the package's sqlite/create.sql made.
 // TestReferencesTablesEndToEndOnSQLite writes the file's create.sql beside
 // this test and runs it; it needs no database server. The tickets keep a
-// conversation (Comments), whose behaviors the TypeScript repositories run
-// on Postgres alone so far, so a ticket and its thread's message are
-// written by hand here, as a raw write may write them; every read and every
-// write of references and files goes through orm.references and
-// orm.attachments, over a bucket on an R2 binding whose S3 API a stand-in
-// serves, as on Postgres.
+// conversation (Comments), whose behaviors the SQLite repositories run
+// through the core (D186): a ticket is created and its thread's message
+// posted as on Postgres. Every read and every write of references and files
+// goes through orm.references and orm.attachments, over a bucket on an R2
+// binding whose S3 API a stand-in serves, as on Postgres.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createHash, createHmac } from 'node:crypto';
@@ -110,13 +109,8 @@ describe('references and attachments on SQLite', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  // A ticket composes Comments, whose writes run on Postgres alone so far:
-  // a raw insert writes its row.
-  const ticket = async (title: string) => {
-    const id = crypto.randomUUID();
-    await orm.exec('INSERT INTO ticket (id, title) VALUES (?1, ?2)', [id, title]);
-    return uuidFromDb(id);
-  };
+  // A ticket composes Comments: its create runs through the core (D186).
+  const ticket = async (title: string) => (await orm.ticket.createOne({ title } as never)).id as string;
   const note = async (title: string, owner: string, audience: 'everyone' | 'private' = 'everyone') =>
     (await orm.asSystem().note.createOne({ title, owner, audience, createdAt: new Date() } as never)).id as string;
 
@@ -155,11 +149,8 @@ describe('references and attachments on SQLite', () => {
   test("a ref block in a row's thread is a reference of the row, which the target lists", async () => {
     const from = await ticket('Login fails');
     const to = await ticket('Session store');
-    // The thread's message, as the conversation's post writes it.
-    await orm.exec(`INSERT INTO ticket_comments_messages (ticket_id, message, state, body, blocks) VALUES (?1, '1', 'posted', 'See the session store.', ?2)`, [
-      uuidToDb(from),
-      JSON.stringify([{ kind: 'ref', schema: 'Ticket', id: to }]),
-    ]);
+    // The thread's message, posted through the core (D186).
+    await orm.withBehaviorCaller({ subject: alice, permissions: [] }).ticket.comments.post(from, { body: 'See the session store.', blocks: [{ kind: 'ref', schema: 'Ticket', id: to }] } as never);
     const backlinks = await orm.references.referencedBy({ table: 'Ticket', key: to });
     expect(backlinks.items).toEqual([{ table: 'Ticket', key: from, via: 'comment', message: 1 }]);
   });
@@ -245,9 +236,15 @@ describe('references and attachments on SQLite', () => {
     expect(r2.objects.has(file.objectKey)).toBe(false);
   });
 
-  test("a write of a table that composes behaviors is refused, and its rows are read", async () => {
-    const id = await ticket('Read on SQLite');
-    expect((await orm.ticket.getOne(id as never)).title).toBe('Read on SQLite');
-    await expect(orm.ticket.createOne({ title: 'Not yet' } as never)).rejects.toThrow('on Postgres alone so far');
+  test("a table that composes behaviors is written through the core, and a raw write of its rows is read", async () => {
+    const id = await ticket('Written on SQLite');
+    expect((await orm.ticket.getOne(id as never)).title).toBe('Written on SQLite');
+    await orm.ticket.updateOne(id as never, { title: 'Renamed on SQLite' } as never);
+    expect((await orm.ticket.getOne(id as never)).title).toBe('Renamed on SQLite');
+    const raw = crypto.randomUUID();
+    await orm.exec('INSERT INTO ticket (id, title) VALUES (?1, ?2)', [raw, 'Written by hand']);
+    expect((await orm.ticket.getOne(uuidFromDb(raw) as never)).title).toBe('Written by hand');
+    await orm.ticket.deleteOne(id as never);
+    await expect(orm.ticket.getOne(id as never)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

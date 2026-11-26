@@ -3,7 +3,7 @@ import { FieldEncryptionError } from './fieldcrypt-error.js';
 import type { FieldCell, FieldKeyring, FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesStore, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './pgtext.js';
 import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
@@ -672,6 +672,14 @@ export function systemActorOf(orm: OrmDefinition): SystemActor {
 /** What a repository runs a statement with: a pg Pool, PoolClient or Client. */
 export interface OrmQueryable {
   query(config: { text: string; values: unknown[]; types?: unknown }): Promise<{ rows: unknown[]; rowCount: number | null }>;
+  /**
+   * The store the behaviors' core reads and writes through in this
+   * connection's transaction (D103), for a connection that is not
+   * Postgres's: sqliteOrmPool's, whose store on openSqlite's file applies a
+   * change set in a savepoint of the transaction, and on D1 in one batch
+   * (D186). Absent on a pg connection, whose store is postgresRulesStore.
+   */
+  rulesStore?(): RulesStore;
 }
 
 /** What ormOf needs of a pg Pool: its queries and a connection of its own for a transaction. */
@@ -1270,6 +1278,19 @@ export type OrmTx<R> = R &
 
 /** The members a repository's table may not take, which an ORM holds itself. */
 export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'withBehaviorCaller', 'transaction', 'query', 'exec', 'queries', 'references', 'attachments'];
+
+/** The key an ORM and a transaction hold their dialect under, which no member name takes. */
+const ORM_DIALECT = Symbol.for('superschematic.orm.dialect');
+
+/**
+ * The dialect an ORM or a transaction runs its statements in (D186):
+ * 'sqlite' for one sqliteOrm opened, 'postgres' for the rest. A read across
+ * tables written as raw SQL (the calendar's occurrences, search) writes its
+ * statement in it.
+ */
+export function ormDialect(orm: object): 'postgres' | 'sqlite' {
+  return (orm as { [ORM_DIALECT]?: 'postgres' | 'sqlite' })[ORM_DIALECT] ?? 'postgres';
+}
 
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
@@ -2931,13 +2952,16 @@ class TableRepository {
 
   /** The host the behaviors' core runs on: this repository's transaction, with the ORM's types. */
   private rulesHost(): RulesHost {
-    if (this.orm.dialect === 'sqlite') {
-      throw new Error(`orm: ${this.def.name} composes behaviors (D103), which the TypeScript repositories run on Postgres alone so far: on SQLite and D1 its reads are served, and a write or an operation of it is not (D182)`);
-    }
     if (!this.rules || !this.orm.rules) {
       throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the ORM was opened with no core for them; createOrm passes @superschematic/rules's (withRulesCore)`);
     }
     const queryable = this.runner.queryable;
+    if (this.orm.dialect === 'sqlite') {
+      // The connection's own store, in its transaction (D186).
+      const store = queryable.rulesStore?.();
+      if (!store) throw new Error(`orm: ${this.def.name} composes behaviors (D103), whose commands run in a transaction of sqliteOrmPool's on SQLite, and this connection is none`);
+      return { core: this.rules, layout: this.orm.rules, store };
+    }
     return {
       core: this.rules,
       layout: this.orm.rules,
@@ -3348,6 +3372,7 @@ function txOf<R>(orm: OrmDefinition, types: unknown, client: OrmQueryable, actin
   const runner: Runner = { queryable: client, inTransaction: true, types };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
+    [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
@@ -3440,6 +3465,7 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acti
   const runner: Runner = { queryable: pool, inTransaction: false, pool, types: runtime.types };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
+    [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {

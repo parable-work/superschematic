@@ -339,7 +339,7 @@ export type { Revealable } from './secret.js';
 
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
-export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormOfRuntime } from './orm.js';
+export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormDialect, ormOfRuntime } from './orm.js';
 export { ormOf, POSTGRES_ORM_RUNTIME } from './orm-postgres.js';
 // Per-record access (D156): the predicate that keeps a read of an
 // @audience table to what a caller sees, which a read across tables
