@@ -92,9 +92,75 @@ pub(crate) struct Runner<'a, C> {
 }
 
 impl<C: Client> Runner<'_, C> {
+    /// The live row whose key is `key`, if the caller sees it (D156): a
+    /// row the caller does not see is not there.
     pub(crate) async fn get_one(&self, key: &Value) -> Result<Values, Error> {
+        if self.plan.kept(self.table) {
+            let mut eq = serde_json::Map::new();
+            eq.insert("eq".to_owned(), key.clone());
+            let mut filter = Values::new();
+            filter.insert(self.table.key.clone(), Value::Object(eq));
+            return self
+                .find_one(Some(&filter), &FindOptions::default())
+                .await?
+                .ok_or_else(|| self.not_found(key));
+        }
+        self.read_back(key).await
+    }
+
+    /// The live row whose key is `key`, whoever the caller: the row a write
+    /// just made or changed, read back.
+    async fn read_back(&self, key: &Value) -> Result<Values, Error> {
         let rows = self.query(&self.plan.get_one(key)?).await?;
         rows.into_iter().next().ok_or_else(|| self.not_found(key))
+    }
+
+    /// Refuses, as not found, a write of the row whose key is `key` that
+    /// the caller may not write (D156): a row the caller may not write is
+    /// not there.
+    async fn require_reach(&self, key: &Value, write: bool) -> Result<(), Error> {
+        if !self.plan.kept(self.table) {
+            return Ok(());
+        }
+        let found = self.rows(&self.plan.reach(key, write)?, 0).await?;
+        if found.is_empty() {
+            return Err(self.not_found(key));
+        }
+        Ok(())
+    }
+
+    /// Refuses a row a party or an agent run created that its grants do
+    /// not reach (D156), which the caller's transaction then rolls back.
+    async fn require_created_reach(&self, row: &Values) -> Result<(), Error> {
+        let grants = self
+            .plan
+            .session
+            .access
+            .as_ref()
+            .is_some_and(|sees| sees.grants.is_some());
+        if !grants {
+            return Ok(());
+        }
+        let key = row.get(&self.table.key).cloned().unwrap_or(Value::Null);
+        match self.require_reach(&key, true).await {
+            Err(Error::NotFound(_)) => Err(Error::AccessRefused(format!(
+                "{}: the row is not one the caller's grants reach",
+                self.table.name
+            ))),
+            other => other,
+        }
+    }
+
+    /// Refuses an upsert of a table whose reads keep to a caller (D156):
+    /// its update could reach a row the caller does not see.
+    fn refuse_held_upsert(&self) -> Result<(), Error> {
+        if self.plan.kept(self.table) {
+            return Err(Error::Definition(format!(
+                "upsert_one of {}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key",
+                self.table.name
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) async fn find_one(
@@ -151,21 +217,24 @@ impl<C: Client> Runner<'_, C> {
     }
 
     pub(crate) async fn create_one(&self, input: &Values) -> Result<Values, Error> {
-        if self.table.behaviors.is_some() {
+        let created = if self.table.behaviors.is_some() {
             let key = self
                 .client
                 .core_create(self.plan.core_create(input)?)
                 .await?;
-            return self.get_one(&Value::String(key)).await;
-        }
-        let statement = self.plan.create_one(input)?;
-        self.query(&statement)
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                Error::Database(format!("{}: the insert returned no row", self.table.name))
-            })
+            self.read_back(&Value::String(key)).await?
+        } else {
+            let statement = self.plan.create_one(input)?;
+            self.query(&statement)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    Error::Database(format!("{}: the insert returned no row", self.table.name))
+                })?
+        };
+        self.require_created_reach(&created).await?;
+        Ok(created)
     }
 
     pub(crate) async fn create_many(&self, inputs: &[Values]) -> Result<Vec<Values>, Error> {
@@ -183,6 +252,9 @@ impl<C: Client> Runner<'_, C> {
         for statement in self.plan.create_many(inputs)? {
             rows.extend(self.query(&statement).await?);
         }
+        for row in &rows {
+            self.require_created_reach(row).await?;
+        }
         Ok(rows)
     }
 
@@ -192,12 +264,14 @@ impl<C: Client> Runner<'_, C> {
         update: &Values,
         options: &WriteOptions,
     ) -> Result<Values, Error> {
+        // A row the caller may not write is not there (D156).
+        self.require_reach(key, true).await?;
         if self.table.behaviors.is_some() {
             self.client
                 .core_update(self.plan.core_update(key, update, options)?)
                 .await
                 .map_err(|err| self.core_miss(err, key))?;
-            return self.get_one(key).await;
+            return self.read_back(key).await;
         }
         self.plan.refuse_preconditions(options)?;
         let rows = self
@@ -248,6 +322,7 @@ impl<C: Client> Runner<'_, C> {
         update: &Values,
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
+        self.refuse_held_upsert()?;
         if self.table.behaviors.is_some() {
             return self.core_upsert(input, on, update, options).await;
         }
@@ -306,6 +381,7 @@ impl<C: Client> Runner<'_, C> {
         key: &Value,
         options: &WriteOptions,
     ) -> Result<(), Error> {
+        self.require_reach(key, true).await?;
         if self.table.behaviors.is_some() {
             return self.core_delete(key, options, false).await;
         }
@@ -379,6 +455,7 @@ impl<C: Client> Runner<'_, C> {
     }
 
     pub(crate) async fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
+        self.require_reach(key, true).await?;
         if self.table.behaviors.is_some() {
             // A live row is removed by the core's delete, which removes its
             // sub-table rows and its queues' messages with it (D103). A row
