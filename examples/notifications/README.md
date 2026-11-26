@@ -1,7 +1,9 @@
 # notifications
 
 A tickets app whose records raise events, which reach the right people on
-the right channel, and whose people answer by text or email (D153).
+the right channel, and whose people answer by text or email (D153). The
+[Events and notifications](https://parable-work.github.io/superschematic/guides/notifications/)
+guide covers it in full.
 
 | Path | What it is |
 |---|---|
@@ -43,3 +45,7 @@ these schemas. The same scenario, under the fixture name
 `fixture-notifications-db`, runs end to end against Postgres in
 `TestNotificationsEndToEnd` (`internal/generator/tsgen`), through the two
 relays over stand-in services.
+
+The notifier is the TypeScript runtime's, on Postgres: the Go and Rust
+servers have none yet, and the generated server does not build one into
+its `Deps`, which `server/server.ts` wires.

@@ -124,8 +124,13 @@ holds for both.
 The Go, TypeScript, Rust and Python types give the table's type a field
 that holds `_version` in JSON (`Version` in Go, `_version` in TypeScript,
 `version` in Rust and `version_` in Python) and declare `HistoryRecord`.
-Only Go has an ORM, so the history readers and fenced writes above are
-Go's; the other languages read and send `_version` as a field.
+The history readers, `PruneHistory` and the `IfVersion` writes above are
+the Go ORM's. A Rust repository fences `update_one` and `delete_one` on
+`_version` through `WriteOptions { expected_version: Some(2), .. }`, and
+fails one that finds the row at another version with
+`Error::VersionConflict`
+([Rust](/superschematic/guides/database-tables/#rust)). The TypeScript
+repositories and the Python types read and send `_version` as a field.
 
 ```go
 ctx := WithUserID(context.Background(), userID)

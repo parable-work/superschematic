@@ -13,7 +13,10 @@ HTTP client over those types. Module names come from
 
 ## Requirements
 
-- Python 3.9 or newer (CI tests on 3.12; see `tools.env`).
+- Python 3.12 or newer, which CI tests on (`PYTHON_VERSION` in
+  `tools.env`): the generated types and SDK packages declare
+  `requires-python = ">=3.12"`. The schema runtime itself takes 3.9 or
+  newer.
 - The [CLI](/superschematic/install/go/).
 - The generated types package needs Pydantic 2.12 or newer. Scalars come
   from the `superscalar` wheel, unpublished until superscalar's first
@@ -144,6 +147,13 @@ calling service's own credential
 whose code is `service_unauthorized` calls `token(True)` once and retries,
 without the end-user refresh. The Python SDK has no option to forward an
 end user, since no server is written in Python.
+
+`client=ClientIdentity(name=..., version=...)` names the app the SDK runs
+in, which it sends as `X-Client-Version`
+([The client's name and version](/superschematic/guides/client-sdks/#the-clients-name-and-version)).
+A method of an `@idempotent` operation sends an `Idempotency-Key`, its
+`idempotency_key` argument or a fresh UUID
+([An idempotency key](/superschematic/guides/client-sdks/#an-idempotency-key)).
 
 With the types package installed, an input is checked before the request:
 pydantic checks its types and required fields, then `validate_all` checks

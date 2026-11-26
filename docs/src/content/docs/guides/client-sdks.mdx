@@ -271,6 +271,11 @@ into `retry_after()`, and a refused input's field errors, the problem's
 `errors`, into `validation_errors()`; `problem()` holds them with the
 problem's `details`.
 
+The other SDKs carry the field errors too, by field: Go's
+`APIError.ValidationErrors`, TypeScript's `ApiError.validationErrors` and
+Python's `APIError.validation_errors`, each absent when the problem holds
+none.
+
 In TypeScript and Python the 401, 403 and 429 classes extend the general
 one. In Go they are types of their own that embed `*APIError` and unwrap
 to it, so `errors.As(err, &apiErr)` finds the `*APIError` behind each of
