@@ -196,6 +196,11 @@ func decode(t *testing.T, raw []byte) map[string]any {
 	return decoded
 }
 
+// routerOptionsSet is true in the module generated with every key of the
+// naming file's [go_api] table set (TestFileTransferRoutesUnderTheRouterOptions
+// writes router_options_mode_test.go, which sets it).
+var routerOptionsSet bool
+
 // refused posts body and checks the route answered 400 bad_request without
 // calling the implementation; it returns the problem.
 func refused(t *testing.T, server *httptest.Server, impl *statements, body io.Reader, contentType string) map[string]any {
@@ -444,7 +449,13 @@ func TestRefusedFields(t *testing.T) {
 	csv := part{"statement", "march.csv", "text/csv", "date,amount\n"}
 
 	body, contentType := multipartBody(t, `{"accountId":"`+account+`","coupon":"x"}`, csv)
-	if problem := refused(t, server, impl, body, contentType); !reflect.DeepEqual(problem["details"], map[string]any{"location": "body", "reason": "unknown fields: coupon"}) {
+	if routerOptionsSet {
+		// go_api.undeclared_input_keys = "keep" passes the key on to the
+		// input type's decoder, which ignores it.
+		if resp, raw := send(t, server, http.MethodPost, "/api/statements", body, contentType); resp.StatusCode != http.StatusOK {
+			t.Errorf("unknown field under the router options: %d %s", resp.StatusCode, raw)
+		}
+	} else if problem := refused(t, server, impl, body, contentType); !reflect.DeepEqual(problem["details"], map[string]any{"location": "body", "reason": "unknown fields: coupon"}) {
 		t.Errorf("unknown field: %v", problem)
 	}
 	body, contentType = multipartBody(t, `{`, csv)

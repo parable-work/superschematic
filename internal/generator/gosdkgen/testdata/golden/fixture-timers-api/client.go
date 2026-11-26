@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"example.com/schemas/sdk/go/fixture-timers-api/runtime"
+	types "example.com/schemas/types/go/fixture-timers-api"
 )
 
 type HTTPClient struct {
@@ -808,13 +809,14 @@ func decodeError(statusCode int, body []byte, headers http.Header) error {
 	}
 
 	apiErr := &APIError{
-		Message:         message,
-		StatusCode:      statusCode,
-		Body:            body,
-		Code:            code,
-		Details:         details,
-		RequestID:       strings.TrimSpace(headers.Get("X-Request-ID")),
-		ResponseHeaders: cloneHeaders(headers),
+		Message:          message,
+		StatusCode:       statusCode,
+		Body:             body,
+		Code:             code,
+		Details:          details,
+		ValidationErrors: parseValidationErrors(body),
+		RequestID:        strings.TrimSpace(headers.Get("X-Request-ID")),
+		ResponseHeaders:  cloneHeaders(headers),
 	}
 
 	if statusCode == http.StatusUpgradeRequired && code == "client_too_old" {
@@ -879,6 +881,43 @@ func parsePayloadString(payload map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(value)
+}
+
+// parseValidationErrors reads the `errors` member of a problem body into the
+// generated ValidationErrors type. It returns nil when the body has no field
+// errors. A filter refusal is an example: its `errors` member is a list.
+func parseValidationErrors(body []byte) types.ValidationErrors {
+	var problem struct {
+		Errors json.RawMessage `json:"errors"`
+	}
+	if len(body) == 0 || json.Unmarshal(body, &problem) != nil {
+		return nil
+	}
+	return decodeValidationErrors(problem.Errors)
+}
+
+// decodeValidationErrors decodes one level of field errors. A list under a
+// field name holds that field's failures. An object holds the errors of a
+// nested field. A value of another shape is not a field error and is
+// skipped.
+func decodeValidationErrors(raw json.RawMessage) types.ValidationErrors {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil
+	}
+	validationErrors := types.NewValidationErrors()
+	for field, value := range fields {
+		var fieldErrors []types.ValidationError
+		if json.Unmarshal(value, &fieldErrors) == nil {
+			validationErrors.SetFieldErrors(field, fieldErrors)
+		} else if nested := decodeValidationErrors(value); nested.HasErrors() {
+			validationErrors.AddNestedError(field, nested)
+		}
+	}
+	if !validationErrors.HasErrors() {
+		return nil
+	}
+	return validationErrors
 }
 
 func parsePayloadMap(payload map[string]any, key string) map[string]any {
