@@ -16,10 +16,10 @@ takes one path, which decides who sent it and what it may reach.
 | Built | Not built yet |
 | --- | --- |
 | `@party` on a table; the conversations' tables and the run requests queue, which the build fills | Go and Rust runtimes; SQLite and D1 |
-| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | the agent run that takes a run request (D158) |
+| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a message's trust narrowing the agent run that takes its request ([agent runs](/superschematic/guides/agent-runs/)) |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | a generated server that mounts the path and its workers |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | Comments' `via`, the channel a message came on |
-| messages as rows, with their files and the rows they are about | |
+| messages as rows, with their files and the rows they are about | giving a held message to a party, its address added from triage; a triage page in Topcoat |
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 
@@ -96,7 +96,9 @@ channel.
 ## Act on a run request
 
 The run request names the party, the message and the grant. The agent
-dispatcher takes the queue. Until it does, an app's own handler can:
+dispatcher takes the queue as it is
+([agent runs](/superschematic/guides/agent-runs/#start-a-run)), or an
+app's own handler does:
 
 ```ts
 const queue = inbound.runWorker(pool, async request => {
@@ -125,7 +127,9 @@ Sending takes `parties.message` (or the `sendPermission` given), and the
 sender must read the party's row. The party's identity on the channel must
 be verified or entered by hand, not opted out and not lapsed. A party is
 sent at most `rateLimit` messages in its window, 20 an hour unless set.
-The `approve` policy answers `allow`, `deny` or `ask`; a message asked
+The `approve` policy answers `allow`, `deny` or `ask`, and
+`agents.sendApproval` holds a run's sends to its autonomy
+([agent runs](/superschematic/guides/agent-runs/#autonomy)); a message asked
 for waits as `awaitingApproval` until `release` sends it or `reject`
 refuses it. A message records its author, kind and on whose behalf it was
 sent (`forSubject`), the channel (`via`), and the rows it is `about`.
