@@ -629,9 +629,78 @@ func (r *ProductSQLiteRepository) UpsertOneResult(ctx context.Context, input *ty
 	return out, err
 }
 
-// UpsertMany is refused on SQLite until the repositories write sqlutil's
-// upsert of many rows, a statement per batch (D89, D116): use UpsertOne,
-// or UpsertOneResult, a row at a time, in a transaction.
-func (r *ProductSQLiteRepository) UpsertMany(context.Context, []*types.Product, ProductUniqueKey, ProductFields, *UpsertOptions) ([]UpsertResult[*types.Product], error) {
-	return nil, sqliteRefused("Product", "upserts many rows, which the SQLite repositories do not write yet; upsert a row at a time with UpsertOne")
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89): sqlutil's SQLite upsert, a batch
+// of opts.Batch rows or as many as SQLite binds the parameters of, in one
+// transaction, which the rows that hold each batch's keys are read in
+// before and after it (sqliteTable.upsertMany). One whose update names no
+// field updates nothing, and reads each row a key holds back. Two inputs of one batch that hold one key are refused,
+// with Postgres's SQLSTATE 21000, and a key over an expression is refused.
+func (r *ProductSQLiteRepository) UpsertMany(ctx context.Context, inputs []*types.Product, on ProductUniqueKey, update ProductFields, opts *UpsertOptions) ([]UpsertResult[*types.Product], error) {
+	key, ok := productSQLiteUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Product has no unique key %q", string(on))
+	}
+	if key.expression {
+		return nil, upsertExpressionKey("UpsertMany", "Product", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Product sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("Product", opts.Batch, 16382)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UpsertResult[*types.Product], 0, len(inputs))
+	if len(inputs) == 0 {
+		return out, nil
+	}
+	// The columns update names, a relation by its key's column.
+	named := productSQLiteMembers(update)
+	var set []int
+	for i := range productSQLite.columns {
+		if c := &productSQLite.columns[i]; named[c.member] && !c.key && !c.auto {
+			set = append(set, i)
+		}
+	}
+	err = r.within(ctx, func(q sqliteQuerier) error {
+		records := make([]sqliteRecord, len(inputs))
+		for i, input := range inputs {
+			if err := r.stampCreate(ctx, input); err != nil {
+				return err
+			}
+			record, err := sqliteMembersOf(input)
+			if err != nil {
+				return fmt.Errorf("upsert Product %d: %w", i, err)
+			}
+			records[i] = record
+		}
+		upserted, err := productSQLite.upsertMany(ctx, q, records, key, string(on), set, batch, opts.OnlyIfChanged, func(sets []string, args []any) ([]string, []any, error) {
+			return r.stamped(ctx, nil, sets, args)
+		})
+		if err != nil {
+			return err
+		}
+		written := make([]sqliteRecord, len(upserted))
+		for i, u := range upserted {
+			written[i] = u.record
+		}
+		rows, err := r.decode(ctx, written, ProductFields{}, false)
+		if err != nil {
+			return err
+		}
+		for i, row := range rows {
+			out = append(out, UpsertResult[*types.Product]{Row: row, Status: upserted[i].status})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

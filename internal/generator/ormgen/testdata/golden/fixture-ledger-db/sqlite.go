@@ -82,11 +82,14 @@ type SQLiteDatabase struct {
 	Entry   *EntrySQLiteRepository
 }
 
-// SQLiteTx is a transaction of a SQLiteDatabase, with its repositories.
+// SQLiteTx is a transaction of a SQLiteDatabase, with its repositories. It
+// runs work after its commit as a Tx does (D166): AfterCommit,
+// AfterCommitHook and CommitDuration.
 type SQLiteTx struct {
 	tx      *sql.Tx
 	db      *SQLiteDatabase
 	depth   int
+	commit  *txCommit
 	Account *AccountSQLiteRepository
 	Entry   *EntrySQLiteRepository
 }
@@ -119,17 +122,19 @@ func (db *SQLiteDatabase) SQL() *sql.DB {
 	return db.db
 }
 
-// txOf is a SQLiteTx over tx, nested depth savepoints deep.
-func (db *SQLiteDatabase) txOf(tx *sql.Tx, depth int) *SQLiteTx {
-	out := &SQLiteTx{tx: tx, db: db, depth: depth}
+// txOf is a SQLiteTx over tx, nested depth savepoints deep, whose
+// after-commit work is commit's (D166).
+func (db *SQLiteDatabase) txOf(tx *sql.Tx, depth int, commit *txCommit) *SQLiteTx {
+	out := &SQLiteTx{tx: tx, db: db, depth: depth, commit: commit}
 	out.Account = &AccountSQLiteRepository{db: db, tx: tx}
 	out.Entry = &EntrySQLiteRepository{db: db, tx: tx}
 	return out
 }
 
 // Transaction executes fn within a transaction, which begins as the
-// database's DSN says (SQLiteDSN: IMMEDIATE), commits when fn returns nil
-// and rolls back when it returns an error.
+// database's DSN says (SQLiteDSN: IMMEDIATE), commits when fn returns nil,
+// then runs the functions the transaction's AfterCommit added (D166), and
+// rolls back when fn returns an error or panics, which runs none of them.
 func (db *SQLiteDatabase) Transaction(ctx context.Context, fn func(TxInterface) error) error {
 	return db.TransactionWith(ctx, TxOptions{}, fn)
 }
@@ -141,11 +146,19 @@ func (db *SQLiteDatabase) TransactionWith(ctx context.Context, opts TxOptions, f
 	if _, err := opts.begin(); err != nil {
 		return err
 	}
-	return db.within(ctx, func(tx *sql.Tx) error { return fn(db.txOf(tx, 0)) })
+	commit := &txCommit{}
+	return db.withinCommitting(ctx, commit, func(tx *sql.Tx) error { return fn(db.txOf(tx, 0, commit)) })
 }
 
 // within runs fn in a transaction of its own.
 func (db *SQLiteDatabase) within(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return db.withinCommitting(ctx, nil, fn)
+}
+
+// withinCommitting runs fn in a transaction of its own, and, when commit is
+// set, records how long its COMMIT took and runs commit's functions in the
+// order AfterCommit added them, with ctx, after it commits (D166).
+func (db *SQLiteDatabase) withinCommitting(ctx context.Context, commit *txCommit, fn func(tx *sql.Tx) error) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -162,15 +175,53 @@ func (db *SQLiteDatabase) within(ctx context.Context, fn func(tx *sql.Tx) error)
 		}
 		return err
 	}
+	started := time.Now()
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	if commit != nil {
+		commit.duration = time.Since(started)
+		for _, fn := range commit.after {
+			fn(ctx)
+		}
 	}
 	return nil
 }
 
-// ReadOnlyTransaction executes fn within a transaction of its reads.
+// ReadOnlyTransaction executes fn within a transaction of its reads, and
+// runs the functions its AfterCommit added after it commits (D166).
 func (db *SQLiteDatabase) ReadOnlyTransaction(ctx context.Context, fn func(ReadOnlyTxInterface) error) error {
-	return db.within(ctx, func(tx *sql.Tx) error { return fn(db.txOf(tx, 0)) })
+	commit := &txCommit{}
+	return db.withinCommitting(ctx, commit, func(tx *sql.Tx) error { return fn(db.txOf(tx, 0, commit)) })
+}
+
+// AfterCommit adds fn to the functions that run after the transaction
+// commits (D166), as Tx.AfterCommit does: in the order added, with the
+// transaction's context, before Transaction returns; a rollback drops
+// them, and a rollback to a savepoint does not.
+func (tx *SQLiteTx) AfterCommit(fn func(context.Context)) {
+	tx.commit.after = append(tx.commit.after, fn)
+}
+
+// AfterCommitHook returns the hook the transaction holds under key, and
+// makes one with newHook the first time, as Tx.AfterCommitHook does (D166).
+func (tx *SQLiteTx) AfterCommitHook(key any, newHook func() CommitHook) CommitHook {
+	if hook, held := tx.commit.hooks[key]; held {
+		return hook
+	}
+	hook := newHook()
+	if tx.commit.hooks == nil {
+		tx.commit.hooks = map[any]CommitHook{}
+	}
+	tx.commit.hooks[key] = hook
+	tx.AfterCommit(hook.AfterCommit)
+	return hook
+}
+
+// CommitDuration is how long the transaction's COMMIT took (D166), zero
+// before the commit.
+func (tx *SQLiteTx) CommitDuration() time.Duration {
+	return tx.commit.duration
 }
 
 // HasReadReplica is false: a SQLite file has no read replica (D150).
@@ -241,13 +292,15 @@ func (tx *SQLiteTx) QueryContext(ctx context.Context, query string, args ...any)
 }
 
 // Transaction executes fn within a transaction nested in tx, a savepoint
-// named for its depth, as Tx.Transaction nests one on Postgres.
+// named for its depth, as Tx.Transaction nests one on Postgres: the
+// functions fn adds with AfterCommit are tx's, which a rollback to the
+// savepoint keeps (D166).
 func (tx *SQLiteTx) Transaction(ctx context.Context, fn func(TxInterface) error) error {
 	savepoint := fmt.Sprintf("sp_%d", tx.depth+1)
 	if _, err := tx.tx.ExecContext(ctx, fmt.Sprintf("SAVEPOINT %s", savepoint)); err != nil {
 		return fmt.Errorf("failed to begin savepoint: %w", err)
 	}
-	if err := fn(tx.db.txOf(tx.tx, tx.depth+1)); err != nil {
+	if err := fn(tx.db.txOf(tx.tx, tx.depth+1, tx.commit)); err != nil {
 		if _, rbErr := tx.tx.ExecContext(ctx, fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepoint)); rbErr != nil {
 			return fmt.Errorf("failed to roll back to savepoint: %w (original error: %v)", rbErr, err)
 		}
@@ -1199,6 +1252,266 @@ func (t *sqliteTable) upsert(ctx context.Context, q sqliteQuerier, record sqlite
 		return nil, fmt.Errorf("no %s row holds the key: %w", t.typeName, ErrNotFound)
 	}
 	return &sqliteUpserted{record: held, status: UpsertUnchanged}, nil
+}
+
+// sqliteSetExcluded and sqliteExcluded are an upsert of many rows' update of
+// a column from the row the statement would have inserted, and that row's
+// value, which an upsert only if changed compares (D89). sqlutil writes
+// them alike on SQLite and Postgres (TestSQLiteUpsertOfManyRows).
+const (
+	sqliteSetExcluded = `%s = EXCLUDED.%s`
+	sqliteExcluded    = `EXCLUDED.%s`
+)
+
+// sqliteManyRow is an input of an upsert of many rows: the columns its
+// insert writes and their values, and the text of its key's values, ""
+// when it leaves a column of the key to its default.
+type sqliteManyRow struct {
+	columns []string
+	values  []any
+	key     string
+}
+
+// keyText is the text of record's values of key's columns, each as it
+// binds, and false when record leaves one unset: what an upsert of many
+// rows matches a row the statement returns to its input by.
+func (t *sqliteTable) keyText(record sqliteRecord, key sqliteUniqueKey) (string, bool, error) {
+	parts := make([]any, 0, len(key.columns))
+	for _, column := range key.columns {
+		var c *sqliteColumn
+		for i := range t.columns {
+			if t.columns[i].quoted == column || t.columns[i].name == strings.Trim(column, `"`) {
+				c = &t.columns[i]
+				break
+			}
+		}
+		if c == nil {
+			return "", false, fmt.Errorf("orm: %s's unique key names no column %s", t.typeName, column)
+		}
+		raw, set := record[c.member]
+		if c.relationKey != "" && set && !sqliteIsNull(raw) {
+			var nested sqliteRecord
+			if err := json.Unmarshal(raw, &nested); err != nil {
+				return "", false, fmt.Errorf("%s.%s: %w", t.typeName, c.member, err)
+			}
+			raw, set = nested[c.relationKey]
+		}
+		if !set || sqliteIsNull(raw) || ((c.key || c.relationKey != "") && c.uuid && sqliteZeroUUID(raw)) {
+			return "", false, nil
+		}
+		value, err := sqliteCellOf(raw, c)
+		if err != nil {
+			return "", false, fmt.Errorf("%s.%s: %w", t.typeName, c.member, err)
+		}
+		parts = append(parts, value)
+	}
+	text, err := json.Marshal(parts)
+	return string(text), err == nil, err
+}
+
+// rowsOfKeys reads the rows that hold the keys of rows at the indexes
+// keyed, by the text of their keys' values.
+func (t *sqliteTable) rowsOfKeys(ctx context.Context, q sqliteQuerier, key sqliteUniqueKey, rows []sqliteManyRow, keyed []int) (map[string]sqliteRecord, error) {
+	held := map[string]sqliteRecord{}
+	if len(keyed) == 0 {
+		return held, nil
+	}
+	var args []any
+	tuples := make([]string, 0, len(keyed))
+	for _, i := range keyed {
+		placeholders := make([]string, 0, len(key.columns))
+		for _, column := range key.columns {
+			for j, c := range rows[i].columns {
+				if strings.Trim(c, `"`) == strings.Trim(column, `"`) {
+					args = append(args, rows[i].values[j])
+					placeholders = append(placeholders, "?"+strconv.Itoa(len(args)))
+					break
+				}
+			}
+		}
+		tuples = append(tuples, "("+strings.Join(placeholders, ", ")+")")
+	}
+	records, err := t.query(ctx, q, fmt.Sprintf(key.rows, strings.Join(tuples, ", ")), args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		text, ok, err := t.keyText(record, key)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			held[text] = record
+		}
+	}
+	return held, nil
+}
+
+// upsertMany inserts each of records, or, when a row already holds its
+// value of key, sets each column of set, by index, to the value the record
+// would have inserted (D89), as the Rust and TypeScript repositories on
+// SQLite run sqlutil's SQLite upsert: a batch of at most batch records, a
+// statement per set of columns its records write, since a VALUES list on
+// SQLite takes no DEFAULT, with the rows that hold the batch's keys read
+// before it, which say which rows it inserted, since SQLite's upsert does
+// not, and after it, which hold the rows it left as they were. stamped adds
+// an update's stamps and fences to the assignments. It answers each
+// record's row and what the upsert did with it, in order. Two records of
+// one batch that hold one key are refused before the batch runs, with
+// Postgres's SQLSTATE, as Postgres refuses to change a row twice in one
+// statement; on names the key in the refusal.
+func (t *sqliteTable) upsertMany(ctx context.Context, q sqliteQuerier, records []sqliteRecord, key sqliteUniqueKey, on string, set []int, batch int, onlyIfChanged bool, stamped func(sets []string, args []any) ([]string, []any, error)) ([]*sqliteUpserted, error) {
+	out := make([]*sqliteUpserted, len(records))
+	live := ""
+	if t.softDelete {
+		live = t.st.liveCondition
+	}
+	for start := 0; start < len(records); start += batch {
+		chunk := records[start:min(start+batch, len(records))]
+		rows := make([]sqliteManyRow, len(chunk))
+		seen := map[string]int{}
+		var keyed []int
+		for i, record := range chunk {
+			columns, values, err := t.cellsOf(record)
+			if err != nil {
+				return nil, err
+			}
+			rows[i] = sqliteManyRow{columns: columns, values: values}
+			text, ok, err := t.keyText(record, key)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			if first, held := seen[text]; held {
+				return nil, &pgconn.PgError{Severity: "ERROR", Code: "21000", Message: fmt.Sprintf("orm: UpsertMany of %s: inputs %d and %d of one statement hold one %s, and an upsert changes a row once", t.typeName, start+first, start+i, on)}
+			}
+			seen[text] = i
+			rows[i].key = text
+			keyed = append(keyed, i)
+		}
+		existed, err := t.rowsOfKeys(ctx, q, key, rows, keyed)
+		if err != nil {
+			return nil, err
+		}
+		// A statement per set of columns the records write, in the order
+		// the sets first appear.
+		var order []string
+		groups := map[string][]int{}
+		for i, row := range rows {
+			name := strings.Join(row.columns, ",")
+			if _, held := groups[name]; !held {
+				order = append(order, name)
+			}
+			groups[name] = append(groups[name], i)
+		}
+		for _, name := range order {
+			members := groups[name]
+			var args []any
+			tuples := make([]string, len(members))
+			for n, i := range members {
+				placeholders := make([]string, len(rows[i].values))
+				for j, value := range rows[i].values {
+					args = append(args, value)
+					placeholders[j] = "?" + strconv.Itoa(len(args))
+				}
+				tuples[n] = "(" + strings.Join(placeholders, ", ") + ")"
+			}
+			var sets, current, next []string
+			for _, column := range set {
+				c := &t.columns[column]
+				sets = append(sets, fmt.Sprintf(sqliteSetExcluded, c.quoted, c.quoted))
+				current = append(current, t.quoted+"."+c.quoted)
+				next = append(next, fmt.Sprintf(sqliteExcluded, c.quoted))
+			}
+			// An update that names no field compares none, so its WHERE is
+			// FALSE: it leaves each row a key holds as it is, and reads it
+			// back below.
+			where := upsertWhere(live, nil, nil, true)
+			if len(sets) == 0 {
+				sets = []string{key.keep}
+			} else {
+				if sets, args, err = stamped(sets, args); err != nil {
+					return nil, err
+				}
+				where = upsertWhere(live, current, next, onlyIfChanged)
+			}
+			query := fmt.Sprintf(t.st.upsert, strings.Join(rows[members[0]].columns, ", "), strings.Join(tuples, ", "), key.conflict, strings.Join(sets, ", "), where)
+			written, err := t.query(ctx, q, query, args...)
+			if err != nil {
+				for _, i := range members {
+					err = t.reference(ctx, q, err, rows[i].columns, rows[i].values)
+					var refused *pgconn.PgError
+					if !errors.As(err, &refused) || refused.Detail != "" {
+						break
+					}
+				}
+				return nil, err
+			}
+			waiting := map[string]int{}
+			var unkeyed []int
+			for _, i := range members {
+				if rows[i].key == "" {
+					unkeyed = append(unkeyed, i)
+				} else {
+					waiting[rows[i].key] = i
+				}
+			}
+			for _, record := range written {
+				text, ok, err := t.keyText(record, key)
+				if err != nil {
+					return nil, err
+				}
+				i, held := -1, false
+				if ok {
+					i, held = waiting[text]
+				}
+				if held {
+					delete(waiting, text)
+				} else if len(unkeyed) > 0 {
+					i, unkeyed = unkeyed[0], unkeyed[1:]
+				} else {
+					return nil, fmt.Errorf("orm: UpsertMany of %s wrote a row whose %s no input holds", t.typeName, on)
+				}
+				status := UpsertUnchanged
+				switch _, before := existed[rows[i].key]; {
+				case rows[i].key == "" || !before:
+					status = UpsertInserted
+				case len(set) > 0:
+					status = UpsertUpdated
+				}
+				out[start+i] = &sqliteUpserted{record: record, status: status}
+			}
+		}
+		// A row no statement returned is one it left as it was, when the
+		// update sets no field or only if changed, or a deleted one.
+		var left []int
+		for i := range chunk {
+			if out[start+i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) == 0 {
+			continue
+		}
+		if !onlyIfChanged && len(set) > 0 {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		held, err := t.rowsOfKeys(ctx, q, key, rows, left)
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range left {
+			record, ok := held[rows[i].key]
+			if rows[i].key == "" || !ok || (t.softDelete && !sqliteIsNull(record["deletedAt"])) {
+				return nil, fmt.Errorf("no %s row holds the key: %w", t.typeName, ErrNotFound)
+			}
+			out[start+i] = &sqliteUpserted{record: record, status: UpsertUnchanged}
+		}
+	}
+	return out, nil
 }
 
 // held reads the row that holds key's value in the cells an insert would

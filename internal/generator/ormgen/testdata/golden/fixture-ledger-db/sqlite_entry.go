@@ -1444,9 +1444,98 @@ func (r *EntrySQLiteRepository) UpsertOneResult(ctx context.Context, input *type
 	return out, err
 }
 
-// UpsertMany is refused on SQLite until the repositories write sqlutil's
-// upsert of many rows, a statement per batch (D89, D116): use UpsertOne,
-// or UpsertOneResult, a row at a time, in a transaction.
-func (r *EntrySQLiteRepository) UpsertMany(context.Context, []*types.Entry, EntryUniqueKey, EntryFields, *UpsertOptions) ([]UpsertResult[*types.Entry], error) {
-	return nil, sqliteRefused("Entry", "upserts many rows, which the SQLite repositories do not write yet; upsert a row at a time with UpsertOne")
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89): sqlutil's SQLite upsert, a batch
+// of opts.Batch rows or as many as SQLite binds the parameters of, in one
+// transaction, which the rows that hold each batch's keys are read in
+// before and after it (sqliteTable.upsertMany). One whose update names no
+// field updates nothing, and reads each row a key holds back. A
+// soft-deleted row that holds a key is left as it is, and UpsertMany
+// returns ErrNotFound. Two inputs of one batch that hold one key are refused,
+// with Postgres's SQLSTATE 21000, and a key over an expression is refused.
+func (r *EntrySQLiteRepository) UpsertMany(ctx context.Context, inputs []*types.Entry, on EntryUniqueKey, update EntryFields, opts *UpsertOptions) ([]UpsertResult[*types.Entry], error) {
+	key, ok := entrySQLiteUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Entry has no unique key %q", string(on))
+	}
+	if key.expression {
+		return nil, upsertExpressionKey("UpsertMany", "Entry", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not createdAt")
+	}
+	if update.CreatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not createdBy")
+	}
+	if update.UpdatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not updatedAt")
+	}
+	if update.UpdatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not updatedBy")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedAt")
+	}
+	if update.DeletedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedBy")
+	}
+	batch, err := upsertBatch("Entry", opts.Batch, 2184)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UpsertResult[*types.Entry], 0, len(inputs))
+	if len(inputs) == 0 {
+		return out, nil
+	}
+	// The columns update names, a relation by its key's column.
+	named := entrySQLiteMembers(update)
+	var set []int
+	for i := range entrySQLite.columns {
+		if c := &entrySQLite.columns[i]; named[c.member] && !c.key && !c.auto {
+			set = append(set, i)
+		}
+	}
+	err = r.within(ctx, func(q sqliteQuerier) error {
+		records := make([]sqliteRecord, len(inputs))
+		for i, input := range inputs {
+			if err := r.stampCreate(ctx, input); err != nil {
+				return err
+			}
+			record, err := sqliteMembersOf(input)
+			if err != nil {
+				return fmt.Errorf("upsert Entry %d: %w", i, err)
+			}
+			records[i] = record
+		}
+		upserted, err := entrySQLite.upsertMany(ctx, q, records, key, string(on), set, batch, opts.OnlyIfChanged, func(sets []string, args []any) ([]string, []any, error) {
+			return r.stamped(ctx, nil, sets, args)
+		})
+		if err != nil {
+			return err
+		}
+		written := make([]sqliteRecord, len(upserted))
+		for i, u := range upserted {
+			written[i] = u.record
+		}
+		rows, err := r.decode(ctx, written, EntryFields{}, false)
+		if err != nil {
+			return err
+		}
+		for i, row := range rows {
+			out = append(out, UpsertResult[*types.Entry]{Row: row, Status: upserted[i].status})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

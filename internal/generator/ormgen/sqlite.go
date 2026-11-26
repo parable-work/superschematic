@@ -61,9 +61,12 @@ type SQLiteTable struct {
 	HasUpdatedAt    bool
 
 	// Key is the index of the primary key's column, and DefaultLimit the
-	// rows a page holds unless told.
+	// rows a page holds unless told. BatchRows is the most rows one
+	// statement of UpsertMany writes on SQLite, as many as bind
+	// sqlutil.SQLiteMaxParameters (TableModel.BatchRowsOf, D89).
 	Key          int
 	DefaultLimit int
+	BatchRows    int
 }
 
 // SQLiteColumn is a column of a table on SQLite: the member of the row's
@@ -177,7 +180,7 @@ type SQLiteRelation struct {
 // sqliteTableOf is repo's table on SQLite.
 func sqliteTableOf(repo *Repository) (*SQLiteTable, error) {
 	table := repo.Table
-	out := &SQLiteTable{Refusal: sqliteRefusal(repo), DefaultLimit: sqlutil.DefaultLimit}
+	out := &SQLiteTable{Refusal: sqliteRefusal(repo), DefaultLimit: sqlutil.DefaultLimit, BatchRows: table.BatchRowsOf(sqlutil.SQLiteMaxParameters)}
 	if out.Refusal == "" {
 		out.Statements = sqlutil.SQLiteTableStatementsOf(table)
 		if err := out.Statements.CheckFormats(); err != nil {

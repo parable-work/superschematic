@@ -2,7 +2,8 @@ package orm
 
 // The Go repositories of fixture-ledger-db on a SQLite file and on
 // Postgres, result for result (D116): one script of calls, every method
-// of a repository among them, runs through each dialect's DatabaseInterface,
+// of a repository among them, its upserts of many rows as the Rust and
+// TypeScript scripts run them (D89), runs through each dialect's DatabaseInterface,
 // over the DDL the build writes for it, and what each call answers on
 // SQLite is what it answers on Postgres, whose statements the TypeScript
 // and Rust repositories are held to (the table parity tests).
@@ -121,6 +122,11 @@ func refusal(err error) string {
 		return "no fields"
 	case strings.Contains(text, "rolled back"):
 		return "rolled back"
+	case errors.As(err, &pg) && pg.Code == "21000":
+		// Two inputs of one upsert's statement that hold one key (D89).
+		return "one key twice"
+	case strings.Contains(text, "sets the fields an update sets"):
+		return "not a field an update sets"
 	}
 	return "error: " + text
 }
@@ -338,6 +344,48 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	call("upsertEntry", entryUpsert, err)
 	entryUpsert, err = entries.UpsertOneResult(ctx, upsert(), EntryUniqueByAccountExternalId, &EntryUpdate{}, nil)
 	call("upsertEntryKeep", entryUpsert, err)
+
+	// Upserts of many rows (D89), as the Rust and TypeScript scripts run
+	// them: a sync of three lines in batches of two, the first of which
+	// upsertEntry wrote; again, one line changed, only if changed; one that
+	// sets no field; lines that set different columns; two lines of one key
+	// in one batch; a field an update does not set; and more lines than D1
+	// binds the parameters of in one statement.
+	line := func(n int, external string, amount int64) *types.Entry {
+		return &types.Entry{Id: keyPtr(n), Account: types.Account{Id: keyPtr(bank)}, ExternalId: external, AmountCents: types.GenericInt64(amount), BookedOn: "2026-10-27", Tags: []string{}}
+	}
+	amounts := EntryFields{AmountCents: true}
+	sync := func() []*types.Entry { return []*types.Entry{line(30, "x1", 650), line(31, "x2", 700), line(32, "x3", 800)} }
+	many, err := entries.UpsertMany(ctx, sync(), EntryUniqueByAccountExternalId, amounts, &UpsertOptions{Batch: 2})
+	call("upsertEntries", many, err)
+	changed := sync()
+	changed[1].AmountCents = 750
+	many, err = entries.UpsertMany(ctx, changed, EntryUniqueByAccountExternalId, amounts, &UpsertOptions{OnlyIfChanged: true})
+	call("upsertEntriesOnlyIfChanged", many, err)
+	many, err = entries.UpsertMany(ctx, changed, EntryUniqueByAccountExternalId, EntryFields{}, nil)
+	call("upsertEntriesKeep", many, err)
+	mixed := []*types.Entry{line(33, "x3", 850), line(34, "x4", 900)}
+	mixed[1].Memo = "Lunch"
+	many, err = entries.UpsertMany(ctx, mixed, EntryUniqueByAccountExternalId, EntryFields{AmountCents: true, Memo: true}, nil)
+	call("upsertEntriesMixed", many, err)
+	many, err = entries.UpsertMany(ctx, []*types.Entry{line(35, "x5", 1), line(36, "x5", 2)}, EntryUniqueByAccountExternalId, amounts, nil)
+	call("upsertEntriesTwice", many, err)
+	many, err = entries.UpsertMany(ctx, sync(), EntryUniqueByAccountExternalId, EntryFields{Id: true}, nil)
+	call("upsertEntriesOfAKey", many, err)
+	lines := make([]*types.Entry, 30)
+	for i := range lines {
+		lines[i] = line(40+i, fmt.Sprintf("m%d", i), int64(1000+i))
+	}
+	many, err = entries.UpsertMany(ctx, lines, EntryUniqueByAccountExternalId, amounts, nil)
+	call("upsertManyEntries", many, err)
+	for i := range lines {
+		lines[i] = line(40+i, fmt.Sprintf("m%d", i), int64(1000+i))
+		if i%2 == 0 {
+			lines[i].AmountCents += 100
+		}
+	}
+	many, err = entries.UpsertMany(ctx, lines, EntryUniqueByAccountExternalId, amounts, &UpsertOptions{OnlyIfChanged: true})
+	call("upsertManyEntriesAgain", many, err)
 	call("deleteEntry", nil, entries.DeleteOne(ctx, key(11)))
 	call("deleteEntryAgain", nil, entries.DeleteOne(ctx, key(11)))
 	call("deleteAsNoOne", nil, entries.DeleteOne(context.Background(), key(12)))
@@ -457,14 +505,11 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 	onPostgres := script(t, postgres)
 	onSQLite := script(t, lite)
 
-	// An upsert of many rows is refused on SQLite until the repositories
-	// write sqlutil's statement of a batch.
-	user, err := ParseUserID(ada)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := lite.GetAccountRepository().UpsertMany(WithUserID(ctx, user), []*types.Account{{Id: keyPtr(7), Name: "Many", Code: "many"}}, AccountUniqueByCode, AccountFields{Name: true}, nil); !errors.Is(err, ErrSQLiteUnsupported) {
-		t.Errorf("UpsertMany on SQLite = %v, want ErrSQLiteUnsupported", err)
+	// A transaction runs its after-commit work on SQLite as on Postgres
+	// (D166).
+	want := []string{"first", "hook of 2 writes", "of a rolled-back savepoint"}
+	if pg, sq := commitHooks(t, postgres), commitHooks(t, lite); !reflect.DeepEqual(pg, want) || !reflect.DeepEqual(sq, want) {
+		t.Errorf("the commit hooks ran %v on Postgres and %v on SQLite, want %v", pg, sq, want)
 	}
 	if len(onPostgres) != len(onSQLite) {
 		t.Fatalf("Postgres answered %d calls and SQLite %d", len(onPostgres), len(onSQLite))
@@ -487,4 +532,61 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 		}
 	}
 	t.Logf("SQLite and Postgres answered %d calls alike, %d of them refusals", len(onPostgres), refusals)
+}
+
+// afterCommits is what a transaction of either dialect gives its
+// after-commit work (D166): *Tx and *SQLiteTx.
+type afterCommits interface {
+	AfterCommit(fn func(context.Context))
+	AfterCommitHook(key any, newHook func() CommitHook) CommitHook
+	CommitDuration() time.Duration
+}
+
+// countingHook counts the writes a transaction made, which run once after
+// its commit.
+type countingHook struct {
+	ran    *[]string
+	writes int
+}
+
+func (h *countingHook) AfterCommit(context.Context) {
+	*h.ran = append(*h.ran, fmt.Sprintf("hook of %d writes", h.writes))
+}
+
+// commitHooks runs the after-commit work of D166 through db's
+// transactions, and answers what ran, in order: a commit's functions and
+// one hook of two writes, those a rolled-back savepoint added among them,
+// and no function of a transaction that rolled back.
+func commitHooks(t *testing.T, db DatabaseInterface) []string {
+	t.Helper()
+	var ran []string
+	ctx := context.Background()
+	err := db.Transaction(ctx, func(tx TxInterface) error {
+		hooked := tx.(afterCommits)
+		if hooked.CommitDuration() != 0 {
+			return errors.New("a commit took time before it ran")
+		}
+		hooked.AfterCommit(func(context.Context) {
+			ran = append(ran, "first")
+			if hooked.CommitDuration() <= 0 {
+				ran = append(ran, "no commit duration")
+			}
+		})
+		for i := 0; i < 2; i++ {
+			hooked.AfterCommitHook("writes", func() CommitHook { return &countingHook{ran: &ran} }).(*countingHook).writes++
+		}
+		_ = tx.Transaction(ctx, func(inner TxInterface) error {
+			inner.(afterCommits).AfterCommit(func(context.Context) { ran = append(ran, "of a rolled-back savepoint") })
+			return errors.New("rolled back")
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Transaction(ctx, func(tx TxInterface) error {
+		tx.(afterCommits).AfterCommit(func(context.Context) { ran = append(ran, "of a rollback") })
+		return errors.New("rolled back")
+	})
+	return ran
 }

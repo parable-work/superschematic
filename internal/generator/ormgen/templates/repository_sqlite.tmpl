@@ -31,6 +31,12 @@ import (
 type {{ $repo }} struct {
 	db *SQLiteDatabase
 	tx *sql.Tx // set in a transaction
+	{{- if .EventQueue }}
+	// commit is the after-commit work of tx's SQLiteTx (D166), which
+	// RunEvent gives the transaction it hands its handler. Nil outside a
+	// transaction.
+	commit *txCommit
+	{{- end }}
 }
 
 var _ {{ .TypeName }}RepositoryInterface = (*{{ $repo }})(nil)
@@ -814,11 +820,86 @@ func (r *{{ $repo }}) UpsertOneResult(ctx context.Context, input *{{ .CreateInpu
 	return out, err
 }
 
-// UpsertMany is refused on SQLite until the repositories write sqlutil's
-// upsert of many rows, a statement per batch (D89, D116): use UpsertOne,
-// or UpsertOneResult, a row at a time, in a transaction.
-func (r *{{ $repo }}) UpsertMany(context.Context, []*{{ .CreateInput }}, {{ .TypeName }}UniqueKey, {{ .TypeName }}Fields, *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
-	return nil, sqliteRefused({{ printf "%q" .TypeName }}, "upserts many rows, which the SQLite repositories do not write yet; upsert a row at a time with UpsertOne")
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89): sqlutil's SQLite upsert, a batch
+// of opts.Batch rows or as many as SQLite binds the parameters of, in one
+// transaction, which the rows that hold each batch's keys are read in
+// before and after it (sqliteTable.upsertMany). One whose update names no
+// field updates nothing, and reads each row a key holds back.{{ if .HasSoftDelete }} A
+// soft-deleted row that holds a key is left as it is, and UpsertMany
+// returns ErrNotFound.{{ end }} Two inputs of one batch that hold one key are refused,
+// with Postgres's SQLSTATE 21000, and a key over an expression is refused.
+func (r *{{ $repo }}) UpsertMany(ctx context.Context, inputs []*{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	key, ok := {{ $v }}UniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if key.expression {
+		return nil, upsertExpressionKey("UpsertMany", "{{ .TypeName }}", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	{{- range .Fields }}
+	{{- if or .IsPrimaryKey .IsAuditField .IsInternalMetadata }}
+	if update.{{ toGoName .Name }} {
+		return nil, fmt.Errorf("orm: UpsertMany of {{ $.TypeName }} sets the fields an update sets, not {{ .Name }}")
+	}
+	{{- end }}
+	{{- end }}
+	batch, err := upsertBatch("{{ .TypeName }}", opts.Batch, {{ .SQLite.BatchRows }})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UpsertResult[*types.{{ .TypeName }}], 0, len(inputs))
+	if len(inputs) == 0 {
+		return out, nil
+	}
+	// The columns update names, a relation by its key's column.
+	named := {{ $v }}Members(update)
+	var set []int
+	for i := range {{ $v }}.columns {
+		if c := &{{ $v }}.columns[i]; named[c.member] && !c.key && !c.auto {
+			set = append(set, i)
+		}
+	}
+	err = r.within(ctx, func(q sqliteQuerier) error {
+		records := make([]sqliteRecord, len(inputs))
+		for i, input := range inputs {
+			if err := r.stampCreate(ctx, input); err != nil {
+				return err
+			}
+			record, err := sqliteMembersOf(input)
+			if err != nil {
+				return fmt.Errorf("upsert {{ .TypeName }} %d: %w", i, err)
+			}
+			records[i] = record
+		}
+		upserted, err := {{ $v }}.upsertMany(ctx, q, records, key, string(on), set, batch, opts.OnlyIfChanged, func(sets []string, args []any) ([]string, []any, error) {
+			return r.stamped(ctx, nil, sets, args)
+		})
+		if err != nil {
+			return err
+		}
+		written := make([]sqliteRecord, len(upserted))
+		for i, u := range upserted {
+			written[i] = u.record
+		}
+		rows, err := r.decode(ctx, written, {{ .TypeName }}Fields{}, false)
+		if err != nil {
+			return err
+		}
+		for i, row := range rows {
+			out = append(out, UpsertResult[*types.{{ .TypeName }}]{Row: row, Status: upserted[i].status})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 {{- end }}
 {{- end }}
@@ -887,6 +968,14 @@ func (r *{{ $repo }}) FindPage(context.Context, *{{ .TypeName }}Filter, *{{ .Typ
 {{- if .Versioned }}
 
 func (r *{{ $repo }}) GetVersion(context.Context, {{ .PrimaryKeyType }}, int64) (*types.{{ .TypeName }}, error) {
+	return nil, {{ $refused }}
+}
+
+func (r *{{ $repo }}) GetVersions(context.Context, []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error) {
+	return nil, {{ $refused }}
+}
+
+func (r *{{ $repo }}) GetVersionsWithFields(context.Context, []VersionKey[{{ .PrimaryKeyType }}], {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
 	return nil, {{ $refused }}
 }
 
@@ -1296,14 +1385,28 @@ func (r *{{ $repo }}) RunChange(ctx context.Context, change types.{{ $r.ChangeQu
 // same transaction (D104) on SQLite, as the Postgres repository's does.
 func (r *{{ $repo }}) RunEvent(ctx context.Context, event types.{{ . }}, claim *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error) {
 	var run *rules.EventRun
-	err := r.inTx(ctx, func(tx *sql.Tx) error {
+	// The handler's transaction runs its after-commit work after the commit
+	// of the transaction the event runs in, the repository's or its own
+	// (D166).
+	work := func(tx *sql.Tx, commit *txCommit) error {
 		var err error
 		run, err = rules.SpendEvent(ctx, sqliteRulesHost(tx), {{ printf "%q" $r.TypeName }}, claim)
 		if err != nil || !run.Ran {
 			return err
 		}
-		return handle(ctx, r.db.txOf(tx, 0))
-	})
+		return handle(ctx, r.db.txOf(tx, 0, commit))
+	}
+	var err error
+	if r.tx != nil {
+		commit := r.commit
+		if commit == nil {
+			commit = &txCommit{}
+		}
+		err = work(r.tx, commit)
+	} else {
+		commit := &txCommit{}
+		err = r.db.withinCommitting(ctx, commit, func(tx *sql.Tx) error { return work(tx, commit) })
+	}
 	if err != nil {
 		return nil, err
 	}
