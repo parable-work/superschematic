@@ -1,0 +1,11 @@
+{
+  "name": "runtime-providers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runtime extension points (D159): a notes app whose environments configure a channel adapter, a credential broker, a sandbox, a model provider and a file processor, each a provider package of its own under providers/. scripts/link.sh puts the HTTP runtime into node_modules from this checkout; see README.md.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "Apache-2.0"
+}

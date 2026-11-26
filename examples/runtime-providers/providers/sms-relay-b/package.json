@@ -1,0 +1,21 @@
+{
+  "name": "@example-providers/sms-relay-b",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel adapter for an SMS relay that takes form posts under an account, with basic authentication; send-only (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "sms-relay-b",
+      "implements": "channel",
+      "operations": ["send", "health"],
+      "config": {
+        "URL": { "description": "The relay's base URL." },
+        "ACCOUNT": { "description": "The account messages are sent under." },
+        "TOKEN": { "secret": true, "description": "The account's auth token." }
+      }
+    }
+  }
+}

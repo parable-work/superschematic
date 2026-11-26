@@ -1,0 +1,18 @@
+{
+  "name": "@example-providers/text-preview",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A file processor with no dependency: the text of plain text and Markdown with an SVG preview of their first lines, and a thumbnail of a greyscale PGM image (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "text-preview",
+      "implements": "files",
+      "config": {
+        "MAX_CHARS": { "optional": true, "description": "The longest text extract returns; 100000 when unset." }
+      }
+    }
+  }
+}
