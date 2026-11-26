@@ -601,7 +601,56 @@ pub fn scenario_path(name: &str) -> PathBuf {
 /// Reads a scenario file (its shared values resolved) and replays it on
 /// cores `make_core` builds, one for each engine a scenario opens.
 pub fn replay_path(path: &Path, make_core: &dyn Fn() -> Core) -> Result<Report, String> {
-    Ok(replay(&load(path)?, make_core))
+    let file = load(path)?;
+    let declarations = declarations_of(path)?;
+    if declarations.is_empty() {
+        return Ok(replay(&file, make_core));
+    }
+    // A file whose scenarios compose declarative behaviors (D103's step 5)
+    // replays on the core with each of them added.
+    let declared = superschematic_rules_behaviors::declaratives(&declarations)?;
+    let declaring = || {
+        let mut core = make_core();
+        for behavior in &declared {
+            core.push(behavior.clone());
+        }
+        core
+    };
+    Ok(replay(&file, &declaring))
+}
+
+/// The declaration files of the declarative behaviors (D103's step 5) a
+/// hand-written scenario file's scenarios compose: its `declarations`, each
+/// a path from the file's directory, read whole, in order. None for a file
+/// that lists none.
+pub fn declarations_of(path: &Path) -> Result<Vec<Value>, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let file: Value =
+        serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut out = Vec::new();
+    for listed in file
+        .get("declarations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(relative) = listed.as_str() else {
+            return Err(format!(
+                "{}: declarations lists paths of declaration files",
+                path.display()
+            ));
+        };
+        let declaration = dir.join(relative);
+        let text = std::fs::read_to_string(&declaration)
+            .map_err(|error| format!("{}: {error}", declaration.display()))?;
+        out.push(
+            serde_json::from_str(&text)
+                .map_err(|error| format!("{}: {error}", declaration.display()))?,
+        );
+    }
+    Ok(out)
 }
 
 /// Replays every scenario of a file on cores `make_core` builds, one for

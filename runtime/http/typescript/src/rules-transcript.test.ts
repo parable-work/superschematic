@@ -25,6 +25,7 @@ import {
   type RulesTable,
   type RulesUse,
 } from './rules';
+import type { BehaviorDeclaration } from '../../../rules/typescript/src/index.ts';
 import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 
 // The recorded scenarios are the specification (D103): each transcript
@@ -162,6 +163,13 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // Aliased (D147): names unique across rows in a shared table, a removed
   // alias's and a deleted row's rows deleted.
   { file: 'core-aliased', floor: 46 },
+  // The declarative vocabulary (D103's step 5): test.Votes, whose
+  // declaration states its rules, which the transcript holds whole and the
+  // core is handed (declare) before the replay.
+  { file: 'core-declarative', floor: 45 },
+  // acme.Rating as a declaration with no crate (D103's step 5): the acme
+  // example's extension's file, which the transcript holds whole.
+  { file: 'acme-rating', floor: 26 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -212,6 +220,8 @@ interface Scenario {
 interface Transcript {
   readonly file: string;
   readonly behaviors: readonly string[];
+  /** The declaration files of the declarative behaviors its scenarios compose (D103's step 5), each whole; absent for none. */
+  readonly declarations?: readonly BehaviorDeclaration[];
   readonly scenarios: readonly Scenario[];
 }
 
@@ -376,6 +386,9 @@ for (const { file, floor } of TRANSCRIPTS) {
   for (const dialect of dialects) {
     describe.skipIf(dialect.skip)(`${file}'s transcript on ${dialect.name}`, () => {
       const transcript = transcriptOf(file);
+      // The core runs the declarative behaviors the transcript declares,
+      // and its declarations list them for the layout rule.
+      if (packageCore !== undefined && transcript.declarations !== undefined) core().declare(transcript.declarations);
       let db: TestDatabase;
       const counts = { command: 0, check: 0, raw: 0 };
       let skipped = 0;

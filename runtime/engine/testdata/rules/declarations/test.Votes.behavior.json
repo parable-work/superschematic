@@ -1,0 +1,136 @@
+{
+  "name": "test.Votes",
+  "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["maxScore", "quorum"],
+    "properties": {
+      "maxScore": { "description": "The highest score a vote gives.", "type": "integer", "minimum": 1, "maximum": 10 },
+      "quorum": { "description": "How many votes an accept needs.", "type": "integer", "minimum": 1 }
+    }
+  },
+  "fields": [
+    { "name": "voteCount", "description": "How many votes the row has.", "type": "Generic.Int64" },
+    { "name": "scoreSum", "description": "The sum of their scores.", "type": "Generic.Int64" },
+    { "name": "scoreAverage", "description": "The mean score; absent before the first vote.", "type": "number" },
+    { "name": "topScore", "description": "The highest score; absent before the first vote.", "type": "Generic.Int64" },
+    { "name": "lowScore", "description": "The lowest score; absent before the first vote.", "type": "Generic.Int64" },
+    { "name": "approvals", "description": "How many votes score 3 or more.", "type": "Generic.Int64" },
+    { "name": "flags", "description": "How many times the row was flagged.", "type": "Generic.Int64" },
+    { "name": "lastVoter", "description": "Who voted last.", "type": "string" },
+    { "name": "lastVotedAt", "description": "When the last vote came.", "type": "Temporal.DateTime" },
+    { "name": "quorate", "description": "Whether the votes reached the quorum once.", "type": "boolean" }
+  ],
+  "tables": [
+    {
+      "name": "votes",
+      "description": "One row per voter: the score and when it came.",
+      "key": "voter",
+      "fields": [
+        { "name": "voter", "description": "The voter's subject.", "type": "string" },
+        { "name": "score", "description": "The score.", "type": "Generic.Int64" },
+        { "name": "votedAt", "description": "When the vote came.", "type": "Temporal.DateTime" }
+      ]
+    }
+  ],
+  "hearsChanges": true,
+  "operations": [
+    {
+      "name": "vote",
+      "description": "Records the caller's vote, replacing the caller's earlier one.",
+      "paramsSchema": {
+        "type": "object",
+        "required": ["score"],
+        "additionalProperties": false,
+        "properties": { "score": { "description": "The score, 1 to the config's maxScore.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["voteCount"],
+        "properties": { "voteCount": { "type": "integer" }, "scoreAverage": { "type": "number" } }
+      },
+      "writes": true
+    },
+    {
+      "name": "flag",
+      "description": "Flags the row; its owner cannot.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": { "type": "object", "properties": { "flags": { "type": "integer" } } },
+      "writes": true
+    },
+    {
+      "name": "accept",
+      "description": "Moves the row to accepted: its owner's, once the votes reach the quorum.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": { "type": "object" },
+      "writes": true
+    },
+    {
+      "name": "summary",
+      "description": "Returns the row's votes in figures.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": { "type": "object" }
+    }
+  ],
+  "vetoes": [
+    { "code": "not_open", "description": "A vote or a flag of a row that is not open." },
+    { "code": "own_row", "description": "A flag by the row's owner." },
+    { "code": "not_owner", "description": "An accept by a caller other than the row's owner." },
+    { "code": "no_quorum", "description": "An accept before the votes reach the quorum." },
+    { "code": "missing_fields", "description": "A transition into a state while a field the state requires is absent or null, as StateRules vetoes it." },
+    { "code": "frozen_fields", "description": "An update that changes a field the row's state freezes, as StateRules vetoes it." },
+    { "code": "required_fields", "description": "An update that clears a field the row's state requires, as StateRules vetoes it." }
+  ],
+  "rules": {
+    "constant": ["owner"],
+    "states": { "accepted": { "frozen": ["title"] } },
+    "guards": [
+      { "on": ["vote", "flag"], "require": { "status": { "eq": "open" } }, "veto": "not_open", "message": "only an open row takes votes and flags" },
+      { "on": ["flag"], "require": { "owner": { "ne": { "caller": true } } }, "veto": "own_row", "message": "the row's owner does not flag it" },
+      { "on": ["accept"], "require": { "owner": { "eq": { "caller": true } } }, "veto": "not_owner", "message": "only the row's owner accepts it" },
+      { "on": ["accept"], "require": { "voteCount": { "gte": { "config": "quorum" } } }, "veto": "no_quorum", "message": "the votes have not reached the quorum" }
+    ],
+    "operations": {
+      "vote": {
+        "params": { "score": { "lte": { "config": "maxScore" } } },
+        "effects": [
+          { "upsert": { "table": "votes", "key": { "caller": true }, "values": { "score": { "param": "score" }, "votedAt": { "now": true } } } },
+          { "set": { "lastVoter": { "caller": true }, "lastVotedAt": { "now": true } } }
+        ],
+        "result": { "voteCount": { "field": "voteCount" }, "scoreAverage": { "field": "scoreAverage" } }
+      },
+      "flag": {
+        "effects": [{ "adjust": { "flags": 1 } }],
+        "result": { "flags": { "field": "flags" } }
+      },
+      "accept": {
+        "effects": [{ "move": { "to": "accepted" } }],
+        "result": { "status": { "field": "status" } }
+      },
+      "summary": {
+        "result": {
+          "voteCount": { "field": "voteCount" },
+          "scoreSum": { "field": "scoreSum" },
+          "scoreAverage": { "field": "scoreAverage" },
+          "topScore": { "field": "topScore" },
+          "lowScore": { "field": "lowScore" },
+          "approvals": { "field": "approvals" },
+          "quorate": { "field": "quorate" }
+        }
+      }
+    },
+    "reactions": [
+      { "when": { "voteCount": { "gte": { "config": "quorum" } } }, "then": [{ "set": { "quorate": true } }] },
+      { "when": { "flags": { "gte": 3 } }, "then": [{ "move": { "to": "closed" } }] }
+    ],
+    "derived": {
+      "voteCount": { "count": { "table": "votes" } },
+      "scoreSum": { "sum": { "table": "votes", "field": "score" } },
+      "scoreAverage": { "average": { "table": "votes", "field": "score" } },
+      "topScore": { "max": { "table": "votes", "field": "score" } },
+      "lowScore": { "min": { "table": "votes", "field": "score" } },
+      "approvals": { "count": { "table": "votes", "where": { "score": { "gte": 3 } } } }
+    }
+  }
+}

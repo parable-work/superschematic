@@ -151,6 +151,20 @@ type BehaviorDeclaration struct {
 	// branches on a veto's code, read beside the behavior's name; an
 	// engine refuses a veto whose code its behavior does not list.
 	Vetoes []BehaviorVeto `json:"vetoes,omitempty"`
+	// Rules are a declarative behavior's rules (D103's step 5), in the
+	// vocabulary the behaviors' core interprets: a behavior no Rust
+	// implements, whose declaration a host hands the core whole
+	// (superschematic_rules_behaviors::core_declaring, the bindings'
+	// declare). The core checks them against the declaration when it is
+	// handed it, and each use's config at define; the registry holds them
+	// to an object. Absent for a behavior code implements.
+	Rules json.RawMessage `json:"rules,omitempty"`
+}
+
+// Declarative reports whether the declaration states its rules (D103's
+// step 5): a behavior the core runs from its declaration alone.
+func (d BehaviorDeclaration) Declarative() bool {
+	return len(d.Rules) > 0
 }
 
 // BehaviorTable is a sub-table a behavior keeps per row (D103): on a table
@@ -575,8 +589,25 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorVetoes(decl); err != nil {
 		return err
 	}
+	if err := checkBehaviorRules(decl); err != nil {
+		return err
+	}
 	r.behaviors[decl.Name] = b
 	r.noteExtension(spec.Extension)
+	return nil
+}
+
+// checkBehaviorRules holds a declarative behavior's rules (D103's step 5)
+// to an object: the behaviors' core reads the vocabulary and refuses what
+// it does not read when a host hands it the declaration.
+func checkBehaviorRules(decl BehaviorDeclaration) error {
+	if !decl.Declarative() {
+		return nil
+	}
+	var rules map[string]json.RawMessage
+	if err := json.Unmarshal(decl.Rules, &rules); err != nil || rules == nil {
+		return fmt.Errorf("registry: behavior %s rules is an object of the declarative vocabulary's rules (D103)", decl.Name)
+	}
 	return nil
 }
 

@@ -20,7 +20,7 @@
 //! call from any number of threads at once, all of which run one core.
 //!
 //! The operations ([`crate`] says each one's documents): `rules_run`,
-//! `rules_declarations`, `rules_check` and `rules_expand`.
+//! `rules_declarations`, `rules_check`, `rules_expand` and `rules_declare`.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -158,6 +158,21 @@ pub unsafe extern "C" fn rules_expand(
     out_len: *mut usize,
 ) -> i32 {
     call(Op::Expand, in_ptr, in_len, out_ptr, out_len)
+}
+
+/// `declare`: declarative behaviors' declaration files (D103's step 5),
+/// which the core runs from then on, to the names of every one it runs.
+///
+/// # Safety
+/// As [`rules_run`].
+#[no_mangle]
+pub unsafe extern "C" fn rules_declare(
+    in_ptr: *const u8,
+    in_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    call(Op::Declare, in_ptr, in_len, out_ptr, out_len)
 }
 
 /// Releases an output document.

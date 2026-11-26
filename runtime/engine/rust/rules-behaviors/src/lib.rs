@@ -100,6 +100,12 @@
 //! a shared table keyed by the name's normalized form, which a create gives
 //! the behavior (the declaration's `fromCreate`) and a removed alias or a
 //! delete frees ([`superschematic_rules::Cx::delete_shared`]).
+//! [`Declarative`], D103's step 5: a behavior with no Rust of its own,
+//! whose declaration file states its rules in a fixed vocabulary this
+//! crate interprets (conditions in the ORM's filter grammar with the
+//! caller as an operand, Constants' and StateRules' field rules, guards,
+//! an operation's effects, reactions and fields derived from a sub-table),
+//! one value per file a host hands its core ([`core_declaring`]).
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -134,6 +140,7 @@ pub mod capacity;
 pub mod comments;
 pub mod constants;
 pub mod currency;
+pub mod declarative;
 mod declared;
 pub mod dependencies;
 pub mod derived;
@@ -175,6 +182,7 @@ pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
     ONE_WAY_NUMBERS,
 };
+pub use declarative::{is_declarative, Declarative, DeclarativeConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use derived::{Derived, DerivedConfig, DerivedField};
 pub use holds::{Holds, HoldsConfig};
@@ -320,6 +328,47 @@ pub fn core() -> Core {
         .with(Recurrence)
         .with(Blueprint)
         .with(Aliased)
+}
+
+/// The declarative behaviors (D103's step 5) of declaration files a host
+/// hands the core, each parsed and its rules checked
+/// ([`Declarative::from_document`]), in order. A file the vocabulary does
+/// not read, one that names a behavior [`core`] registers, and two files
+/// of one name that differ are refused with the reason; a file given twice
+/// is one behavior.
+pub fn declaratives(documents: &[serde_json::Value]) -> Result<Vec<Declarative>, String> {
+    let mut out: Vec<Declarative> = Vec::new();
+    for document in documents {
+        let declared = Declarative::from_document(document)?;
+        if NAMES.contains(&declared.name()) {
+            return Err(format!(
+                "behavior {}: the core implements it, and a declaration cannot replace it",
+                declared.name()
+            ));
+        }
+        match out.iter().find(|known| known.name() == declared.name()) {
+            Some(known) if known.document() == declared.document() => continue,
+            Some(_) => {
+                return Err(format!(
+                    "behavior {}: two declarations of it differ",
+                    declared.name()
+                ))
+            }
+            None => out.push(declared),
+        }
+    }
+    Ok(out)
+}
+
+/// [`core`] with the declarative behaviors of declaration files a host
+/// hands it ([`declaratives`]), after the core's own, in order: what a
+/// host runs a project whose behaviors include declared ones on.
+pub fn core_declaring(documents: &[serde_json::Value]) -> Result<Core, String> {
+    let mut core = core();
+    for declared in declaratives(documents)? {
+        core.push(declared);
+    }
+    Ok(core)
 }
 
 #[cfg(test)]

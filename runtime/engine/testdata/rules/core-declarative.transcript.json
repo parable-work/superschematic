@@ -1,0 +1,4046 @@
+{
+  "file": "core-declarative",
+  "source": "runtime/engine/testdata/rules/scenarios/core-declarative.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance",
+    "Stock",
+    "Holds",
+    "Calendar",
+    "Payments",
+    "Recurrence",
+    "Blueprint",
+    "Aliased",
+    "test.Votes"
+  ],
+  "declarations": [
+    {
+      "name": "test.Votes",
+      "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "maxScore",
+          "quorum"
+        ],
+        "properties": {
+          "maxScore": {
+            "description": "The highest score a vote gives.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "quorum": {
+            "description": "How many votes an accept needs.",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "fields": [
+        {
+          "name": "voteCount",
+          "description": "How many votes the row has.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "scoreSum",
+          "description": "The sum of their scores.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "scoreAverage",
+          "description": "The mean score; absent before the first vote.",
+          "type": "number"
+        },
+        {
+          "name": "topScore",
+          "description": "The highest score; absent before the first vote.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "lowScore",
+          "description": "The lowest score; absent before the first vote.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "approvals",
+          "description": "How many votes score 3 or more.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "flags",
+          "description": "How many times the row was flagged.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "lastVoter",
+          "description": "Who voted last.",
+          "type": "string"
+        },
+        {
+          "name": "lastVotedAt",
+          "description": "When the last vote came.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "quorate",
+          "description": "Whether the votes reached the quorum once.",
+          "type": "boolean"
+        }
+      ],
+      "tables": [
+        {
+          "name": "votes",
+          "description": "One row per voter: the score and when it came.",
+          "key": "voter",
+          "fields": [
+            {
+              "name": "voter",
+              "description": "The voter's subject.",
+              "type": "string"
+            },
+            {
+              "name": "score",
+              "description": "The score.",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "votedAt",
+              "description": "When the vote came.",
+              "type": "Temporal.DateTime"
+            }
+          ]
+        }
+      ],
+      "hearsChanges": true,
+      "operations": [
+        {
+          "name": "vote",
+          "description": "Records the caller's vote, replacing the caller's earlier one.",
+          "paramsSchema": {
+            "type": "object",
+            "required": [
+              "score"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "score": {
+                "description": "The score, 1 to the config's maxScore.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "resultSchema": {
+            "type": "object",
+            "required": [
+              "voteCount"
+            ],
+            "properties": {
+              "voteCount": {
+                "type": "integer"
+              },
+              "scoreAverage": {
+                "type": "number"
+              }
+            }
+          },
+          "writes": true
+        },
+        {
+          "name": "flag",
+          "description": "Flags the row; its owner cannot.",
+          "paramsSchema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "resultSchema": {
+            "type": "object",
+            "properties": {
+              "flags": {
+                "type": "integer"
+              }
+            }
+          },
+          "writes": true
+        },
+        {
+          "name": "accept",
+          "description": "Moves the row to accepted: its owner's, once the votes reach the quorum.",
+          "paramsSchema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "resultSchema": {
+            "type": "object"
+          },
+          "writes": true
+        },
+        {
+          "name": "summary",
+          "description": "Returns the row's votes in figures.",
+          "paramsSchema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "resultSchema": {
+            "type": "object"
+          }
+        }
+      ],
+      "vetoes": [
+        {
+          "code": "not_open",
+          "description": "A vote or a flag of a row that is not open."
+        },
+        {
+          "code": "own_row",
+          "description": "A flag by the row's owner."
+        },
+        {
+          "code": "not_owner",
+          "description": "An accept by a caller other than the row's owner."
+        },
+        {
+          "code": "no_quorum",
+          "description": "An accept before the votes reach the quorum."
+        },
+        {
+          "code": "missing_fields",
+          "description": "A transition into a state while a field the state requires is absent or null, as StateRules vetoes it."
+        },
+        {
+          "code": "frozen_fields",
+          "description": "An update that changes a field the row's state freezes, as StateRules vetoes it."
+        },
+        {
+          "code": "required_fields",
+          "description": "An update that clears a field the row's state requires, as StateRules vetoes it."
+        }
+      ],
+      "rules": {
+        "constant": [
+          "owner"
+        ],
+        "states": {
+          "accepted": {
+            "frozen": [
+              "title"
+            ]
+          }
+        },
+        "guards": [
+          {
+            "on": [
+              "vote",
+              "flag"
+            ],
+            "require": {
+              "status": {
+                "eq": "open"
+              }
+            },
+            "veto": "not_open",
+            "message": "only an open row takes votes and flags"
+          },
+          {
+            "on": [
+              "flag"
+            ],
+            "require": {
+              "owner": {
+                "ne": {
+                  "caller": true
+                }
+              }
+            },
+            "veto": "own_row",
+            "message": "the row's owner does not flag it"
+          },
+          {
+            "on": [
+              "accept"
+            ],
+            "require": {
+              "owner": {
+                "eq": {
+                  "caller": true
+                }
+              }
+            },
+            "veto": "not_owner",
+            "message": "only the row's owner accepts it"
+          },
+          {
+            "on": [
+              "accept"
+            ],
+            "require": {
+              "voteCount": {
+                "gte": {
+                  "config": "quorum"
+                }
+              }
+            },
+            "veto": "no_quorum",
+            "message": "the votes have not reached the quorum"
+          }
+        ],
+        "operations": {
+          "vote": {
+            "params": {
+              "score": {
+                "lte": {
+                  "config": "maxScore"
+                }
+              }
+            },
+            "effects": [
+              {
+                "upsert": {
+                  "table": "votes",
+                  "key": {
+                    "caller": true
+                  },
+                  "values": {
+                    "score": {
+                      "param": "score"
+                    },
+                    "votedAt": {
+                      "now": true
+                    }
+                  }
+                }
+              },
+              {
+                "set": {
+                  "lastVoter": {
+                    "caller": true
+                  },
+                  "lastVotedAt": {
+                    "now": true
+                  }
+                }
+              }
+            ],
+            "result": {
+              "voteCount": {
+                "field": "voteCount"
+              },
+              "scoreAverage": {
+                "field": "scoreAverage"
+              }
+            }
+          },
+          "flag": {
+            "effects": [
+              {
+                "adjust": {
+                  "flags": 1
+                }
+              }
+            ],
+            "result": {
+              "flags": {
+                "field": "flags"
+              }
+            }
+          },
+          "accept": {
+            "effects": [
+              {
+                "move": {
+                  "to": "accepted"
+                }
+              }
+            ],
+            "result": {
+              "status": {
+                "field": "status"
+              }
+            }
+          },
+          "summary": {
+            "result": {
+              "voteCount": {
+                "field": "voteCount"
+              },
+              "scoreSum": {
+                "field": "scoreSum"
+              },
+              "scoreAverage": {
+                "field": "scoreAverage"
+              },
+              "topScore": {
+                "field": "topScore"
+              },
+              "lowScore": {
+                "field": "lowScore"
+              },
+              "approvals": {
+                "field": "approvals"
+              },
+              "quorate": {
+                "field": "quorate"
+              }
+            }
+          }
+        },
+        "reactions": [
+          {
+            "when": {
+              "voteCount": {
+                "gte": {
+                  "config": "quorum"
+                }
+              }
+            },
+            "then": [
+              {
+                "set": {
+                  "quorate": true
+                }
+              }
+            ]
+          },
+          {
+            "when": {
+              "flags": {
+                "gte": 3
+              }
+            },
+            "then": [
+              {
+                "move": {
+                  "to": "closed"
+                }
+              }
+            ]
+          }
+        ],
+        "derived": {
+          "voteCount": {
+            "count": {
+              "table": "votes"
+            }
+          },
+          "scoreSum": {
+            "sum": {
+              "table": "votes",
+              "field": "score"
+            }
+          },
+          "scoreAverage": {
+            "average": {
+              "table": "votes",
+              "field": "score"
+            }
+          },
+          "topScore": {
+            "max": {
+              "table": "votes",
+              "field": "score"
+            }
+          },
+          "lowScore": {
+            "min": {
+              "table": "votes",
+              "field": "score"
+            }
+          },
+          "approvals": {
+            "count": {
+              "table": "votes",
+              "where": {
+                "score": {
+                  "gte": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "Declarative > votes upsert the caller's row of a sub-table, each score held to 1 to the config's maxScore, and the count, sum, average, highest, lowest and a filtered count are derived from the rows as each vote writes them",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Proposal",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "owner",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Proposal",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "accepted",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "accepted"
+                      },
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "test.Votes",
+                  "config": {
+                    "maxScore": 5,
+                    "quorum": 2
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 4
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 1,
+              "scoreAverage": 4
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 1,
+                  "scoreSum": 4,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1001000,
+                  "scoreAverage": 4,
+                  "topScore": 4,
+                  "lowScore": 4
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1001000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 2
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 2,
+              "scoreAverage": 3
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 6,
+                  "approvals": 1,
+                  "lastVoter": "bob",
+                  "lastVotedAt": 1002000,
+                  "scoreAverage": 3,
+                  "topScore": 4,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 5
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 2,
+              "scoreAverage": 3.5
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 6
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation vote of behavior test.Votes: /score: must be <= 5",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/score",
+                    "message": "must be <= 5"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 0
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation vote of behavior test.Votes: /score: must be >= 1",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/score",
+                    "message": "must be >= 1"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 2,
+                "weight": 3
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation vote of behavior test.Votes: must NOT have additional properties: weight",
+              "details": {
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must NOT have additional properties: weight"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "summary",
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 2,
+              "scoreSum": 7,
+              "scoreAverage": 3.5,
+              "topScore": 5,
+              "lowScore": 2,
+              "approvals": 1
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Declarative > a guard compares a field that holds a subject with the caller: the owner cannot flag its row, a flag adjusts a counter, and a reaction moves the Workflow once the flags reach three, heard from the change queue",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Proposal",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "owner",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Proposal",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "accepted",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "accepted"
+                      },
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "test.Votes",
+                  "config": {
+                    "maxScore": 5,
+                    "quorum": 2
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "flag",
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes flag of Proposal p1: the row's owner does not flag it",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "flag",
+                "reason": "the row's owner does not flag it",
+                "vetoCode": "own_row",
+                "vetoDetails": {
+                  "action": "flag"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "flag",
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "flags": 1
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 1
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "flag",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "flags": 2
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 2
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "insert",
+                "at": 1000000,
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 2
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1002000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 1
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 2
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1003000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 1
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 2
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 2
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "dave",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "flag",
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "flags": 3
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 3
+                }
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1005000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 2
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 3
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "closed",
+                  "enteredAt": 1006000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 3
+                }
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1006000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 3
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "closed",
+                      "enteredAt": 1006000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0,
+                      "flags": 3
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "closed",
+                  "enteredAt": 1006000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 3
+                }
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "erin",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "flag",
+              "params": {}
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes flag of Proposal p1: only an open row takes votes and flags",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "flag",
+                "reason": "only an open row takes votes and flags",
+                "vetoCode": "not_open",
+                "vetoDetails": {
+                  "action": "flag"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "closed",
+                  "enteredAt": 1006000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 3
+                }
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "erin",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 3
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes vote of Proposal p1: only an open row takes votes and flags",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "vote",
+                "reason": "only an open row takes votes and flags",
+                "vetoCode": "not_open",
+                "vetoDetails": {
+                  "action": "vote"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "closed",
+                  "enteredAt": 1006000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0,
+                  "flags": 3
+                }
+              }
+            },
+            "version": 5
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Declarative > an accept is its owner's, once the votes reach the quorum, and moves the Workflow; a reaction marks the row quorate; the owner stays as its create gave it, and an accepted row's title is frozen",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Proposal",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "owner",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Proposal",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "accepted",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "accepted"
+                      },
+                      {
+                        "from": "open",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "test.Votes",
+                  "config": {
+                    "maxScore": 5,
+                    "quorum": 2
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 0,
+                  "scoreSum": 0,
+                  "approvals": 0
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 3
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 1,
+              "scoreAverage": 3
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 1,
+                  "scoreSum": 3,
+                  "approvals": 1,
+                  "lastVoter": "bob",
+                  "lastVotedAt": 1001000,
+                  "scoreAverage": 3,
+                  "topScore": 3,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "accept",
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes accept of Proposal p1: the votes have not reached the quorum",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "accept",
+                "reason": "the votes have not reached the quorum",
+                "vetoCode": "no_quorum",
+                "vetoDetails": {
+                  "action": "accept"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 1,
+                  "scoreSum": 3,
+                  "approvals": 1,
+                  "lastVoter": "bob",
+                  "lastVotedAt": 1001000,
+                  "scoreAverage": 3,
+                  "topScore": 3,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 4
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "voteCount": 2,
+              "scoreAverage": 3.5
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "accept",
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes accept of Proposal p1: only the row's owner accepts it",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "accept",
+                "reason": "only the row's owner accepts it",
+                "vetoCode": "not_owner",
+                "vetoDetails": {
+                  "action": "accept"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "insert",
+                "at": 1000000,
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1001000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 0,
+                      "scoreSum": 0,
+                      "approvals": 0
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 1,
+                      "scoreSum": 3,
+                      "approvals": 1,
+                      "lastVoter": "bob",
+                      "lastVotedAt": 1001000,
+                      "scoreAverage": 3,
+                      "topScore": 3,
+                      "lowScore": 3
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1003000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 1,
+                      "scoreSum": 3,
+                      "approvals": 1,
+                      "lastVoter": "bob",
+                      "lastVotedAt": 1001000,
+                      "scoreAverage": 3,
+                      "topScore": 3,
+                      "lowScore": 3
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 2,
+                      "scoreSum": 7,
+                      "approvals": 2,
+                      "lastVoter": "carol",
+                      "lastVotedAt": 1003000,
+                      "scoreAverage": 3.5,
+                      "topScore": 4,
+                      "lowScore": 3
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1005000,
+                "before": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 2,
+                      "scoreSum": 7,
+                      "approvals": 2,
+                      "lastVoter": "carol",
+                      "lastVotedAt": 1003000,
+                      "scoreAverage": 3.5,
+                      "topScore": 4,
+                      "lowScore": 3
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Lunch",
+                    "owner": "alice"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "open",
+                      "enteredAt": 1000000
+                    },
+                    "test.Votes": {
+                      "voteCount": 2,
+                      "scoreSum": 7,
+                      "approvals": 2,
+                      "lastVoter": "carol",
+                      "lastVotedAt": 1003000,
+                      "scoreAverage": 3.5,
+                      "topScore": 4,
+                      "lowScore": 3,
+                      "quorate": true
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "owner": "bob"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "Proposal: owner: owner is a constant of Proposal: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "owner",
+                    "rule": "constant",
+                    "message": "owner is a constant of Proposal: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Dinner"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Dinner",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "accept",
+              "params": {}
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "status": "accepted"
+            },
+            "row": {
+              "own": {
+                "title": "Dinner",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "accepted",
+                  "enteredAt": 1007000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1008000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Brunch"
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes update of Proposal p1: Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "update",
+                "reason": "Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+                "vetoCode": "frozen_fields",
+                "vetoDetails": {
+                  "state": "accepted",
+                  "fields": [
+                    "title"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Dinner",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "accepted",
+                  "enteredAt": 1007000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "dave",
+              "permissions": []
+            },
+            "now": 1009000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "vote",
+              "params": {
+                "score": 1
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes vote of Proposal p1: only an open row takes votes and flags",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "vote",
+                "reason": "only an open row takes votes and flags",
+                "vetoCode": "not_open",
+                "vetoDetails": {
+                  "action": "vote"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Dinner",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "accepted",
+                  "enteredAt": 1007000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 16,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Declarative > the define check holds a use's config to the declaration's configSchema, and its rules to the type: the Workflow its states and a move read, and the fields a constant and a state name",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 11,
+                  "quorum": 0,
+                  "extra": true
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Proposal: behavior test.Votes config: unknown key \"extra\"; type Proposal: behavior test.Votes config: /maxScore: must be <= 10; type Proposal: behavior test.Votes config: /quorum: must be >= 1",
+              "details": {
+                "issues": [
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "unknown key \"extra\""
+                  },
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "schema",
+                    "path": "/config/maxScore",
+                    "message": "must be <= 10"
+                  },
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "schema",
+                    "path": "/config/quorum",
+                    "message": "must be >= 1"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Proposal: behavior test.Votes: must have required property 'config'",
+              "details": {
+                "issues": [
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "schema",
+                    "path": "",
+                    "message": "must have required property 'config'"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Proposal: behavior test.Votes config: it reads the status of Workflow, which the type does not list",
+              "details": {
+                "issues": [
+                  {
+                    "use": "test.Votes",
+                    "index": 0,
+                    "behavior": "test.Votes",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Proposal: behavior test.Votes config: it reads the status of Workflow, which the type does not list"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Proposal: behavior test.Votes config: rules.constant: owner is not a field of Proposal (its fields: title)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Proposal: behavior test.Votes config: rules.constant: owner is not a field of Proposal (its fields: title)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Proposal",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "accepted",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "accepted"
+                    },
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "test.Votes",
+                "config": {
+                  "maxScore": 5,
+                  "quorum": 2
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "owner",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Proposal: behavior test.Votes config: rules.states.accepted.frozen: title is not a field of Proposal (its fields: owner)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "test.Votes",
+                    "index": 1,
+                    "behavior": "test.Votes",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Proposal: behavior test.Votes config: rules.states.accepted.frozen: title is not a field of Proposal (its fields: owner)"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

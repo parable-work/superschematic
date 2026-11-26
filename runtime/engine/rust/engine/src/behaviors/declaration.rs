@@ -64,7 +64,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 16] = [
+const DECLARATION_KEYS: [&str; 17] = [
     "name",
     "description",
     "configSchema",
@@ -81,6 +81,7 @@ const DECLARATION_KEYS: [&str; 16] = [
     "contracts",
     "preconditionSchema",
     "vetoes",
+    "rules",
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
 const FIELD_KEYS: [&str; 6] = [
@@ -431,8 +432,10 @@ impl BehaviorDeclaration {
 /// A declaration without the members only a table's layout reads (D103):
 /// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
 /// field's `type` and whether a value field is `optional` (D103's step 4),
-/// which the engine, keeping no table, never answers with, and its
-/// `contracts` (D104), which only the behaviors' core reads. It shifts them
+/// which the engine, keeping no table, never answers with, its
+/// `contracts` (D104) and a declarative behavior's `rules` (D103's step 5),
+/// which only the behaviors' core reads: an extension's crate implements
+/// the behavior for the engine. It shifts them
 /// out, so the members after them keep the order the declaration writes
 /// them in.
 fn without_layout_members(mut value: Value) -> Value {
@@ -442,6 +445,7 @@ fn without_layout_members(mut value: Value) -> Value {
         members.shift_remove("armsDeadlines");
         members.shift_remove("hearsChanges");
         members.shift_remove("contracts");
+        members.shift_remove("rules");
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
@@ -1134,6 +1138,19 @@ mod tests {
             .map(String::as_str)
             .collect();
         assert_eq!(field, ["name", "description"]);
+    }
+
+    /// A declarative behavior's rules (D103's step 5) are the behaviors'
+    /// core's to read: the engine takes the member, whose behavior an
+    /// extension's crate implements for it, and answers with none of it.
+    #[test]
+    fn a_declarative_behaviors_rules_are_left_out_of_its_json() {
+        let rated = BehaviorDeclaration::parse(
+            r#"{"name": "test.Rated", "fields": [{"name": "count", "type": "Generic.Int64"}], "rules": {"derived": {}}}"#,
+        )
+        .expect("a declaration with rules is sound");
+        assert!(rated.json.get("rules").is_none());
+        assert_eq!(rated.json["fields"], json!([{"name": "count"}]));
     }
 
     /// A declaration may declare the sub-tables a table's row keeps, whether

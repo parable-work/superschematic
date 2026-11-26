@@ -95,6 +95,19 @@ impl Declarations {
             .expect("the core's declaration files read")
     }
 
+    /// The declarations of the behaviors ported onto the core and of the
+    /// declarative behaviors (D103's step 5) a host hands its core
+    /// (`superschematic_rules_behaviors::core_declaring`), each file whole.
+    pub fn ported_with(declared: &[Value]) -> Result<Self, String> {
+        let texts: Vec<String> = declared.iter().map(Value::to_string).collect();
+        Self::from_files(
+            superschematic_rules_behaviors::DECLARATIONS
+                .iter()
+                .copied()
+                .chain(texts.iter().map(String::as_str)),
+        )
+    }
+
     /// The declarations read from declaration files' text, a project's own
     /// behaviors' among them.
     pub fn from_files<'a>(files: impl IntoIterator<Item = &'a str>) -> Result<Self, String> {

@@ -1,0 +1,1612 @@
+{
+  "name": "core-declarative",
+  "description": "The declarative vocabulary (D103's step 5) over test.Votes, a behavior whose declaration states its rules and which no Rust implements (runtime/engine/testdata/rules/declarations/test.Votes.behavior.json): a vote that upserts the caller's row of a sub-table, its parameter held to 1 to the config's maxScore; fields derived from the rows as a count, a sum, an average, a highest, a lowest and a filtered count; guards over the row's fields, the Workflow's status and the caller compared with a field that holds a subject; a counter an operation adjusts; an operation that moves the Workflow; two reactions heard from the change queue; the owner kept as its create gave it and a title an accepted row freezes, in Constants' and StateRules' words; and the define refusals. Cases written by hand in the recorded format, since no engine implements a declarative behavior. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D103's step 5): runtime/engine/testdata/rules/scenarios/core-declarative.json",
+  "declarations": [
+    "../declarations/test.Votes.behavior.json"
+  ],
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Declarative > votes upsert the caller's row of a sub-table, each score held to 1 to the config's maxScore, and the count, sum, average, highest, lowest and a filtered count are derived from the rows as each vote writes them",
+      "behaviors": [
+        "Workflow",
+        "test.Votes"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": []
+        },
+        "erin": {
+          "subject": "erin",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": null,
+            "instanceType": "Proposal"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Proposal"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 0,
+                "scoreSum": 0,
+                "approvals": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 4
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "voteCount": 1,
+            "scoreAverage": 4
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 2
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "voteCount": 2,
+            "scoreAverage": 3
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 5
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "voteCount": 2,
+            "scoreAverage": 3.5
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 6
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation vote of behavior test.Votes: /score: must be <= 5",
+            "details": {
+              "issues": [
+                {
+                  "path": "/score",
+                  "message": "must be <= 5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 0
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation vote of behavior test.Votes: /score: must be >= 1",
+            "details": {
+              "issues": [
+                {
+                  "path": "/score",
+                  "message": "must be >= 1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 2,
+              "weight": 3
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation vote of behavior test.Votes: must NOT have additional properties: weight",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "must NOT have additional properties: weight"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "summary",
+            {}
+          ],
+          "now": 1005000,
+          "expect": {
+            "voteCount": 2,
+            "scoreSum": 7,
+            "scoreAverage": 3.5,
+            "topScore": 5,
+            "lowScore": 2,
+            "approvals": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 2,
+                "scoreSum": 7,
+                "approvals": 1,
+                "lastVoter": "alice",
+                "lastVotedAt": 1003000,
+                "scoreAverage": 3.5,
+                "topScore": 5,
+                "lowScore": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Declarative > a guard compares a field that holds a subject with the caller: the owner cannot flag its row, a flag adjusts a counter, and a reaction moves the Workflow once the flags reach three, heard from the change queue",
+      "behaviors": [
+        "Workflow",
+        "test.Votes"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": []
+        },
+        "erin": {
+          "subject": "erin",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": null,
+            "instanceType": "Proposal"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Proposal"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 0,
+                "scoreSum": 0,
+                "approvals": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "flag",
+            {}
+          ],
+          "now": 1001000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes flag of Proposal p1: the row's owner does not flag it",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "flag",
+              "reason": "the row's owner does not flag it",
+              "vetoCode": "own_row",
+              "vetoDetails": {
+                "action": "flag"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Proposal",
+            "p1",
+            "flag",
+            {}
+          ],
+          "now": 1002000,
+          "expect": {
+            "flags": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "flag",
+            {}
+          ],
+          "now": 1003000,
+          "expect": {
+            "flags": 2
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1004000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 0,
+                "scoreSum": 0,
+                "approvals": 0,
+                "flags": 2
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dave",
+          "args": [
+            "Proposal",
+            "p1",
+            "flag",
+            {}
+          ],
+          "now": 1005000,
+          "expect": {
+            "flags": 3
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1006000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "closed",
+                "enteredAt": 1006000
+              },
+              "test.Votes": {
+                "voteCount": 0,
+                "scoreSum": 0,
+                "approvals": 0,
+                "flags": 3
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "erin",
+          "args": [
+            "Proposal",
+            "p1",
+            "flag",
+            {}
+          ],
+          "now": 1007000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes flag of Proposal p1: only an open row takes votes and flags",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "flag",
+              "reason": "only an open row takes votes and flags",
+              "vetoCode": "not_open",
+              "vetoDetails": {
+                "action": "flag"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "erin",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 3
+            }
+          ],
+          "now": 1007000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes vote of Proposal p1: only an open row takes votes and flags",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "vote",
+              "reason": "only an open row takes votes and flags",
+              "vetoCode": "not_open",
+              "vetoDetails": {
+                "action": "vote"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Declarative > an accept is its owner's, once the votes reach the quorum, and moves the Workflow; a reaction marks the row quorate; the owner stays as its create gave it, and an accepted row's title is frozen",
+      "behaviors": [
+        "Workflow",
+        "test.Votes"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": []
+        },
+        "erin": {
+          "subject": "erin",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": null,
+            "instanceType": "Proposal"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Proposal"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proposal",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 0,
+                "scoreSum": 0,
+                "approvals": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 3
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "voteCount": 1,
+            "scoreAverage": 3
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "accept",
+            {}
+          ],
+          "now": 1002000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes accept of Proposal p1: the votes have not reached the quorum",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "accept",
+              "reason": "the votes have not reached the quorum",
+              "vetoCode": "no_quorum",
+              "vetoDetails": {
+                "action": "accept"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 4
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "voteCount": 2,
+            "scoreAverage": 3.5
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Proposal",
+            "p1",
+            "accept",
+            {}
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes accept of Proposal p1: only the row's owner accepts it",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "accept",
+              "reason": "only the row's owner accepts it",
+              "vetoCode": "not_owner",
+              "vetoDetails": {
+                "action": "accept"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1005000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Lunch",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 2,
+                "scoreSum": 7,
+                "approvals": 2,
+                "lastVoter": "carol",
+                "lastVotedAt": 1003000,
+                "scoreAverage": 3.5,
+                "topScore": 4,
+                "lowScore": 3,
+                "quorate": true
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            {
+              "owner": "bob"
+            }
+          ],
+          "now": 1006000,
+          "error": {
+            "class": "InstanceValidationError",
+            "code": "invalid_instance",
+            "message": "Proposal in namespace default (version 1): owner: owner is a constant of Proposal: its create sets it and nothing changes it after",
+            "details": {
+              "issues": [
+                {
+                  "path": "owner",
+                  "rule": "constant",
+                  "message": "owner is a constant of Proposal: its create sets it and nothing changes it after"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            {
+              "title": "Dinner"
+            }
+          ],
+          "now": 1006000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Dinner",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              },
+              "test.Votes": {
+                "voteCount": 2,
+                "scoreSum": 7,
+                "approvals": 2,
+                "lastVoter": "carol",
+                "lastVotedAt": 1003000,
+                "scoreAverage": 3.5,
+                "topScore": 4,
+                "lowScore": 3,
+                "quorate": true
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "accept",
+            {}
+          ],
+          "now": 1007000,
+          "expect": {
+            "status": "accepted"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            {
+              "title": "Brunch"
+            }
+          ],
+          "now": 1008000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes update of Proposal p1: Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "update",
+              "reason": "Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "accepted",
+                "fields": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dave",
+          "args": [
+            "Proposal",
+            "p1",
+            "vote",
+            {
+              "score": 1
+            }
+          ],
+          "now": 1009000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes vote of Proposal p1: only an open row takes votes and flags",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "vote",
+              "reason": "only an open row takes votes and flags",
+              "vetoCode": "not_open",
+              "vetoDetails": {
+                "action": "vote"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proposal",
+            "id": "p1",
+            "data": {
+              "title": "Dinner",
+              "owner": "alice"
+            },
+            "behaviors": {
+              "status": {
+                "status": "accepted",
+                "enteredAt": 1007000
+              },
+              "test.Votes": {
+                "voteCount": 2,
+                "scoreSum": 7,
+                "approvals": 2,
+                "lastVoter": "carol",
+                "lastVotedAt": 1003000,
+                "scoreAverage": 3.5,
+                "topScore": 4,
+                "lowScore": 3,
+                "quorate": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Declarative > the define check holds a use's config to the declaration's configSchema, and its rules to the type: the Workflow its states and a move read, and the fields a constant and a state name",
+      "behaviors": [
+        "Workflow",
+        "test.Votes"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": []
+        },
+        "erin": {
+          "subject": "erin",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 11,
+                        "quorum": 0,
+                        "extra": true
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Proposal/behaviors/1: must match \"then\" schema; /types/Proposal/behaviors/1/config: unknown key \"extra\"; /types/Proposal/behaviors/1/config/maxScore: must be <= 10; /types/Proposal/behaviors/1/config/quorum: must be >= 1",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Proposal/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Proposal/behaviors/1/config",
+                  "message": "unknown key \"extra\""
+                },
+                {
+                  "path": "/types/Proposal/behaviors/1/config/maxScore",
+                  "message": "must be <= 10"
+                },
+                {
+                  "path": "/types/Proposal/behaviors/1/config/quorum",
+                  "message": "must be >= 1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Proposal/behaviors/1: must match \"then\" schema; /types/Proposal/behaviors/1: must have required property 'config'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Proposal/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Proposal/behaviors/1",
+                  "message": "must have required property 'config'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Proposal/behaviors/0/config: type Proposal: behavior test.Votes config: it reads the status of Workflow, which the type does not list",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Proposal/behaviors/0/config",
+                  "message": "type Proposal: behavior test.Votes config: it reads the status of Workflow, which the type does not list"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Proposal/behaviors/1/config: type Proposal: behavior test.Votes config: rules.constant: owner is not a field of Proposal (its fields: title)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Proposal/behaviors/1/config",
+                  "message": "type Proposal: behavior test.Votes config: rules.constant: owner is not a field of Proposal (its fields: title)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proposal",
+              "types": {
+                "Proposal": {
+                  "name": "Proposal",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "accepted",
+                          "closed"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "accepted"
+                          },
+                          {
+                            "from": "open",
+                            "to": "closed"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "test.Votes",
+                      "config": {
+                        "maxScore": 5,
+                        "quorum": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Proposal/behaviors/1/config: type Proposal: behavior test.Votes config: rules.states.accepted.frozen: title is not a field of Proposal (its fields: owner)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Proposal/behaviors/1/config",
+                  "message": "type Proposal: behavior test.Votes config: rules.states.accepted.frozen: title is not a field of Proposal (its fields: owner)"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
