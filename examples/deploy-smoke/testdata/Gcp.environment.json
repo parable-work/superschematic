@@ -19,6 +19,12 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
+        }
+      ],
       "language": "TYPESCRIPT",
       "artifact": "image",
       "origins": [
@@ -53,6 +59,19 @@
             }
           },
           "edge": "sql:smoke-api->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api->smoke-files"
         }
       ]
     },
@@ -64,6 +83,12 @@
         {
           "name": "smoke-api",
           "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
         }
       ],
       "language": "TYPESCRIPT",
@@ -103,6 +128,19 @@
             }
           },
           "edge": "sql:smoke-api-alert-reactions->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-alert-reactions->smoke-files"
         }
       ]
     },
@@ -114,6 +152,12 @@
         {
           "name": "smoke-api",
           "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
         }
       ],
       "language": "TYPESCRIPT",
@@ -155,6 +199,19 @@
             }
           },
           "edge": "sql:smoke-api-check-in-wake-ups->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-check-in-wake-ups->smoke-files"
         }
       ]
     },
@@ -166,6 +223,12 @@
         {
           "name": "smoke-api",
           "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
         }
       ],
       "language": "TYPESCRIPT",
@@ -202,6 +265,19 @@
             }
           },
           "edge": "sql:smoke-api-drain-line-items->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-drain-line-items->smoke-files"
         }
       ]
     },
@@ -213,6 +289,12 @@
         {
           "name": "smoke-api",
           "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
         }
       ],
       "language": "TYPESCRIPT",
@@ -253,6 +335,85 @@
             }
           },
           "edge": "sql:smoke-api-follow-up-timers->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-follow-up-timers->smoke-files"
+        }
+      ]
+    },
+    {
+      "name": "smoke-api-release-files",
+      "kind": "worker",
+      "platform": "gcp.cloudrunworker",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "worker": {
+        "api": "smoke-api",
+        "name": "ReleaseFiles",
+        "queue": "FileReleased",
+        "database": "smoke-db",
+        "instances": 1,
+        "concurrency": 1,
+        "graceSeconds": 8
+      },
+      "resourceName": "smoke-api-release-files",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "smoke-db.database.smoke-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "smoke-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "smoke-api-release-files@superschematic-smoke.iam"
+            }
+          },
+          "edge": "sql:smoke-api-release-files->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-release-files->smoke-files"
         }
       ]
     },
@@ -264,6 +425,12 @@
         {
           "name": "smoke-api",
           "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
         }
       ],
       "language": "TYPESCRIPT",
@@ -298,6 +465,19 @@
             }
           },
           "edge": "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        },
+        {
+          "field": "SMOKE_FILES_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "smoke-files.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:smoke-api-sync-all-linked-accounts->smoke-files"
         }
       ]
     },
@@ -317,6 +497,24 @@
         "$output": {
           "resource": "smoke-db.instance",
           "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "smoke-files",
+      "kind": "bucket",
+      "platform": "gcp.storage",
+      "services": [
+        {
+          "name": "smoke-files",
+          "kind": "Bucket"
+        }
+      ],
+      "resourceName": "superschematic-smoke-smoke-stack-smoke-files",
+      "address": {
+        "$output": {
+          "resource": "smoke-files.bucket",
+          "name": "name"
         }
       }
     },
@@ -398,6 +596,90 @@
   ],
   "edges": [
     {
+      "id": "bucket:smoke-api->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrun-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-alert-reactions->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-alert-reactions",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunworker-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-check-in-wake-ups->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-check-in-wake-ups",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunworker-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-drain-line-items->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-drain-line-items",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunworker-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-follow-up-timers->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-follow-up-timers",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunworker-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-release-files->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-release-files",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunworker-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
+      "id": "bucket:smoke-api-sync-all-linked-accounts->smoke-files",
+      "kind": "bucket",
+      "from": "smoke-api-sync-all-linked-accounts",
+      "to": "smoke-files",
+      "service": {
+        "name": "smoke-files",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrunjob-storage",
+      "field": "SMOKE_FILES_BUCKET"
+    },
+    {
       "id": "site:smoke-web->smoke-api",
       "kind": "site",
       "from": "smoke-web",
@@ -461,6 +743,18 @@
       "id": "sql:smoke-api-follow-up-timers->smoke-db",
       "kind": "sql",
       "from": "smoke-api-follow-up-timers",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrunworker-cloudsql",
+      "field": "SMOKE_DB_DATABASE"
+    },
+    {
+      "id": "sql:smoke-api-release-files->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api-release-files",
       "to": "smoke-db",
       "service": {
         "name": "smoke-db",
@@ -572,6 +866,59 @@
         ]
       },
       {
+        "id": "smoke-api-alert-reactions.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-alert-reactions.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-alert-reactions.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-alert-reactions.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-alert-reactions->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-alert-reactions.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-alert-reactions.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-alert-reactions.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-alert-reactions->smoke-files"
+        ]
+      },
+      {
         "id": "smoke-api-alert-reactions.worker-pool",
         "type": "gcp:cloudrunv2/workerPool:WorkerPool",
         "properties": {
@@ -608,6 +955,15 @@
                   {
                     "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "smoke-api-alert-reactions@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
                   },
                   {
                     "name": "WORKER_CONCURRENCY",
@@ -655,7 +1011,8 @@
         "dependsOn": [
           "smoke-api-alert-reactions.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -750,6 +1107,59 @@
         ]
       },
       {
+        "id": "smoke-api-check-in-wake-ups.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-check-in-wake-ups.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-check-in-wake-ups.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-check-in-wake-ups.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-check-in-wake-ups->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-check-in-wake-ups.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-check-in-wake-ups.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-check-in-wake-ups.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-check-in-wake-ups->smoke-files"
+        ]
+      },
+      {
         "id": "smoke-api-check-in-wake-ups.worker-pool",
         "type": "gcp:cloudrunv2/workerPool:WorkerPool",
         "properties": {
@@ -786,6 +1196,15 @@
                   {
                     "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "smoke-api-check-in-wake-ups@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
                   },
                   {
                     "name": "WORKER_CONCURRENCY",
@@ -833,7 +1252,8 @@
         "dependsOn": [
           "smoke-api-check-in-wake-ups.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -928,6 +1348,59 @@
         ]
       },
       {
+        "id": "smoke-api-drain-line-items.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-drain-line-items->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-drain-line-items->smoke-files"
+        ]
+      },
+      {
         "id": "smoke-api-drain-line-items.worker-pool",
         "type": "gcp:cloudrunv2/workerPool:WorkerPool",
         "properties": {
@@ -964,6 +1437,15 @@
                   {
                     "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "smoke-api-drain-line-items@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
                   },
                   {
                     "name": "WORKER_CONCURRENCY",
@@ -1011,7 +1493,8 @@
         "dependsOn": [
           "smoke-api-drain-line-items.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -1106,6 +1589,59 @@
         ]
       },
       {
+        "id": "smoke-api-follow-up-timers.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-follow-up-timers.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-follow-up-timers.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-follow-up-timers.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-follow-up-timers->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-follow-up-timers.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-follow-up-timers.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-follow-up-timers.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-follow-up-timers->smoke-files"
+        ]
+      },
+      {
         "id": "smoke-api-follow-up-timers.worker-pool",
         "type": "gcp:cloudrunv2/workerPool:WorkerPool",
         "properties": {
@@ -1142,6 +1678,15 @@
                   {
                     "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "smoke-api-follow-up-timers@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
                   },
                   {
                     "name": "WORKER_CONCURRENCY",
@@ -1189,11 +1734,253 @@
         "dependsOn": [
           "smoke-api-follow-up-timers.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
           "smoke-api-follow-up-timers"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "smoke-api-release-files",
+          "displayName": "smoke-stack Gcp worker smoke-api-release-files",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api-release-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.cloudsql-client.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-release-files.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-release-files->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.cloudsql-login.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-release-files.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-release-files->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.database-user.smoke-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke-api-release-files@superschematic-smoke.iam",
+          "project": "superschematic-smoke",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account",
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-release-files->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-release-files.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-release-files.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-release-files->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-release-files.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-release-files->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.worker-pool",
+        "type": "gcp:cloudrunv2/workerPool:WorkerPool",
+        "properties": {
+          "deletionProtection": false,
+          "location": "us-central1",
+          "name": "smoke-api-release-files",
+          "project": "superschematic-smoke",
+          "scaling": {
+            "manualInstanceCount": 1,
+            "scalingMode": "MANUAL"
+          },
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.database.smoke-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "smoke-api-release-files@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "WORKER_CONCURRENCY",
+                    "value": "1"
+                  }
+                ],
+                "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api-release-files",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "smoke-api-release-files.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "smoke-api-release-files.account",
+          "smoke-db.database.smoke-db",
+          "smoke-db.instance",
+          "smoke-files.bucket"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-release-files"
         ]
       },
       {
@@ -1321,6 +2108,15 @@
                     {
                       "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                       "value": "smoke-api-sync-all-lin-1b1ec80@superschematic-smoke.iam"
+                    },
+                    {
+                      "name": "SMOKE_FILES_BUCKET_NAME",
+                      "value": {
+                        "$output": {
+                          "resource": "smoke-files.bucket",
+                          "name": "name"
+                        }
+                      }
                     }
                   ],
                   "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api-sync-all-linked-accounts",
@@ -1367,7 +2163,8 @@
         "dependsOn": [
           "smoke-api-sync-all-linked-accounts.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -1445,6 +2242,59 @@
         "phase": "rollout",
         "owners": [
           "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-sync-all-linked-accounts->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api-sync-all-linked-accounts->smoke-files"
         ]
       },
       {
@@ -1572,6 +2422,15 @@
                   {
                     "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "smoke-api@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "SMOKE_FILES_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-files.bucket",
+                        "name": "name"
+                      }
+                    }
                   }
                 ],
                 "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api",
@@ -1637,11 +2496,65 @@
         "dependsOn": [
           "smoke-api.account",
           "smoke-db.database.smoke-db",
-          "smoke-db.instance"
+          "smoke-db.instance",
+          "smoke-files.bucket"
         ],
         "phase": "rollout",
         "owners": [
           "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-api.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "smoke-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "smoke-api.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api->smoke-files"
+        ]
+      },
+      {
+        "id": "smoke-api.storage.smoke-files",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-files.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "smoke-api.account",
+          "smoke-files.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:smoke-api->smoke-files"
         ]
       },
       {
@@ -1724,6 +2637,25 @@
         "phase": "infrastructure",
         "owners": [
           "smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-files.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": false,
+          "location": "US-CENTRAL1",
+          "name": "superschematic-smoke-smoke-stack-smoke-files",
+          "project": "superschematic-smoke",
+          "publicAccessPrevention": "enforced",
+          "uniformBucketLevelAccess": true,
+          "versioning": {
+            "enabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-files"
         ]
       },
       {
@@ -2117,29 +3049,48 @@
         "smoke-api-alert-reactions.cloudsql-client.smoke-db",
         "smoke-api-alert-reactions.cloudsql-login.smoke-db",
         "smoke-api-alert-reactions.database-user.smoke-db",
+        "smoke-api-alert-reactions.sign-as-self",
+        "smoke-api-alert-reactions.storage.smoke-files",
         "smoke-api-check-in-wake-ups.account",
         "smoke-api-check-in-wake-ups.cloudsql-client.smoke-db",
         "smoke-api-check-in-wake-ups.cloudsql-login.smoke-db",
         "smoke-api-check-in-wake-ups.database-user.smoke-db",
+        "smoke-api-check-in-wake-ups.sign-as-self",
+        "smoke-api-check-in-wake-ups.storage.smoke-files",
         "smoke-api-drain-line-items.account",
         "smoke-api-drain-line-items.cloudsql-client.smoke-db",
         "smoke-api-drain-line-items.cloudsql-login.smoke-db",
         "smoke-api-drain-line-items.database-user.smoke-db",
+        "smoke-api-drain-line-items.sign-as-self",
+        "smoke-api-drain-line-items.storage.smoke-files",
         "smoke-api-follow-up-timers.account",
         "smoke-api-follow-up-timers.cloudsql-client.smoke-db",
         "smoke-api-follow-up-timers.cloudsql-login.smoke-db",
         "smoke-api-follow-up-timers.database-user.smoke-db",
+        "smoke-api-follow-up-timers.sign-as-self",
+        "smoke-api-follow-up-timers.storage.smoke-files",
+        "smoke-api-release-files.account",
+        "smoke-api-release-files.cloudsql-client.smoke-db",
+        "smoke-api-release-files.cloudsql-login.smoke-db",
+        "smoke-api-release-files.database-user.smoke-db",
+        "smoke-api-release-files.sign-as-self",
+        "smoke-api-release-files.storage.smoke-files",
         "smoke-api-sync-all-linked-accounts.account",
         "smoke-api-sync-all-linked-accounts.cloudsql-client.smoke-db",
         "smoke-api-sync-all-linked-accounts.cloudsql-login.smoke-db",
         "smoke-api-sync-all-linked-accounts.database-user.smoke-db",
+        "smoke-api-sync-all-linked-accounts.sign-as-self",
+        "smoke-api-sync-all-linked-accounts.storage.smoke-files",
         "smoke-api.account",
         "smoke-api.cloudsql-client.smoke-db",
         "smoke-api.cloudsql-login.smoke-db",
         "smoke-api.database-user.smoke-db",
+        "smoke-api.sign-as-self",
+        "smoke-api.storage.smoke-files",
         "smoke-db.database.smoke-db",
         "smoke-db.instance",
         "smoke-db.migrator",
+        "smoke-files.bucket",
         "smoke-web.address",
         "smoke-web.anchor",
         "smoke-web.backend",
@@ -2163,6 +3114,7 @@
         "smoke-api-check-in-wake-ups",
         "smoke-api-drain-line-items",
         "smoke-api-follow-up-timers",
+        "smoke-api-release-files",
         "smoke-api-sync-all-linked-accounts"
       ],
       "resources": [
@@ -2170,6 +3122,7 @@
         "smoke-api-check-in-wake-ups.worker-pool",
         "smoke-api-drain-line-items.worker-pool",
         "smoke-api-follow-up-timers.worker-pool",
+        "smoke-api-release-files.worker-pool",
         "smoke-api-sync-all-linked-accounts.job",
         "smoke-api-sync-all-linked-accounts.schedule",
         "smoke-api-sync-all-linked-accounts.schedule-invoker",

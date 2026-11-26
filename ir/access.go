@@ -214,10 +214,15 @@ const (
 	// PrincipalAgent is an agent run, which acts through a grant and for
 	// whom it serves.
 	PrincipalAgent = "agent"
+	// PrincipalExtension is a runtime provider (D159): a channel adapter,
+	// a credential provider, a sandbox or model provider or a file
+	// processor, acting as itself with the narrow role its package
+	// declares (RuntimeProvider.Role), never for a user.
+	PrincipalExtension = "extension"
 )
 
 // PrincipalKinds are the kinds of principal, in order.
-var PrincipalKinds = []string{PrincipalUser, PrincipalParty, PrincipalAgent}
+var PrincipalKinds = []string{PrincipalUser, PrincipalParty, PrincipalAgent, PrincipalExtension}
 
 // GrantHolderKinds are the kinds of principal a grant may be held by.
 var GrantHolderKinds = []string{PrincipalParty, PrincipalAgent}

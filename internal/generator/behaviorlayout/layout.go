@@ -153,7 +153,10 @@ type Table struct {
 	// converts the core's string key to.
 	Key Column `json:"key"`
 
-	// Version is the column each row's version is in, [VersionColumn].
+	// Version is the column each row's version is in, [VersionColumn]; ""
+	// for a table in the layout read-only, which composes no behavior and
+	// a use reads (registry.BehaviorReads, D152), whose rows an adapter
+	// reads at version 0 and no command writes.
 	Version string `json:"version"`
 
 	// Live is the condition a row of a soft-deletable table is live under,
@@ -633,7 +636,61 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		}
 		layout.Types[td.Name] = table
 	}
+	if layout == nil {
+		return nil, nil
+	}
+	// A table a use reads beside its own row's (registry.BehaviorReads:
+	// Recurrence's holidays and relative target, D152) that composes no
+	// behavior is in the layout read-only, so an adapter answers the core's
+	// reads of its rows.
+	for _, td := range sqlutil.TableTypes(schema) {
+		for _, ref := range td.TableBehaviors() {
+			for _, name := range registry.BehaviorReads(ref.Name, ref.Config) {
+				if layout.Types[name] != nil {
+					continue
+				}
+				read, err := readTableOf(schema, name, tables)
+				if err != nil {
+					return nil, fmt.Errorf("behaviorlayout: table %s implements %s, which reads %s: %w", td.Name, ref.Name, name, err)
+				}
+				layout.Types[name] = read
+			}
+		}
+	}
 	return layout, nil
+}
+
+// readTableOf is the read-only layout of a table of schema that composes
+// no behavior and a use reads (D152): its key, its own columns, its audit
+// columns and its live condition, no use and no version column, which an
+// adapter reads as version 0. No command writes it.
+func readTableOf(schema *ir.Schema, name string, tables []sqlutil.TableModel) (*Table, error) {
+	var model *sqlutil.TableModel
+	for i := range tables {
+		if tables[i].Type == name {
+			model = &tables[i]
+		}
+	}
+	td := schema.Types[name]
+	if model == nil || td == nil {
+		return nil, fmt.Errorf("%s is not a table of schema %s", name, schema.Name)
+	}
+	own, relations := ownColumnsOf(schema, model)
+	t := &Table{Type: name, Table: model.Name, Own: own, Audit: readAudit(td, model), Uses: []Use{}}
+	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); model.SoftDelete && deletedAt != nil {
+		t.Live = &Live{Column: deletedAt.Name}
+	}
+	for _, c := range model.Columns {
+		if c.Key {
+			t.Key = Column{Field: c.Field, Column: c.Name, Type: keyType(c)}
+			t.Key.Convert = ConvertOf(t.Key.Type)
+		}
+	}
+	if t.Key.Column == "" {
+		return nil, fmt.Errorf("table %s has no key column", name)
+	}
+	t.Spec = TypeSpec{Name: name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own, relations)}
+	return t, nil
 }
 
 // TableOf is the layout of td, a table of schema that composes behaviors
@@ -835,22 +892,14 @@ func ownColumnsOf(schema *ir.Schema, model *sqlutil.TableModel) ([]Column, []*Re
 // ones, in column order. A config that names a field is held to them, by
 // the core at a command (the spec's fields) and by the loader's checks
 // before it (a Timers field start), so both list the same names. It is nil
-// when schema's tables cannot be modelled, which the build reports
+// when td cannot be modelled ([Unmodelled]), which the build reports
 // elsewhere.
 func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
-	if schema == nil || td == nil {
+	model := modelOf(schema, td)
+	if model == nil {
 		return nil
 	}
-	tables, err := sqlutil.TablesOf(schema, nil)
-	if err != nil {
-		return nil
-	}
-	for i := range tables {
-		if tables[i].Type == td.Name {
-			return ownColumns(schema, &tables[i])
-		}
-	}
-	return nil
+	return ownColumns(schema, model)
 }
 
 // SpecFields are the fields of td, a table of schema, the core's spec of
@@ -858,7 +907,7 @@ func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 // layout's audit, createdBy when a use reads it. A refusal of a config that
 // names a field the type lacks names them as the core's does ("its fields:
 // ..."), so the loader's checks that word it as the core does list these.
-// It is nil when schema's tables cannot be modelled, which the build
+// It is nil when td cannot be modelled ([Unmodelled]), which the build
 // reports elsewhere.
 func SpecFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 	model := modelOf(schema, td)
@@ -970,7 +1019,7 @@ func readsCreatedBy(ref ir.BehaviorRef) bool {
 // column, which the layout's audit names when a use reads it. A by is held to
 // them beside [OwnFields], by the core at a command (the spec's fields) and
 // by the loader's checks before it, so both list the same names. It is nil
-// for a table without one, and when schema's tables cannot be modelled,
+// for a table without one, and when td cannot be modelled ([Unmodelled]),
 // which the build reports elsewhere.
 func AuditFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 	model := modelOf(schema, td)
@@ -1075,8 +1124,8 @@ func fieldSpecs(own []Column, relations []*RelationSpec) []FieldSpec {
 // ImageColumns are the columns of td's rows that its change trigger writes
 // as a write's image (D103), unquoted: the layout's own columns and each
 // use's owned columns, in the layout's order, a binary, vector or
-// geometric column left out. It is nil when schema's tables cannot be
-// modelled.
+// geometric column left out. It is nil when td cannot be modelled
+// ([Unmodelled]).
 func ImageColumns(schema *ir.Schema, td *ir.TypeDef) []string {
 	model := modelOf(schema, td)
 	if model == nil {
@@ -1114,7 +1163,7 @@ func ImageColumns(schema *ir.Schema, td *ir.TypeDef) []string {
 
 // LiveColumn is the column a soft delete of td's rows stamps, deleted_at,
 // unquoted, as the layout's live condition names it, or "" for a table
-// that is not soft-deletable or when schema's tables cannot be modelled.
+// that is not soft-deletable or when td cannot be modelled ([Unmodelled]).
 // The change trigger hears a write that moves it alone (D103): a soft
 // delete, or a restore.
 func LiveColumn(schema *ir.Schema, td *ir.TypeDef) string {
@@ -1129,21 +1178,31 @@ func LiveColumn(schema *ir.Schema, td *ir.TypeDef) string {
 }
 
 // modelOf is the table model of td, a table of schema, or nil when it is
-// none or schema's tables cannot be modelled.
+// none or it cannot be modelled (Unmodelled). Another table that cannot be
+// modelled leaves td's model as it is, but for a relation to that table.
 func modelOf(schema *ir.Schema, td *ir.TypeDef) *sqlutil.TableModel {
 	if schema == nil || td == nil {
 		return nil
 	}
-	tables, err := sqlutil.TablesOf(schema, nil)
-	if err != nil {
-		return nil
-	}
+	tables, _ := sqlutil.TablesModelled(schema, nil)
 	for i := range tables {
 		if tables[i].Type == td.Name {
 			return &tables[i]
 		}
 	}
 	return nil
+}
+
+// Unmodelled is why td, a table of schema, has no table model, so that
+// [OwnFields], [SpecFields] and [AuditFields] are nil: the build's refusal
+// of the table (an index or unique key that names no column of it), or nil
+// when td has a model.
+func Unmodelled(schema *ir.Schema, td *ir.TypeDef) error {
+	if schema == nil || td == nil {
+		return nil
+	}
+	_, refused := sqlutil.TablesModelled(schema, nil)
+	return refused[td.Name]
 }
 
 // subTableOf is the layout of the sub-table declared for the use ref on

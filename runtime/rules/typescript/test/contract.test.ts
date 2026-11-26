@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments', 'Blueprint', 'Aliased']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments', 'Recurrence', 'Blueprint', 'Aliased']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -394,7 +394,9 @@ test('declarations are the registered files, each field typed and the value fiel
   // Lease's expireHolder runs on the table as a whole, which the core now
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
-  expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool']);
+  expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool', 'Recurrence']);
+  // Recurrence (D153) raises an occurrence's opened, reminded and missed.
+  expect((byName('Recurrence').events ?? []).map(e => e.kind)).toEqual(['opened', 'reminded', 'missed']);
   // Comments keeps its messages, draft chunks, read markers, follows,
   // deliveries, edits and reactions in sub-tables of the row and each
   // conversation's high-water marks in a table of the table as a whole;

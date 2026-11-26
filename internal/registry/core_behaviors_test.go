@@ -16,7 +16,7 @@ import (
 
 // coreBehaviorNames are the behaviors New registers, sorted.
 var coreBehaviorNames = []string{"Aliased", "Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering",
-	"Payments", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
+	"Payments", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements, commerceBehaviorNames the ones @superschematic/engine-commerce
@@ -25,7 +25,7 @@ var coreBehaviorNames = []string{"Aliased", "Approvals", "Assignment", "Blueprin
 var (
 	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
 	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
-	rulesOnlyBehaviorNames = []string{"Aliased", "Pool", "Reconcile", "Schedules", "Seats"}
+	rulesOnlyBehaviorNames = []string{"Aliased", "Pool", "Reconcile", "Recurrence", "Schedules", "Seats"}
 )
 
 // A registry with no extension declares the behaviors the engine, the

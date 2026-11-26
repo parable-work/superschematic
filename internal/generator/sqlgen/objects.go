@@ -39,6 +39,10 @@ type Trigger struct {
 	// Function is the trigger function it executes, which takes no
 	// arguments.
 	Function string
+	// Transition, when set, makes it a statement trigger over the
+	// statement's rows it names (REFERENCING OLD TABLE AS old_rows), as
+	// references' and attachments' are (D154); empty for a row trigger.
+	Transition string
 	// Refuses is set on a trigger that fails a write it does not allow, as
 	// a @stateMachine's guard (D118) and a @fenced counter's trigger (D119)
 	// do. The migration planner places such a trigger by a rule of its
@@ -161,15 +165,13 @@ func SearchIndexName(table string) string {
 	return "idx_" + table + "_search_trgm"
 }
 
-// ProjectionViewStatements renders the CREATE VIEW statement of one
-// projection and its COMMENT statements, in order, each without its
-// trailing semicolon. security_barrier keeps a function in a reader's query
-// from seeing rows the predicates exclude.
-func ProjectionViewStatements(view ProjectionView) []string {
+// ProjectionSelectSQL renders the SELECT a projection's view wraps, without
+// a trailing semicolon: the statement ProjectionViewStatements creates the
+// view as, over the same tables. Run under the settings the view reads,
+// it returns the rows the view serves.
+func ProjectionSelectSQL(view ProjectionView) string {
 	var b strings.Builder
-	fmt.Fprintf(&b,
-		"CREATE VIEW %s WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT",
-		view.QualifiedView)
+	b.WriteString("SELECT")
 	if len(view.DistinctOn) > 0 {
 		fmt.Fprintf(&b, " DISTINCT ON (%s)", strings.Join(view.DistinctOn, ", "))
 	}
@@ -202,7 +204,17 @@ func ProjectionViewStatements(view ProjectionView) []string {
 	if len(view.OrderBy) > 0 {
 		fmt.Fprintf(&b, "\nORDER BY %s", strings.Join(view.OrderBy, ", "))
 	}
-	statements := []string{b.String()}
+	return b.String()
+}
+
+// ProjectionViewStatements renders the CREATE VIEW statement of one
+// projection and its COMMENT statements, in order, each without its
+// trailing semicolon. security_barrier keeps a function in a reader's query
+// from seeing rows the predicates exclude.
+func ProjectionViewStatements(view ProjectionView) []string {
+	statements := []string{fmt.Sprintf(
+		"CREATE VIEW %s WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\n%s",
+		view.QualifiedView, ProjectionSelectSQL(view))}
 
 	doc := oneLine(view.Doc)
 	if doc == "" {

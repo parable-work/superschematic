@@ -117,6 +117,22 @@ type Service struct {
 	// may set.
 	ClientVersions bool
 
+	// ProviderSlots are an API service's provider slots (D159), from the
+	// @providers of its @envVars classes: each config field whose value
+	// names a runtime provider, with the interface it takes.
+	ProviderSlots map[string]string
+
+	// Providers are the runtime provider packages an API service's config
+	// lists (D159), as the loader read and checked them. A slot's value
+	// names one of them.
+	Providers []*ir.RuntimeProvider
+
+	// Features are the runtime features an API service uses, each with the
+	// interface it needs (registry.RuntimeFeature, D159). Every deployable
+	// that runs the API's code names a provider of each such interface in
+	// each environment, or the environment is refused.
+	Features []ir.RuntimeFeatureUse
+
 	// Operations are an API service's operations, each with what admits a
 	// caller to it (docs/stack-model.md, section 9.3): every calls edge to
 	// the API must reach one its caller may invoke. OperationsOf reads them

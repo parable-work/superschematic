@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{Hook, Refusal, SchemaIssue, Stop, Veto, View};
 
 use super::messages::Message;
-use super::{CommentsConfig, ATTACHMENTS, NAME};
+use super::{CommentsConfig, NAME};
 
 /// The largest `data` an action block holds, in bytes of compact JSON.
 pub(super) const MAX_ACTION_DATA: usize = 8192;
@@ -211,7 +211,7 @@ pub(super) fn check_body(
 /// A block's own checks, the first block by index that fails its kind's
 /// (batch 5's order): an action's `data` at most 8192 bytes of compact
 /// JSON; a code block's lines in order, then its path relative; and an
-/// attachment block, which a table's Comments waits for.
+/// attachment's https uri with a host.
 pub(super) fn check_block_shapes(
     view: &View<'_, CommentsConfig>,
     operation: &str,
@@ -262,12 +262,21 @@ pub(super) fn check_block_shapes(
                 }
             }
             Some("attachment") => {
-                return Err(invalid(
-                    view,
-                    operation,
-                    format!("/blocks/{index}"),
-                    format!("is an attachment block: {ATTACHMENTS}"),
-                ));
+                let uri = block.get("uri").and_then(Value::as_str).unwrap_or_default();
+                if let Some(rest) = uri.strip_prefix("https:") {
+                    let host = rest
+                        .strip_prefix("//")
+                        .and_then(|after| after.chars().next())
+                        .is_some_and(|first| !matches!(first, '/' | '?' | '#'));
+                    if !host {
+                        return Err(invalid(
+                            view,
+                            operation,
+                            format!("/blocks/{index}/uri"),
+                            "must be an https URL with a host",
+                        ));
+                    }
+                }
             }
             _ => {}
         }
@@ -323,6 +332,14 @@ pub(super) fn check_blocks(
     }
     let held = blocks_of(before);
     for (index, block) in blocks.iter().enumerate() {
+        if block.get("kind").and_then(Value::as_str) != Some("attachment")
+            || held.iter().any(|old| old == block)
+        {
+            continue;
+        }
+        check_attachment(view, index, block)?;
+    }
+    for (index, block) in blocks.iter().enumerate() {
         if block.get("kind").and_then(Value::as_str) != Some("ref") {
             continue;
         }
@@ -348,6 +365,71 @@ pub(super) fn check_blocks(
             ),
             json!({ "block": index, "schema": schema, "id": id }),
         ));
+    }
+    Ok(())
+}
+
+// check_attachment holds an attachment block to the config's attachments,
+// in the contract's order (batch 5): its uri's scheme, its media type, then
+// its size, the first that fails the veto attachment_not_allowed.
+fn check_attachment(view: &View<'_, CommentsConfig>, index: usize, block: &Value) -> Hook<()> {
+    let allowed = &view.config().attachments;
+    let refuse = |member: &str, value: Value, allows: Value, reason: String| {
+        Err(veto(
+            view,
+            "attachment_not_allowed",
+            reason,
+            json!({ "block": index, "member": member, "value": value, "allowed": allows }),
+        ))
+    };
+    let uri = block.get("uri").and_then(Value::as_str).unwrap_or_default();
+    let scheme = uri.split(':').next().unwrap_or_default();
+    if !allowed.schemes.iter().any(|one| one == scheme) {
+        return refuse(
+            "uri",
+            json!(scheme),
+            json!(allowed.schemes),
+            format!(
+                "block {index} is a file at a {scheme} URI, and Comments on {} allows {}",
+                view.type_name(),
+                allowed.schemes.join(", ")
+            ),
+        );
+    }
+    let media_type = block
+        .get("mediaType")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if let Some(types) = &allowed.media_types {
+        let family = media_type.split('/').next().unwrap_or_default();
+        let held = types.iter().any(|one| {
+            one == media_type || one.strip_suffix("/*").is_some_and(|range| range == family)
+        });
+        if !held {
+            return refuse(
+                "mediaType",
+                json!(media_type),
+                json!(types),
+                format!(
+                    "block {index} is a file of type {media_type}, and Comments on {} allows {}",
+                    view.type_name(),
+                    types.join(", ")
+                ),
+            );
+        }
+    }
+    if let (Some(max), Some(bytes)) = (allowed.max_bytes, block.get("bytes").and_then(whole)) {
+        if bytes > max {
+            return refuse(
+                "bytes",
+                json!(bytes),
+                json!(max),
+                format!(
+                    "block {index} is a file of {bytes} bytes, and Comments on {} allows at most {max}",
+                    view.type_name()
+                ),
+            );
+        }
     }
     Ok(())
 }

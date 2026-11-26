@@ -515,7 +515,17 @@ func rowSelect(table *Table) []string {
 			alias(field.Column.Column)
 		}
 	}
-	return append(selected, quote(table.Version)+" AS v")
+	return append(selected, versionRead(table)+" AS v")
+}
+
+// versionRead is what a row read selects as its version: the version
+// column, or 0 for a table the layout holds read-only, which composes no
+// behavior and a use reads (D152).
+func versionRead(table *Table) string {
+	if table.Version == "" {
+		return "0"
+	}
+	return quote(table.Version)
 }
 
 // rowOf is the row of key as the core reads it from the values of

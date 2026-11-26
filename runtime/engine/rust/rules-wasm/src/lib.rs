@@ -57,6 +57,18 @@
 //!   A host checks the specs its layout holds when it first opens the core,
 //!   so a core that lacks a behavior or refuses a config fails then.
 //!
+//! - `expand`: a recurrence (D152), `{"anchor", "timeZone"?, "rule"?,
+//!   "start"?, "every"?, "lastDone"?, "date"?, "offset"?, "adjust"?,
+//!   "weekendDays"?, "holidays"?, "opensBefore"?, "remindBefore"?,
+//!   "overdueAfter"?, "from"?, "to"?, "limit"?}`, to its dated occurrences,
+//!   `{"occurrences": [{"key", "due", "dueAt", "opensAt"?, "remindAt"?,
+//!   "overdueAt", "shifted"?, "projected"?}], "more"}`
+//!   ([`superschematic_rules_behaviors::recurrence::expand`] says how each
+//!   anchor dates them). A recurrence it refuses (a rule that is no RRULE,
+//!   a zone the bundled database lacks) is the error document
+//!   `invalid_input` with the reason, so every language dates a rule alike
+//!   and refuses one alike.
+//!
 //! An input the operation cannot read is an error document,
 //! `{"error": {"code", "message"}}` with the code `invalid_json` or
 //! `invalid_input`, and a panic `internal`; [`run_json`] says which by its
@@ -101,6 +113,7 @@ pub enum Op {
     Run,
     Declarations,
     Check,
+    Expand,
 }
 
 impl Op {
@@ -110,6 +123,7 @@ impl Op {
             Op::Run => "run",
             Op::Declarations => "declarations",
             Op::Check => "check",
+            Op::Expand => "expand",
         }
     }
 }
@@ -163,6 +177,11 @@ fn output_on(core: &Core, op: Op, input: &[u8]) -> Result<Value, (&'static str, 
             let input: RunInput = parse(op, input)?;
             let step: Step = core.run(&input.spec, &input.command, &input.answers);
             serde_json::to_value(step).map_err(|error| ("internal", error.to_string()))
+        }
+        Op::Expand => {
+            let input: Value = parse(op, input)?;
+            superschematic_rules_behaviors::recurrence::expand_json(&input)
+                .map_err(|reason| ("invalid_input", format!("expand: {reason}")))
         }
         Op::Check => {
             let input: CheckInput = parse(op, input)?;

@@ -229,6 +229,10 @@ func (r run) generateGoTypes() error {
 	if err != nil {
 		return err
 	}
+	projections, err := r.goCaptureProjections(deps)
+	if err != nil {
+		return fmt.Errorf("generator: go types for %s: %w", r.Config.Name, err)
+	}
 	var output *typegen.ModuleOutput
 	if err := r.measure("output.types-go.generate", func() error {
 		var err error
@@ -241,6 +245,7 @@ func (r run) generateGoTypes() error {
 			Naming:            r.Options.Naming,
 			Registry:          r.Registry,
 			EngineDocument:    engineDocument,
+			Projections:       projections,
 			Clock:             r.Options.Clock,
 		})
 		return err
@@ -263,6 +268,24 @@ func (r run) generateGoTypes() error {
 
 	r.Done("types-go", dir)
 	return nil
+}
+
+// goCaptureProjections renders the schema's @projection views as its
+// create.sql does, with the build's SQL options, for the Go types'
+// capture functions (D168). It renders none when the naming file's
+// [go.projection_capture] table is off or the schema declares no view.
+func (r run) goCaptureProjections(deps map[string]*ir.Schema) ([]sqlgen.ProjectionView, error) {
+	if !r.Options.Naming.Go.ProjectionCapture.Enabled() || len(r.Schema.Projections()) == 0 {
+		return nil, nil
+	}
+	ddl, err := sqlgen.Generate(r.Schema, SQLOptions(r.Config, r.Outputs, deps, r.Options.Naming))
+	if err != nil {
+		return nil, fmt.Errorf("projection capture: %w", err)
+	}
+	if ddl == nil {
+		return nil, nil
+	}
+	return ddl.Projections, nil
 }
 
 // generateTSTypes emits the TypeScript type package.

@@ -96,8 +96,9 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	// it implements after the engine's, then those D103's step 4 ports
 	// (Rollups, Dependencies, Numbering, Revisions, Comments); Reconcile's value field is optional, its column
 	// NULL before the behavior sets it, Schedules and Pool each declare the
-	// one event they emit, run and recheck, whose payload's schema the
-	// declaration holds, Pool's pick and Lease's expireHolder run on the
+	// one event they emit, run and recheck, and Recurrence its three,
+	// opened, reminded and missed, whose payloads' schemas the
+	// declarations hold, Pool's pick and Lease's expireHolder run on the
 	// table as a whole, and Budget implements the contract Capacity, which
 	// Pool asks.
 	var names []string
@@ -106,7 +107,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		names = append(names, declaration.Name)
 		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Blueprint", "Aliased"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Recurrence", "Blueprint", "Aliased"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
 	}
 	// Comments' writes are beside the row (D103's step 4).
@@ -119,15 +120,23 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	if reconcile.Value != "observed" || len(reconcile.Fields) == 0 || reconcile.Fields[0].Name != "observed" || !reconcile.Fields[0].Optional {
 		t.Fatalf("Reconcile's declaration = %+v, want its value field observed, optional", reconcile)
 	}
-	for name, kind := range map[string]string{"Schedules": "run", "Pool": "recheck"} {
-		events := byName[name].Events
-		if len(events) != 1 || events[0].Kind != kind || len(events[0].PayloadSchema) == 0 {
-			t.Fatalf("%s's events = %+v, want the one event %s, with its payload's schema", name, events, kind)
+	// Recurrence (D153) raises an occurrence's opened, reminded and missed.
+	emitters := map[string][]string{"Schedules": {"run"}, "Pool": {"recheck"}, "Recurrence": {"opened", "reminded", "missed"}}
+	for name, kinds := range emitters {
+		var got []string
+		for _, event := range byName[name].Events {
+			if len(event.PayloadSchema) == 0 {
+				t.Fatalf("%s's event %s has no payload schema", name, event.Kind)
+			}
+			got = append(got, event.Kind)
+		}
+		if !slices.Equal(got, kinds) {
+			t.Fatalf("%s's events = %q, want %q, each with its payload's schema", name, got, kinds)
 		}
 	}
 	for _, declaration := range declarations {
-		if len(declaration.Events) > 0 && declaration.Name != "Schedules" && declaration.Name != "Pool" {
-			t.Fatalf("%s declares events %+v, and only Schedules and Pool emit any", declaration.Name, declaration.Events)
+		if _, ok := emitters[declaration.Name]; len(declaration.Events) > 0 && !ok {
+			t.Fatalf("%s declares events %+v, and only Schedules, Pool and Recurrence emit any", declaration.Name, declaration.Events)
 		}
 	}
 	scopes := map[string]string{}

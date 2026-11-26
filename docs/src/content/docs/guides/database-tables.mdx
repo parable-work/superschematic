@@ -454,6 +454,150 @@ that leaves deleted rows out adds it too. A field whose column would be
 `search_text` beside search fields fails the build, since the generated
 column takes that name.
 
+## Search across tables
+
+`@searchField` filters one table's rows. `@searchable` puts a table's rows
+in one index the whole database shares, so one search finds a row of any
+table, ranked, for a page and for an agent alike (D155).
+
+```ts
+import { AutoGenerate, Comments, Encrypted, Relation, attachments, audience, key, queue, searchable } from "@superschematic/db";
+
+// One message per row whose indexed text changed; the build fills its fields.
+@queue()
+export abstract class SearchIndexing {}
+
+@attachments<Task>({ released: FileReleased })
+@searchable<Task>({ title: "title", body: "details", scope: "project", queue: SearchIndexing })
+export abstract class Task implements Comments<Task, {}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  project: Relation<Project, { onDelete: "CASCADE" }>;
+  title: string;
+  details: Nullable<string>;
+  accessCode: Nullable<Encrypted<string>>;
+}
+
+@audience<Page>({ owner: "owner" })
+@searchable<Page>({ title: "title", body: "text", scope: "project", queue: SearchIndexing })
+export abstract class Page {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  project: Relation<Project, { onDelete: "CASCADE" }>;
+  title: string;
+  text: Nullable<string>;
+  owner: Identity.UUID;
+}
+```
+
+| Option | What it sets |
+| --- | --- |
+| `title` | the text field that titles each row: a match in it ranks highest, and a hit shows it |
+| `body` | a text field, or a list of them, that holds the row's body |
+| `scope` | a field holding one value, a text or a key (a relation's among them), that a search may keep to: a workspace, a project |
+| `queue` | the `@queue` class a write that changes the indexed text enqueues on: `sourceTable` and `sourceKey`; required |
+| `comments` | `false` leaves the row's conversation out; indexed when the table implements `Comments` |
+| `attachments` | `false` leaves its files' extracted text out; indexed when the table declares `@attachments` |
+
+The build adds one table to the database, `search_index`, with a row per
+record of every `@searchable` table: its table and key, its title, its
+body, the text of its conversation's messages, its files' extracted text,
+its scope, an optional embedding, and its effective audience and agent
+access ([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+A GIN index covers its words, each weighed by where it is: the title
+first, then the body, then the conversation, then the files.
+
+An `Encrypted<T>` field is never indexed: the build refuses `@searchable`
+naming one, since an index row holds its text in the clear.
+
+### How the index keeps up
+
+A trigger on each `@searchable` table runs in the writer's transaction:
+
+- a delete, or a soft delete, deletes the row's index row;
+- a change of the row's audience is copied into its index row, so a search
+  never shows a row to someone it was just hidden from;
+- an insert, a restore, and an update that changes a title, body or scope
+  field enqueue the row. So does a message posted or edited in its
+  conversation, and a file added, removed or given its extracted text.
+
+The queue keeps one ready message per row, however many writes it takes.
+Its worker calls `indexSearch`, which builds the row's index row again:
+
+```ts
+// An API's @worker({ queue: SearchIndexing }) class IndexSearch.
+export const createWorkers: WorkersConstructor = deps => ({
+  async indexSearch(message) {
+    await indexSearch(deps.orm, message);
+  },
+});
+```
+
+A changed text is found by its new words once the worker has run: under
+`stack dev`, within its poll interval; on Cloudflare Workers, at the next
+Cron firing, within about a minute, since a trigger's enqueue sends no
+wake. Access never waits on the queue. `reindexSearch(orm)` builds every
+row's index row, once, for a table made `@searchable` with rows in it.
+
+### Searching
+
+```ts
+import { searchTables } from "@superschematic/http-runtime/postgres";
+
+const { items, total, more } = await searchTables(orm, principal, { q: "walnut desk", scope: project, limit: 20 });
+// items: [{ table: "Task", key, title, matched: "body", snippet: [{ text: "a " }, { text: "walnut", match: true }, ...], place: 1 }, ...]
+```
+
+A row matches when it holds every word of `q`, folded to lower case, and
+the hits come best first: Postgres's `ts_rank_cd` over the weighed words,
+then table and key, as the engine's Search ranks. `tables` keeps to some
+tables, and `scope` to the rows whose scope field holds one of its values.
+A snippet comes in parts, each match marked, so no markup in a row reaches
+a page.
+
+Access is checked inside the query, so `total` and every page are exact
+and a hidden row never shows as a gap:
+
+- a user's audience is held on the index row's copy of each row's;
+- a party, or an agent run, reaches rows through its grants' relation
+  paths: for it the search keeps each table's rows to those its own list
+  reads show, through the table's repository, and leaves out a table its
+  grants reach no row of;
+- `permissions` in the options names the permission a table's rows need.
+
+`searchRoutes({ orm, authenticate })` serves the search at
+`GET /api/search?q=...&tables=...&scope=...&limit=...&offset=...`, and
+`searchMcpTool` with `callSearchTool` as the MCP tool `search`. An app
+mounts them; an agent run calls the tool with its run token, a grant, and
+finds what its grant reaches.
+
+### Embeddings
+
+Embeddings are off unless the options give them. With a model provider
+that embeds ([Runtime providers](/superschematic/guides/runtime-providers/)):
+
+```ts
+const options = { embeddings: searchEmbeddingsOf(providers.model("MODEL"), "text-embedding-1") };
+await indexSearch(deps.orm, message, options);
+await searchTables(orm, principal, { q }, options);
+```
+
+`indexSearch` then embeds a row's text after it writes the index row, and
+keeps the vector while the text is the same, so a write that leaves the
+text alone costs no model call. A search embeds its query and re-ranks its
+first 200 hits by reciprocal rank fusion of their text place and their
+similarity; the hits and the total stay the rows that hold the words. A
+model that fails leaves the text order.
+
+| Settled | Why |
+| --- | --- |
+| the index lives in each database | the access check reads each row's audience and, for a grant, the row itself, in the query that ranks |
+| a vector costs 8 bytes a dimension a row, a model call per changed text and one per search | a 1536-dimension model is about 12 GB a million rows; a search reads at most 200 vectors |
+| leaving out the option switches embeddings off | no call is made and no search re-ranks; `reindexSearch` embeds every row again after a change of model |
+
+Search across tables is Postgres alone: the build refuses `@searchable` in
+a service that lists `sqlite`.
+
 ## Pages
 
 `FindPage` reads one page of the rows a filter finds, in the order of one
@@ -948,6 +1092,155 @@ caller opened none, and the lock is SQLite's one writer, which holds the
 database once the merge writes. A merge whose relations delete rows of a
 `@versioned` table has no SQLite form. The TypeScript and Go
 repositories run on Postgres alone, so D1 has no merge.
+
+## References and files on any row
+
+A `Relation<>` points at one table the schema names. Two declarations of
+`@superschematic/db` let a row point at a row of any table, and hold files,
+and let every row list what points at it (D154).
+
+```ts
+import { AutoGenerate, Comments, attachments, audience, key, queue, references } from "@superschematic/db";
+
+// One message per reference a target's delete cleared; the build fills its fields.
+@queue()
+export abstract class ReferenceCleared {}
+
+// One message per object a file named, once the file is gone; the build fills its fields.
+@queue()
+export abstract class FileReleased {}
+
+@references<Issue>({ cleared: ReferenceCleared })
+@attachments<Issue>({ released: FileReleased, maxFileBytes: 26214400 })
+export abstract class Issue implements Comments<Issue, { attachments: { schemes: ["attachment"] } }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+}
+
+@audience<Note>({ owner: "owner" })
+@references<Note>({ tables: [Issue, Note], cleared: ReferenceCleared })
+@attachments<Note>({ released: FileReleased, mediaTypes: ["text/*", "image/*", "application/pdf"] })
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  owner: Identity.UUID;
+}
+```
+
+| Option | What it sets |
+| --- | --- |
+| `@references` `tables` | the tables a reference may point at; any table of the database with one key unless set |
+| `@references` `cleared` | the `@queue` class a target's delete enqueues one message on per reference it clears: `holderTable`, `holderKey`, `targetTable`, `targetKey` and `role` |
+| `@references` `maxPerRow` | the most references one row holds; 1000 unless set |
+| `@attachments` `released` | the `@queue` class a file's delete enqueues a message on, naming its object: `objectKey`, `contentHash` and `reason`; required |
+| `@attachments` `maxFileBytes` | the largest file; 100 MiB unless set, and at most 5 GiB, the largest object one signed `PUT` uploads |
+| `@attachments` `maxRowBytes` | the most bytes one row's files hold together, uploads under way among them; 1 GiB unless set |
+| `@attachments` `maxFiles` | the most files one row holds; 100 unless set |
+| `@attachments` `mediaTypes` | the media types a file may have, each `type/subtype` or `type/*`; any unless set |
+
+The build adds a sub-table beside each table that declares one, a child
+of the row that its delete deletes, with no repository of its own:
+
+- `issue_references`: one row per target and role, the target's table by
+  its type's name and its key as the database writes it as text, who
+  added it and when. A row points at one target once per role, and an
+  index on the target serves the reads of what points at a row.
+- `issue_attachments`: one row per file, its name, media type, size,
+  SHA-256, caption, who uploaded it and when, and the name of the object
+  that holds its bytes, which two rows may share. A file processor's
+  extraction and preview state sit beside them (`none`, `pending`, `done`
+  or `failed`).
+
+A target is not a foreign key, since it is a row of any table. A trigger
+on each table a reference may point at stands in for one: after a delete
+statement it deletes the references to the rows it removed, from every
+references sub-table that may hold one, and enqueues a cleared message for
+each, so the row that held it hears of it through the queue's worker. A
+soft delete is an update and clears nothing: a read leaves a deleted row
+out on its own, and a row restored keeps its references. Both declarations
+are Postgres alone.
+
+### References and backlinks
+
+The repositories hold `references` beside the tables:
+
+```ts
+await orm.references.add({ from: { table: "Note", key: note }, to: { table: "Issue", key: issue }, role: "blocks" });
+const held = await orm.references.of({ table: "Note", key: note });
+const { items, hidden } = await orm.references.referencedBy({ table: "Issue", key: issue });
+```
+
+`referencedBy` answers the rows that point at a row across every table:
+those whose references name it, and those whose `Comments` messages hold a
+ref block that names it, so a mention in a thread is a backlink too. Every
+read keeps to what its caller may read, through the target's and each
+holder's own repository, as any read of theirs does
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+A reference to a row the caller cannot read is left out entirely, not
+shown locked. A caller who cannot read the row itself is told it is not
+there, and so is one who adds a reference to such a row. Only the owner of
+a row whose audience is not everyone gets `hidden`, how many rows they
+cannot see point at it; anyone else hears of no rows but the ones they see.
+
+### Files
+
+A browser uploads a file straight to the bucket, through a URL the API
+signs, so its bytes never pass through a Worker's or a server's request:
+
+```ts
+const { attachment, upload } = await orm.attachments.begin(
+  { to: { table: "Issue", key: issue }, name: "plan.pdf", mediaType: "application/pdf", size, sha256 },
+  { bucket: deps.issueFiles }
+);
+// The browser sends PUT upload.url with upload.headers and the bytes.
+const file = await orm.attachments.complete({ table: "Issue", id: attachment.id }, { bucket: deps.issueFiles });
+```
+
+`begin` holds the file to the declaration's bounds with the row's other
+files and the uploads under way, records it `pending`, and signs a `PUT`
+of its media type for an object of its own. `complete` reads the object
+back as it streams, hashing it, through workerd's native digest on
+Workers, and holds it to the size and SHA-256 `begin` declared: a file
+whose bytes differ is removed. An upload never completed is released an
+hour after its URL expires. A bucket's [CORS rules](/superschematic/guides/buckets/#let-a-page-reach-the-bucket)
+must admit `PUT` from the page's origin with the `content-type` header.
+
+A message carries a file as an attachment block, which
+`attachmentBlock(file)` writes: `attachment:<id>`, its name, media type,
+size and SHA-256. `Comments` holds the block to the config's
+`attachments`: its scheme, its media type, then its size.
+
+`file` files a file onto another row, of the same table or another, with
+no second upload: a copy of its row that names the same object, or with
+`move` the file itself. When the file's table keeps references that may
+point at the other row's table, its row then points at the other row,
+with the role `filed`, so the other row lists it among its backlinks.
+
+A file's delete, `detach`, the row's own or a `move`, enqueues its
+object's release. The released queue's worker calls `release`, which
+deletes the object, and its preview's, once no file of any table names
+it:
+
+```ts
+// An API's @worker({ queue: FileReleased }) class ReleaseFiles.
+export const createWorkers: WorkersConstructor = deps => ({
+  async releaseFiles(message) {
+    await deps.orm.asSystem().attachments.release(message, { bucket: deps.issueFiles });
+  },
+});
+```
+
+| Settled | Why |
+| --- | --- |
+| a file is at most 100 MiB unless the declaration says otherwise, and at most 5 GiB | one signed `PUT` uploads up to 5 GiB to R2, S3 and Cloud Storage alike; a larger file needs a multipart upload, which is not built |
+| a row's files hold at most 1 GiB and 100 files unless set | a row is a record, not a drive; an upload under way counts until it expires, so two at once cannot pass the bound |
+| text is extracted when an upload completes, and a preview is made on a file's first view | search indexes the text whether or not anyone opens the file; most files are never viewed, so a preview made at upload would mostly go unseen |
+
+Extraction and previews are a file processor's (D159), which is not built
+yet: `complete` asks a file's extraction and `download` its preview, and
+`pending` and `processed` are what a processor reads and records.
 
 ## State machines
 
@@ -3090,6 +3383,119 @@ due, and an event message deleted with SQL is never handed on. Prefer the
 operations: `pauseSchedule` and `resumeSchedule`, a `setSchedule` that
 replaces it, `cancelSchedule`.
 
+### A row's recurrence, and the calendar
+
+A table implements `Recurrence` as it implements Schedules, with the table
+itself as its first type argument (D152): a rule on each row that turns
+into dated occurrences, each opened, reminded, done, missed or skipped.
+Schedules runs code at times; Recurrence keeps a record of what is due and
+what was done. The behaviors' core alone implements it, and dates every
+language's occurrences alike.
+
+```ts
+// recurrence-db
+@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+export abstract class Filing
+  implements
+    Recurrence<Filing, {
+      anchors: ["calendar", "afterDone", "relative"];
+      timeZone: "Europe/London";
+      horizonDays: 400;
+      adjust: "after";
+      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar" };
+      relative: { via: "contract"; type: "Contract"; field: "endsOn" };
+      opensBefore: "P14D";
+      remindBefore: "P3D";
+      overdueAfter: "P1D";
+      permission: "filings.work";
+      managePermission: "filings.manage";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  holidayCalendar: Nullable<string>;
+  contract: Nullable<Relation<Contract>>;
+}
+```
+
+Above, a filing is due on a calendar rule, a while after it was last
+done, or a while before its contract ends. Each occurrence opens two weeks
+before it is due, reminds three days before, and is missed a day after. A
+due date that falls on a weekend or on a holiday of the filing's calendar
+moves to the next business day.
+
+| Member | What it does |
+| --- | --- |
+| `anchors` | the anchors a row's recurrence may take: `calendar`, an RFC 5545 `RRULE` from a wall start; `afterDone`, an interval after the last completion; `relative`, an offset from the date `relative` names, and its anniversaries |
+| `timeZone` | the IANA zone a recurrence is read in when `setRecurrence` names none; UTC when absent |
+| `horizonDays` | how many days ahead the occurrences are kept; 400 when absent |
+| `historyDays` | how many days a finished occurrence stays after its due; 1100 when absent |
+| `adjust` | how a due date on a weekend day or a holiday moves: `before`, `after` or `none`; none when absent |
+| `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
+| `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
+| `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
+| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds |
+| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `permission` | the permission `complete` and `listOccurrences` need |
+| `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
+
+The build adds the owned fields `recurrence` (the row's rule as set),
+`nextDueAt` and `lastDoneAt`; the sub-table `filing_recurrence_occurrences`
+(`FilingRecurrenceOccurrences`), one row per occurrence, keyed by its
+nominal wall date-time before any adjustment (`2026-10-31T09:00`), with
+`due`, `due_at`, `opens_at`, `remind_at`, `overdue_at`, `state`,
+`revision`, `shifted`, `moved`, `changed_at`, `reminded_at`,
+`completed_at`, `completed_by_table`, `completed_by_key`,
+`completed_by_principal` and `note`; the deadline queue
+`filing_deadline_queue`, where the deadlines `open`, `remind`, `overdue`
+and `plan` wait; and the change queue `filing_change_queue`, through which
+a write of the calendar field or the relation plans again. Its operations
+are `recurrence.setRecurrence({ anchor, rule?, start?, every?, offset?,
+timeZone?, adjust? })`, which answers `{ recurrence, planned, kept,
+nextDueAt? }`; `complete({ key?, completedBy?, note? })`, `skip({ key,
+note? })` and `moveOne({ key, due })`, each answering the occurrence; and
+the read-only `listOccurrences({ from?, to?, states? })`.
+
+- **States.** An occurrence is `upcoming` until it opens, then `open`
+  until it is `done` or, at its overdue time, `missed`. `skip` finishes one
+  that is not done. A missed one can still be completed late, and it never
+  blocks the next.
+- **Rule changes.** `setRecurrence` replans only the occurrences that
+  have not opened. Open and finished ones stay as they are; `kept` names
+  the open ones.
+- **What completed it.** `completedBy` is `{ table, key }`, any row as a
+  reference names one; the principal that completed it is recorded too.
+  An `afterDone` recurrence dates its next occurrence from the completion.
+- **Holidays.** Your app fills the holiday table. Core ships no holidays:
+  which days close is data, and which calendar applies is a field of the
+  row.
+- **Dates in every language.** The core expands each rule. TypeScript
+  (`RulesCore.expand`), Go (`rules.Expand`) and Rust
+  (`recurrence::expand`) read one golden file of expansions, so they return
+  the same dates across a change of the clocks.
+
+`@calendarSource` puts a table on the calendar: each row dated by a date
+or date-time `field` (to an `end`), or each occurrence of its Recurrence
+(`occurrences: true`), titled by a field, with a `kind` and a `color` key.
+`readCalendar(orm, principal, { from, to, sources?, scope? })` from
+`@superschematic/http-runtime/postgres` merges every source in a window.
+It reads each table through its repository as the caller, so a row's
+audience and the caller's grants hold, and shows an occurrence only when
+its row is shown. `calendarRoutes` serves the read at `GET /api/calendar`,
+and `calendarMcpTool` with `callCalendarTool` serve it as an MCP tool.
+
+A calendar client sends no `Authorization` header, so its feed's URL holds
+a token: `POST /api/calendar/feeds { role, detail, sources? }` issues one
+for the caller, and `GET /api/calendar/feed/<token>.ics` serves it as
+iCalendar. The token is a grant of the database's `@accessGrants` table
+that reads its feed alone: it reads as its holder, bounded by its role's
+permissions, and every other route refuses it. Its `detail` is `full`
+(each title) or `busy` ("Busy" and a reference number), so a leaked URL
+shows only what its owner chose. A feed lasts a year unless its issue says
+otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
+another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 ### A pool of members
 
 A table implements `Pool` as it implements Schedules (D104): each row is a
@@ -3573,10 +3979,17 @@ const page = await orm.ticket.comments.listMessages(id, { thread: posted.id });
 
 `post` takes a Markdown body of at most `maxBodyLength` code points,
 blocks (`ref`, another row; `action`, a card for what the poster did;
-`code`, a place in code at a revision), mentions, a `thread` to reply
+`code`, a place in code at a revision; `attachment`, a file the
+deployment keeps, held to the config's `attachments`), mentions, a `thread` to reply
 in, a message of it to quote (`quotes`), and a `clientId`, by which a retry
 returns the message it posted. A ref block names a row of a table the
-database's layout holds; whether the caller may read it is the route's.
+database's layout holds; whether the caller may read it is the route's. A
+ref block is a reference of the row too: the row it names lists the
+conversation's row among its backlinks
+([References and files on any row](#references-and-files-on-any-row)). An
+attachment block names a file by a URI whose scheme `attachments.schemes`
+lists (`attachment:<id>` for a file of the row's own `@attachments`), and
+its media type and size are held to the config's too.
 `edit` is its author's, within `editWindowMs` of the message's
 `postedAt` when the config sets one, at most 500 times, and keeps what
 it replaced for `listEdits`. `deleteMessage` keeps the message's place
@@ -3595,7 +4008,7 @@ What the engine's Comments does beyond this waits for the core: a reply
 streamed as it is written (`begin`, `appendDraft`, `finish`,
 `interrupt`), read state and follows (`markRead`, `follow`, a
 reader's `unread`), the inbox and deliveries, search across a
-namespace, attachment blocks and `moveAnchor`. The build leaves their
+namespace, and `moveAnchor`. The build leaves their
 operations out of the table's and refuses their config members. A
 message records no calling service (`via`) and no subject acted for
 (`for`). Comments can be added to a table with rows, whose

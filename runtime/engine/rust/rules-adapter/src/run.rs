@@ -1312,7 +1312,13 @@ fn row_list(dialect: Dialect, table: &Table) -> Vec<String> {
         .enumerate()
         .map(|(i, column)| format!("{} AS c{i}", selected(dialect, &column.column)))
         .collect();
-    list.push(format!("{} AS v", quote(&table.version)));
+    // A table the layout holds read-only, which composes no behavior and a
+    // use reads (D152), has no version column; its rows read at 0.
+    if table.version.is_empty() {
+        list.push("0 AS v".to_owned());
+    } else {
+        list.push(format!("{} AS v", quote(&table.version)));
+    }
     list
 }
 

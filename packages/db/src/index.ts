@@ -64,6 +64,7 @@ export type {
   CalendarOn,
   Comments,
   CommentsBlockKind,
+  CommentsAttachmentsOn,
   CommentsOn,
   Constants,
   ConstantsOn,
@@ -113,6 +114,10 @@ export type {
   Rollups,
   RollupsOn,
   RollupSourceOn,
+  Recurrence,
+  RecurrenceAnchor,
+  RecurrenceOn,
+  RecurrenceWeekday,
   ScheduleKind,
   Schedules,
   SchedulesOn,
@@ -135,5 +140,15 @@ export type {
 export type { IdempotencyKeys, RoleSeed, User, UserConfig, UserRole } from "./user";
 export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";
-export { accessGrants, accessLog, audience } from "./access";
-export type { AgentAccessValue, AudienceOptions, AudienceValue } from "./access";
+export { accessGrants, accessLog, audience, calendarSource } from "./access";
+export type { AgentAccessValue, AudienceOptions, AudienceValue, CalendarSourceOptions } from "./access";
+export { attachments, references } from "./rowrefs";
+export { channelIdentities, event, notifier } from "./notifications";
+export type { EventOptions, NotifierPart, Urgency } from "./notifications";
+export { agents } from "./agents";
+export type { AgentsPart } from "./agents";
+export { conversations, party, runRequests } from "./parties";
+export type { ConversationsPart, PartyOptions } from "./parties";
+export type { AttachmentsOptions, ReferencesOptions } from "./rowrefs";
+export { searchable } from "./search";
+export type { SearchableOptions } from "./search";

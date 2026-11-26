@@ -224,6 +224,42 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $cascade.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if or .ReferencesClears .AttachmentsReleases }}
+
+-- Create the functions and triggers of references and attachments: a
+-- target's delete clears the references to its rows and tells each row
+-- that held one, and a file's delete releases the object it named
+{{- range $clear := .ReferencesClears }}
+
+{{ $clear.FunctionSQL }};
+
+{{ $clear.Trigger.SQL }};
+{{- end }}
+{{- range $release := .AttachmentsReleases }}
+
+{{ $release.FunctionSQL }};
+
+{{ $release.Trigger.SQL }};
+{{- end }}
+{{- end }}
+{{- if or .SearchTriggers .SearchChildTriggers }}
+
+-- Create the functions and triggers of the search index: a row's delete
+-- deletes its index row, a change of its audience is copied into it, and a
+-- change of its text, its conversation or its files enqueues the row
+{{- range $search := .SearchTriggers }}
+
+{{ $search.FunctionSQL }};
+
+{{ $search.Trigger.SQL }};
+{{- end }}
+{{- range $child := .SearchChildTriggers }}
+
+{{ $child.FunctionSQL }};
+
+{{ $child.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Create projection views: read-only relations over the tables above. A

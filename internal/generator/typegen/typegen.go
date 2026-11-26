@@ -28,6 +28,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -395,6 +396,11 @@ type ModuleOutput struct {
 	// each with the terminal states and the moves its helpers in
 	// state_machines.go answer by. Nil when no type declares one.
 	StateMachines []StateMachineInfo
+
+	// ProjectionCapture is what projection_capture.go writes (D168), nil
+	// when the naming file's [go.projection_capture] table is off or
+	// selects no view.
+	ProjectionCapture *ProjectionCaptureInfo
 }
 
 // DescriptorFile is one descriptor document written beside the types.
@@ -463,6 +469,13 @@ type Options struct {
 	// GenerateContext.EngineDocument builds it, which engine.go holds as
 	// a constant. Nil writes no engine.go.
 	EngineDocument []byte
+
+	// Projections are the schema's @projection views as its create.sql
+	// renders them (sqlgen.Generate with the build's SQL options, so each
+	// reads the tables it does). The naming file's [go.projection_capture]
+	// table selects among them (D168); it is off by default, and nil
+	// selects none.
+	Projections []sqlgen.ProjectionView
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -637,6 +650,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.StateMachines, err = buildStateMachines(schema, opts.Dependencies, output); err != nil {
+		return nil, err
+	}
+	output.ProjectionCapture = buildProjectionCapture(opts.Naming.Go.ProjectionCapture, opts.Projections)
+	if err := checkProjectionCaptureNames(output); err != nil {
 		return nil, err
 	}
 

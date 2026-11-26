@@ -395,7 +395,7 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkProvenanceConfig(schema, td, ref, r)
 				}
-			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior:
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior, recurrenceBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {
 					break
 				}
@@ -404,6 +404,8 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 					checkSeatsConfig(schema, td, ref, uses, r)
 				case schedulesBehavior:
 					checkSchedulesConfig(schema, td, ref, uses, r)
+				case recurrenceBehavior:
+					checkRecurrenceConfig(schema, td, ref, uses, r)
 				case poolBehavior:
 					checkPoolConfig(schema, td, ref, uses, r)
 				case constantsBehavior:
