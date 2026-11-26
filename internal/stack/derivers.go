@@ -181,8 +181,9 @@ func (r *resolver) applyDeriverSettings(where, env string, d *deployable, entry 
 // A deriver fills engine types through the engine, or tables through
 // their repositories, not both: one whose schemas are of both kinds is
 // refused, and so is one that names none over a database that has both. A
-// Go API's deriver is refused: a deriver runs on a TypeScript or Rust API.
-// A deriver of tables runs on a TypeScript API alone so far.
+// deriver of tables runs on a TypeScript, Rust or Go API (D146), and one of
+// engine types on a TypeScript or Rust API: a Go API's deriver of engine
+// types is refused.
 func (r *resolver) runDerivers() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -195,9 +196,8 @@ func (r *resolver) runDerivers() {
 			continue
 		}
 		lang := r.services[run.API].Language
-		if lang == "" || lang == registry.APILanguageGo {
-			r.fail(CodeUnrealizable, "deriver %s of %s: %s is a Go API, and %s; write the API in TypeScript or Rust", d.deriver.Name, run.API, run.API, DeriverLanguages)
-			continue
+		if lang == "" {
+			lang = registry.APILanguageGo
 		}
 		db, ok := r.connectsQuietly(r.services[run.API])
 		if !ok || (!r.services[db].Engine && len(r.services[db].DerivedTables) == 0) {
@@ -244,8 +244,8 @@ func (r *resolver) runDerivers() {
 			r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, engine types of %s, and of %s, tables of it; a deriver fills engine types through the engine or tables through their repositories, so declare a deriver for each and name its schemas (D146)", d.deriver.Name, run.API, strings.Join(ofEngine, ", "), db, strings.Join(ofTables, ", "))
 			continue
 		}
-		if len(ofTables) > 0 && lang != registry.APILanguageTypeScript {
-			r.fail(CodeUnrealizable, "deriver %s of %s fills the derived fields of %s, tables of %s, and %s is a %s API; %s", d.deriver.Name, run.API, strings.Join(ofTables, ", "), db, run.API, lang, TableDeriverLanguages)
+		if len(ofEngine) > 0 && lang == registry.APILanguageGo {
+			r.fail(CodeUnrealizable, "deriver %s of %s fills the derived fields of %s, engine types of %s, and %s is a Go API; %s; write the API in TypeScript or Rust", d.deriver.Name, run.API, strings.Join(ofEngine, ", "), db, run.API, DeriverLanguages)
 			continue
 		}
 		run.Concurrency = registry.DeriverConcurrency(d.deriver)
@@ -263,10 +263,10 @@ func (r *resolver) runDerivers() {
 	}
 }
 
-// DeriverLanguages says which languages a deriver runs in (D74), for the
-// refusals of a Go API's deriver.
-const DeriverLanguages = "a deriver runs on a TypeScript or Rust API; Go follows"
+// DeriverLanguages says which languages a deriver runs in (D74, D146), for
+// the refusals of a Go API's deriver of engine types.
+const DeriverLanguages = "a deriver of engine types runs on a TypeScript or Rust API, and a Go API's deriver fills tables alone (D146)"
 
-// TableDeriverLanguages says which languages a deriver of tables runs in
-// (D146), for the refusals of a Rust API's.
-const TableDeriverLanguages = "a deriver of tables runs on a TypeScript API, where a table's Derived operations are served; Rust and Go follow (D146)"
+// TableDeriverLanguages said which languages a deriver of tables runs in
+// (D146); every API language runs one now.
+const TableDeriverLanguages = "a deriver of tables runs on a TypeScript, Rust or Go API (D146)"
