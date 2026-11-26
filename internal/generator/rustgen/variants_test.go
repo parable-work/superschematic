@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestGeneratedVariantFieldDecodesTheMemberItsSiblingNames builds the crate
@@ -20,7 +21,9 @@ import (
 // a note reads none; a result that does not decode as the member its kind
 // names is a decode error; a result while the kind names no member is read
 // as its shape picks it, which validate_step refuses as "variant"; and a
-// step encodes as it was read.
+// step encodes as it was read. The API's crate, built beside it, reads its
+// view through the database's union and checks its input with the
+// database's validate_step_result_by.
 func TestGeneratedVariantFieldDecodesTheMemberItsSiblingNames(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compiled variant check in short mode")
@@ -40,11 +43,50 @@ func TestGeneratedVariantFieldDecodesTheMemberItsSiblingNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outDir := testpaths.TempDir(t)
+	root := testpaths.TempDir(t)
+	outDir := filepath.Join(root, "fixture-variant-field-db")
 	if err := SetLocalPaths(output, testpaths.Local(t), outDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	// The API's crate, beside the database's, which its views' union and
+	// validators come from.
+	api, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-variant-field-api"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiOutput, err := Generate(api, Options{
+		SchemaName:   "fixture-variant-field-api",
+		Dependencies: map[string]*ir.Schema{"fixture-variant-field-db": schema},
+		Clock:        codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiDir := filepath.Join(root, "fixture-variant-field-api")
+	if err := SetLocalPaths(apiOutput, testpaths.Local(t), apiDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTypes(apiOutput, apiDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(apiDir, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	apiCrate := strings.ReplaceAll(apiOutput.CrateName, "-", "_")
+	apiTest := `use ` + apiCrate + `::{validators, StepResult, StepView};
+
+#[test]
+fn a_view_reads_the_member_its_kind_names() {
+    let view: StepView = serde_json::from_str(r#"{"id":"00000000-0000-4000-8000-000000000001","title":"t","kind":"review","result":{"verdict":"approved","passed":true}}"#).unwrap();
+    assert!(matches!(view.result, Some(StepResult::ReviewResult(_))), "{view:?}");
+    let errors = validators::validate_create_step_input(&serde_json::json!({"title":"t","kind":"note","result":{"passed":true}}));
+    assert!(format!("{:?}", errors.flatten()).contains("variant"), "{:?}", errors.flatten());
+}
+`
+	if err := os.WriteFile(filepath.Join(apiDir, "tests", "variant_view.rs"), []byte(apiTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	testsDir := filepath.Join(outDir, "tests")
@@ -99,10 +141,12 @@ fn a_step_round_trips() {
 	if err := os.WriteFile(filepath.Join(testsDir, "variant_field.rs"), []byte(decodeTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(cargoPath, "test", "--quiet")
-	cmd.Dir = outDir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(outDir, "target"))
-	if combined, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test failed: %v\n%s", err, combined)
+	for _, dir := range []string{outDir, apiDir} {
+		cmd := exec.Command(cargoPath, "test", "--quiet")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(root, "target"))
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cargo test in %s failed: %v\n%s", filepath.Base(dir), err, combined)
+		}
 	}
 }
