@@ -727,16 +727,13 @@ Postgres, which D83's DDL has no form for (and which says capacity 1
 alone); two claims raced through a Go or a Rust API server; and the
 Reservation bundle (step 5).
 
-What Derived and Provenance left: a Rust deriver deployable over a table
-that implements Derived (D146 built TypeScript's: `internal/stack` takes a
-`@deriver` over such a table, and the deriver's entrypoint opens the
-database's repositories as the deriver); an
-index for a deriver's pull, which scans rows a page at a time until a
-declaration may list a column (step 7); raw writes, which neither hears;
-the computed `fields` and `stale` served by the repositories and the API;
-a server that sets `actingFor` from its principal; an extraction schema
-for an object or JSON field; `usage`, which is taken and not stored; and
-a `status` member for a table with several Workflows.
+What Derived and Provenance left: an index for a deriver's pull, which
+scans rows a page at a time until a declaration may list a column (step
+7); raw writes, which neither hears; the computed `fields` and `stale`
+served by the repositories and the API; a server that sets `actingFor`
+from its principal; an extraction schema for an object or JSON field;
+`usage`, which is taken and not stored; and a `status` member for a table
+with several Workflows.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
@@ -1411,11 +1408,14 @@ The names and rules are reversible until the first release.
 Built: the `additive` key and its refusals, and the resolved annotations
 in each visible tool's record in `tools/schema.json`
 (`ir.ResolveMCPToolAnnotations`, `docs/src/content/docs/reference/mcp-tools.md`).
-The commit that built it names D123.
+The MCP endpoints of the TypeScript and Rust API servers and of the
+engine send `destructiveHint` and `idempotentHint` from the resolved
+record, beside `readOnlyHint`. A Go API serves no MCP endpoint (D81). The
+commits that built it name D123.
 
-Left: an API's MCP endpoint, in the Go, TypeScript and Rust servers, and
-the engine's still list `annotations.readOnlyHint` alone. They take
-`destructiveHint` and `idempotentHint` when they read the resolved record.
+Left: development mode's tool list
+(`runtime/engine/rust/rules-handler/src/tools.rs`) still derives
+`destructiveHint` from the call's kind.
 
 ## D137 to D148. What a document library needs of the framework
 
@@ -1441,18 +1441,24 @@ decision.
 Built: `@graphOperations(Root, { operations?, permissions?, by?,
 overridePermission? })`, which the loader expands into a route per
 operation with generated inputs and results, in the OpenAPI, the SDKs and
-the MCP tools, served by the generated TypeScript server
-(`runtime/http/typescript/src/graph-routes.ts`); the root read first, a
-ref or a commit held to its root, the row rule and the engine's refusals
-as problems (`docs/src/content/docs/guides/api-routes.mdx`, "A version
-graph's operations"); `EntityHistory` in the four engines and facades,
-with the scenario `entity_history`; and `@versionGraph({ enqueueOnCommit,
+the MCP tools, served by the generated TypeScript, Go and Rust servers
+(`runtime/http/typescript/src/graph-routes.ts`,
+`runtime/http/go/graphroutes`, `runtime/http/rust/src/graph_routes.rs`);
+the root read first, a ref or a commit held to its root, the row rule and
+the engine's refusals as problems
+(`docs/src/content/docs/guides/api-routes.mdx`, "A version graph's
+operations"); a Dockerfile for a TypeScript server that serves a set,
+whose stage of its own builds the version-graph core's wasm module; the
+Python and Rust SDKs' types of a set, which compile and call;
+`EntityHistory` in the four engines and facades, with the scenario
+`entity_history`; and `@versionGraph({ enqueueOnCommit,
 enqueueOnRelease })`, as `@enqueueOnChange` triggers on the commit and
-release tables, with the scenario `enqueue`. Past the text: a sixteenth
-route, `compose` (`GET {roots}/{id}/refs/{ref}/tree`), since a client that
-edits a change set must read it; `branch` with no `from` branches the
-root's primary line and creates it, named `main`, for a root that has
-none, since no route creates one; `revert` is under the row rule with the
+release tables, with the scenario `enqueue`, a release's message carrying
+its commit's sequence, read from the commit table. Past the text: a
+sixteenth route, `compose` (`GET {roots}/{id}/refs/{ref}/tree`), since a
+client that edits a change set must read it; `branch` with no `from`
+branches the root's primary line and creates it, named `main`, for a root
+that has none, since no route creates one; `revert` is under the row rule with the
 six the text lists, since it writes a change set too, and so is a
 `merge`'s target when it is a change set, since the merge writes it; a
 primary line is never discarded through the routes (409
@@ -1463,15 +1469,19 @@ another root are 404, as a path's commit is; and every operation is an MCP
 tool without `@mcp` on the class, as a behavior set's are. The commits
 that built it name D138.
 
-Left: the Go and Rust servers do not serve the set: each operation stays
-a method of the implementation to write by hand, with the same route and
-types, and the build says so. A TypeScript server that serves a set gets
-no Dockerfile from a stack's build, since no stage of the image builds
-the version-graph core's wasm module. The Workers entry takes the same
-options and is untested. The generated types are not compiled in the
-Python and Rust SDKs. A release's message carries no sequence, which the
-release pointer does not hold, and the SQLite layout, which has no
-trigger, enqueues nothing.
+Left:
+
+- The SQLite layout, which has no trigger, enqueues nothing.
+- The Workers entry takes the same options and is untested.
+- No MCP case of the scenario is run against the Go or the Rust server.
+- No servergen test builds a Rust stack of a graph API.
+- A Rust server of a set over a database whose DB service lists sqlite
+  first is refused: the Rust server runs a graph's facade on Postgres
+  alone.
+- A public Go API whose auth schema is not its graph's database is
+  refused, since `graphs.go` reads a graph's roots through the ORM of the
+  graph's database, and a public API's `Config.DB` is the ORM of its
+  auth schema.
 
 ## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
 
@@ -1481,74 +1491,66 @@ relation to the root; the descriptor's `kinds[].releasedTable`; `Release`
 rewriting the root's rows in its transaction, in the four engines, on
 Postgres and on the SQLite layout, which gains an optional tenth table,
 `released`; the scenario `released`; a read-only repository in the Go,
-TypeScript and Rust ORMs; and a `@tableOperation` write of the table
-refused (`docs/src/content/docs/reference/version-graphs.md`, "Released
-rows", and `runtime/versiongraph/README.md`). The table's key is a row id
-of its own with a unique index on the root and the entity key, since a
-table has one key column; `Release` of the commit already released
-rewrites every row of the root, which backfills a member that gains
-`released`; and a released member with an `Encrypted<T>` content field is
-refused. The commit that built it names D139.
+TypeScript and Rust ORMs, the TypeScript one an object of the table's
+reads alone, which `TableDefinition.readOnly` asks of `repositories()`;
+released reads in the three ORMs that leave out the rows of a
+soft-deleted root unless they include deleted rows; and a
+`@tableOperation` write of the table refused
+(`docs/src/content/docs/reference/version-graphs.md`, "Released rows",
+and `runtime/versiongraph/README.md`). The table's key is a row id of its
+own with a unique index on the root and the entity key, since a table has
+one key column; `Release` of the commit already released rewrites every
+row of the root, which backfills a member that gains `released`; a
+released member with an `Encrypted<T>` content field is refused; and a
+soft delete of the root clears no released row, so a restore of the root
+reads them again. The commits that built it name D139.
 
-Left: the TypeScript repository of a released table is read-only in its
-type alone. `repositories()` in `runtime/http/typescript/src/orm.ts`
-builds one class for every table, so the object still carries the writes;
-it exposes the reads alone when `TableDefinition` takes a `readOnly` flag
-and tsgen writes it. No fixture declares a projection over a released
-table or a `@tableOperation` read or list of one: they go through the
-paths every table has, untested here. A soft delete of the root leaves its
-released rows, which only a hard delete removes: the released
-repositories do not yet leave out the rows of a soft-deleted root, and a
-soft delete does not clear them. Either is a change to the three ORMs (or
-a trigger the sql generator writes), and a restore of the root has to see
-the rows again, so until then a reader of a released table filters on its
-root as it would on any child table.
+Left: no fixture declares a projection over a released table, or a
+`@tableOperation` read or list of one: they go through the paths every
+table has, untested here.
 
 ## D140. `@idempotent` makes a repeated call answer what the first one answered (D93, D98 amended)
 
 Built: `@idempotent({ ttl?, required? })`, the reserved class
 `IdempotencyKey implements IdempotencyKeys` and its table, the check that
-refuses an API whose database lacks it, the route step in the Go and
-TypeScript runtimes and routers
-(`runtime/http/testdata/idempotency_parity.json`), the store a generated
-Go or TypeScript entrypoint builds over the database, the header and its
-refusals in OpenAPI, the key a TypeScript, Go or Python SDK method sends,
-and the `idempotencyKey` argument of a tool on the TypeScript server's MCP
-endpoint (the API routes guide, "A call that runs once"). The commit that
-built it names D140 and says where it departs from the table this entry
-held: the decorator is also refused on an encrypted operation, a manual
-route and an operation that uploads files, the request's hash covers its
-query, and a row has a UUID key and a unique hash of operation, principal
-and key.
+refuses an API whose database lacks it, the route step in the Go,
+TypeScript and Rust runtimes and routers
+(`runtime/http/testdata/idempotency_parity.json`), with the Rust
+runtime's stores in memory, on Postgres and on SQLite; the store a
+generated Go, TypeScript or Rust entrypoint builds over the database,
+which a Rust API's `Implementations::new` builds over `Deps.db`; the
+header and its refusals in OpenAPI; the key a TypeScript, Go, Python or
+Rust SDK method sends; and the `idempotencyKey` argument of a tool on the
+TypeScript and Rust servers' MCP endpoints (the API routes guide, "A call
+that runs once"). The commits that built it name D140, and the first says
+where it departs from the table this entry held: the decorator is also
+refused on an encrypted operation, a manual route and an operation that
+uploads files, the request's hash covers its query, and a row has a UUID
+key and a unique hash of operation, principal and key.
 
-Left: the Rust runtime, router and SDK. `rustrestgen` refuses an API with
-an `@idempotent` operation, and the Rust SDK sends no key. An operation's
-docs do not get `replayMode: idempotent` and the pointer from the
-decorator, and the tool documents (`tools/schema.json`, the SDKs' tool
-invokers) do not list `idempotencyKey`: the replay contract holds a
-pointer to a required string argument of the tool, which the key is not
-unless the operation says `required`, and each SDK's invoker would have to
-pass it to the method as the key. A tool that both asks the person to
-confirm (D93) and is `@idempotent` asks again on a repeat that the route
-would answer from the kept answer: the endpoint confirms before the route
-reads the key, and its check (D98) keeps no key, so it cannot tell a
-replay from a first call.
+Left: an operation's docs do not get `replayMode: idempotent` and the
+pointer from the decorator, and the tool documents (`tools/schema.json`,
+the SDKs' tool invokers) do not list `idempotencyKey`. The replay
+contract holds a pointer to a required string argument of the tool, which
+the key is not unless the operation says `required`, and every SDK's
+invoker would have to pass it to the method as the key. A tool that both
+asks the person to confirm (D93) and is `@idempotent` asks again on a
+repeat that the route would answer from the kept answer, on the
+TypeScript and the Rust endpoints alike: the endpoint confirms before the
+route reads the key, and its check (D98) keeps no key, so it cannot tell
+a replay from a first call.
 
 ## D142. A bucket puts only when absent, reads an object's head, and may name its objects by their content (D54 amended)
 
 Built: `put` with `ifAbsent` and its `created`, `head`, the Bucket
 config's `contentAddressed` and `maxBytes`, and the content bucket in
-`Deps`, in Go and TypeScript over GCS and in TypeScript over an R2
+`Deps`, in Go, TypeScript and Rust over GCS, each of whose uploads sends
+`ifGenerationMatch=0` for `ifAbsent`, and in TypeScript over an R2
 binding (`runtime/http/testdata/content_bucket_parity.json`, the buckets
-guide). The commit that built it names D142.
+guide). The commits that built it name D142.
 
-Left: the Rust runtime. Its `Bucket` trait has no `ifAbsent` and no
-`head`, it has no content bucket, and a Rust server's `Deps` holds the
-plain `Arc<dyn Bucket>` for a Bucket service whose config says
-`contentAddressed`. `gcs.rs` can send `ifGenerationMatch=0` on its multipart
-upload as the other two do. The R2 conditional write, `onlyIf` with
-`If-None-Match: *`, is tested against a stand-in of the binding, not
-against R2.
+Left: the R2 conditional write, `onlyIf` with `If-None-Match: *`, is
+tested against a stand-in of the binding, not against R2.
 
 ## D145. A worker in drain mode runs as a job that empties its queue and exits, and an enqueue wakes it (D53, D68, D92 amended)
 
@@ -1572,23 +1574,25 @@ runs a drain worker as it runs any worker. The stacks and queues guides
 and section 8.8 of `docs/stack-model.md` describe it. The commit that
 built it names D145, and says where it departs from the decision's text.
 
+A Rust worker drains as well: its slot is the session advisory lock of
+the descriptor's `slot` statement, on a connection taken from the pool;
+it waits for a message due within the five minutes `next_due` reads and
+exits once idle; `worker::Group` runs several queues under one slot; and
+the Rust queue client sends the wake (`runtime/http/rust/src/wake.rs`),
+at most once per queue in five seconds. gcp runs it as a job. A behavior
+worker drains in Go, TypeScript and Rust, and resolution admits it: it
+takes one slot for all its queues, whose loops stop together. Each rules
+adapter wakes the change queue of every row a unit writes, and so do the
+Go and TypeScript ORMs' writes that bypass the core (`UpdateMany`,
+`DeleteMany`, `HardDeleteOne`).
+
 Left:
 
-- A Rust worker in drain mode. The Rust runtime's worker loop does not
-  exit when its queue is idle and takes no slot, so gcp refuses a Rust
-  worker whose mode is drain; and the Rust queue client sends no wake, so
-  a message a Rust API enqueues waits for the tick. Its queue descriptor
-  holds the `slot` statement already.
-- A behavior worker in drain mode, which resolution refuses: its change
-  queue is filled by a trigger, which no wake hears, and its claim loops
-  take no slot. Its deadlines and events now wake through the rules
-  adapter, and its queues read their next due time (D151); the change
-  queue's wake and the slot are what is left.
 - A wake from an enqueue on SQLite (`Enqueue<Queue>SQLite`,
-  `enqueueStatement`), and a slot there: no target runs a drain worker
-  over a SQLite file.
+  `enqueueStatement`), and a slot there, which has no advisory lock: no
+  target runs a drain worker over a SQLite file.
 - A bound on a task's life shorter than a day, and a setting for it.
-- Holding wakes back while the worker holds its slots. A process sends a
+- Holding wakes back while the workers hold every slot. A process sends a
   queue's wake whenever five seconds have passed since its last, so on a
   busy queue each enqueuing process starts up to twelve executions a
   minute that find no slot and exit at once, each a Cloud Run Admin API
@@ -1599,28 +1603,46 @@ Left:
   keyed by the class alone, so two databases that each declare a queue
   class of one name wake each other's drain workers: starts wasted, no
   message lost.
+- A raw SQL write of a table a behavior hears wakes nothing: its trigger
+  writes the change, and the tick finds it.
+- Go's ORM `OnEnqueue` wakes a delayed enqueue at any distance, where the
+  Rust and TypeScript queue clients send no wake for a message due past
+  the five-minute horizon.
+- A plain TypeScript `@worker`'s main does not await
+  `queueWakesSettled`, so a wake its handler's enqueue sent just before
+  it exits may not go out.
+- The Rust ORM sends no wake: its rules host (`rustgen`'s `orm.rs`) has
+  none, so a write through the repositories of a database's Rust types,
+  a Rust API's table operations and a Rust deriver's settles among them,
+  wakes no behavior queue, and the tick finds it. A Rust API's
+  `behaviors.rs` does wake.
 
 ## D146. A `@deriver` fills the Derived fields of a table, as it fills an engine type's (D74, D103 amended)
 
-Built: `@deriver({ schemas })` in a TypeScript API over a database of
-tables that implement Derived. The resolver admits it
-(`internal/stack/derivers.go`), the API's `Derivers` type is the one an
-engine database's deriver has, a method per derived field typed by the
-field, and the generated entrypoint opens the database's repositories as
-the deriver and runs the HTTP runtime's `runDeriver`
-(`@superschematic/http-runtime/deriver`) over each table's
-`staleDerivations` and `settleDerivations`
+Built: `@deriver({ schemas })` in a TypeScript, Go or Rust API over a
+database of tables that implement Derived. The resolver admits it
+(`internal/stack/derivers.go`), and the gcp, local and fake platforms run
+it. The API's `Derivers` type is the one an engine database's deriver
+has, a method per derived field typed by the field, which apigen writes
+for Go and rustrestgen for Rust. The entrypoint servergen writes opens the
+database's repositories as the deriver and runs the HTTP runtime's loop
+over each table's `staleDerivations` and `settleDerivations`: `runDeriver`
+(`@superschematic/http-runtime/deriver`), `runtime/http/go/deriver` or
+`runtime/http/rust/src/deriver.rs`
 (`docs/src/content/docs/guides/stacks.mdx`, Derivers). A deriver fills
 tables or engine types, not both: one whose schemas are of both kinds is
-refused, and names its schemas over a database that has both. The commit
-that built it names D146.
+refused, and names its schemas over a database that has both. A Rust
+API's derivers all fill one kind, tables or engine types, and a Go
+API's deriver of engine types is still refused, since that loop is the
+engine's. The commits that built it name D146.
 
-Left: a Rust and a Go deriver of tables, which the build refuses; a wake
-on a write, where the loop pulls again every five seconds, and each pull
-is a scan of the table's rows with their derivations sub-table, since the
-core keeps no index of stale fields; an item the core skips without
-counting an attempt, which is answered again at every pull while its
-guard holds it; and D74's model label and cost cap, which stay D74's.
+Left: a wake on a write, where the loop pulls again every five seconds,
+and each pull is a scan of the table's rows with their derivations
+sub-table, since the core keeps no index of stale fields; an item the
+core skips without counting an attempt, which is answered again at every
+pull while its guard holds it; D74's model label and cost cap, which stay
+D74's; and a Go or a Rust deriver over a database whose DB service lists
+sqlite first.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
@@ -1759,14 +1781,11 @@ Left:
   enqueue fire on Workers, an urgent deadline within ten seconds, and
   whether a workflow binding's upload needs the Workflow to exist (the
   version waits for it either way).
-- A wake for a change queue, which a trigger fills: a Reaction on Workers
-  runs at the next firing, within a minute.
 - A wake between drainers, without a cycle in the graph.
-- Go and Rust: neither runs on Workers, and neither runtime sends a wake
-  for a behavior's deadline or event; a Rust queue client sends none at
-  all (D145).
-- A behavior worker in drain mode on gcp (D145): the change queue's wake
-  and the slot.
+- Go and Rust: both now wake their behavior queues for events and for
+  deadlines due within five minutes (`rules.Host.Wake`,
+  `Host::with_wake`). Neither runs on Workers, and a deadline armed more
+  than five minutes ahead wakes nothing.
 - The CPU bound for a `@worker`'s drainer, whose window D92 set at 50 s
   apart from its CPU time.
 - A wake on SQLite and D1, where no worker claims on Workers.
