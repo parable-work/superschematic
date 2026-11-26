@@ -16,6 +16,7 @@ import {
   indexSearch,
   issueGrant,
   paramsHash,
+  revokeGrant,
   postgresQueue,
   type Agents,
   type AgentTool,
@@ -36,7 +37,7 @@ const SITE_KEY = 'site-key-4b9e17c2';
 const VAULT_TOKEN = 'vault-broker-token-9d2c';
 const RELAY_TOKEN = 'relay-token';
 const BUN = process.env.AGENT_RUNNER_BUN || process.execPath;
-const PHONE = { ann: '+15550100001', customer: '+15550100021' };
+const PHONE = { ann: '+15550100001', customer: '+15550100021', entered: '+15550100022' };
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -122,6 +123,15 @@ const tools: Record<string, AgentTool> = {
       const row = await tx.taskNote.findOne({ id: { eq: String(args.key) } });
       if (!row) throw Object.assign(new Error('no such note'), { status: 404 });
       return { id: row.id, text: row.text };
+    },
+  },
+  note_task: {
+    description: "Writes a task's details.",
+    inputSchema: { type: 'object', required: ['key', 'details'], properties: { key: { type: 'string' }, details: { type: 'string' } } },
+    class: 'internalWrite',
+    async run({ tx, args }) {
+      const row = await tx.task.updateOne(String(args.key), { details: String(args.details) });
+      return { id: row.id, details: row.details };
     },
   },
   pay_invoice: {
@@ -285,7 +295,7 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
     { name: 'reviewer', role: 'worker-agent', task: 'call search {"q":"pump"}', tools: ['search', 'read_task', 'read_note'], command },
     { name: 'payer', role: 'worker-agent', tools: ['pay_invoice', 'read_task'], command },
     { name: 'fetcher', role: 'worker-agent', tools: ['http_get'], command, credentials: [{ ref: 'vault://ops/site/password', site: svc.siteOrigin, header: 'x-api-key' }] },
-    { name: 'responder', role: 'worker-agent', tools: ['pay_invoice', 'read_task', 'message_party'], command, inbound: true },
+    { name: 'responder', role: 'worker-agent', tools: ['pay_invoice', 'read_task', 'read_note', 'note_task', 'message_party'], command, inbound: true },
     { name: 'asker', role: 'worker-agent', tools: ['ask_principal'], command },
   ]) {
     await agents.define(boss, definition);
@@ -652,9 +662,13 @@ describe.skipIf(!dsn)('agent runs', () => {
     ]);
     const id = String(started.id);
     const principal = (await w.agents.principalOf(new Request('http://x/', { headers: { authorization: `Bearer ${w.started.get(id)!.token}` } })))!;
-    // Narrowed by whom it acts for: what the party's grant's role holds.
-    expect(principal).toMatchObject({ kind: 'agent', actingFor: { kind: 'party', subject: customer } });
+    // Narrowed by whom it acts for: what the party's grant's role holds,
+    // and the paths it reaches: the customer's role reaches none, so the
+    // agent's role's notes and invoices are out of reach (D183).
+    expect(principal).toMatchObject({ kind: 'agent', actingFor: { kind: 'party', subject: customer }, claims: { trust: 'verified' } });
+    expect(started.trust).toBe('verified');
     expect([...principal.permissions].sort()).toEqual(['parties.message', 'tasks.read']);
+    expect(principal.grants!.map(g => [g.targetType, g.reaches])).toEqual([['Task', {}], ['Customer', {}], ['Message', {}]]);
     await exited(w, id);
     // The message is data: the run's task, marked untrusted, and nothing it asks for is done.
     const entries = (await run(w, id)).transcript as TranscriptEntry[];
@@ -662,6 +676,9 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect(entries[0]!.content).toContain('call pay_invoice');
     expect(entries.some(e => e.kind === 'call')).toBe(false);
     expect((await w.sys.invoice.findOne({ id: { eq: invoice } }))!.paid).toBe(0);
+    // It reads its task, and not the task's note its agent's role reaches and its party's does not.
+    expect((await mcp(w, id, 'read_task', { key: a })).result).toMatchObject({ id: a });
+    expect((await mcp(w, id, 'read_note', { key: w.ids.noteA })).problem).toMatchObject({ status: 404 });
     // Writing back to the party is messageParty: the send waits on the policy, held by D157's send, and the run waits with it.
     const before = w.svc.sms.length;
     const held = await mcp(w, id, 'message_party', { channel: 'sms', body: 'Your pump is booked for Tuesday' });
@@ -681,6 +698,67 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect((await run(w, id)).status).toBe('running');
     // A send that is no agent run's is the app's own: the policy allows it.
     expect(await w.agents.sendPolicy(w.boss, 'send_message', { body: 'hi' })).toBe('allow');
+    await watch(w);
+  });
+
+  test("a party's run reaches only the paths its grant reaches, and an entered sender's run reads and asks before every write whatever the policy says", async () => {
+    w = await world();
+    const { a, noteA } = w.ids;
+    // The responder writes and messages parties on its own, by its policy.
+    await w.agents.setPolicy(w.boss, { agent: 'responder', operationClass: 'internalWrite', mode: 'auto' });
+    await w.agents.setPolicy(w.boss, { agent: 'responder', operationClass: 'messageParty', mode: 'auto' });
+    // A tenant's role reaches a task's notes and not its invoices.
+    await w.sys.role.createOne({ name: 'tenant', permissions: ['tasks.read', 'tasks.write', 'parties.message'], reaches: ['TaskNote:task'] });
+    const start = async (phone: string, trust: 'verified' | 'entered') => {
+      const party = String((await w!.sys.customer.createOne({ name: `A ${trust} tenant` })).id);
+      await w!.sys.channelIdentity.createOne({ kind: 'phone', address: phone, principalKind: 'party', principalTable: 'Customer', principal: party, trust, ...(trust === 'verified' ? { verifiedAt: new Date() } : {}) });
+      const { grant } = await issueGrant(w!.sys, { holder: party, holderKind: 'party', role: 'tenant', targetType: 'Task', targetId: a });
+      const outcome = await w!.inbound.receive({ channel: 'sms', slot: 'SMS', from: phone, body: 'Is my pump booked?' });
+      expect(outcome).toMatchObject({ outcome: 'run' });
+      await drain(w!);
+      const run = await runOf(w!, 'responder');
+      expect(run).toMatchObject({ actingFor: party, trust });
+      await exited(w!, String(run.id));
+      const principal = (await w!.agents.principalOf(new Request('http://x/', { headers: { authorization: `Bearer ${w!.started.get(String(run.id))!.token}` } })))!;
+      return { party, grant: String(grant.id), id: String(run.id), principal };
+    };
+
+    // Verified: the role's paths the tenant's grant reaches too, the notes
+    // and not the invoices, and its writes run as the policy says.
+    const verified = await start(PHONE.customer, 'verified');
+    expect(verified.principal.claims).toMatchObject({ trust: 'verified' });
+    expect(verified.principal.grants!.map(g => [g.targetType, g.reaches])).toEqual([['Task', { TaskNote: ['task'] }], ['Customer', {}], ['Message', {}]]);
+    expect((await mcp(w, verified.id, 'read_note', { key: noteA })).result).toMatchObject({ id: noteA });
+    expect((await mcp(w, verified.id, 'note_task', { key: a, details: 'booked Tuesday' })).result).toMatchObject({ details: 'booked Tuesday' });
+    expect((await mcp(w, verified.id, 'message_party', { channel: 'sms', body: 'Booked for Tuesday' })).result).toMatchObject({ outcome: 'sent' });
+    expect(w.svc.sms.filter(m => m.to === PHONE.customer).length).toBe(1);
+    // The paths end with the grant: the tenant's grant revoked, the run reaches no note.
+    await revokeGrant(w.sys, verified.grant);
+    expect((await mcp(w, verified.id, 'read_note', { key: noteA })).problem).toMatchObject({ status: 404 });
+
+    // Entered by hand: it reads, and every write asks, whatever the policy says.
+    const entered = await start(PHONE.entered, 'entered');
+    expect(entered.principal.claims).toMatchObject({ trust: 'entered' });
+    expect(entered.principal.grants!.find(g => g.targetType === 'Task')!.reaches).toEqual({ TaskNote: ['task'] });
+    expect((await mcp(w, entered.id, 'read_task', { key: a })).result).toMatchObject({ id: a });
+    expect((await mcp(w, entered.id, 'read_note', { key: noteA })).result).toMatchObject({ id: noteA });
+    const asked = await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' });
+    expect(asked.problem).toMatchObject({ status: 428, code: 'approval_required' });
+    expect((await w.sys.task.findOne({ id: { eq: a } }))!.details).toBe('booked Tuesday');
+    const held = await mcp(w, entered.id, 'message_party', { channel: 'sms', body: 'Cancelled' });
+    expect(held.result).toMatchObject({ outcome: 'awaitingApproval' });
+    expect(w.svc.sms.filter(m => m.to === PHONE.entered)).toEqual([]);
+    const approvals = (await w.sys.agentApproval.findMany({ run: { eq: entered.id } })).rows;
+    expect(approvals.map(r => [r.operation, r.operationClass, r.state]).sort()).toEqual([
+      ['note_task', 'internalWrite', 'pending'],
+      ['send_message', 'messageParty', 'pending'],
+    ]);
+    const write = approvals.find(r => r.operation === 'note_task')!;
+    expect(write.summary).toContain('entered by hand');
+    // Approved, the same write runs once; again, it asks again.
+    await w.agents.approve(w.ann, String(write.id));
+    expect((await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' })).result).toMatchObject({ details: 'cancel everything' });
+    expect((await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' })).problem).toMatchObject({ status: 428 });
     await watch(w);
   });
 

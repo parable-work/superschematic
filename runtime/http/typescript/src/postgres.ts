@@ -492,7 +492,10 @@ export {
   DEFAULT_TRANSCRIPT_RETENTION_DAYS,
   createAgents,
   defaultAutonomy,
+  effectiveAutonomy,
+  narrowReaches,
   paramsHash,
+  trustOf,
   type AgentRunRequest,
   type AgentSandboxTool,
   type AgentTool,
@@ -505,6 +508,7 @@ export {
   type GateOutcome,
   type OperationClass,
   type PrincipalRef,
+  type RunTrust,
   type TranscriptEntry,
   type TranscriptStore,
 } from './agents.js';
