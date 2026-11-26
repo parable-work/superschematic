@@ -729,6 +729,8 @@ export class Reports {
   `@manualRouteRegistration`. Each router gates the route and hands it to
   your handler, which writes the stream: the body, its `Content-Type`
   and the headers. A refusal is a problem body, as any route's.
+- Each SDK method returns the stream unread, with its headers
+  ([Client SDKs](/superschematic/guides/client-sdks/#streams)).
 - A client sends the input type as a JSON body, beside the path and
   query parameters, so the operation is no `@webhook`, not encrypted,
   takes no [upload](#uploads) and no `FilterBy`, and is not `@paginated`

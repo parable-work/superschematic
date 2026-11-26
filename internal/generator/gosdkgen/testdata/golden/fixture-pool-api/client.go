@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -31,8 +32,12 @@ import (
 
 type HTTPClient struct {
 	httpClient *http.Client
-	config     SDKConfig
-	baseURL    string
+	// streamClient shares httpClient's transport without its total timeout,
+	// so a stream's body can outlast it. See DoStream.
+	streamClient *http.Client
+	timeout      time.Duration
+	config       SDKConfig
+	baseURL      string
 	// clientVersion is the X-Client-Version every call sends (D143), empty
 	// without config.Client.
 	clientVersion string
@@ -61,6 +66,9 @@ var (
 	ErrEnvelopeContractFields = errors.New("SDK contract error: expected RFC 9457 envelope fields data and meta in success response")
 	// ErrEnvelopeContractMetaRequestID indicates meta.requestId is missing or malformed.
 	ErrEnvelopeContractMetaRequestID = errors.New("SDK contract error: expected RFC 9457 envelope meta.requestId in success response")
+	// ErrStreamContentType indicates a streamed success response is not the
+	// media type the operation declares (D167).
+	ErrStreamContentType = errors.New("SDK contract error: unexpected content type in streamed success response")
 )
 
 // EnvelopeContractError describes strict success-envelope contract violations.
@@ -137,6 +145,8 @@ func NewHTTPClient(config SDKConfig) (*HTTPClient, error) {
 
 	return &HTTPClient{
 		httpClient:    httpClient,
+		streamClient:  &http.Client{Transport: httpClient.Transport},
+		timeout:       timeout,
 		config:        config,
 		baseURL:       baseURL,
 		clientVersion: clientVersion,
@@ -244,6 +254,50 @@ func (c *HTTPClient) DoFile(
 	}, nil
 }
 
+// DoStream sends a request whose success body is a stream of contentType,
+// an @httpBinaryStream operation's (D167), and returns that body unread:
+// the caller reads it and must close it. A refusal is decoded into the
+// errors DoJSON returns. A success answer of another media type is
+// ErrStreamContentType, with the body closed. Timeout bounds the wait for
+// the response headers, not the body: ctx and closing the body bound
+// reading it. ResponseInterceptor is not applied, since it takes the
+// whole body.
+func (c *HTTPClient) DoStream(
+	ctx context.Context,
+	method string,
+	path string,
+	query url.Values,
+	body any,
+	contentType string,
+) (*runtime.BinaryStream, error) {
+	requestBody, requestContentType, err := c.buildRequestBody(body)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.send(ctx, method, c.requestURL(path, query), requestBody, requestContentType, contentType+", application/problem+json", true)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		responseHeaders := resp.Header.Clone()
+		responseBody, err := c.readResponseBody(resp)
+		if err != nil {
+			return nil, err
+		}
+		return nil, decodeError(resp.StatusCode, responseBody, responseHeaders)
+	}
+	got := resp.Header.Get("Content-Type")
+	if mediaType, _, err := mime.ParseMediaType(got); err != nil || mediaType != contentType {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%w: want %s, got %q (status %d)", ErrStreamContentType, contentType, got, resp.StatusCode)
+	}
+	return &runtime.BinaryStream{
+		ContentType: contentType,
+		Header:      resp.Header.Clone(),
+		Body:        resp.Body,
+	}, nil
+}
+
 // unwrapEnvelope enforces the success response contract and returns
 // the inner data payload from {data, meta: {requestId}}.
 // SYNC: keep strict envelope validation in sync with
@@ -282,16 +336,55 @@ func (c *HTTPClient) do(
 	query url.Values,
 	body any,
 ) (int, []byte, http.Header, error) {
-	requestURL := c.baseURL + path
-	if len(query) > 0 {
-		requestURL += "?" + query.Encode()
-	}
-
 	requestBody, contentType, err := c.buildRequestBody(body)
 	if err != nil {
 		return 0, nil, nil, err
 	}
+	resp, err := c.send(ctx, method, c.requestURL(path, query), requestBody, contentType, "application/json", false)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	responseHeaders := resp.Header.Clone()
+	responseBody, err := c.readResponseBody(resp)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 
+	if interceptor := c.config.ResponseInterceptor; interceptor != nil && resp.StatusCode < http.StatusBadRequest {
+		interceptedBody, err := interceptor(ctx, resp, responseBody)
+		if err != nil {
+			return 0, nil, nil, fmt.Errorf("response interceptor: %w", err)
+		}
+		if interceptedBody != nil {
+			responseBody = interceptedBody
+		}
+	}
+
+	return resp.StatusCode, responseBody, responseHeaders, nil
+}
+
+func (c *HTTPClient) requestURL(path string, query url.Values) string {
+	requestURL := c.baseURL + path
+	if len(query) > 0 {
+		requestURL += "?" + query.Encode()
+	}
+	return requestURL
+}
+
+// send sends one request and returns the last response with its body
+// unread. It retries once after refreshing an expired end-user token, once
+// with a fresh service credential, and up to maxRateLimitRetries times
+// after a 429. A stream request goes through streamClient, with Timeout a
+// deadline on the response headers only.
+func (c *HTTPClient) send(
+	ctx context.Context,
+	method string,
+	requestURL string,
+	requestBody []byte,
+	contentType string,
+	accept string,
+	stream bool,
+) (*http.Response, error) {
 	// One call refreshes the end user at most once and asks for a fresh
 	// service credential at most once.
 	alreadyRetriedAuth := false
@@ -301,10 +394,10 @@ func (c *HTTPClient) do(
 	for {
 		req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(requestBody))
 		if err != nil {
-			return 0, nil, nil, fmt.Errorf("create request: %w", err)
+			return nil, fmt.Errorf("create request: %w", err)
 		}
 		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Accept", accept)
 		if c.clientVersion != "" {
 			req.Header.Set("X-Client-Version", c.clientVersion)
 		}
@@ -315,55 +408,65 @@ func (c *HTTPClient) do(
 		}
 
 		if err := c.applyAuth(ctx, req); err != nil {
-			return 0, nil, nil, err
+			return nil, err
 		}
 		if err := c.applyServiceCredential(ctx, req, freshServiceToken); err != nil {
-			return 0, nil, nil, err
+			return nil, err
 		}
 		freshServiceToken = false
 		if interceptor := c.config.RequestInterceptor; interceptor != nil {
 			if err := interceptor(ctx, req); err != nil {
-				return 0, nil, nil, fmt.Errorf("request interceptor: %w", err)
+				return nil, fmt.Errorf("request interceptor: %w", err)
 			}
 		}
 
-		resp, err := c.httpClient.Do(req)
+		var resp *http.Response
+		if stream {
+			resp, err = c.sendStream(req)
+		} else {
+			resp, err = c.httpClient.Do(req)
+		}
 		if err != nil {
-			return 0, nil, nil, &NetworkError{APIError: &APIError{
+			return nil, &NetworkError{APIError: &APIError{
 				Message: "request failed",
 				Body:    []byte(err.Error()),
 			}}
 		}
 
-		responseHeaders := resp.Header.Clone()
-		responseBody, err := c.readResponseBody(resp)
-		if err != nil {
-			return 0, nil, nil, err
-		}
-
-		if resp.StatusCode == http.StatusUnauthorized && problemCode(responseBody) == "service_unauthorized" {
-			// The service credential was refused: ask its source for a fresh
-			// token once. The end-user refresh cannot help, so it does not run.
-			if !serviceRetried && c.serviceTokenSource() != nil {
-				serviceRetried = true
-				freshServiceToken = true
+		if resp.StatusCode == http.StatusUnauthorized {
+			// A 401's body says which credential was refused. Read it here,
+			// and hand it on unread to a caller that gets the response.
+			responseBody, err := c.readResponseBody(resp)
+			if err != nil {
+				return nil, err
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(responseBody))
+			if problemCode(responseBody) == "service_unauthorized" {
+				// The service credential was refused: ask its source for a
+				// fresh token once. The end-user refresh cannot help, so it
+				// does not run.
+				if !serviceRetried && c.serviceTokenSource() != nil {
+					serviceRetried = true
+					freshServiceToken = true
+					continue
+				}
+			} else if !alreadyRetriedAuth && c.refreshTokenProvider() != nil {
+				if _, err := c.refreshAuthToken(ctx); err != nil {
+					return nil, &AuthenticationError{APIError: &APIError{
+						Message:    "authentication failed",
+						StatusCode: http.StatusUnauthorized,
+						Body:       []byte(err.Error()),
+					}}
+				}
+				alreadyRetriedAuth = true
 				continue
 			}
-		} else if resp.StatusCode == http.StatusUnauthorized && !alreadyRetriedAuth && c.refreshTokenProvider() != nil {
-			if _, err := c.refreshAuthToken(ctx); err != nil {
-				return 0, nil, nil, &AuthenticationError{APIError: &APIError{
-					Message:    "authentication failed",
-					StatusCode: http.StatusUnauthorized,
-					Body:       []byte(err.Error()),
-				}}
-			}
-			alreadyRetriedAuth = true
-			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && rateLimitAttempt < c.maxRateLimitRetries() {
+			discardBody(resp)
 			wait := 1 << rateLimitAttempt
-			if retryAfter := parseRetryAfter(responseHeaders); retryAfter != nil && *retryAfter > 0 {
+			if retryAfter := parseRetryAfter(resp.Header); retryAfter != nil && *retryAfter > 0 {
 				wait = *retryAfter
 			}
 			if wait > maxRateLimitSleepSeconds {
@@ -372,24 +475,54 @@ func (c *HTTPClient) do(
 			select {
 			case <-time.After(time.Duration(wait) * time.Second):
 			case <-ctx.Done():
-				return 0, nil, nil, ctx.Err()
+				return nil, ctx.Err()
 			}
 			rateLimitAttempt++
 			continue
 		}
 
-		if interceptor := c.config.ResponseInterceptor; interceptor != nil && resp.StatusCode < http.StatusBadRequest {
-			interceptedBody, err := interceptor(ctx, resp, responseBody)
-			if err != nil {
-				return 0, nil, nil, fmt.Errorf("response interceptor: %w", err)
-			}
-			if interceptedBody != nil {
-				responseBody = interceptedBody
-			}
-		}
-
-		return resp.StatusCode, responseBody, responseHeaders, nil
+		return resp, nil
 	}
+}
+
+// sendStream sends req through streamClient and cancels it if the response
+// headers take longer than Timeout. The returned body cancels the request
+// when it is closed.
+func (c *HTTPClient) sendStream(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	timer := time.AfterFunc(c.timeout, cancel)
+	resp, err := c.streamClient.Do(req.WithContext(ctx))
+	if !timer.Stop() {
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		cancel()
+		return nil, fmt.Errorf("no response headers within %s", c.timeout)
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+// cancelOnClose is a stream's body: closing it ends the request.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnClose) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
+
+// discardBody closes a response that is about to be retried.
+func discardBody(resp *http.Response) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_ = resp.Body.Close()
 }
 
 func (c *HTTPClient) applyAuth(ctx context.Context, req *http.Request) error {
