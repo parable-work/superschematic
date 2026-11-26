@@ -266,7 +266,3 @@ func (r *resolver) runDerivers() {
 // DeriverLanguages says which languages a deriver runs in (D74, D146), for
 // the refusals of a Go API's deriver of engine types.
 const DeriverLanguages = "a deriver of engine types runs on a TypeScript or Rust API, and a Go API's deriver fills tables alone (D146)"
-
-// TableDeriverLanguages said which languages a deriver of tables runs in
-// (D146); every API language runs one now.
-const TableDeriverLanguages = "a deriver of tables runs on a TypeScript, Rust or Go API (D146)"

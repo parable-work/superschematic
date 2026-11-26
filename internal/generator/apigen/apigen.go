@@ -375,6 +375,11 @@ type APIOutput struct {
 	// Engine's.
 	TableDerivers []DeriverInfo
 
+	// GoDerivers are the derivers of a Go API's server output (D146), its
+	// TableDerivers typed by the database's Go types (SetDerivers), which
+	// deps.go declares; nil on the output the generators share.
+	GoDerivers []GoDeriver
+
 	// Auth is the provider's analysis of the upstream schema: it gates the
 	// ORM-backed auth store adapters in middleware.go on what the upstream
 	// schema actually declares.

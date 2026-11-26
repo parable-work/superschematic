@@ -192,24 +192,27 @@ func namesSubject(raw json.RawMessage, subject string) bool {
 	return json.Unmarshal(raw, &list) == nil && slices.Contains(list, subject)
 }
 
-// refuseGoDerivers refuses a Go API that declares derivers: a deriver runs
-// on a TypeScript or Rust API (D74).
-func refuseGoDerivers(api *ir.Schema) error {
-	if len(api.Derivers) == 0 {
+// refuseGoEngineDerivers refuses a Go API one of whose derivers fills
+// engine types: a Go API's deriver fills tables that implement Derived
+// (D146), and one of engine types runs on a TypeScript or Rust API (D74).
+func refuseGoEngineDerivers(api *ir.Schema, engine *apigen.EngineInfo) error {
+	if engine == nil || len(engine.Derivers) == 0 {
 		return nil
 	}
-	return fmt.Errorf("generator: %s declares deriver %s, and it is a Go API; %s (D74)", api.Name, api.Derivers[0].Name, stack.DeriverLanguages)
-}
-
-// refuseRustTableDerivers refuses a Rust API one of whose derivers fills
-// tables: a deriver of tables runs on a TypeScript API so far (D146).
-func refuseRustTableDerivers(api *ir.Schema, tables []apigen.DeriverInfo) error {
-	if len(tables) == 0 {
-		return nil
-	}
+	d := engine.Derivers[0]
 	var names []string
-	for _, schema := range tables[0].Schemas {
+	for _, schema := range d.Schemas {
 		names = append(names, schema.Name)
 	}
-	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, tables of its database, and it is a Rust API; %s", api.Name, tables[0].Name, strings.Join(names, ", "), stack.TableDeriverLanguages)
+	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, engine types of its database, and it is a Go API; %s", api.Name, d.Name, strings.Join(names, ", "), stack.DeriverLanguages)
+}
+
+// refuseRustMixedDerivers refuses a Rust API whose derivers fill engine
+// types and tables both: deps.rs types the items of one kind of deriver,
+// the engine's or the HTTP runtime's (D146).
+func refuseRustMixedDerivers(api *ir.Schema, engine *apigen.EngineInfo, tables []apigen.DeriverInfo) error {
+	if engine == nil || len(engine.Derivers) == 0 || len(tables) == 0 {
+		return nil
+	}
+	return fmt.Errorf("generator: %s declares deriver %s, which fills engine types, and deriver %s, which fills tables, and it is a Rust API, whose derivers fill one kind or the other; declare them on two APIs (D146)", api.Name, engine.Derivers[0].Name, tables[0].Name)
 }

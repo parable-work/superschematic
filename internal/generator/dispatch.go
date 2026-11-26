@@ -1268,6 +1268,20 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 	if err := output.SetDeps(deps); err != nil {
 		return nil, fmt.Errorf("generator: %w", err)
 	}
+	// Deps.go declares the derivers of tables, typed by the database's Go
+	// types (D146).
+	if len(output.TableDerivers) > 0 {
+		fieldTypes := func(table string) (map[string]string, error) {
+			db, err := r.LoadDependency(deps.Database)
+			if err != nil {
+				return nil, err
+			}
+			return typegen.FieldTypes(db, typegen.Options{SchemaName: deps.Database, ModulePath: deps.DatabaseTypes, Naming: r.Options.Naming, Registry: r.Registry}, table, deps.DatabaseTypesAlias+".")
+		}
+		if err := output.SetDerivers(output.TableDerivers, fieldTypes); err != nil {
+			return nil, fmt.Errorf("generator: %w", err)
+		}
+	}
 	if output.UpstreamSchema != "" {
 		upstream, err := r.LoadDependency(output.UpstreamSchema)
 		if err != nil {
@@ -1319,7 +1333,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 		return nil
 	}
-	if err := refuseGoDerivers(r.Schema); err != nil {
+	if err := refuseGoEngineDerivers(r.Schema, output.Engine); err != nil {
 		return deps, nil, err
 	}
 	if db, _, ok := r.Schema.Database(); ok {
@@ -1355,6 +1369,10 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 			if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
 				return deps, nil, err
 			}
+		}
+		// A worker's messages and a deriver's fields are the database's Go
+		// types (D53, D146).
+		if len(r.Schema.Workers) > 0 || len(output.TableDerivers) > 0 {
 			deps.DatabaseTypes = r.Options.Naming.GoTypesModule(db)
 			deps.DatabaseTypesAlias = toGoPackageName(db)
 			output.AddIndirectModules([]string{deps.DatabaseTypes})
@@ -1656,19 +1674,24 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// Deps.rs declares the derivers, typed by the engine database's Rust
-	// types (D74). A deriver of tables runs on a TypeScript API (D146).
-	if err := refuseRustTableDerivers(r.Schema, apiOutput.TableDerivers); err != nil {
+	// Deps.rs declares the derivers, typed by the database's Rust types:
+	// the engine database's (D74), or the database whose tables they fill
+	// (D146), one kind per API.
+	if err := refuseRustMixedDerivers(r.Schema, apiOutput.Engine, apiOutput.TableDerivers); err != nil {
 		return nil, nil, err
 	}
 	fieldTypes := func(schema string) (map[string]string, error) {
-		db, err := r.LoadDependency(apiOutput.Engine.Database)
+		database := rustDeps.Database
+		if apiOutput.Engine != nil {
+			database = apiOutput.Engine.Database
+		}
+		db, err := r.LoadDependency(database)
 		if err != nil {
 			return nil, err
 		}
 		return rustgen.FieldTypes(db, schema, rustrestgen.DatabaseTypesModule+"::")
 	}
-	if err := output.SetDerivers(apiOutput.Engine, fieldTypes); err != nil {
+	if err := output.SetDerivers(apiOutput.Engine, apiOutput.TableDerivers, fieldTypes); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
 	if err := output.SetDeps(rustDeps); err != nil {

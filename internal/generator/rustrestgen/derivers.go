@@ -2,9 +2,11 @@ package rustrestgen
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 )
 
@@ -37,8 +39,15 @@ type DeriverInfo struct {
 	Concurrency int
 	BatchSize   int
 
-	// Schemas are the engine types it fills, in order.
+	// Schemas are the engine types or the tables it fills, in order.
 	Schemas []string
+
+	// Tables reports that its schemas are tables that implement Derived
+	// (D146): its entrypoint pulls and settles through the database's
+	// repositories, Repositories[i] the method of the repositories that
+	// opens Schemas[i]'s, and opens no engine.
+	Tables       bool
+	Repositories []string
 
 	// Methods are its methods, one per derived field of its schemas, in
 	// the schemas' order and then by field.
@@ -99,15 +108,18 @@ func (m DeriverMethod) FromList() string {
 // FieldTypes, qualified with DatabaseTypesModule.
 type FieldTypes func(schema string) (map[string]string, error)
 
-// SetDerivers sets the API's derivers from its engine database, their
-// fields typed by types, refusing two methods of one deriver that one name
-// would take.
-func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, types FieldTypes) error {
+// SetDerivers sets the API's derivers, those of its engine database and
+// those that fill tables (D146), sorted by name, their fields typed by
+// types, refusing two methods of one deriver that one name would take.
+func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, tables []apigen.DeriverInfo, types FieldTypes) error {
 	o.Derivers = nil
-	if engine == nil {
-		return nil
+	var derivers []apigen.DeriverInfo
+	if engine != nil {
+		derivers = append(derivers, engine.Derivers...)
 	}
-	for _, d := range engine.Derivers {
+	derivers = append(derivers, tables...)
+	slices.SortStableFunc(derivers, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
+	for _, d := range derivers {
 		info := DeriverInfo{
 			Name:        d.Name,
 			Field:       rustutil.Identifier(rustutil.ToSnakeCase(d.Name), "deriver"),
@@ -116,10 +128,15 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, types FieldTypes) err
 			Permissions: d.Permissions,
 			Concurrency: d.Concurrency,
 			BatchSize:   d.BatchSize,
+			Tables:      d.Tables,
 		}
 		methods := map[string]string{}
 		for _, schema := range d.Schemas {
 			info.Schemas = append(info.Schemas, schema.Name)
+			if d.Tables {
+				// The repositories' method of the table, as rustgen names it.
+				info.Repositories = append(info.Repositories, codegen.ToSnakeCase(schema.Name))
+			}
 			fieldTypes, err := types(schema.Name)
 			if err != nil {
 				return fmt.Errorf("rustrestgen: deriver %s of %s: %w", d.Name, o.SchemaName, err)
@@ -156,6 +173,23 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, types FieldTypes) err
 // HasDerivers reports whether the API declares a deriver, for which
 // deps.rs declares Derivers and the scaffold create_derivers.
 func (o *APIOutput) HasDerivers() bool { return o.Deps != nil && len(o.Derivers) > 0 }
+
+// HasTableDerivers reports whether a deriver of the API fills tables
+// (D146): deps.rs then types its items with the HTTP runtime's deriver
+// module, and the crate's dependency on the database's types turns on the
+// repositories, which its entrypoint pulls and settles through.
+func (o *APIOutput) HasTableDerivers() bool {
+	return o.HasDerivers() && slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables })
+}
+
+// DeriverJudge names what judges a deriver's answers in a comment: the
+// engine, or the behaviors' core for a deriver of tables.
+func (o *APIOutput) DeriverJudge() string {
+	if o.HasTableDerivers() {
+		return "the behaviors' core"
+	}
+	return "the engine"
+}
 
 // Deriver returns the deriver named name, or nil.
 func (o *APIOutput) Deriver(name string) *DeriverInfo {

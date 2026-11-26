@@ -324,9 +324,15 @@ impl<T> DerivedAnswer<T> {
         }
     }
 }
+{{- if .HasTableDerivers }}
+
+/// The deriver loop's answer for what a deriver's method returned: its
+/// value as JSON, or its error as a failure, which counts an attempt.
+{{- else }}
 
 /// The engine's answer for what a deriver's method returned: its value as
 /// JSON, or its error as a failure, which counts an attempt.
+{{- end }}
 pub fn derivation_answer<T: Serialize>(
     answered: Result<DerivedAnswer<T>, BoxError>,
 ) -> DerivationAnswer {

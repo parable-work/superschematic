@@ -154,7 +154,7 @@ fn open_bucket(
         config: {{ $api.Config }},
 {{- end }}
 {{- if $api.Database }}
-        db: {{ $api.Database.Var }}{{ if .Worker }}.clone(){{ end }},
+        db: {{ $api.Database.Var }}{{ if or .Worker .DeriverOfTables }}.clone(){{ end }},
 {{- end }}
 {{- with $api.Engine }}
         engine: {{ .Var }}.clone(),
