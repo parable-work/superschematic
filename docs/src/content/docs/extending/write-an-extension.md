@@ -789,6 +789,14 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   behavior's name in the preconditions of an update, a delete or an
   operation, which the engine checks and hands to the behavior's guard.
   Lease's is `{ token }`.
+- `rules`, optional, states the behavior's rules in the declarative
+  vocabulary the behaviors' core interprets (D103's step 5), so a table
+  that composes it runs it with no Rust: conditions, field rules, guards,
+  an operation's effects, reactions and fields derived from a sub-table
+  ([declarative behaviors](/superschematic/reference/declarative-behaviors/)).
+  acme's file states them beside `tables` (a `ratings` sub-table keyed by
+  the shopper) and fields with a `type`, which a table's layout reads;
+  the engine reads neither, and runs the crate below.
 
 Assembly fails on a malformed declaration, and `Finalize` on a
 `requires` or `conflicts` name nobody registered or an invocation policy
