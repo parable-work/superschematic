@@ -91,6 +91,13 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, job: {{ tsQuote .Name
 // Trace export, from the Worker's OTEL_ bindings: a refused value throws
 // here, and Cloudflare refuses the version.
 const telemetry = startWorkersTelemetry(env, { service: {{ tsQuote .Name }}, stack: {{ tsQuote .Stack }}, kind: 'job', logger });
+{{- if .WakesQueues }}
+
+// The wakes the job's writes send (D145, D151), as its QUEUE_WAKES binding
+// names them: an enqueue, a deadline or an event due before the next firing
+// of a worker's Cron Trigger starts a run of the worker's Workflow.
+installQueueWakes(env);
+{{- end }}
 
 /** What Cloudflare hands the scheduled handler beside the controller: waitUntil keeps the isolate for work after the run. */
 interface ExecutionContext {
@@ -216,7 +223,7 @@ export default {
     try {
       await runTries({ cron: controller.cron });
     } finally {
-      ctx.waitUntil(telemetry.flush());
+      ctx.waitUntil({{ if .WakesQueues }}queueWakesSettled().then(() => telemetry.flush()){{ else }}telemetry.flush(){{ end }});
     }
   },
 };
@@ -256,6 +263,9 @@ export class {{ .WorkflowClass }} extends WorkflowEntrypoint<unknown, RunPayload
       try {
         await runTries({ instance: event.instanceId });
       } finally {
+{{- if .WakesQueues }}
+        await queueWakesSettled();
+{{- end }}
         await telemetry.flush();
       }
     });

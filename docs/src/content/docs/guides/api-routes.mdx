@@ -2443,8 +2443,13 @@ them runs until a worker does. An API that serves
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
-the TypeScript repositories run behaviors on Postgres alone, and so is
-one an environment places on Cloudflare Workers. A Rust one builds in a
+the TypeScript repositories run behaviors on Postgres alone. On
+Cloudflare Workers a TypeScript one drains its table's queues at each
+firing of a Cron Trigger, and a deadline or an event due before the next
+firing wakes it through its Workflow
+([Queue workers on Cron Triggers](/superschematic/guides/stacks/#queue-workers-on-cron-triggers),
+D151). An environment that runs the database and no worker for a table's
+queues is refused. A Rust one builds in a
 checkout that sets `[paths] rules_adapter_rust` and `rules_behaviors_rust`,
 as a Rust server with behavior operations does.
 

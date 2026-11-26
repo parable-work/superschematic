@@ -4,7 +4,10 @@
 # module, with the bindings the cloudflare target gives its version: the
 # database's hyperdrive binding, named after its field, and its two
 # plain_text variables, and a worker's WORKER_CONCURRENCY and
-# WORKER_DRAIN_SECONDS. workerd's hyperdrive binding is Hyperdrive's local
+# WORKER_DRAIN_SECONDS. The server holds QUEUE_WAKES and a workflow binding
+# per worker's Workflow (D151), which the fixture stands in for with the
+# tester's WakeRecorder entrypoint, recording each instance the server
+# creates. workerd's hyperdrive binding is Hyperdrive's local
 # form: a connection string whose host workerd routes to the service the
 # binding names, here the Postgres the test reaches, $PG_ADDRESS, in a
 # database of its own. The site ts-ledger-web, whose origin serves
@@ -44,6 +47,9 @@ const ledgerWorker :Workerd.Worker = (
     (name = "TS_LEDGER_DB_DATABASE", hyperdrive = (designator = "postgres", database = "$PG_DATABASE", user = "$PG_USER", password = "$PG_PASSWORD", scheme = "postgresql")),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_BINDING", text = "TS_LEDGER_DB_DATABASE"),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_CONFIG", text = "a76a99bc342644deb02c38d66082262a"),
+    (name = "QUEUE_WAKES", text = "{\"EmbedLineItem\":[{\"binding\":\"WAKE_TS_LEDGER_EMBED_LINE_ITEMS\"}],\"SyncRequested\":[{\"binding\":\"WAKE_TS_LEDGER_SYNC_ITEMS\"}]}"),
+    (name = "WAKE_TS_LEDGER_EMBED_LINE_ITEMS", service = (name = "tester", entrypoint = "WakeRecorder")),
+    (name = "WAKE_TS_LEDGER_SYNC_ITEMS", service = (name = "tester", entrypoint = "WakeRecorder")),
   ],
   compatibilityDate = "2026-09-15",
   compatibilityFlags = ["nodejs_als"],

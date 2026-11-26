@@ -30,6 +30,20 @@ import (
 // firing handles at a time, and WORKER_DRAIN_SECONDS. Its database is on
 // Hyperdrive (hyperdrive.go): D1 refuses a worker's claims
 // (PlatformSpec.NoQueueClaims).
+//
+// A behavior worker (D103, D151) is a drainer too: its drain.ts runs its
+// table's deadline, change and event queues at each firing, each claiming
+// batches of up to its concurrency, with the handlers its main.ts runs
+// under stack dev. Its window and grace together fit within the CPU time a
+// firing may take (DefaultCPUMilliseconds, or its cpuMs), so a firing ends
+// before Cloudflare stops it, whatever its handlers do: the window is
+// ir.DefaultWorkerDrainSeconds, or less when the CPU time leaves less, and
+// a drainSeconds that does not fit is refused. A firing that leaves a
+// backlog logs a warning naming the queue, and the next firing takes the
+// rest.
+//
+// Every drainer's Worker is also a Workflow of the class its drain.ts
+// exports, which a write wakes before the next firing (wakes.go).
 
 // Drainer runs TypeScript workers as Cloudflare Workers that drain their
 // queues at each firing of a Cron Trigger.
@@ -43,6 +57,13 @@ const (
 	DrainerHTTPConnector = "cloudflare.drainer-workers"
 	DrainerR2Connector   = "cloudflare.drainer-r2"
 )
+
+// DefaultCPUMilliseconds is the CPU time an invocation of a Worker may
+// take unless its version's limits say otherwise: 30 seconds, by the CPU
+// time table of Cloudflare's Workers limits (developers.cloudflare.com/
+// workers/platform/limits). A behavior worker's window and grace fit
+// within it, or within its cpuMs (D151).
+const DefaultCPUMilliseconds = 30_000
 
 // DrainSchedule is the Cron Trigger every worker's Worker fires on: every
 // minute, the shortest a Cron Trigger takes.
@@ -75,6 +96,9 @@ func drainerPlatform() registry.PlatformSpec {
 		NameOf:    workerName,
 		AddressOf: func(registry.PlatformContext) any { return nil },
 		Lower:     lowerDrainer,
+		// A worker here drains at a Cron Trigger's firings, so a message
+		// due before the next one wakes it, whatever its mode (D151).
+		WakesWorkers: true,
 	}
 }
 
@@ -103,13 +127,32 @@ func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if run.MaxInstances > 0 {
 		return registry.Lowered{}, registry.Unrealizable("worker %s may run up to %d instances (maxInstances) in environment %s, and no target scales a worker with its queue's depth yet (D53, amended); leave maxInstances out", d.Name, run.MaxInstances, env.Name)
 	}
-	drain := ir.DefaultWorkerDrainSeconds
-	if n, ok := wholeNumber(d.Settings["drainSeconds"]); ok {
-		drain = int(n)
-	}
 	grace := run.GraceSeconds
 	if grace <= 0 {
 		grace = ir.DefaultWorkerGraceSeconds
+	}
+	drain := ir.DefaultWorkerDrainSeconds
+	set, hasDrain := wholeNumber(d.Settings["drainSeconds"])
+	if hasDrain {
+		drain = int(set)
+	}
+	if behavior := len(run.Queues) > 0; behavior {
+		// A behavior worker's firing ends before the invocation's CPU
+		// limit (D151): its window and grace, wall time, bound the CPU
+		// time it takes, whatever its handlers do.
+		cpu := DefaultCPUMilliseconds
+		if n, ok := wholeNumber(d.Settings["cpuMs"]); ok {
+			cpu = int(n)
+		}
+		budget := cpu/1000 - grace
+		switch {
+		case budget < 1:
+			return registry.Lowered{}, registry.Unrealizable("behavior worker %s lets its handlers finish for %s, and a firing on Workers may take %dms of CPU time (cpuMs), which leaves it no time to claim; raise cpuMs or shorten its @behaviorWorker's grace (D151)", d.Name, seconds(grace), cpu)
+		case hasDrain && drain > budget:
+			return registry.Lowered{}, registry.Unrealizable("behavior worker %s claims for %s and lets its handlers finish for %s at each firing, and a firing on Workers may take %dms of CPU time (cpuMs), which the two must fit within so the firing ends before Cloudflare stops it; shorten drainSeconds to %d or raise cpuMs (D151)", d.Name, seconds(drain), seconds(grace), cpu, budget)
+		case !hasDrain && drain > budget:
+			drain = budget
+		}
 	}
 	if drain+grace > MaxScheduledRunSeconds {
 		return registry.Lowered{}, registry.Unrealizable("worker %s claims for %s and lets its handlers finish for %s at each firing, %s in all, and Cloudflare stops a scheduled run after %s; shorten drainSeconds or its @worker's grace", d.Name, seconds(drain), seconds(grace), seconds(drain+grace), seconds(MaxScheduledRunSeconds))
@@ -130,7 +173,25 @@ func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	// The Worker waits for each Worker its service bindings name, so a
 	// destroy removes it, with its bindings, first (calls.go).
 	out.Resources[0].DependsOn = bindingDependencies(d)
+	// A drainer wakes no other drainer: its version would wait for the
+	// other's Workflow, and two drainers over one database would wait for
+	// each other. What its handlers leave another worker, the other's next
+	// firing takes (wakes.go).
 	if run.Instances > 0 {
+		// The Workflow a wake creates an instance of, of the class the
+		// deployment's version exports, so it waits for the deployment
+		// (D151).
+		out.Resources = append(out.Resources, &ir.Resource{
+			ID:        workflowID(d.Name),
+			Type:      TypeWorkflow,
+			DependsOn: []string{deploymentID(d.Name)},
+			Properties: map[string]any{
+				"accountId":    v.accountID,
+				"workflowName": d.ResourceName,
+				"scriptName":   ir.Output{Resource: workerID(d.Name), Name: "name"},
+				"className":    ir.QueueWakeClass,
+			},
+		})
 		out.Resources = append(out.Resources, &ir.Resource{
 			ID:        scheduleID(d.Name),
 			Type:      TypeWorkersCronTrigger,

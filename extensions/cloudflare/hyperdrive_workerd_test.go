@@ -129,6 +129,13 @@ func TestWorkerdLedgerFixtureHoldsTheGoldenBindings(t *testing.T) {
 				if !ok || have.kind != "service" || tsLedgerFixtureServices[have.value] != callee {
 					t.Errorf("%s's %s is a %s of %q, want a service of the fixture's Worker for %v", worker, name, have.kind, have.value, b["service"])
 				}
+			case "workflow":
+				// workerd runs no Workflow: the fixture stands in for a
+				// worker's with the tester's WakeRecorder entrypoint, which
+				// records each instance a wake creates (D151).
+				if have.kind != "service" || !strings.HasPrefix(name, "WAKE_") {
+					t.Errorf("%s's %s is a %s of %q, want the fixture's stand-in for the Workflow %v", worker, name, have.kind, have.value, b["workflowName"])
+				}
 			case "assets":
 				if have.kind != "service" || have.value != "assets" {
 					t.Errorf("%s's %s is a %s of %q, want the fixture's assets stand-in", worker, name, have.kind, have.value)

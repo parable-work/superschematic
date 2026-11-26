@@ -185,6 +185,14 @@ type PlatformSpec struct {
 	// claim loop. Only a database platform sets it.
 	NoQueueClaims string
 
+	// WakesWorkers, on a worker platform, says that a worker here runs at
+	// the firings of a schedule and takes a wake whatever its mode (D151):
+	// resolution gives each deployable that may enqueue to one of its
+	// queues a wake (ir.ResolvedDeployable.Wakes), as it gives a worker in
+	// drain mode's (D145), so a message due before the next firing starts
+	// a run. The cloudflare.drainer platform sets it.
+	WakesWorkers bool
+
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
 	NameOf func(PlatformContext) any
@@ -783,6 +791,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.NoQueueClaims != "" && spec.Kind != ir.DeployableDatabase {
 		return fmt.Errorf("registry: %s platform %q says why no worker claims a queue on it; only a database platform places a queue", spec.Kind, spec.Name)
+	}
+	if spec.WakesWorkers && spec.Kind != ir.DeployableWorker {
+		return fmt.Errorf("registry: %s platform %q says its workers take a wake; only a worker platform runs a worker (D151)", spec.Kind, spec.Name)
 	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")

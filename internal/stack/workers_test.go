@@ -2,6 +2,7 @@ package stack_test
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func TestWorkerDeployable(t *testing.T) {
 		t.Errorf("calls = %s, want its API's, shop-api", got)
 	}
 	want := ir.ResolvedWorker{API: "shop-orders", Name: "FulfilOrders", Queue: "OrderPlaced", Database: "shop-db", Instances: 1, Concurrency: 8, GraceSeconds: 8}
-	if worker.Worker == nil || *worker.Worker != want {
+	if worker.Worker == nil || !reflect.DeepEqual(*worker.Worker, want) {
 		t.Errorf("run = %+v, want %+v", worker.Worker, want)
 	}
 	var edges []string
@@ -235,6 +236,49 @@ func TestABehaviorWorkerDoesNotDrain(t *testing.T) {
 	settingsFor(s.Environment("Staging"), stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers")).Mode = ir.WorkerModeDrain
 	_, errs := resolve(t, assemble(t), s, services, "Staging")
 	mustFail(t, errs, stack.CodeInvalidSettings, "worker shop-orders-order-timers is a behavior worker and runs in drain mode (Staging set it)", "leave its mode out, so its instances keep running (D145)")
+}
+
+// behaviorShop is the worker shop whose database keeps Order's deadline,
+// change and event queues (D103, D104): with worker, a behavior worker of
+// shop-orders runs them.
+func behaviorShop(worker bool) (*ir.Stack, []stack.Service) {
+	s, services := workerShop()
+	db := service(services, "shop-db")
+	db.Queues = append(db.Queues, "OrderChange", "OrderDeadline", "OrderEvent")
+	db.BehaviorQueues = map[string]ir.BehaviorQueue{
+		"OrderDeadline": {Row: "Order", Kind: ir.BehaviorQueueDeadlines},
+		"OrderChange":   {Row: "Order", Kind: ir.BehaviorQueueChanges},
+		"OrderEvent":    {Row: "Order", Kind: ir.BehaviorQueueEvents},
+	}
+	if worker {
+		orders := service(services, "shop-orders")
+		orders.Workers = append(orders.Workers, ir.Worker{Name: "OrderTimers", Queue: "OrderDeadline", Queues: []string{"OrderDeadline", "OrderChange", "OrderEvent"}, BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Order"}, Origin: ir.OriginBehavior})
+	}
+	return s, services
+}
+
+// TestBehaviorQueuesNeedAWorker (D151): an environment that runs a database
+// whose table keeps a deadline, change or event queue refuses it while no
+// worker it runs claims the queue, naming the database, the table, the
+// queue and what it holds; a behavior worker of the table drains them all,
+// and turning it off refuses the environment again.
+func TestBehaviorQueuesNeedAWorker(t *testing.T) {
+	s, services := behaviorShop(false)
+	_, errs := resolve(t, assemble(t), s, services, "Staging")
+	mustFail(t, errs, stack.CodeUnrealizable, "environment Staging runs database shop-db, whose table Order keeps its deadline queue in queue OrderDeadline, and no worker the environment runs drains it", "declare @behaviorWorker(Order) on an API over shop-db")
+	mustFail(t, errs, stack.CodeUnrealizable, "whose table Order keeps its change queue in queue OrderChange")
+	mustFail(t, errs, stack.CodeUnrealizable, "whose table Order keeps its event queue in queue OrderEvent")
+
+	s, services = behaviorShop(true)
+	env := mustResolve(t, assemble(t), s, services, "Staging")
+	worker := env.Deployable("shop-orders-order-timers")
+	if worker == nil || !slices.Equal(worker.Worker.Queues, []string{"OrderDeadline", "OrderChange", "OrderEvent"}) || !slices.Equal(worker.Worker.AllQueues(), worker.Worker.Queues) {
+		t.Fatalf("the behavior worker resolved %+v, want it to claim Order's three queues", worker)
+	}
+
+	settingsFor(s.Environment("Staging"), stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers")).Enabled = new(bool)
+	_, errs = resolve(t, assemble(t), s, services, "Staging")
+	mustFail(t, errs, stack.CodeUnrealizable, "queue OrderDeadline, and no worker the environment runs drains it")
 }
 
 // TestWorkerRollsOutAfterItsCallees: the worker calls shop-api, so it rolls

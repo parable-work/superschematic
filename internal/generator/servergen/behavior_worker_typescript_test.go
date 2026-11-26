@@ -55,6 +55,15 @@ func loadTypeScriptTimersFixture(t *testing.T) fixture {
 		}
 		f.schemas[name], f.configs[name] = schema, cfg
 	}
+	// fixture-timers-db's Invoice keeps a deadline and a change queue too,
+	// which an environment refuses to run with no worker to drain them
+	// (D151): the API runs them by a behavior worker of its own here, as
+	// the loader fills one.
+	api := f.schemas[tsTimersAPI]
+	api.Workers = append(api.Workers, &ir.Worker{
+		Name: "InvoiceTimers", Queue: "InvoiceDeadline", Queues: []string{"InvoiceDeadline", "InvoiceChange"},
+		BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Invoice"}, Origin: ir.OriginBehavior,
+	})
 	enabled := map[string]any{"enabled": true}
 	f.configs[tsTimersDB].Outputs = map[string]any{
 		"types": map[string]any{"go": enabled, "typescript": enabled},
@@ -87,7 +96,7 @@ func TestTypeScriptBehaviorWorkerEntrypoint(t *testing.T) {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	dir := servergen.ServerDir(out, tsTimersStack, tsTimersWorker)
 	files := map[string]string{}
-	for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile, servergen.DockerFile} {
+	for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile, servergen.DockerFile, servergen.TypeScriptDrainFile, servergen.TypeScriptWorkersTypesFile} {
 		files[filepath.Join("server", tsTimersStack, tsTimersWorker, file)] = filepath.Join(dir, file)
 	}
 	compareGoldens(t, tsBehaviorsGoldenRoot, files)

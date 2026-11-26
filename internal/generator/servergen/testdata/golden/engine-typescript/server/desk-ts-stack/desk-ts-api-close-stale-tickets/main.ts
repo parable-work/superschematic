@@ -20,7 +20,7 @@
 
 import { createLogger, type Database, type Logger } from '@superschematic/http-runtime';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
-import { connectPostgres } from '@superschematic/http-runtime/postgres';
+import { connectPostgres, queueWakesSettled } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import { openEngineInBackground, type AsyncEngine, type EngineBackground, type EngineOptions, type Principal } from '@superschematic/engine/server';
 import * as deskTsApiApi from '@schemas/desk-ts-api-api';
@@ -88,7 +88,9 @@ function main(): void {
   const started = Date.now();
   const end = (code: number): void => {
     for (const engine of engines) engine.close();
-    void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));
+    // The wakes the job's enqueues sent go out before it exits (D145, D151):
+    // only a queue on Postgres sends one.
+    void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
   };
   run(stop.signal, pools, engines).then(
     () => {

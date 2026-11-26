@@ -3,7 +3,10 @@ import { createLogger } from './logger';
 import {
   DEFAULT_DRAIN_IDLE_MS,
   PRUNE_BATCH,
+  runFiring,
   runWorker,
+  WAKE_HORIZON_MS,
+  WAKE_IDLE_MS,
   workerConcurrency,
   workerDrain,
   workerDrainSeconds,
@@ -470,5 +473,50 @@ describe('workerDrainSeconds', () => {
     expect(workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '20' })).toBe(20);
     expect(() => workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '0' })).toThrow('WORKER_DRAIN_SECONDS is "0"; it is a whole number of seconds, one or more');
     expect(() => workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '1m' })).toThrow('a whole number of seconds');
+  });
+});
+
+describe('runFiring (D151)', () => {
+  test('a firing runs every queue for its window, says what each did, and warns of a queue it left a backlog on', async () => {
+    const busy = new FakeQueue(30);
+    const quiet = new FakeQueue(30);
+    for (let i = 0; i < 40; i++) busy.add(`b-${i}`, () => sleep(20));
+    quiet.add('q-1', async () => {});
+    const { lines, logger } = logs();
+    const firing = await runFiring([{ ...busy.queue(), name: 'Busy' }, { ...quiet.queue(), name: 'Quiet' }], { windowMs: 150, concurrency: 2, graceMs: 1_000, logger });
+    expect(firing.queues.map(q => q.name)).toEqual(['Busy', 'Quiet']);
+    expect(firing.backlog).toEqual(['Busy']);
+    expect(firing.queues[1]?.run).toEqual({ handled: 1, failed: 0, released: 0, backlog: false });
+    const handled = firing.queues[0]?.run.handled ?? 0;
+    expect(handled).toBeGreaterThan(0);
+    expect(handled).toBeLessThan(40);
+    expect(busy.ready.length).toBe(40 - handled);
+    const warned = lines.filter(l => l.msg === 'backlog left for the next firing: the queue held more than one firing handles');
+    expect(warned).toEqual([expect.objectContaining({ queue: 'Busy', handled, window: 0.15 })]);
+  });
+
+  test("a wake's run drains: it stops once its queues were idle, well before its window, and takes no slot", async () => {
+    const q = new FakeQueue(30);
+    q.add('m-1', async () => {});
+    let slots = 0;
+    const started = Date.now();
+    const firing = await runFiring(
+      [
+        {
+          ...q.queue(),
+          slot: async () => {
+            slots++;
+            return async () => {};
+          },
+        },
+      ],
+      { windowMs: 10_000, concurrency: 4, graceMs: 1_000, wake: { idleMs: 50, horizonMs: 0 } }
+    );
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(slots).toBe(0);
+    expect(q.completed).toEqual(['m-1']);
+    expect(firing.backlog).toEqual([]);
+    expect(WAKE_IDLE_MS).toBe(2_000);
+    expect(WAKE_HORIZON_MS).toBe(10_000);
   });
 });

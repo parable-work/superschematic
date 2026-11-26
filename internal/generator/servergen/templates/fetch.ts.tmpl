@@ -123,6 +123,13 @@ configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}(stackE
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .WakesQueues }}
+
+// The wakes the server's writes send (D145, D151), as its QUEUE_WAKES binding
+// names them: an enqueue, a deadline or an event due before the next firing
+// of a worker's Cron Trigger starts a run of the worker's Workflow.
+installQueueWakes(env);
+{{- end }}
 
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
@@ -298,8 +305,9 @@ async function respond(request: Request, ctx: ExecutionContext): Promise<Respons
   try {
     return await handle(request);
   } finally {
-    // The spans the request ended go out after its response.
-    ctx.waitUntil(telemetry.flush());
+    // The wakes the request sent and the spans it ended go out after its
+    // response.
+    ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
   }
 }
 {{- else }}

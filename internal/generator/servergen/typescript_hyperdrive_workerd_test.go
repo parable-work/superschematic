@@ -354,7 +354,7 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 	}
 	for _, want := range []string{
 		"the ledger under workerd: Postgres through Hyperdrive, nearest, an enqueue that commits with its transaction, and both workers drained at a firing",
-		`"msg":"worker started","stack":"ts-ledger-stack","worker":"ts-ledger-sync-items","api":"ts-ledger","class":"SyncItems","queue":"SyncRequested","concurrency":2,"cron":"* * * * *","drainSeconds":6`,
+		`"msg":"worker started","stack":"ts-ledger-stack","worker":"ts-ledger-sync-items","api":"ts-ledger","class":"SyncItems","queue":"SyncRequested","concurrency":2,"drainSeconds":6,"cron":"* * * * *"`,
 		`"msg":"message failed and will be retried"`,
 		`"msg":"message failed and is dead: its retries are spent"`,
 		`"msg":"embedded","stack":"ts-ledger-stack","worker":"ts-ledger-embed-line-items","api":"ts-ledger","lineItem":"pen","category":"travel"`,

@@ -143,10 +143,16 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if err := addBinding(version, map[string]any{"type": bindingPlainText, "name": BundleBinding, "text": ir.BundleDigestToken}); err != nil {
 		return registry.Lowered{}, fmt.Errorf("job %s: %w", d.Name, err)
 	}
+	waits, err := addWakes(d, version)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
 	out := registry.Lowered{Resources: workerNodes(d, v, false, settingBool(d.Settings, "logs", true), version)}
 	// The Worker waits for each Worker its service bindings name, so a
 	// destroy removes it, with its bindings, first (calls.go).
 	out.Resources[0].DependsOn = bindingDependencies(d)
+	// Its version waits for each Workflow that wakes a worker (wakes.go).
+	waitForWakes(out.Resources, waits)
 	// The Workflow through which the job runner runs the job once, of the
 	// class the deployment's version exports, so it waits for the
 	// deployment.

@@ -51,14 +51,24 @@ export type Argon2idDeriver = (password: Uint8Array, salt: Uint8Array, params: A
 function nodeArgon2idDeriver(): Argon2idDeriver | undefined {
   const argon2 = (nodeCrypto as unknown as { argon2?: Argon2 }).argon2;
   if (typeof argon2 !== 'function') return undefined;
-  return (password, salt, params, length) =>
-    new Promise((resolve, reject) => {
+  // A runtime may declare argon2 and refuse it when called (a Bun whose
+  // crypto lacks it throws ERR_CRYPTO_ARGON2_NOT_SUPPORTED): the portable
+  // one then derives, the same key.
+  let supported = true;
+  return (password, salt, params, length) => {
+    if (!supported) return portableArgon2idDeriver(password, salt, params, length);
+    return new Promise<Uint8Array>((resolve, reject) => {
       argon2(
         'argon2id',
         { message: password, nonce: salt, parallelism: params.parallelism, tagLength: length, memory: params.memoryKiB, passes: params.iterations },
         (error, key) => (error ? reject(error) : resolve(key))
       );
+    }).catch((error: unknown) => {
+      if ((error as { code?: unknown } | null)?.code !== 'ERR_CRYPTO_ARGON2_NOT_SUPPORTED') throw error;
+      supported = false;
+      return portableArgon2idDeriver(password, salt, params, length);
     });
+  };
 }
 
 /** ./argon2's argon2id, on the calling thread, which writes node:crypto's keys (D92). */

@@ -24,6 +24,9 @@ http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
 http_runtime_typescript = "../../runtime/http/typescript"
 versiongraph_go = "../../runtime/versiongraph/go"
+# The behaviors' core (D103), which the repositories of FollowUp, CheckIn
+# and Alert run through, and whose WebAssembly module an image builds.
+rules_typescript = "../../runtime/rules/typescript"
 # A stack's server images build from the checkout, which holds the runtime
 # modules above as well as this project.
 build_context = "../.."
