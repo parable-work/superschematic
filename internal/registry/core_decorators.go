@@ -196,6 +196,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// of channel identities (core_notifications.go, D153).
 	specs = append(specs, notificationDecorators()...)
 
+	// The agent orchestration's tables and an operation's autonomy class
+	// (core_agents.go, D158).
+	specs = append(specs, agentDecorators()...)
+
 	// The tables whose rows are parties, the conversations' tables and the
 	// queue of run requests (core_parties.go, D157).
 	specs = append(specs, partyDecorators()...)

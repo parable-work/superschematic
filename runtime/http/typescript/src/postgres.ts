@@ -484,6 +484,30 @@ export {
   type ReplyOutcome,
   type Urgency,
 } from './notify.js';
+// Agent orchestration (D158): the dispatcher of agent runs, their tokens,
+// autonomy, budgets and stop switches, over the @agents tables.
+export {
+  AGENT_PERMISSIONS,
+  AgentsError,
+  DEFAULT_TRANSCRIPT_RETENTION_DAYS,
+  createAgents,
+  defaultAutonomy,
+  paramsHash,
+  type AgentRunRequest,
+  type AgentSandboxTool,
+  type AgentTool,
+  type AgentToolContext,
+  type AgentTrigger,
+  type Agents,
+  type AgentsOptions,
+  type AskThread,
+  type Autonomy,
+  type GateOutcome,
+  type OperationClass,
+  type PrincipalRef,
+  type TranscriptEntry,
+  type TranscriptStore,
+} from './agents.js';
 export type { EventDefinition } from './orm.js';
 // Outside parties and inbound messages (D157): the principal a party is,
 // the one path every inbound message takes, conversations whose messages

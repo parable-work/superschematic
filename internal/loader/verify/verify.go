@@ -281,6 +281,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkCalendarSources(schema, r)
 	checkSearchables(schema, in, r)
 	checkNotifications(schema, in, r)
+	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)

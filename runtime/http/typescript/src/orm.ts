@@ -440,6 +440,8 @@ export interface TableDefinition {
   readonly searchable?: SearchableDefinition;
   /** What the table is to the notifier (D153): one of its parts, or the table of channel identities; absent for any other table. */
   readonly notifier?: 'inbox' | 'deliveries' | 'routes' | 'preferences' | 'subscriptions' | 'channelTrust' | 'replies' | 'channelIdentities';
+  /** What the table is to the agent orchestration (D158): one of its parts; absent for any other table. */
+  readonly agents?: 'definitions' | 'runs' | 'policies' | 'approvals' | 'controls';
   /** The table's @event declarations (D153), which the notifier raises and routes; absent for a table with none. */
   readonly events?: readonly EventDefinition[];
   /** A @party table (D157): its rows are principals of kind party, which act through grants alone; title is the member a party is named by. Absent for any other table. */

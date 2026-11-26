@@ -130,6 +130,7 @@ await orm.asSystem().noticeRoute.createOne({
 | `{ principal: id }` | one user |
 | `{ role: "oncall" }` | the users holding the role |
 | `{ party: { table, key } }` | a party row, through its grants |
+| `{ agent: name }` | an agent (D158): the route puts a run request about the record on the dispatcher's queue, in place of a notice ([agent runs](../agent-runs/)) |
 
 Expose the route table through table operations behind a permission, so
 editing routes is one.

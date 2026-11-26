@@ -10,6 +10,18 @@
       "properties": {},
       "type": "object"
     },
+    "AgentsDef": {
+      "additionalProperties": false,
+      "properties": {
+        "part": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part"
+      ],
+      "type": "object"
+    },
     "App": {
       "additionalProperties": false,
       "properties": {
@@ -4953,6 +4965,9 @@
           "default": false,
           "type": "boolean"
         },
+        "autonomy": {
+          "$ref": "#/$defs/OperationAutonomy"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -5726,6 +5741,22 @@
       },
       "required": [
         "part"
+      ],
+      "type": "object"
+    },
+    "OperationAutonomy": {
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "mode": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "class"
       ],
       "type": "object"
     },
@@ -7228,6 +7259,9 @@
         },
         "accessLog": {
           "$ref": "#/$defs/AccessLogDef"
+        },
+        "agents": {
+          "$ref": "#/$defs/AgentsDef"
         },
         "allowUnknownFields": {
           "default": false,

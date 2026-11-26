@@ -19,6 +19,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/access"
+	"github.com/parable-work/superschematic/internal/loader/agents"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/conversations"
@@ -626,6 +627,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// audience columns as the table's own (D156).
 	access.ExpandExternal(vin.ExternalTypes)
 	notifications.ExpandExternal(vin.ExternalTypes)
+	agents.ExpandExternal(vin.ExternalTypes)
 	if verify.CheckBehaviors(schema, vin).Err() == nil {
 		owned, err := behaviorfields.Expand(schema, reg)
 		if err != nil {
@@ -707,6 +709,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// notifier's classes and the channel identities join the schema before
 	// the pass, so it reads them as its own.
 	if added := notifications.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Agent orchestration (D158): the fields of each @agents class's part
+	// that the class does not declare join it before the pass, so it reads
+	// them as its own.
+	if added := agents.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

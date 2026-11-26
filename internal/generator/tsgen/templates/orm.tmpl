@@ -314,6 +314,9 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Notifier}}
   notifier: {{jsonString .Notifier}},
 {{- end}}
+{{- if .Agents}}
+  agents: {{jsonString .Agents}},
+{{- end}}
 {{- if .Party}}
   party: { {{- if .PartyTitle}} title: {{jsonString .PartyTitle}} {{end -}} },
 {{- end}}

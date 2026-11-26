@@ -1,0 +1,15 @@
+import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+
+// The work app's tables (D158): tasks agents work on, the grants a run's
+// token is, the notifier that asks for approvals, and the orchestration's
+// own tables. The orchestration runs on Postgres.
+export default defineConfig({
+  name: "work-db",
+  kind: SchemaKind.DB,
+  outputs: {
+    types: {
+      [TargetLanguage.TypeScript]: { enabled: true }
+    },
+    sql: { dialects: ["postgres"] }
+  }
+});
