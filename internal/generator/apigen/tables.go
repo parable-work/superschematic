@@ -456,6 +456,9 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 	if to.Database != b.dbName {
 		return nil, fmt.Errorf("apigen: operation %s: its @tableOperation reads and writes a table of %s, and the API's other table operations one of %s; an API serves the tables of one database (D106)", owner, to.Database, b.dbName)
 	}
+	if to.Kind == ir.TableOperationMerge {
+		return nil, unserved("it merges one row of %s into another (D147), which the TypeScript server serves and the Go server writes no handler of yet: implement it over MergeInto", to.Type)
+	}
 	if to.Projection {
 		return nil, unserved("its result %s reads the projection %s, and the Go server writes handlers over a table's repository alone so far", endpoint.OutputType, to.Type)
 	}

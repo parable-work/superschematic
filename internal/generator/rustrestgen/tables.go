@@ -109,6 +109,9 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 	if !slices.Contains(ir.TableOperationKinds, op.Kind) || op.Type == "" || op.Database == "" {
 		return refuse("whose kind, table and database are not all set (kind %q, type %q, database %q); the loader fills an operation's tableOperation and checks it, so load the schema before generating", op.Kind, op.Type, op.Database)
 	}
+	if op.Kind == ir.TableOperationMerge {
+		return unserved("it merges one row of %s into another (D147), which the TypeScript server serves and the Rust server writes no handler of yet: implement it over merge_into", op.Type)
+	}
 	if op.Projection {
 		return unserved("it reads the projection %s, and the Rust repositories read tables so far", op.Type)
 	}
