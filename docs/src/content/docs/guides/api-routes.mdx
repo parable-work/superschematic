@@ -1363,7 +1363,12 @@ it through a relation of the table to itself, is 409. It takes no row rule
 and no parent in its path, since it reaches both rows by their keys. The
 TypeScript server serves it; the Go and Rust servers write no handler of
 it yet, so the operation stays in the implementation's interface, to write
-over `MergeInto` and `merge_into`.
+over `MergeInto` and `merge_into`. A TypeScript server whose database
+lists sqlite first opens it on SQLite, where its repositories merge no
+rows yet, so the build refuses the merge there (D182). The route reads
+both rows as its caller, and the Go and Rust repositories' merges find
+only the rows their caller may write
+([Who may read a row](/superschematic/guides/database-tables/#who-may-read-a-row)).
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message
