@@ -11,14 +11,14 @@ export default defineConfig({
   dependencies: [FixtureRecurrenceDb],
   outputs: {
     types: {
-      [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true },
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }
     },
-    api: { enabled: true },
+    // A TypeScript server: the Go server serves neither Recurrence nor a
+    // calendar source yet (D180).
+    api: { enabled: true, language: "TYPESCRIPT" },
     sdk: {
-      [TargetLanguage.Go]: { enabled: true },
       [TargetLanguage.TypeScript]: { enabled: true },
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }

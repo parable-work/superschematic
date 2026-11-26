@@ -125,6 +125,14 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// GoORM is a DB service whose config enables its Go types, which the
+	// build generates the Go ORM of, and GoServer an API whose server is
+	// Go (outputs.api, language GO or unset), which the loader reads from
+	// the config. checkGoFeatures refuses in them each platform feature
+	// the Go outputs do not serve yet (D180).
+	GoORM    bool
+	GoServer bool
+
 	// Naming supplies the npm scope that marks an import as a schema
 	// service reference. The loader fills it from loader.WithNaming; empty
 	// fields fall back to naming.Default().
@@ -285,6 +293,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkNotifications(schema, in, r)
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
+	checkGoFeatures(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)
