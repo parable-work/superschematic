@@ -117,6 +117,7 @@ export abstract class Reconcile<C extends ReconcileConfig> {
    * holds each step; a step refused stops there and records drift. An
    * observation no newer is answered unchanged. Needs observePermission.
    * @writes
+   * @checks observePermission
    */
   abstract observe(params: ObserveParams): ObserveResult;
 }

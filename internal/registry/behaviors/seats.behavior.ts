@@ -150,6 +150,7 @@ export abstract class Seats<C extends SeatsConfig> {
    * refuses it, or unseats the subject seated longest when its onFull is
    * displace. A subject seated already is answered unchanged.
    * @writes
+   * @checks seats.*.take seats.*.assign
    */
   abstract takeSeat(params: TakeSeatParams): TakeSeatResult;
 
@@ -159,6 +160,7 @@ export abstract class Seats<C extends SeatsConfig> {
    * fromField holds cannot leave while it holds them. A subject not seated is
    * answered unchanged.
    * @writes
+   * @checks seats.*.assign
    */
   abstract leaveSeat(params: LeaveSeatParams): LeaveSeatResult;
 

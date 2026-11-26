@@ -150,6 +150,7 @@ export abstract class Workflow<C extends WorkflowConfig> {
    * Moves the instance to another state along a transition the config lists.
    * A transition that names a permission needs a caller who holds it.
    * @writes
+   * @checks transitions[].permission overridePermission
    */
   abstract transition(params: TransitionParams): TransitionResult;
 }

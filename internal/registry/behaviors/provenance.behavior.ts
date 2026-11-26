@@ -101,6 +101,7 @@ export abstract class Provenance<C extends ProvenanceConfig> {
    * Accepts proposed fields as they are, as the caller. Needs the review's
    * permission.
    * @writes
+   * @checks review.permission
    */
   abstract accept(params: AcceptParams): AcceptResult;
 
@@ -109,6 +110,7 @@ export abstract class Provenance<C extends ProvenanceConfig> {
    * through update(), as the caller's own write, so Derived does not propose
    * it again. Needs the review's permission.
    * @writes
+   * @checks review.permission
    */
   abstract reject(params: RejectParams): RejectResult;
 

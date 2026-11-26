@@ -464,6 +464,7 @@ export abstract class Calendar<C extends CalendarConfig> implements /** Time a c
    * changes only while the instance holds no time that has not ended. Needs
    * the config's permission.
    * @writes
+   * @checks permission
    */
   abstract setOpeningHours(params: SetOpeningHoursParams): SetOpeningHoursResult;
 
@@ -473,12 +474,14 @@ export abstract class Calendar<C extends CalendarConfig> implements /** Time a c
    * which needs the permission's .override. Forcing keeps the holds: the
    * claims are moved by their own Workflow, by a rule or by hand.
    * @writes
+   * @checks permission
    */
   abstract addClosure(params: AddClosureParams): AddClosureResult;
 
   /**
    * Removes a closure. Needs the config's permission.
    * @writes
+   * @checks permission
    */
   abstract removeClosure(params: RemoveClosureParams): RemoveClosureResult;
 

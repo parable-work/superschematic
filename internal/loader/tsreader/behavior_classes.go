@@ -142,6 +142,11 @@ type behaviorClassReader struct {
 	// params are the class's type parameters, the table and the config,
 	// which a schema's types may not name.
 	params map[string]bool
+	// at is the config path of the member being read (registry's
+	// ConfigPath, by segment), and refs, while the config is read, the
+	// references its members' types mark (Names, Hears); nil otherwise.
+	at   []string
+	refs *[]registry.BehaviorReference
 }
 
 func (r *behaviorClassReader) fail(node *astNode, format string, args ...any) {
@@ -181,8 +186,17 @@ func (r *behaviorClassReader) read(node *astNode, marker decoratorRef) BehaviorC
 			if len(params) == 2 {
 				r.fail(params[1], "behavior class %s: its config, the type parameter %s, needs a constraint, the config's type: %s extends { ... }", name, params[1].Name().Text(), params[1].Name().Text())
 			}
-		} else if schema, ok := r.schema(last.Constraint); ok {
-			decl.ConfigSchema = r.raw(last.Constraint, schema)
+		} else {
+			// The config's members that name a part of the table, marked
+			// by their types (Names<T, R>, Hears<T>), are its references.
+			var refs []registry.BehaviorReference
+			r.refs, r.at = &refs, nil
+			schema, ok := r.schema(last.Constraint)
+			r.refs = nil
+			if ok {
+				decl.ConfigSchema = r.raw(last.Constraint, schema)
+				decl.References = refs
+			}
 		}
 	}
 

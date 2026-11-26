@@ -1,6 +1,6 @@
 // Reactions's class (D103): the build derives reactions.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
-import { declaresBehavior, type JsonSchema } from "@superschematic/db";
+import { declaresBehavior, type Hears, type JsonSchema, type Names } from "@superschematic/db";
 
 /** A string that is not empty. */
 type Named = JsonSchema<string, { minLength: 1 }>;
@@ -47,7 +47,7 @@ interface ReactionsConfig {
        * it there is in a terminal state of its own schema's Workflow, with an
        * outcome outcomes lists when it is given, at least one.
        */
-      allTerminal?: {
+      allTerminal?: Hears<{
         /**
          * The schema of the linking instances, which composes Links and
          * Workflow.
@@ -63,14 +63,14 @@ interface ReactionsConfig {
          * outcome when absent.
          */
         outcomes?: JsonSchema<("success" | "failure" | "neutral")[], { minItems: 1; uniqueItems: true }>;
-      };
+      }>;
       /**
        * The rule fires on an instance when an instance of schema that links
        * to it through link enters a terminal state of its own schema's
        * Workflow whose outcome outcomes lists, by a create or a transition,
        * or is linked to it while in one.
        */
-      anyTerminal?: {
+      anyTerminal?: Hears<{
         /**
          * The schema of the linking instances, which composes Links and
          * Workflow.
@@ -83,7 +83,7 @@ interface ReactionsConfig {
         link: JsonSchema<string, { pattern: "^[a-z][A-Za-z0-9]{0,63}$" }>;
         /** The outcomes of the terminal states that set the rule off. */
         outcomes: JsonSchema<("success" | "failure" | "neutral")[], { minItems: 1; uniqueItems: true }>;
-      };
+      }>;
       /**
        * An all or any rollup of the type's Rollups config: the rule fires on
        * an instance when an instance of the rollup's schema changes, links,
@@ -124,7 +124,7 @@ interface ReactionsConfig {
    * Implied when the type has one Workflow; needed when it has several. A
    * type anchored Workflow is named Workflow.
    */
-  status?: Named;
+  status?: Names<Named, "workflow">;
 }
 
 /**

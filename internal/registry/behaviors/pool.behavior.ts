@@ -210,6 +210,7 @@ export abstract class Pool<C extends PoolConfig> {
    * reason, and a call that moves neither is answered unchanged. Arms the
    * member's recheck at its outUntil. Needs permission.
    * @writes
+   * @checks permission
    */
   abstract markOut(params: MarkOutParams): MarkOutResult;
 
@@ -222,6 +223,7 @@ export abstract class Pool<C extends PoolConfig> {
    * from now when the check names no time, and its recheck is armed then, or
    * recheckAfterMs from now when that is later. Needs permission.
    * @writes
+   * @checks permission
    */
   abstract reportRoom(params: ReportRoomParams): ReportRoomResult;
 

@@ -1,7 +1,7 @@
 // Timers's class (D103): the build derives timers.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
 import { Temporal } from "superscalar";
-import { computed, declaresBehavior, subTable, type Integer, type JsonSchema } from "@superschematic/db";
+import { computed, declaresBehavior, subTable, type Integer, type JsonSchema, type Names } from "@superschematic/db";
 
 /** A state's name, as a config writes it. */
 type StateName = JsonSchema<string, { pattern: "^[A-Za-z][A-Za-z0-9_-]*$"; maxLength: 64 }>;
@@ -26,12 +26,12 @@ interface TimersConfig {
        * A state of the type's Workflow; the deadline starts again at each
        * entry into it.
        */
-      enters: Named;
+      enters: Names<Named, "state">;
     } | {
       /**
        * An own field of the type, by JSON key, whose values are date-times.
        */
-      field: Named;
+      field: Names<Named, { field: "Temporal.DateTime"; reason: "a deadline starts from the time a value holds" }>;
     };
     /**
      * How long after its start the deadline is due, in milliseconds; 0 when
@@ -86,7 +86,7 @@ interface TimersConfig {
    * enters starts, then and until. Implied when the type has one Workflow;
    * needed when it has several. A type anchored Workflow is named Workflow.
    */
-  status?: Named;
+  status?: Names<Named, "workflow">;
 }
 
 interface FireTimerParams {
@@ -182,6 +182,7 @@ export abstract class Timers<C extends TimersConfig> {
    * permission; refused for a deadline with nothing to start from now, or
    * whose until holds.
    * @writes
+   * @checks permission
    */
   abstract resetTimer(params: ResetTimerParams): ResetTimerResult;
 
@@ -191,6 +192,7 @@ export abstract class Timers<C extends TimersConfig> {
    * changes. Needs the config's permission; refused for a deadline not
    * started, cancelled, or whose until holds.
    * @writes
+   * @checks permission
    */
   abstract snoozeTimer(params: SnoozeTimerParams): SnoozeTimerResult;
 

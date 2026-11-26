@@ -86,9 +86,11 @@ func TestOpenAPITimersOperations(t *testing.T) {
 		t.Errorf("TicketTimersSnoozeTimerInput.dueAt's minimum = %v, want 0", minimum)
 	}
 
-	// The permission catalog lists the route's tickets.write and the
-	// config's tickets.timers under each Timers operation, which the core
-	// checks a reset's and a snooze's caller against.
+	// The permission catalog lists the route's tickets.write under each
+	// operation, and the config's tickets.timers under the two Timers
+	// operations its declaration says check it (D103's step 5), which the
+	// core checks a reset's and a snooze's caller against: a fire checks
+	// none of its own.
 	var catalog struct {
 		Permissions []struct {
 			Name       string   `json:"name"`
@@ -102,7 +104,7 @@ func TestOpenAPITimersOperations(t *testing.T) {
 	for _, p := range catalog.Permissions {
 		operations[p.Name] = p.Operations
 	}
-	timers := []string{"TicketTimersFireTimerHandler", "TicketTimersResetTimerHandler", "TicketTimersSnoozeTimerHandler"}
+	timers := []string{"TicketTimersResetTimerHandler", "TicketTimersSnoozeTimerHandler"}
 	if got := operations["tickets.timers"]; !reflect.DeepEqual(got, timers) {
 		t.Errorf("tickets.timers is required by %v, want %v", got, timers)
 	}

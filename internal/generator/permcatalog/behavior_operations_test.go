@@ -67,9 +67,9 @@ func TestCatalogListsAWorkflowsOverridePermission(t *testing.T) {
 }
 
 // TestCatalogListsASeatsTakeAndAssign (D104): an API that serves a table's
-// Seats lists, under each of Seats' operations, the take and assign
-// permissions its seats name, which no member's name says is a permission,
-// and under Reconcile's observe its observePermission, each of which the
+// Seats lists, under the operations of Seats that check them, the take and
+// assign permissions its seats name, which no member's name says is a
+// permission, and under Reconcile's observe its observePermission, each of which the
 // core checks. fixture-seats-api serves fixture-seats-db's Problem, whose
 // seats take problems.own and problems.work and assign problems.assign and
 // problems.release, and whose status names problems.override, and its
@@ -104,12 +104,16 @@ func TestCatalogListsASeatsTakeAndAssign(t *testing.T) {
 	for _, p := range catalog.Permissions {
 		operations[p.Name] = p.Operations
 	}
-	seats := []string{"ProblemSeatsLeaveSeatHandler", "ProblemSeatsListSeatsHandler", "ProblemSeatsTakeSeatHandler"}
+	// Seats' declaration says which operation checks which (D103's step
+	// 5): takeSeat a seat's take and assign, leaveSeat its assign, and
+	// listSeats none.
+	both := []string{"ProblemSeatsLeaveSeatHandler", "ProblemSeatsTakeSeatHandler"}
+	take := []string{"ProblemSeatsTakeSeatHandler"}
 	want := map[string][]string{
-		"problems.assign":   seats,
-		"problems.own":      seats,
-		"problems.release":  seats,
-		"problems.work":     seats,
+		"problems.assign":   both,
+		"problems.own":      take,
+		"problems.release":  both,
+		"problems.work":     take,
 		"problems.override": {"ProblemStatusTransitionHandler"},
 		"sandboxes.observe": {"SandboxObservedObserveHandler"},
 		"sandboxes.stop":    {"SandboxStatusTransitionHandler"},
@@ -208,16 +212,17 @@ func catalogOf(t *testing.T, api, db string) map[string][]string {
 }
 
 // TestCatalogListsPoolsPermission (D104): an API that serves a table's Pool
-// lists its config's permission under each of Pool's three operations, the
-// table's pick among them, as a use's config's permissions are listed under
-// every operation of the use until a class declaration says which checks
-// which (pick checks none), and Budget's observePermission under each of
-// Budget's nine. fixture-pool-api serves fixture-pool-db's Account, whose
+// lists its config's permission under markOut and reportRoom, the two
+// operations Pool's declaration says check it (D103's step 5), and not
+// under the table's pick, which checks none; and Budget's
+// observePermission under each of Budget's nine, since Budget's
+// declaration says none, so a use's config's permissions are listed under
+// every operation of the use. fixture-pool-api serves fixture-pool-db's Account, whose
 // Pool names accounts.pool and whose Budget names accounts.observe.
 func TestCatalogListsPoolsPermission(t *testing.T) {
 	operations := catalogOf(t, "fixture-pool-api", "fixture-pool-db")
 	want := map[string][]string{
-		"accounts.pool": {"AccountPoolMarkOutHandler", "AccountPoolPickHandler", "AccountPoolReportRoomHandler"},
+		"accounts.pool": {"AccountPoolMarkOutHandler", "AccountPoolReportRoomHandler"},
 		"accounts.observe": {"AccountBudgetCheckReserveHandler", "AccountBudgetObserveHandler", "AccountBudgetRecordUsageForHandler", "AccountBudgetRecordUsageHandler",
 			"AccountBudgetReserveForHandler", "AccountBudgetReserveHandler", "AccountBudgetSetLimitHandler", "AccountBudgetSettleForHandler", "AccountBudgetSettleHandler"},
 	}

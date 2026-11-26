@@ -108,7 +108,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "reportRoom",
@@ -175,7 +178,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "pick",

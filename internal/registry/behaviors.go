@@ -86,6 +86,14 @@ type BehaviorDeclaration struct {
 	// ConfigSchema is the JSON Schema of the config a type gives the
 	// behavior. Absent means the behavior takes no config.
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// References are the members of the config that name a part of the
+	// table its use sits on (D103's step 5): a field, a Workflow use, a
+	// state of it, or a table whose writes the use hears. The build holds
+	// a use's config to them (verify's checkConfigReferences) and derives
+	// what reads them (BehaviorListens) from them, as per-behavior code did
+	// before. Only a behavior a table composes names them; an engine's
+	// declaration parser shifts the member out.
+	References []BehaviorReference `json:"references,omitempty"`
 	// CreateParamsSchema is the JSON Schema of the parameters a create
 	// gives the behavior for the new instance, which an engine passes to
 	// its initialize: an object schema that sets "additionalProperties",
@@ -581,6 +589,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		return err
 	}
 	if err := checkBehaviorVetoes(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorPaths(decl); err != nil {
 		return err
 	}
 	r.behaviors[decl.Name] = b

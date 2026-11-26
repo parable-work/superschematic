@@ -400,6 +400,7 @@ export abstract class Stock<C extends StockConfig> implements /** Units a claim 
    * Adds units that arrived to what is on hand, with a reason and an optional
    * reference, such as a delivery note's. Needs the config's permission.
    * @writes
+   * @checks permission
    */
   abstract receiveStock(params: ReceiveStockParams): ReceiveStockResult;
 
@@ -409,6 +410,7 @@ export abstract class Stock<C extends StockConfig> implements /** Units a claim 
    * it leaves fewer on hand than claims hold, unless the config allows
    * backorder.
    * @writes
+   * @checks permission
    */
   abstract adjustStock(params: AdjustStockParams): AdjustStockResult;
 
@@ -418,6 +420,7 @@ export abstract class Stock<C extends StockConfig> implements /** Units a claim 
    * the config's permission, and its .override for a count below what claims
    * hold.
    * @writes
+   * @checks permission
    */
   abstract countStock(params: CountStockParams): CountStockResult;
 

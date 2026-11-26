@@ -164,7 +164,11 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "transitions[].permission",
+        "overridePermission"
+      ]
     }
   ],
   "vetoes": [

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // The authoring types of @superschematic/db that a behavior's class writes
@@ -14,6 +16,8 @@ const (
 	constWrapper      = "Const"
 	oneOfWrapper      = "OneOf"
 	openWrapper       = "Open"
+	namesWrapper      = "Names"
+	hearsWrapper      = "Hears"
 	rowKeyType        = "RowKey"
 )
 
@@ -86,7 +90,7 @@ func (r *behaviorClassReader) schemaAt(node *astNode, depth int) (map[string]any
 			// An array of anything: no items keyword.
 			return map[string]any{"type": "array"}, true
 		}
-		items, ok := r.schemaAt(element, depth+1)
+		items, ok := r.eachItem(element, depth)
 		if !ok {
 			return nil, false
 		}
@@ -202,7 +206,9 @@ func (r *behaviorClassReader) objectSchema(members []*astNode, depth int) (map[s
 				r.fail(m, "member %s names its type", name)
 				return nil, false
 			}
+			r.at = append(r.at, name)
 			s, ok := r.schemaAt(sig.Type, depth+1)
+			r.at = r.at[:len(r.at)-1]
 			if !ok {
 				return nil, false
 			}
@@ -216,7 +222,7 @@ func (r *behaviorClassReader) objectSchema(members []*astNode, depth int) (map[s
 		case kindIndexSignature:
 			index := m.AsIndexSignatureDeclaration()
 			key := index.Parameters.Nodes[0].AsParameterDeclaration().Type
-			value, ok := r.schemaAt(index.Type, depth+1)
+			value, ok := r.eachMember(index.Type, depth)
 			if !ok {
 				return nil, false
 			}
@@ -284,6 +290,17 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 				base[key] = value
 			}
 			return base, true
+		case namesWrapper:
+			if len(args) != 2 {
+				break
+			}
+			kind, ok := r.literalType(args[1])
+			if !ok {
+				return nil, false
+			}
+			return r.reference(node, args, kind, depth)
+		case hearsWrapper:
+			return r.reference(node, args, registry.ReferenceListen, depth)
 		case integerType:
 			return map[string]any{"type": "integer"}, true
 		case rowKeyType:
@@ -318,7 +335,7 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 	switch name {
 	case "Array", "ReadonlyArray":
 		if len(args) == 1 {
-			items, ok := r.schemaAt(args[0], depth+1)
+			items, ok := r.eachItem(args[0], depth)
 			if !ok {
 				return nil, false
 			}
@@ -330,7 +347,7 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 		}
 	case "Record":
 		if len(args) == 2 {
-			value, ok := r.schemaAt(args[1], depth+1)
+			value, ok := r.eachMember(args[1], depth)
 			if !ok {
 				return nil, false
 			}
@@ -368,6 +385,53 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 	}
 	r.fail(node, "a behavior's class writes no JSON Schema for %s: an interface, a type alias or an authoring type of @superschematic/db (JsonSchema, Integer, Const)", name)
 	return nil, false
+}
+
+// eachItem is the schema of a list's items, read at the list's path with
+// [] after its last segment (transitions[]), as a reference within it
+// names it.
+func (r *behaviorClassReader) eachItem(node *astNode, depth int) (map[string]any, bool) {
+	if len(r.at) == 0 {
+		return r.schemaAt(node, depth+1)
+	}
+	last := r.at[len(r.at)-1]
+	r.at[len(r.at)-1] = last + "[]"
+	defer func() { r.at[len(r.at)-1] = last }()
+	return r.schemaAt(node, depth+1)
+}
+
+// eachMember is the schema of an object's members, Record's or an index
+// signature's values, read at the object's path with a * segment
+// (gates.*).
+func (r *behaviorClassReader) eachMember(node *astNode, depth int) (map[string]any, bool) {
+	r.at = append(r.at, "*")
+	defer func() { r.at = r.at[:len(r.at)-1] }()
+	return r.schemaAt(node, depth+1)
+}
+
+// reference records, while the config is read, the member at the current
+// path as one that names a part of the table (Names<T, R>, R's kind) or
+// whose object the use hears (Hears<T>), and reads its schema, T's.
+func (r *behaviorClassReader) reference(node *astNode, args []*astNode, kind any, depth int) (map[string]any, bool) {
+	if len(args) == 0 {
+		r.fail(node, "a reference's first type argument is its value's type")
+		return nil, false
+	}
+	if r.refs == nil {
+		r.fail(node, "Names and Hears mark members of the config alone, which name a part of the table its use sits on (D103)")
+		return nil, false
+	}
+	ref := registry.BehaviorReference{Path: strings.Join(r.at, ".")}
+	switch k := kind.(type) {
+	case string:
+		ref.Kind = k
+	case map[string]any:
+		ref.Kind = registry.ReferenceField
+		ref.Type, _ = k["field"].(string)
+		ref.Reason, _ = k["reason"].(string)
+	}
+	*r.refs = append(*r.refs, ref)
+	return r.schemaAt(args[0], depth+1)
 }
 
 // literal is a literal type's value: a string, a number as written, true,

@@ -132,6 +132,22 @@ export type OneOf<U> = U & { readonly __oneOf?: true };
 /** An object that admits members T does not name: T's schema with no additionalProperties. */
 export type Open<T extends object> = T & { readonly __open?: true };
 
+/**
+ * What a member of a behavior's config names of the table its use sits on
+ * (D103): an own field ("field", or { field: "Temporal.DateTime" } for one
+ * that holds that scalar, with the reason the build gives when it does
+ * not), a Workflow use by its field ("workflow"), or a state of the
+ * Workflow the config's workflow member names, or of the table's one
+ * Workflow ("state"). T is the member's own type. The declaration lists it
+ * among its references, and the build holds a use's config to it.
+ */
+export type Names<T, R extends "field" | "workflow" | "state" | { readonly field: string; readonly reason?: string }> = T & {
+  readonly __names?: R;
+};
+
+/** A member of a behavior's config whose object's schema and link name a table and its to-one relation to this one, whose writes the use hears (D103). */
+export type Hears<T extends { readonly schema: string; readonly link: string }> = T & { readonly __hears?: true };
+
 /** The contract of a row's room now and when it will have it (D104), which Budget implements and Pool asks. */
 export interface Capacity {}
 

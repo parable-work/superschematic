@@ -1,7 +1,7 @@
 // Approvals' class (D103): the build derives approvals.behavior.json from
 // it (make behaviors), which the behaviors' core and the engine read.
 import { Temporal } from "superscalar";
-import { computed, declaresBehavior, subTable, type Integer, type JsonSchema } from "@superschematic/db";
+import { computed, declaresBehavior, subTable, type Integer, type JsonSchema, type Names } from "@superschematic/db";
 
 /** A state's name, as a config writes it. */
 type StateName = JsonSchema<string, { pattern: "^[A-Za-z][A-Za-z0-9_-]*$"; maxLength: 64 }>;
@@ -22,7 +22,7 @@ interface ApprovalsConfig {
    * type has one Workflow; needed when it has several. A Workflow anchored on
    * the type is named Workflow. A table's alone: an engine type refuses it.
    */
-  status?: Named;
+  status?: Names<Named, "workflow">;
 }
 
 /** One gate: who signs off for its state, how many, and what consumes it. */
@@ -192,6 +192,7 @@ export abstract class Approvals<C extends ApprovalsConfig> {
    * allows it, while the instance is in the state, and for a caller whose
    * sign-off for the state is not yet consumed.
    * @writes
+   * @checks gates.*.permission
    * @returns The sign-off, with the gate's sign-offs after it and the count
    * it needs.
    */

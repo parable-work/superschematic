@@ -361,10 +361,7 @@
             "use": "Timers",
             "behavior": "Timers",
             "operation": "fireTimer",
-            "writes": true,
-            "permissions": [
-              "tickets.timers"
-            ]
+            "writes": true
           },
           "httpMethod": "POST",
           "restPath": "ticket/{id}/timers/fire-timer",

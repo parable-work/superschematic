@@ -139,7 +139,11 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "seats.*.take",
+        "seats.*.assign"
+      ]
     },
     {
       "name": "leaveSeat",
@@ -185,7 +189,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "seats.*.assign"
+      ]
     },
     {
       "name": "listSeats",
