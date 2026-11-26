@@ -193,7 +193,7 @@ func (o *APIOutput) checkBehaviorDeps(deps DepsInfo) error {
 	route := routes[0]
 	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
 	if deps.Dialect == SQLiteDialect {
-		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D103)", route.Database)
+		why = fmt.Sprintf("%s lists sqlite first, and the generated server builds Deps.orm over a pg pool alone (D182): on SQLite the ./orm/sqlite entry's repositories run behaviors (D186), which an app passes the router as orm", route.Database)
 	}
 	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, why)
 }
@@ -209,7 +209,7 @@ func (o *APIOutput) checkTableDeps(deps DepsInfo) error {
 	route := routes[0]
 	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
 	if deps.Dialect == SQLiteDialect {
-		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D106)", route.Database)
+		why = fmt.Sprintf("%s lists sqlite first, and the generated server builds Deps.orm over a pg pool alone (D106, D182): an app passes the router the ./orm/sqlite entry's repositories as orm", route.Database)
 	}
 	return fmt.Errorf("tsrestgen: %s serves %s, a @tableOperation (a %s of %s), which runs through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Operation, route.Kind, route.Type, route.Database, why)
 }
@@ -651,7 +651,7 @@ func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	}
 	w := workers[0]
 	if deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Runs(), deps.Database)
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the generated behavior worker claims through the Postgres queue client and Deps.orm alone (D103, D186); on SQLite a worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims", w.Name, w.Behavior.Runs(), deps.Database)
 	}
 	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }

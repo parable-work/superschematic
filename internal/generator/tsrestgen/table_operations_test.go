@@ -242,7 +242,7 @@ func TestTableOperationsNeedTheRepositories(t *testing.T) {
 		why  string
 	}{
 		"no TypeScript types": {DepsInfo{Database: trackerDB, Dialect: "postgres"}, "enable outputs.types.typescript in fixture-tracker-db's config"},
-		"sqlite first":        {DepsInfo{Database: trackerDB, Dialect: SQLiteDialect, ORM: "FixtureTrackerDbOrm", DatabaseTypesPackage: "@schemas/fixture-tracker-db-types"}, "fixture-tracker-db lists sqlite first, and the repositories run on Postgres alone (D106)"},
+		"sqlite first":        {DepsInfo{Database: trackerDB, Dialect: SQLiteDialect, ORM: "FixtureTrackerDbOrm", DatabaseTypesPackage: "@schemas/fixture-tracker-db-types"}, "fixture-tracker-db lists sqlite first, and the generated server builds Deps.orm over a pg pool alone (D106, D182): an app passes the router the ./orm/sqlite entry's repositories as orm"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := generateTracker(t, trackerFixture(t, nil)).SetDeps(tc.deps)

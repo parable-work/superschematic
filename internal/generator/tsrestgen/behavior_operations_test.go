@@ -256,7 +256,7 @@ func TestBehaviorOperationsNeedTheRepositories(t *testing.T) {
 		why  string
 	}{
 		"no TypeScript types": {DepsInfo{Database: behaviorDB, Dialect: "postgres"}, "enable outputs.types.typescript in fixture-workflow-db's config"},
-		"sqlite first":        {DepsInfo{Database: behaviorDB, Dialect: SQLiteDialect, ORM: "FixtureWorkflowDbOrm", DatabaseTypesPackage: "@schemas/fixture-workflow-db-types"}, "fixture-workflow-db lists sqlite first, and the repositories run on Postgres alone (D103)"},
+		"sqlite first":        {DepsInfo{Database: behaviorDB, Dialect: SQLiteDialect, ORM: "FixtureWorkflowDbOrm", DatabaseTypesPackage: "@schemas/fixture-workflow-db-types"}, "fixture-workflow-db lists sqlite first, and the generated server builds Deps.orm over a pg pool alone (D182): on SQLite the ./orm/sqlite entry's repositories run behaviors (D186), which an app passes the router as orm"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := generateBehavior(t, behaviorFixture(t)).SetDeps(tc.deps)

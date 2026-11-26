@@ -195,7 +195,7 @@ func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 	}{
 		"sqlite first": {
 			DepsInfo{Database: timersDB, Dialect: SQLiteDialect, ORM: "FixtureTimersDbOrm", DatabaseTypesPackage: "@schemas/fixture-timers-db-types"},
-			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, and fixture-timers-db lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)",
+			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, and fixture-timers-db lists sqlite first: the generated behavior worker claims through the Postgres queue client and Deps.orm alone (D103, D186); on SQLite a worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims",
 		},
 		"no TypeScript types": {
 			DepsInfo{Database: timersDB, Dialect: "postgres"},
