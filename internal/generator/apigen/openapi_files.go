@@ -66,6 +66,31 @@ func fileDownloadResponse(download *ir.FileDownloadDef) map[string]interface{} {
 	}
 }
 
+// binaryStreamResponse is the 200 of an @httpBinaryStream operation (D167):
+// the stream's bytes as its media type, a binary string, with the headers
+// the stream declares, and no envelope. A refusal stays a problem.
+func binaryStreamResponse(stream *ir.HTTPBinaryStreamDef) map[string]interface{} {
+	response := map[string]interface{}{
+		"description": "Successful response, streamed as " + stream.ContentType,
+		"content": map[string]interface{}{
+			stream.ContentType: map[string]interface{}{
+				"schema": map[string]interface{}{"type": "string", "format": "binary"},
+			},
+		},
+	}
+	if len(stream.ResponseHeaders) > 0 {
+		headers := map[string]interface{}{}
+		for _, name := range stream.ResponseHeaders {
+			headers[name] = map[string]interface{}{
+				"description": "Sent with the stream's first bytes",
+				"schema":      map[string]interface{}{"type": "string"},
+			}
+		}
+		response["headers"] = headers
+	}
+	return response
+}
+
 // fileNotModifiedResponse is the 304 of a FileDownload<C> result read by
 // GET (D141): the answer to a request whose If-None-Match names the file's
 // entity tag, or whose If-Modified-Since is not before the file's time,

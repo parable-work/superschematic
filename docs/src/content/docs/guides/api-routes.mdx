@@ -731,6 +731,9 @@ export class Reports {
   and the headers. A refusal is a problem body, as any route's.
 - Each SDK method returns the stream unread, with its headers
   ([Client SDKs](/superschematic/guides/client-sdks/#streams)).
+- The OpenAPI document describes the 200 as the stream's media type, a
+  binary string, with the `responseHeaders`, and no envelope. The
+  refusals stay `application/problem+json`.
 - A client sends the input type as a JSON body, beside the path and
   query parameters, so the operation is no `@webhook`, not encrypted,
   takes no [upload](#uploads) and no `FilterBy`, and is not `@paginated`
