@@ -1,8 +1,10 @@
-import { Identity, Temporal } from "superscalar";
-import { Nullable } from "@superschematic/schema";
-import { AutoGenerate, key } from "@superschematic/db";
+import { Identity } from "superscalar";
+import { AutoGenerate, event, key, notifier, queue } from "@superschematic/db";
 
-// A note.
+// A note. Its edits raise note.changed, which the notifier (D153) routes
+// to the people its routes name and sends through the channel adapter the
+// environment configures.
+@event<Note>({ kind: "note.changed", payload: ["title"], title: "title" })
 export abstract class Note {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -12,18 +14,18 @@ export abstract class Note {
   body: string;
 }
 
-// A notice about a note to one recipient, which the SMS slot's channel
-// adapter sends. Notifications (D153) will raise these from events; the
-// example's build-time check counts this table as using a channel.
-export abstract class Notice {
-  @key
-  id: AutoGenerate<Identity.UUID>;
+// The notifier's tables, which the build fills: the inbox, the deliveries,
+// the routes and its dispatch queue. A database that declares them needs a
+// channel adapter in every environment that runs an API over it.
+@notifier("inbox")
+export abstract class Notice {}
 
-  noteId: Identity.UUID;
+@notifier("deliveries")
+export abstract class Delivery {}
 
-  recipient: string;
+@notifier("routes")
+export abstract class NoticeRoute {}
 
-  body: string;
-
-  sentAt: Nullable<Temporal.DateTime>;
-}
+@queue()
+@notifier("dispatch")
+export abstract class NoticeWork {}

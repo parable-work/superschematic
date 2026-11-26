@@ -130,6 +130,9 @@ export interface CalendarSourceDef {
   title: string;
 }
 
+export interface ChannelIdentitiesDef {
+}
+
 export interface DNSPlacement {
   platform: string;
   values?: { [key: string]: unknown };
@@ -273,6 +276,14 @@ export interface EnvironmentDecl {
   settings?: DeployableSettings[];
   target?: string;
   values?: { [key: string]: unknown };
+}
+
+export interface EventDef {
+  description?: string;
+  kind: string;
+  payload?: string[];
+  title?: string;
+  urgency?: string;
 }
 
 export interface Fence {
@@ -480,6 +491,10 @@ export interface MiddlewareConfig {
   rateLimit?: number;
   rateLimitKey?: string;
   timeout?: number;
+}
+
+export interface NotifierDef {
+  part: string;
 }
 
 export interface OperationDocs {
@@ -857,6 +872,7 @@ export interface TypeDef {
    */
   behaviors?: BehaviorRef[];
   calendarSources?: CalendarSourceDef[];
+  channelIdentities?: ChannelIdentitiesDef;
   comment?: string;
   database?: DatabaseDecl;
   denyUnknownFields?: boolean;
@@ -865,6 +881,7 @@ export interface TypeDef {
   enqueueOnChange?: EnqueueOnChange[];
   envVars?: boolean;
   environment?: EnvironmentDecl;
+  events?: EventDef[];
   extends?: string;
   extensions?: Extensions;
   fences?: Fence[];
@@ -877,6 +894,7 @@ export interface TypeDef {
   kind?: string;
   mergeable?: boolean;
   name: string;
+  notifier?: NotifierDef;
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
