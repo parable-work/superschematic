@@ -297,9 +297,9 @@ func respondTableError(w gohttp.ResponseWriter, r *gohttp.Request, err error) {
 		runtimeresponse.LoggedError(w, r, refusal.Status, refusal.Message, string(refusal.Code))
 		return
 	}
-	RespondAppError(w, LoggerFromContext(r.Context()), err)
+	RespondAppError(w, {{ appErrorContext }}LoggerFromContext(r.Context()), err)
 {{- else }}
-	RespondAppError(w, LoggerFromContext(r.Context()), err)
+	RespondAppError(w, {{ appErrorContext }}LoggerFromContext(r.Context()), err)
 {{- end }}
 }
 {{- if .TablesRequireCaller }}

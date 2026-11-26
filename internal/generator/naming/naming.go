@@ -237,6 +237,9 @@ type Naming struct {
 	// Go is the [go] table: shapes of the generated Go types and ORM that
 	// a project whose Go code another compiler's output shaped can set.
 	Go GoConfig `toml:"go"`
+	// GoAPI is the [go_api] table: how the generated Go API routers answer
+	// a request they refuse, and the symbols they write beside the routes.
+	GoAPI GoAPIConfig `toml:"go_api"`
 
 	// TypeComments is how the TypeScript reader reads the comment of a
 	// declaration: a class, an interface, a type alias or an enum.
@@ -1417,6 +1420,9 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.Go.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.GoAPI.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {

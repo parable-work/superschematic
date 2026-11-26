@@ -33,9 +33,12 @@ var enumError = validate.ValidationError{Validator: "enum", Message: "invalid en
 // is the enum's first member, so the input type's rules must not depend on
 // one enum value against another (none of the generated rules do); its
 // errors at a replaced string's path are the "enum" alone.
-func DecodeRefusal(raw json.RawMessage, target any, err error) *InputRefusal {
+//
+// StrictType leaves an enum's refusal as the decoder's: the body does not
+// match the declared type. The other options do not change it.
+func DecodeRefusal(raw json.RawMessage, target any, err error, opts ...ReadOption) *InputRefusal {
 	t := reflect.TypeOf(target)
-	if t == nil || t.Kind() != reflect.Pointer || !isEnumRefusal(err) {
+	if t == nil || t.Kind() != reflect.Pointer || !isEnumRefusal(err) || readOptionsOf(opts).strictType != "" {
 		return Mismatch("does not match the declared type", nil)
 	}
 	fresh := reflect.New(t.Elem()).Interface()

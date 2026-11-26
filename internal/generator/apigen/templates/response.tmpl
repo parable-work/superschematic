@@ -46,12 +46,21 @@ func RespondError(w http.ResponseWriter, r *http.Request, status int, message st
 	runtimeresponse.LoggedError(w, r, status, message)
 }
 
+{{ with $.Naming.GoAPI.ValidationErrorCode -}}
+// RespondValidationErrors sends a logged validation errors response, with
+// the code {{ . }} for a request its validation refuses
+// (go_api.validation_error_code).
+func RespondValidationErrors(w http.ResponseWriter, r *http.Request, errors types.ValidationErrors) {
+	runtimeresponse.LoggedValidationErrors(w, r, errors, {{ printf "%q" . }})
+}
+{{- else -}}
 // RespondValidationErrors sends a logged validation errors response, with
 // the bad_request code every generated server sends for a request its
 // validation refuses.
 func RespondValidationErrors(w http.ResponseWriter, r *http.Request, errors types.ValidationErrors) {
 	runtimeresponse.LoggedValidationErrors(w, r, errors)
 }
+{{- end }}
 
 // RespondInputRefusal sends the logged 400 of a refused input body, the
 // problem every generated server sends: its detail, and for a body the

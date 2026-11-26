@@ -812,7 +812,10 @@ named after one.
 Default: `{SERVICE}_DATABASE`
 
 The field of an API's database: its `authDb`, or its one DB-kind
-dependency.
+dependency. An API has one database, so this template alone may leave
+`{SERVICE}` out: `DATABASE` gives the field `DATABASE`, which a platform
+sets as `DATABASE_URL` or the `DATABASE_CLOUD_SQL_*` variables, whatever
+the database is named.
 
 ### `derived_fields.service`
 
@@ -1093,6 +1096,157 @@ The key matches in any case. The member's comment keeps the lines. An
 enum with no such line gets neither method. The member's `@title` tag
 (D48) is a separate label, which the methods do not read. `off` writes
 neither method. Any other value fails the load.
+
+## `[go_api]`
+
+How the generated Go API routers answer a request they refuse, and the
+symbols they write beside the routes. Every key defaults to the core's
+router. A project whose clients and hand-written handlers know the answers
+of another router sets these keys, so that the generated router answers
+each request as that router did. The TypeScript and Rust routers do not
+read the table. A text value that holds a line break, a NUL, a quote or a
+backslash fails the load.
+
+### `go_api.validation_error_code`
+
+Default: empty
+
+The code of the validation problem the router sends for a path, query or
+filter value that breaks a rule. Empty, the router passes no code and the
+runtime sends its own, `bad_request`.
+
+### `go_api.path_param_error`
+
+Default: `{name} must be percent-encoded UTF-8`
+
+The detail of the 400 the router sends for a path parameter that does not
+percent-decode to UTF-8. `{name}` is the parameter's name.
+
+### `[go_api.validator_names]`
+
+Default: empty
+
+Renames the validators of a route's own checks of its path and query
+values: `min`, `max`, `minLength`, `maxLength`, `pattern`, and the bounds
+of a query list, `listMin` and `listMax`. Each key is the core's name and
+its value the name the route sends. A validator the table does not list
+keeps the core's name. A body's rules are its input type's, and keep
+their names. A key that names another validator, or an empty name, fails
+the load.
+
+```toml
+[go_api.validator_names]
+minLength = "min_length"
+listMax = "list_max"
+```
+
+### `go_api.undeclared_input_keys`
+
+Default: `refuse`
+
+`refuse` refuses an input body with a top-level key its type does not
+declare, as every generated server does. `keep` passes the key on to the
+type's decoder, which ignores it or, for a key in another case, reads it
+into the field it matches, as `encoding/json` does. A closed type,
+`@strictJSON` or `@denyUnknownFields`, is refused under either value, and
+the keys of an `@allowUnknownFields` type, or of a webhook's input, are
+dropped under either value. Any other value fails the load.
+
+### `go_api.input_trailing_data`
+
+Default: `refuse`
+
+`refuse` reads the whole input body and refuses one with anything after
+its JSON value. `ignore` reads the first JSON value, as a `json.Decoder`
+reads it, and leaves the rest of the body unread: trailing data and a
+second value are not refused, and a read error after the first value is
+not seen. Any other value fails the load.
+
+### `go_api.optional_input_empty_body`
+
+Default: `refuse`
+
+`refuse` refuses an empty input body, or one of white space alone, as for
+any input. `object` reads the empty body of an input the operation does
+not require as the empty object `{}`, which the input type then decodes
+and validates. A required input's empty body is refused under either
+value, and a multipart route reads no input from an empty JSON body under
+either value. Any other value fails the load.
+
+### `go_api.strict_input_refusals`
+
+Default: `route`
+
+`route` refuses a `@strictJSON` input's undeclared key with the problem of
+every generated server, and a string an enum lacks as an `enum` field
+error at its path. `decoder` makes each refusal the type's decoder's: the
+route names the type to the runtime (`bodyargs.StrictType`), which names
+it in `details.type` of the refusal of an undeclared key, and a string an
+enum lacks does not match the declared type. A runtime with its own
+answers words them from the type's name. An open type's answers do not
+change. Any other value fails the load.
+
+### `go_api.app_error_context`
+
+Default: `false`
+
+`true` makes `RespondAppError` take the request's context after the
+writer, `RespondAppError(w, ctx, logger, err)`, and pass it to the
+runtime's `apperror.Respond` as its second argument. Every call the router
+writes passes `r.Context()`. It is for a runtime that answers a request the
+client canceled, or whose deadline passed, from that context.
+superschematic's runtime takes no context, so a project sets the key only
+with a runtime whose `Respond` does.
+
+### `go_api.manual_route_constants`
+
+Default: `false`
+
+`true` makes `routes.go` write, for each `@manualRouteRegistration`
+operation, its method and full path, and the rate limit, the name of its
+rate limit counter, the body limit and the timeout it declares, as
+constants: `<Handler>Method`, `<Handler>Path`,
+`<Handler>RequestsPerMinute`, `<Handler>RateLimitBucket`,
+`<Handler>BodyLimitMegabytes` and `<Handler>TimeoutSeconds`. A server that
+mounts the route itself reads them rather than typing them again. A
+constant of a limit is written only when the operation declares it.
+
+### `go_api.body_arguments`
+
+Default: `values`
+
+How a route reads the arguments of an operation without an input type
+from its JSON body. `values` decodes each argument from its own JSON value
+and checks the argument's rules, every failure at its path. `struct` reads
+the body's first JSON value, the null as `{}`, and decodes it into one
+struct with each argument's type's decoder, so a value the decoder refuses
+is a decode refusal. It then checks each argument with its type's own
+`Validate`, `ValidateRequired` for a required argument, and answers the
+first that fails, at its name. The argument's own rules are not checked
+under `struct`. A route with a union argument reads it as `values` says.
+Any other value fails the load.
+
+### `go_api.query_param_list_empty_item`
+
+Default: empty
+
+The detail of the 400 the router sends for a list of a `@query` parameter
+that holds an empty item, `?ids=` or `?ids=a,,b`. `{name}` is the
+parameter's name. Empty, the route drops an empty item, and a list of no
+item is absent. A list argument of a GET operation drops its empty items
+under either value.
+
+### `go_api.file_upload_type`
+
+Default: empty
+
+A type of the scalar Go module that the API's `FileUploadData` aliases,
+for a scalar library that ships the uploaded file's type, so that the
+implementation and the scalar library pass one type. The type has the
+fields `FileUploadData` has (`Filename`, `ContentType`, `Size`, `Data`,
+`Closer`, `Width`, `Height`) and its methods (`Close`, `ReadAllBytes`,
+`ResetReader`). Empty, the API defines `FileUploadData` itself. A value
+that is not an exported Go identifier fails the load.
 
 ## `[extension.<name>]`
 

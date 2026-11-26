@@ -491,3 +491,6 @@ older body's `error` or `message`), `Code` is its `code` and
 `StatusCode` the HTTP status. `Error()` joins them:
 `order 7 has already shipped (code: ORDER_SHIPPED, status: 409)`, or
 `<message> (status: <status>)` when the response has no code.
+`ValidationErrors` holds the problem's field errors, its `errors` member
+by field name, a nested field's under its name, as a validation 400
+writes them; it is nil when the answer has none.
