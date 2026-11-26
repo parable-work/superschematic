@@ -1487,6 +1487,11 @@ Left:
   refused, since `graphs.go` reads a graph's roots through the ORM of the
   graph's database, and a public API's `Config.DB` is the ORM of its
   auth schema.
+- A Go server's graph operations over a database with per-record access
+  (an `@audience` table or `@accessGrants`) are refused: the graph's
+  facade reads its tables with no caller, and `graphReading` reads as the
+  system for a caller whose subject is no UUID, so neither keeps to an
+  audience or a grant's reach (D180).
 
 ## D139. `released: true` on a graph member keeps the released tree's rows in a table of its own (D17 amended)
 
@@ -1646,8 +1651,10 @@ and each pull is a scan of the table's rows with their derivations
 sub-table, since the core keeps no index of stale fields; an item the
 core skips without counting an attempt, which is answered again at every
 pull while its guard holds it; D74's model label and cost cap, which stay
-D74's; and a Go or a Rust deriver over a database whose DB service lists
-sqlite first.
+D74's; a Go or a Rust deriver over a database whose DB service lists
+sqlite first; and a Go deriver of a table with `@audience`, which the
+build refuses, since the Go behaviors' core decodes the table's
+`effectiveAudience` as one UUID and fails every pull (D180).
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
@@ -2573,6 +2580,12 @@ Left:
   a `*` path bound.
 - The Go server's calendar, references, search, notifier, parties and
   agents, which later Go workstreams port (D184 and on).
+- A held table that composes behaviors, through the Go behaviors' core:
+  its create fills neither default of `audience` and `agentAccess`, so a
+  create that names neither fails their checks, and its reads of the
+  rows decode `effectiveAudience`, a list, as one UUID, which fails
+  Derived's `StaleDerivations`. No test runs one:
+  `TestHeldRepositoriesCompile` builds the behavior fixtures alone.
 
 ## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
 
