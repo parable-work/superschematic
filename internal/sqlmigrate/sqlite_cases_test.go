@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/loader/access"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -79,6 +80,15 @@ var sqliteOnlyCases = []planCase{
 		fieldNamed(s, "Order", "note").Required = true
 		dropField(s, "Order", "code")
 	}},
+	// A table gains an audience (D156, D182): the plan adds its five
+	// columns, and the triggers that resolve it, the update's backfilling
+	// every row the table holds, so a customer whose audience is private by
+	// default is its own alone, its effective audience a JSON array of its
+	// id.
+	{name: "add-audience", after: func(s *ir.Schema) {
+		typeNamed(s, "Customer").Audience = &ir.AudienceDef{Owner: "id", Default: ir.AudiencePrivate}
+		access.Expand(s)
+	}, rows: resolvedAudiences},
 	// A table that other tables reference, renamed and rebuilt: order
 	// references it with ON DELETE RESTRICT, which dropping the old table
 	// would refuse with foreign keys on.
@@ -262,6 +272,15 @@ var supplierWarehouseCycle = extraRows{
 type extraRows struct {
 	seed   []string
 	checks []seedCheck
+}
+
+// resolvedAudiences checks the audience a plan's backfill resolved (D182):
+// every customer, private by default, is its own alone.
+var resolvedAudiences = extraRows{
+	checks: []seedCheck{
+		{Name: "each customer is its own alone",
+			SQL: `SELECT count(*) > 0 AND count(*) = sum("audience" = 'private' AND "effective_audience" = json_array("id") AND "effective_agents" = 'followRole') FROM "customer"`},
+	},
 }
 
 var (
