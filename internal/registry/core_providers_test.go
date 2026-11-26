@@ -44,7 +44,8 @@ func TestProvidersDecoratorReadsTheSlots(t *testing.T) {
 
 // TestRegisterRuntimeFeature (D159): a feature names the interface it
 // needs and how to tell an API uses it, and RuntimeFeaturesUsed answers
-// the ones an API uses. This is the call sections 3, 4 and 8 make.
+// the ones an API uses. This is the call sections 3, 4 and 8 make; the
+// core registers notifications itself (D153).
 func TestRegisterRuntimeFeature(t *testing.T) {
 	r := New(naming.Naming{})
 	usesNotices := func(in RuntimeFeatureInput) bool {
@@ -55,14 +56,15 @@ func TestRegisterRuntimeFeature(t *testing.T) {
 		}
 		return false
 	}
-	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "notifications", Interface: ir.RuntimeChannel, Uses: usesNotices}); err != nil {
+	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "notices", Interface: ir.RuntimeChannel, Uses: usesNotices}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RegisterRuntimeFeature(RuntimeFeature{Name: "agents", Interface: ir.RuntimeSandbox, Uses: func(RuntimeFeatureInput) bool { return true }}); err != nil {
 		t.Fatal(err)
 	}
 	for name, f := range map[string]RuntimeFeature{
-		"registered twice": {Name: "notifications", Interface: ir.RuntimeChannel, Uses: usesNotices},
+		"registered twice": {Name: "notices", Interface: ir.RuntimeChannel, Uses: usesNotices},
+		"the core's":       {Name: "notifications", Interface: ir.RuntimeChannel, Uses: usesNotices},
 		"no interface":     {Name: "payments", Interface: "payments", Uses: usesNotices},
 		"no Uses":          {Name: "attachments", Interface: ir.RuntimeFiles},
 		"no name":          {Interface: ir.RuntimeFiles, Uses: usesNotices},
@@ -74,10 +76,68 @@ func TestRegisterRuntimeFeature(t *testing.T) {
 	api := &ir.Schema{Name: "notes-api"}
 	db := &ir.Schema{Name: "notes-db", Types: map[string]*ir.TypeDef{"Notice": {Name: "Notice"}}}
 	got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"notes-db": db}})
-	if len(got) != 2 || got[0] != (ir.RuntimeFeatureUse{Feature: "agents", Interface: ir.RuntimeSandbox}) || got[1] != (ir.RuntimeFeatureUse{Feature: "notifications", Interface: ir.RuntimeChannel}) {
+	if len(got) != 2 || got[0] != (ir.RuntimeFeatureUse{Feature: "agents", Interface: ir.RuntimeSandbox}) || got[1] != (ir.RuntimeFeatureUse{Feature: "notices", Interface: ir.RuntimeChannel}) {
 		t.Fatalf("RuntimeFeaturesUsed = %v", got)
 	}
 	if got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api}); len(got) != 1 || got[0].Feature != "agents" {
 		t.Fatalf("with no database: %v", got)
+	}
+}
+
+// TestNotificationsNeedAChannel (D153): the core registers notifications,
+// which an API uses when one of its databases declares an @event, a
+// @notifier class or a @channelIdentities class.
+func TestNotificationsNeedAChannel(t *testing.T) {
+	r := New(naming.Naming{})
+	api := &ir.Schema{Name: "tickets-api"}
+	for name, db := range map[string]*ir.TypeDef{
+		"an event":           {Name: "Ticket", Events: []*ir.EventDef{{Kind: "ticket.assigned"}}},
+		"an inbox":           {Name: "Notice", Notifier: &ir.NotifierDef{Part: ir.NotifierInbox}},
+		"channel identities": {Name: "ChannelIdentity", ChannelIdentities: &ir.ChannelIdentitiesDef{}},
+	} {
+		schema := &ir.Schema{Name: "tickets-db", Types: map[string]*ir.TypeDef{db.Name: db}}
+		got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"tickets-db": schema}})
+		if len(got) != 1 || got[0] != (ir.RuntimeFeatureUse{Feature: "notifications", Interface: ir.RuntimeChannel}) {
+			t.Errorf("%s: RuntimeFeaturesUsed = %v", name, got)
+		}
+	}
+	plain := &ir.Schema{Name: "tickets-db", Types: map[string]*ir.TypeDef{"Ticket": {Name: "Ticket"}}}
+	if got := r.RuntimeFeaturesUsed(RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{"tickets-db": plain}}); len(got) != 0 {
+		t.Errorf("a database that raises no event uses %v", got)
+	}
+}
+
+// TestEventDecorator (D153): @event reads its kind, payload, title,
+// urgency and description, and refuses an unknown option or no kind.
+func TestEventDecorator(t *testing.T) {
+	r := New(naming.Naming{})
+	spec, ok := r.Decorator("event", TargetType)
+	if !ok {
+		t.Fatal("no @event")
+	}
+	td := &ir.TypeDef{Name: "Ticket"}
+	args := []any{map[string]any{"kind": "ticket.assigned", "payload": []any{"title", "priority"}, "title": "title", "urgency": "urgent"}}
+	if err := spec.Apply(Node{Type: td}, args, Site{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := spec.Apply(Node{Type: td}, []any{map[string]any{"kind": "ticket.closed"}}, Site{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(td.Events) != 2 || td.Events[0].Kind != "ticket.assigned" || len(td.Events[0].Payload) != 2 || td.Events[0].Urgency != "urgent" || td.Events[1].Kind != "ticket.closed" {
+		t.Fatalf("Events = %+v", td.Events)
+	}
+	for name, a := range map[string][]any{
+		"no kind":        {map[string]any{"urgency": "urgent"}},
+		"unknown option": {map[string]any{"kind": "a.b", "channels": "sms"}},
+		"payload text":   {map[string]any{"kind": "a.b", "payload": "title"}},
+		"no options":     {},
+	} {
+		if err := spec.Apply(Node{Type: &ir.TypeDef{Name: "T"}}, a, Site{}); err == nil {
+			t.Errorf("%s: applied", name)
+		}
+	}
+	notifier, _ := r.Decorator("notifier", TargetType)
+	if err := notifier.Apply(Node{Type: &ir.TypeDef{Name: "N"}}, []any{"outbox"}, Site{}); err == nil {
+		t.Error("@notifier took a part it does not have")
 	}
 }

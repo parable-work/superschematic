@@ -188,6 +188,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// the calendar merges (core_calendar.go, D152).
 	specs = append(specs, calendarDecorators()...)
 
+	// The events a table's rows raise, the notifier's tables and the table
+	// of channel identities (core_notifications.go, D153).
+	specs = append(specs, notificationDecorators()...)
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

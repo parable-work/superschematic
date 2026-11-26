@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
+	"github.com/parable-work/superschematic/internal/loader/notifications"
 	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
@@ -622,6 +623,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// A @source view of another service's @audience table reads its
 	// audience columns as the table's own (D156).
 	access.ExpandExternal(vin.ExternalTypes)
+	notifications.ExpandExternal(vin.ExternalTypes)
 	if verify.CheckBehaviors(schema, vin).Err() == nil {
 		owned, err := behaviorfields.Expand(schema, reg)
 		if err != nil {
@@ -686,6 +688,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// or an @attachments table, and the fields of the queues they name,
 	// join the schema before the pass, so it reads them as its own.
 	if added := rowrefs.Expand(schema); len(added) > 0 {
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
+	}
+	// Events, notifications and channels (D153): the fields of the
+	// notifier's classes and the channel identities join the schema before
+	// the pass, so it reads them as its own.
+	if added := notifications.Expand(schema); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
