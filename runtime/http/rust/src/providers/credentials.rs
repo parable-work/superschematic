@@ -361,7 +361,10 @@ mod tests {
             serde_json::to_value(&use_).unwrap(),
             serde_json::json!({"ref": "ops/reports-api/token", "provider": "vault-broker", "target": {"kind": "header", "site": "https://reports.test", "name": "Authorization"}, "usedAt": "2026-11-25T12:00:00.000Z"})
         );
-        assert_eq!(records.lock().unwrap().as_slice(), std::slice::from_ref(&use_));
+        assert_eq!(
+            records.lock().unwrap().as_slice(),
+            std::slice::from_ref(&use_)
+        );
 
         let injection = vault
             .resolve("ops/reports-api/token", &target())

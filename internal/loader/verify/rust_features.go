@@ -15,10 +15,13 @@ import (
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
 // reveal and the access log. An audience on SQLite is refused for every
-// language (checkAccess).
+// language (checkAccess). So are references and attachments (D154, D185),
+// on Postgres, and the runtime providers of an API's @providers slots
+// (D159, D185), each a provider crate the server links.
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
-// for an @providers slot, an @autonomy operation, and the table features
+// for a listed provider with no Rust crate, an @autonomy operation, and
+// the table features
 // of the database its operations read (Input.Database), where the build
 // loaded one. Recurrence (D152) is the core's in every language, and a
 // Rust types crate writes it through the core; a Rust server is refused a
@@ -37,8 +40,8 @@ type RustFeature struct {
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
 // does not carry (D181), sorted by type: @calendarSource (D152), @event,
-// @notifier and @channelIdentities (D153), @references and @attachments
-// (D154), @searchable (D155), @party, @conversations and @runRequests
+// @notifier and @channelIdentities (D153), @searchable (D155), @party,
+// @conversations and @runRequests
 // (D157), and @agents (D158). With server, a Rust server's: a table that
 // composes Recurrence (D152) too.
 func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
@@ -68,12 +71,6 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 		if td.ChannelIdentities != nil {
 			add("@channelIdentities (D153)")
 		}
-		if td.RowReferences != nil {
-			add("@references (D154)")
-		}
-		if td.Attachments != nil {
-			add("@attachments (D154)")
-		}
 		if td.Searchable != nil {
 			add("@searchable (D155)")
 		}
@@ -94,18 +91,21 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 }
 
 // RustServerFeatures are the features of an API's schema a Rust server
-// does not serve (D181), sorted by type: an @envVars class's @providers
-// slots (D159) and an operation's @autonomy (D158).
+// does not serve (D181): a provider the API's config lists whose directory
+// holds no Rust crate of it (D185), which a Rust server cannot link, and
+// an operation's @autonomy (D158), sorted by type.
 func RustServerFeatures(schema *ir.Schema) []RustFeature {
 	if schema == nil {
 		return nil
 	}
 	var out []RustFeature
+	for _, p := range schema.Providers {
+		if p != nil && p.Crate == "" {
+			out = append(out, RustFeature{Type: "provider " + p.Name, Feature: fmt.Sprintf("a provider of no Rust crate (%s declares it in its package.json alone; a Rust server links a crate whose Cargo.toml declares it under [package.metadata.superschematic.provider], D185)", p.Path)})
+		}
+	}
 	for _, name := range sortedTypes(schema) {
 		td := schema.Types[name]
-		if len(td.ProviderSlots) > 0 {
-			out = append(out, RustFeature{Owner: td.Owner, Type: td.Name, Feature: "@providers slots (D159)"})
-		}
 		for _, fd := range td.Fields {
 			if fd != nil && fd.Autonomy != nil {
 				out = append(out, RustFeature{Owner: td.Owner, Type: td.Name + "." + fd.Name, Feature: "@autonomy (D158)"})
