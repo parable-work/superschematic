@@ -98,6 +98,15 @@ func (f *ProductFilter) sqliteConditions(args *[]any) []string {
 			}
 		}
 	}
+	// Through a one-to-many relation (D108, D180), as on Postgres.
+	if f.OrderLines != nil {
+		through := f.OrderLines.sqliteConditions(args)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`product.id IN (SELECT order_line.product_id FROM order_line%s)`, where))
+	}
 	if f.ReferencedByOrderLineProduct != nil {
 		probe := `SELECT 1 FROM order_line WHERE order_line.product_id = product.id`
 		if f.ReferencedByOrderLineProduct.Exists {

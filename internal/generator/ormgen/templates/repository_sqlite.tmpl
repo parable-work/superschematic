@@ -69,6 +69,20 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 		conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe }}, where))
 	}
 	{{- end }}
+	{{- range .ManyRelations }}
+	// Through a one-to-many relation (D108, D180), as on Postgres.
+	if f.{{ .GoField }} != nil {
+		through := f.{{ .GoField }}.sqliteConditions(args)
+		{{- if .SourceLive }}
+		through = append(through, {{ goRawString .SourceLive }})
+		{{- end }}
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe }}, where))
+	}
+	{{- end }}
 	{{- range .ReferencedBy }}
 	if f.{{ .FilterField }} != nil {
 		probe := {{ goRawString .Probe.Probe }}

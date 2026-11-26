@@ -437,6 +437,15 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	call("deleteAccounts", n, err)
 	found, total, err = accounts.FindMany(ctx, nil, &AccountFindOptions{Fields: allAccounts, OrderBy: []AccountOrderBy{{Field: AccountOrderByCode}}})
 	call("accountsAtTheEnd", map[string]any{"rows": found, "total": total}, err)
+	// A filter through a one-to-many relation (D108, D180): the accounts
+	// some live entry of more than 1000 cents points at, and, in an AnyOf,
+	// those a debit points at.
+	over := int64(1000)
+	found, total, err = accounts.FindMany(ctx, &AccountFilter{EntriesByAccount: &EntryFilter{AmountCents: &Int64Filter{Gt: &over}}}, &AccountFindOptions{Fields: allAccounts, OrderBy: []AccountOrderBy{{Field: AccountOrderByCode}}})
+	call("accountsThroughEntries", map[string]any{"rows": found, "total": total}, err)
+	debit := string(types.EntryKind_Debit)
+	found, total, err = accounts.FindMany(ctx, &AccountFilter{AnyOf: []AccountFilter{{EntriesByAccount: &EntryFilter{Kind: &StringFilter{Eq: &debit}}}}}, &AccountFindOptions{Fields: allAccounts, OrderBy: []AccountOrderBy{{Field: AccountOrderByCode}}})
+	call("accountsWithDebits", map[string]any{"rows": found, "total": total}, err)
 	entryList, total, err = entries.FindMany(ctx, nil, &EntryFindOptions{Fields: allEntries, OrderBy: []EntryOrderBy{{Field: EntryOrderById}}, IncludeDeleted: true})
 	call("entriesAtTheEnd", map[string]any{"rows": entryList, "total": total}, err)
 	return calls

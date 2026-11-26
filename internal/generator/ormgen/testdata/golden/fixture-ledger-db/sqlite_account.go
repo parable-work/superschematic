@@ -366,6 +366,26 @@ func (f *AccountFilter) sqliteConditions(args *[]any) []string {
 			}
 		}
 	}
+	// Through a one-to-many relation (D108, D180), as on Postgres.
+	if f.EntriesByAccount != nil {
+		through := f.EntriesByAccount.sqliteConditions(args)
+		through = append(through, `entry.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`account.id IN (SELECT entry.account_id FROM entry%s)`, where))
+	}
+	// Through a one-to-many relation (D108, D180), as on Postgres.
+	if f.EntriesByTransfer != nil {
+		through := f.EntriesByTransfer.sqliteConditions(args)
+		through = append(through, `entry.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`account.id IN (SELECT entry.transfer_id FROM entry%s)`, where))
+	}
 	if f.ReferencedByEntryAccount != nil {
 		probe := `SELECT 1 FROM entry WHERE entry.account_id = account.id`
 		if !f.ReferencedByEntryAccount.IncludeDeleted {
