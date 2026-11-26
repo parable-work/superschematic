@@ -138,7 +138,6 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		}
 		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 	}
-<<<<<<< HEAD
 	// Search's row triggers (D155, D186): each @searchable table's after
 	// each write, which delete its index row with it, copy its audience and
 	// enqueue it, and its sub-tables', which enqueue the row they belong to.
@@ -152,8 +151,6 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 		}
 	}
-=======
->>>>>>> origin/main
 	// References' and attachments' row triggers (D154, D182): a target's
 	// clear and a file's release.
 	for _, c := range out.ReferencesClears {
