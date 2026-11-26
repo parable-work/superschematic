@@ -114,6 +114,11 @@ type EndpointInfo struct {
 	// other: the router's handler serves it from the table's repository
 	// (src/tables.rs), and its namespace's trait has no method for it.
 	Table *TableInfo
+
+	// Graph is the graph operation the endpoint is (D138), nil for every
+	// other: the router's handler runs it through the graph's facade
+	// (src/graphs.rs), and its namespace's trait has no method for it.
+	Graph *GraphInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -451,6 +456,14 @@ type APIOutput struct {
 	// writes no handler for yet (D106, D116), each with why: it stays a
 	// method of its namespace's trait.
 	UnservedTables []UnservedTable
+	// VersionGraphDepPath is the path of the version graph's engine crate
+	// from the API crate, which an API that serves a graph's operations
+	// depends on (D138); SetReplacePaths sets it. VersionGraphCrate is the
+	// crate's name, and VersionGraphCrateIdent the name src/graphs.rs uses
+	// it by.
+	VersionGraphDepPath    string
+	VersionGraphCrate      string
+	VersionGraphCrateIdent string
 	// MCP is the API's MCP endpoint with outputs.api.mcp on (D81, D116),
 	// nil otherwise: src/router/mcp.rs declares its tools and the router
 	// serves them at POST /api/mcp.
@@ -817,6 +830,8 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
+	// The @graphOperations sets the router serves (D138), by class.
+	graphSets := make(map[string]*GraphSetInfo)
 	var err error
 	for _, endpoint := range implemented {
 		// The Go router decrypts an encrypted operation's body with the
@@ -873,6 +888,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 				output.UnservedTables = append(output.UnservedTables, UnservedTable{Operation: info.Namespace + "." + info.Name, Reason: unserved})
 			}
 		}
+		// A graph operation's handler runs it through the graph's facade
+		// (D138): its namespace has no method for it either.
+		if info.Behavior == nil && info.Table == nil {
+			if info.Graph, err = b.graphInfo(endpoint, info, graphSets); err != nil {
+				return nil, err
+			}
+		}
 		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
@@ -894,6 +916,10 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		return nil, fmt.Errorf("rustrestgen: %s serves the user model's routes, which need its authDb's User table; no authDb with one was given", opts.SchemaName)
 	}
 
+	if output.HasGraphOperations() {
+		names := opts.Naming.OrDefault()
+		output.VersionGraphCrate, output.VersionGraphCrateIdent = names.VersionGraphRustCrate, names.VersionGraphRustCrateIdent()
+	}
 	output.Namespaces = rustapigen.SortedNamespaces(namespaceSet)
 	for provider := range webhookProviders {
 		output.WebhookProviders = append(output.WebhookProviders, provider)
@@ -1056,6 +1082,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"apps.tmpl", "apps.rs", output.HasApps()},
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
+		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {
@@ -1202,6 +1229,7 @@ func templateFuncs() template.FuncMap {
 		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
 		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },
 		"rulesSerdeVersion":   func() string { return RulesSerdeVersion },
+		"graphInput":          graphInput,
 	})
 }
 
@@ -1226,6 +1254,13 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 		return fmt.Errorf("http runtime crate path: %w", err)
 	}
 	output.RuntimeDepPath = rel
+	if output.HasGraphOperations() {
+		// The graph operations run on the version graph's engine (D138),
+		// whose Postgres client the crate binds to its pool.
+		if output.VersionGraphDepPath, err = naming.RelPath(outputDir, paths.VersionGraphRust); err != nil {
+			return fmt.Errorf("version graph engine crate path: %w", err)
+		}
+	}
 	if output.Identity != nil {
 		if output.Identity.ScalarDepPath, err = naming.RelPath(outputDir, paths.ScalarRust); err != nil {
 			return fmt.Errorf("scalar crate path: %w", err)

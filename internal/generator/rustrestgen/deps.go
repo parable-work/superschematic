@@ -448,7 +448,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types as database_types: for its workers' messages and queues,
 // a behavior worker's among them (D65, D103).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -472,7 +472,7 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // repositories they are served from are behind (D116); empty for any
 // other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -518,6 +518,10 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	}
 	o.Deps = &deps
 	if err := o.checkTableDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkGraphDeps(); err != nil {
 		o.Deps = nil
 		return err
 	}
@@ -644,7 +648,7 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {

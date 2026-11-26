@@ -145,7 +145,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -170,6 +170,10 @@ impl Implementations {
     ///
     /// `db` is {{ .TableDatabase }}, from whose repositories the table operations
     /// are served (D106): what `Deps.db` holds.
+{{- else if .HasGraphOperations }}
+    ///
+    /// `db` is the pool of {{ .GraphDatabase }}, on which the graph operations run
+    /// (D138): the pool `Deps.db` holds.
 {{- end }}
 {{- if .TableFieldKeys }}
     ///
@@ -192,10 +196,13 @@ impl Implementations {
             service_authenticator,
 {{- end }}
 {{- if .HasBehaviorOperations }}
-            behaviors: crate::behaviors::Behaviors::new(db{{ if .HasTableOperations }}.clone(){{ end }}),
+            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db{{ if .TableFieldKeys }}, field_keys{{ end }}),
+            tables: crate::tables::tables(db{{ if .HasGraphOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
+{{- end }}
+{{- if .HasGraphOperations }}
+            graphs: crate::graphs::Graphs::new(db),
 {{- end }}
         }
     }

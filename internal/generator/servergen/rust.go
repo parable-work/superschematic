@@ -520,6 +520,11 @@ type RustAPI struct {
 	Tables    bool
 	FieldKeys bool
 
+	// Graphs is true when the API serves a version graph's operations
+	// (D138): Implementations::new then takes Database's pool too, over
+	// which the router's handlers run each through the graph's facade.
+	Graphs bool
+
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
 	Engine *RustEngine
@@ -1007,6 +1012,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Tables = true
 			api.FieldKeys = o.TableFieldKeys()
+		}
+		if o.HasGraphOperations() {
+			if api.Database == nil || api.Database.Service != o.GraphDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose graph operations run on %s (D138), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.GraphDatabase())
+			}
+			api.Graphs = true
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
@@ -1926,7 +1937,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 		}
 		args = append(args, authenticator)
 	}
-	if a.Behaviors || a.Tables {
+	if a.Behaviors || a.Tables || a.Graphs {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {

@@ -15,13 +15,12 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestGraphOperationsByServerLanguage: the TypeScript server serves a
-// @graphOperations set (D138), so its build warns of nothing, its
-// implementation interface has no method for a graph operation and its
-// router mounts each with the runtime's handler; the Go and the Rust
-// servers do not serve it yet, so each build warns once for the set, and
-// each operation stays a method of the implementation's interface, to be
-// written by hand, with the same route.
+// TestGraphOperationsByServerLanguage: every server serves a
+// @graphOperations set (D138), so no build warns of it and no
+// implementation interface has a method for a graph operation: the
+// TypeScript router mounts each with the runtime's handler, the Go router
+// with a method of graphs.go and the Rust router with a function of
+// src/graphs.rs. The Rust build writes the API's SDKs in every language.
 func TestGraphOperationsByServerLanguage(t *testing.T) {
 	paths := testpaths.Local(t)
 	loadDependency := func(name string) (*ir.Schema, error) {
@@ -89,7 +88,6 @@ func TestGraphOperationsByServerLanguage(t *testing.T) {
 		}
 		return out
 	}
-	const operations = "branch, save, arrange, commit, seal, merge, rebase, revert, discard, history, compose, release, released, materialize, diff, entityHistory"
 	read := func(path string) string {
 		t.Helper()
 		data, err := os.ReadFile(path)
@@ -136,12 +134,12 @@ func TestGraphOperationsByServerLanguage(t *testing.T) {
 			t.Errorf("graphs.go serves no %s", method)
 		}
 	}
-	want := "fixture-graph-api: the Go server writes no handlers for RecipeOperations, a @graphOperations set of Recipe's version graph (D138): its 16 operations (" + operations + ") each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them"
 
+	// The Rust server serves the set from src/graphs.rs: its build warns of
+	// nothing, and its trait holds get_recipe alone.
 	result, dir = build(APILanguageRust)
-	want = strings.Replace(want, "the Go server", "the Rust server", 1)
-	if warnings := graphWarnings(result); len(warnings) != 1 || warnings[0] != want {
-		t.Errorf("the Rust build's warnings = %q,\nwant one, %q", warnings, want)
+	if warnings := graphWarnings(result); len(warnings) != 0 {
+		t.Errorf("a Rust build warned of the set it serves: %v", warnings)
 	}
 	for _, done := range []string{"sdk-python", "sdk-rust", "sdk-go", "sdk-typescript"} {
 		if result.Outputs[done] == "" {
@@ -149,9 +147,13 @@ func TestGraphOperationsByServerLanguage(t *testing.T) {
 		}
 	}
 	rustInterfaces := read(filepath.Join(dir, "src", "interfaces.rs"))
-	for _, method := range []string{"fn branch(", "fn save(", "fn entity_history(", "fn get_recipe("} {
-		if !strings.Contains(rustInterfaces, method) {
-			t.Errorf("the Rust trait lacks %s, a method the project writes", method)
+	if !strings.Contains(rustInterfaces, "fn get_recipe(") || strings.Contains(rustInterfaces, "fn branch(") || strings.Contains(rustInterfaces, "fn entity_history(") {
+		t.Errorf("the Rust trait holds other than get_recipe:\n%s", rustInterfaces)
+	}
+	rustGraphs := read(filepath.Join(dir, "src", "graphs.rs"))
+	for _, function := range []string{"fn recipe_branch(", "fn recipe_save(", "fn recipe_entity_history(", "fn recipe_released("} {
+		if !strings.Contains(rustGraphs, function) {
+			t.Errorf("src/graphs.rs serves no %s", function)
 		}
 	}
 }
