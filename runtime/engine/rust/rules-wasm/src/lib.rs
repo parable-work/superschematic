@@ -320,11 +320,7 @@ pub fn error_document(code: &str, message: &str) -> String {
     json!({ "error": { "code": code, "message": message } }).to_string()
 }
 
-fn output_on(
-    rules: &Rules,
-    op: Op,
-    input: &[u8],
-) -> Result<Value, (&'static str, String)> {
+fn output_on(rules: &Rules, op: Op, input: &[u8]) -> Result<Value, (&'static str, String)> {
     match op {
         Op::Declarations => {
             let (_, declared) = rules.current();
