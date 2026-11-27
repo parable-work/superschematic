@@ -2986,6 +2986,10 @@ Left:
 - Generated routes, MCP tools and SDK methods for references and
   attachments, as in TypeScript (D154's left).
 - Go on SQLite and D1: the loader refuses a database's Go types of
-  either declaration there (D182), which TypeScript alone serves.
+  either declaration there (D182), which TypeScript alone serves. The
+  SQLite database and its transactions (batch 8, D116) carry
+  `References()` and `Attachments()`, which a table's `Comments` gives a
+  database the loader does not refuse, over a host that answers
+  `ErrSQLiteUnsupported` for every statement (`sqliteRowFeaturesHost`).
 - A provider package named by its Go module path alone, resolved from
   the module cache rather than a directory.
