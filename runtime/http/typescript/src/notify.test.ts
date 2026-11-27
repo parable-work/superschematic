@@ -27,6 +27,10 @@ describe('quietDelaySeconds', () => {
     expect(quietDelaySeconds(at('2027-03-10T12:00:00Z'), 'UTC', null, null)).toBe(0);
     expect(quietDelaySeconds(at('2027-03-10T12:00:00Z'), 'UTC', '09:00', '09:00')).toBe(0);
   });
+  test('a window stored as a Temporal.Time, HH:MM:SS, reads as its HH:MM', () => {
+    expect(quietDelaySeconds(at('2027-03-10T23:30:00Z'), 'UTC', '22:00:00', '07:00:00')).toBe(7.5 * 3600);
+    expect(quietDelaySeconds(at('2027-03-10T12:00:00Z'), 'UTC', '12:00:00', '13:00:00')).toBe(3600);
+  });
 });
 
 describe('sameId', () => {

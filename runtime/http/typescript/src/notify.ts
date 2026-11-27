@@ -394,8 +394,9 @@ function wallDate(at: Date, zone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 }
 
+/** The minutes of the day of a time of day: HH:MM, or the HH:MM:SS a Temporal.Time is stored as, its seconds dropped. */
 function minutesOf(text: string): number | undefined {
-  const m = /^(\d{1,2}):(\d{2})$/u.exec(text);
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/u.exec(text);
   return m ? Number(m[1]) * 60 + Number(m[2]) : undefined;
 }
 

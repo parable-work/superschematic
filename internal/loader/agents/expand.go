@@ -22,6 +22,7 @@ const (
 	dateTimeScalar = "Temporal.DateTime"
 	int64Scalar    = "Generic.Int64"
 	jsonScalar     = "Generic.JSON"
+	sha256Scalar   = "Crypto.SHA256"
 )
 
 // Expand adds the fields of every @agents class's part that the class does
@@ -43,7 +44,7 @@ func Expand(schema *ir.Schema) []string {
 	if !used {
 		return nil
 	}
-	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar, jsonScalar}
+	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar, jsonScalar, sha256Scalar}
 	for _, name := range scalars {
 		if schema.Scalars[name] == nil {
 			schema.Scalars[name] = &ir.ScalarDef{Name: name}
@@ -259,7 +260,7 @@ func approvalFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		required("operation", "string", "The operation or tool it asks to run."),
 		required("operationClass", "string", "Its class."),
 		required("params", jsonScalar, "The exact parameters it asks to run with."),
-		required("paramsHash", "string", "The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again."),
+		required("paramsHash", sha256Scalar, "The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again."),
 		required("summary", "string", "What an approver is shown."),
 		required("permission", "string", "The permission an approver holds."),
 		withDefault(required("state", "string", "pending, approved, denied, used or superseded."), &pending),

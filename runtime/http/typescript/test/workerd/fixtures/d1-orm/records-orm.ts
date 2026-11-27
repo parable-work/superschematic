@@ -276,7 +276,7 @@ export const fixtureReferencesDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -585,7 +585,7 @@ export const fixtureReferencesDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

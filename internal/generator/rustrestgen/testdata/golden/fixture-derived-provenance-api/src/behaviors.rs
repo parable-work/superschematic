@@ -102,13 +102,13 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "sourceHash",
                   "field": "sourceHash",
                   "column": "source_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "settledHash",
                   "field": "settledHash",
                   "column": "settled_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "model",
@@ -120,7 +120,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "settledAt",
@@ -292,13 +292,13 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "sourceHash",
                   "field": "sourceHash",
                   "column": "source_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "settledHash",
                   "field": "settledHash",
                   "column": "settled_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "model",
@@ -310,7 +310,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "settledAt",
@@ -423,7 +423,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "review",
