@@ -107,8 +107,10 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		names = append(names, declaration.Name)
 		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Recurrence", "Blueprint", "Aliased"}; !slices.Equal(names, want) {
-		t.Fatalf("the core declares %q, want %q", names, want)
+	// The declarative behaviors (D103's step 5) another test of this
+	// process handed the native core follow its own (rules.Declare).
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance", "Stock", "Holds", "Calendar", "Payments", "Recurrence", "Blueprint", "Aliased"}; len(names) < len(want) || !slices.Equal(names[:len(want)], want) {
+		t.Fatalf("the core declares %q, want %q first", names, want)
 	}
 	// Comments' writes are beside the row (D103's step 4).
 	for _, operation := range byName["Comments"].Operations {
@@ -189,6 +191,41 @@ func TestNativeCheckRefusesAConfigTheCoreRefuses(t *testing.T) {
 	}
 	if empty, err := rules.Native().Check(nil); err != nil || len(empty) != 0 {
 		t.Fatalf("Check(nil) = %v, %v, want no refusals", empty, err)
+	}
+}
+
+// Declare hands the native core a declarative behavior (D103's step 5),
+// which Native's Declarations then list and its check takes; a file the
+// vocabulary does not read and one that names a behavior the core
+// implements are an *Error of code invalid_input.
+func TestDeclareHandsTheNativeCoreADeclarativeBehavior(t *testing.T) {
+	tally := json.RawMessage(`{"name": "test.Tally", "fields": [{"name": "count", "type": "Generic.Int64"}],
+		"operations": [{"name": "add", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": {"type": "object"}, "writes": true}],
+		"rules": {"operations": {"add": {"effects": [{"adjust": {"count": 1}}], "result": {"count": {"field": "count"}}}}}}`)
+	declared, err := rules.Declare(tally)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(declared, "test.Tally") {
+		t.Fatalf("declared = %v, want test.Tally among them", declared)
+	}
+	declarations, err := rules.Native().Declarations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(declarations, func(d rules.Declaration) bool { return d.Name == "test.Tally" }) {
+		t.Fatalf("Native's declarations lack test.Tally")
+	}
+	refusals, err := rules.Native().Check([]rules.TypeSpec{{Name: "Counter", Uses: []rules.UseSpec{{Behavior: "test.Tally"}}}})
+	if err != nil || len(refusals) != 1 || refusals[0] != nil {
+		t.Fatalf("check = %+v, %v, want the core to take a Counter of test.Tally", refusals, err)
+	}
+	for _, file := range []string{`{"name": "test.Plain"}`, `{"name": "Workflow", "rules": {}}`} {
+		_, err := rules.Declare(json.RawMessage(file))
+		var refused *rules.Error
+		if !errors.As(err, &refused) || refused.Code != "invalid_input" {
+			t.Errorf("Declare(%s) = %v, want invalid_input", file, err)
+		}
 	}
 }
 
