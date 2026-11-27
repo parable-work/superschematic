@@ -949,20 +949,21 @@ jobs:
           bun run test
 
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)
-        # The engine guide's example: the http runtime and the engine rebuilt
-        # from the installs above, on the addon built above, linked into the
-        # example, and its test run
-        # against a listening server under each runtime. A step of this job
-        # rather than a job of its own: it needs only what this job installs,
-        # and takes seconds. End to end, so the full tier.
+        # The guide's notes server on development mode (D117): the http
+        # runtime and the rules handler rebuilt from the installs above,
+        # linked into the example, its test run against a listening server
+        # under each runtime, and superschematic-dev's smoke over the file
+        # it wrote. A step of this job rather than a job of its own: it
+        # needs only what this job installs, and takes seconds. End to end,
+        # so the full tier.
         if: github.event_name != 'pull_request'
         run: examples/engine-notes/scripts/check.sh
 
       - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
-        # The work-queue guide's example: the engine and the work-queue
-        # package rebuilt from the installs above, linked into the example,
-        # and its test run against a listening server under each runtime.
-        # End to end, so the full tier, as engine-notes is.
+        # The work-queue guide's job runner on development mode (D117): the
+        # rules handler rebuilt from the installs above, linked into the
+        # example, and its test run through the handler's routes under each
+        # runtime. End to end, so the full tier, as engine-notes is.
         if: github.event_name != 'pull_request'
         run: examples/engine-jobs/scripts/check.sh
 
