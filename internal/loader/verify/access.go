@@ -17,8 +17,9 @@ import (
 // An @audience table is a plain table of a DB service: its effective
 // audience is a list of UUIDs the reads compare by array containment on
 // Postgres and through json_each on SQLite, which triggers keep. On SQLite
-// only the TypeScript repositories read it so far, so a service that lists
-// sqlite takes no other language's types (D182, refuseSQLiteReaders). Its
+// only the TypeScript repositories read it so far, and the Go ones refuse
+// its calls at run time, so a service that lists sqlite takes no Rust types
+// (D182, refuseSQLiteReaders). Its
 // owner is a field that holds a UUID or a
 // to-one relation, or createdBy, which the table then declares. Its
 // inheritFrom is a to-one relation to a table that is @audience too. It
