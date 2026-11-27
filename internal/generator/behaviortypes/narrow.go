@@ -968,8 +968,11 @@ func EnumValues(enum *ir.EnumDef) []string {
 // a later version removed included. On a table the gated states are the
 // alias <Base>Gate, and signOff takes the row's version its signer read,
 // optional, which a pinned gate needs (D104), and read, the values of the
-// fields a gate pins (D200); an engine type's Approvals refuses version and
-// read, takes no requirement of D200's and never answers stale,
+// fields a gate pins (D200): an object of the fields the gates' pinOn name,
+// each any JSON, and no read when no gate pins a field, so a table's types
+// never hold an object of no named members, which the TypeScript
+// repositories cannot write. An engine type's Approvals refuses version
+// and read, takes no requirement of D200's and never answers stale,
 // not_counted or countsToward, so its types name the states inline and
 // have none of them.
 func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
@@ -1007,6 +1010,24 @@ func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 			return fmt.Errorf("operation signOff's result: %w", err)
 		}
 		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "stale" || code == "not_counted" })
+	} else {
+		pinned := map[string]any{}
+		for _, state := range states {
+			gate, _ := gates[state].(map[string]any)
+			fields, _ := gate["pinOn"].([]any)
+			for _, field := range fields {
+				if name, ok := field.(string); ok {
+					pinned[name] = map[string]any{"description": fmt.Sprintf("The value of %s as the signer read it.", name)}
+				}
+			}
+		}
+		if len(pinned) == 0 {
+			if err := deleteProperty(n.Params["signOff"], "read"); err != nil {
+				return fmt.Errorf("operation signOff: %w", err)
+			}
+		} else if err := setOperationProperty(n.Params, "signOff", nil, "read", map[string]any{"type": "object", "additionalProperties": false, "properties": pinned}); err != nil {
+			return err
+		}
 	}
 	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
 }

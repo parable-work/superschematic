@@ -233,10 +233,6 @@
             "nullable": true,
             "type": "string"
           },
-          "read": {
-            "description": "The value of each field the gate pins (pinOn) as the signer read it, by field. Needed on a gate that pins fields; one that is not the field's value is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.",
-            "nullable": true
-          },
           "state": {
             "$ref": "#/components/schemas/TaskApprovalsGate",
             "description": "The gated state to sign off for."

@@ -340,6 +340,51 @@ func TestNarrowApprovalsOfATableTypesItsGatesAndVersion(t *testing.T) {
 	}
 }
 
+// A table's signOff takes read only when a gate pins fields (D200): a
+// closed object of the fields every gate's pinOn names, each any JSON.
+// Either way its parameters hold no object of no named members, so the
+// TypeScript repositories type them rather than writing unknown.
+func TestNarrowApprovalsReadNamesThePinnedFields(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Approvals")
+	table := &ir.TypeDef{Name: "Change", Behaviors: []ir.BehaviorRef{{Name: "Approvals", Implements: true}, {Name: "Workflow", Field: "status"}}}
+	target := Target{Schema: "changes", Base: "ChangeApprovals", Document: ir.NewSchema("changes", ir.SchemaKindDB), Instance: table}
+	for _, tc := range []struct {
+		config string
+		want   []string
+	}{
+		{`{"gates": {"ready": {"count": 1, "permission": "changes.review"}}}`, nil},
+		{`{"gates": {"ready": {"count": 1, "permission": "changes.review", "pinOn": ["headSha"]}, "landed": {"count": 1, "permission": "changes.land", "pinOn": ["baseSha", "headSha"]}}}`, []string{"baseSha", "headSha"}},
+	} {
+		n, err := Narrow(declaration, json.RawMessage(tc.config), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		renderer := TSRenderer{}
+		renderer.Render(n.Params["signOff"], "")
+		if renderer.UsesJSONObject {
+			t.Errorf("%s: signOff's parameters use JSONObject, want every member named", tc.config)
+		}
+		read, err := at(n.Params["signOff"], "properties", "read")
+		if tc.want == nil {
+			if err == nil {
+				t.Errorf("%s: signOff's read = %v, want none where no gate pins a field", tc.config, read)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: signOff has no read: %v", tc.config, err)
+		}
+		properties, _ := read["properties"].(map[string]any)
+		if got := slices.Sorted(maps.Keys(properties)); !slices.Equal(got, tc.want) || read["additionalProperties"] != false {
+			t.Errorf("%s: signOff's read = %v, want the closed object of %v", tc.config, read, tc.want)
+		}
+		if DescriptionOf(read) == "" {
+			t.Errorf("%s: signOff's read lost its declared description", tc.config)
+		}
+	}
+}
+
 // An engine type's Approvals refuses signOff's version and never answers
 // stale (D104): its narrowing names the gated states inline, as before,
 // and has neither, so its generated clients do not change.

@@ -24,7 +24,6 @@
         "properties": {
           "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
           "note": {"description":"A string value","maxLength":10000,"type":["string","null"]},
-          "read": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
           "state": {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
           "version": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
         },

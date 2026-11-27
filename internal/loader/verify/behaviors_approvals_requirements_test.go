@@ -118,7 +118,7 @@ func TestApprovalsRequirementsAreHeldToTheTable(t *testing.T) {
 - at '/gates/done/callers/0': value must be one of 'person', 'acting-for-person', 'agent'`},
 	})
 	holdAccepted(t, map[string]func(doc, task map[string]any){
-		"a gate that reads rows by a list of rules": rows(nil, byRule),
+		"a gate that reads rows by a list of rules":    rows(nil, byRule),
 		"a gate that reads rows that point at the row": rows(nil, map[string]any{"schema": "Requirement", "link": "task"}),
 		"a gate with every requirement member": inline(map[string]any{
 			"callers":              []any{"person", "acting-for-person"},

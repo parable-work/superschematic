@@ -72,12 +72,6 @@
           "target": "input.note"
         },
         {
-          "toolParameter": "read",
-          "required": false,
-          "kind": "input",
-          "target": "input.read"
-        },
-        {
           "toolParameter": "state",
           "required": true,
           "kind": "input",
@@ -101,7 +95,7 @@
           "position": 1,
           "kind": "input",
           "target": "input",
-          "sources": ["note", "read", "state", "version"]
+          "sources": ["note", "state", "version"]
         }
       ]
     },

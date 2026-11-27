@@ -23,7 +23,6 @@ export interface TaskApprovalsListSignOffsParams {
 export interface TaskApprovalsSignOffParams {
   id: string;
   note?: string;
-  read?: TaskApprovalsSignOffInput['read'];
   state: TaskApprovalsGate;
   version?: TaskApprovalsSignOffInput['version'];
 }
@@ -258,14 +257,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a7745045442e888d1b439d21d14efedfab4cdae22d66b058631d97beb950ba0a',
+    inputSchemaDigest: 'sha256:056da1f3d069c7f2238a6468441bad86d0fcc00993b7088ed3c5aa5dd5432729',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -422,7 +420,6 @@ export const openAIFunctions: OpenAIFunction[] = [
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -501,7 +498,6 @@ export const anthropicTools: AnthropicTool[] = [
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        read: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
         state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
         version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
@@ -588,7 +584,7 @@ export async function invokeTool<T extends ToolName>(
     case TASK_APPROVALS_LIST_SIGN_OFFS:
       return sdk.task.approvals.listSignOffs((params as TaskApprovalsListSignOffsParams).id, { cursor: (params as TaskApprovalsListSignOffsParams).cursor, limit: (params as TaskApprovalsListSignOffsParams).limit, state: (params as TaskApprovalsListSignOffsParams).state });
     case TASK_APPROVALS_SIGN_OFF:
-      return sdk.task.approvals.signOff((params as TaskApprovalsSignOffParams).id, { note: (params as TaskApprovalsSignOffParams).note, read: (params as TaskApprovalsSignOffParams).read, state: (params as TaskApprovalsSignOffParams).state, version: (params as TaskApprovalsSignOffParams).version });
+      return sdk.task.approvals.signOff((params as TaskApprovalsSignOffParams).id, { note: (params as TaskApprovalsSignOffParams).note, state: (params as TaskApprovalsSignOffParams).state, version: (params as TaskApprovalsSignOffParams).version });
     case TASK_APPROVALS_WITHDRAW_SIGN_OFF:
       return sdk.task.approvals.withdrawSignOff((params as TaskApprovalsWithdrawSignOffParams).id, { state: (params as TaskApprovalsWithdrawSignOffParams).state });
     case TASK_STATUS_TRANSITION:

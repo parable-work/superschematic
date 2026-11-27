@@ -2,6 +2,21 @@
   "name": "fixture-approvals-db",
   "kind": "DB",
   "scalars": {
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
     "Identity.UUID": {
       "name": "Identity.UUID",
       "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
@@ -394,7 +409,7 @@
     "TaskApprovalsSignOffs": {
       "name": "TaskApprovalsSignOffs",
       "owner": "src/tasks.schema.ts",
-      "comment": "One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.",
+      "comment": "One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run's Agent), the assurance its host reported, the permissions it held and the values of the fields the gate's requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.",
       "role": "DBTable",
       "fields": [
         {
@@ -429,6 +444,62 @@
           "description": "The subject of the caller who signed.",
           "typeRef": {
             "name": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "description": "The caller's kind (D156): user, party, agent or extension; absent when the host named none.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "actingFor",
+          "description": "The subject the caller acted for (D77); absent when it acted for no one.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "actingForKind",
+          "description": "The kind of the subject the caller acted for; absent when the host named none.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "description": "The Agent whose run the caller was (D158); absent for a caller that was no agent run.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "signedInAt",
+          "description": "When the caller's session last signed in, as its host reported it.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "userVerified",
+          "description": "Whether the caller proved user verification on the sign-off itself.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "held",
+          "description": "The permissions the caller held when it signed, a list, which a requirement read from rows counts unless it reads them again.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "values",
+          "description": "The value each field the gate's requirements reset on held when it signed, by field, null for none.",
+          "typeRef": {
+            "name": "Generic.JSON"
           }
         },
         {

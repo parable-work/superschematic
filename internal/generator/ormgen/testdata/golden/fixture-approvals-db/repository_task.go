@@ -70,11 +70,6 @@ const (
 type TaskApprovalsSignOffParams struct {
 	// Note is why, for the others.
 	Note *string `json:"note,omitempty"`
-	// Read is the value of each field the gate pins (pinOn) as the signer read
-	// it, by field. Needed on a gate that pins fields; one that is not the
-	// field's value is vetoed stale before anything else is checked. A table's
-	// alone: an engine type refuses it.
-	Read json.RawMessage `json:"read,omitempty"`
 	// State is the gated state to sign off for.
 	State TaskApprovalsGate `json:"state"`
 	// Version is the row's version the signer read, the version a write through

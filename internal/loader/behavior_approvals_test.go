@@ -81,7 +81,10 @@ func TestApprovalsFixturesLoad(t *testing.T) {
 	for _, fd := range sub.Fields {
 		fields = append(fields, fd.Name+":"+fd.TypeRef.Name)
 	}
-	if want := "task:Task,number:string,state:string,subject:string,note:string,at:Temporal.DateTime,consumedAt:Temporal.DateTime"; strings.Join(fields, ",") != want {
+	// Each sign-off records whom its caller was, its assurance, the
+	// permissions it held and the values its requirements reset on (D200).
+	if want := "task:Task,number:string,state:string,subject:string,kind:string,actingFor:string,actingForKind:string,agent:string," +
+		"signedInAt:Temporal.DateTime,userVerified:boolean,held:Generic.JSON,values:Generic.JSON,note:string,at:Temporal.DateTime,consumedAt:Temporal.DateTime"; strings.Join(fields, ",") != want {
 		t.Errorf("TaskApprovalsSignOffs' fields = %s, want %s", strings.Join(fields, ","), want)
 	}
 	for _, kind := range []string{ir.BehaviorQueueDeadlines, ir.BehaviorQueueChanges} {
