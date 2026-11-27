@@ -1,6 +1,6 @@
 {
   "name": "core-declarative",
-  "description": "The declarative vocabulary (D103's step 5) over test.Votes, a behavior whose declaration states its rules and which no Rust implements (runtime/engine/testdata/rules/declarations/test.Votes.behavior.json): a vote that upserts the caller's row of a sub-table, its parameter held to 1 to the config's maxScore; fields derived from the rows as a count, a sum, an average, a highest, a lowest and a filtered count; guards over the row's fields, the Workflow's status and the caller compared with a field that holds a subject; a counter an operation adjusts; an operation that moves the Workflow; two reactions heard from the change queue; the owner kept as its create gave it and a title an accepted row freezes, in Constants' and StateRules' words; and the define refusals. Cases written by hand in the recorded format, since no engine implements a declarative behavior. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "description": "The declarative vocabulary (D103's step 5) over test.Votes, a behavior whose declaration states its rules and which no Rust implements (runtime/engine/testdata/rules/declarations/test.Votes.behavior.json): a vote that upserts the caller's row of a sub-table, its parameter held to 1 to the config's maxScore; fields derived from the rows as a count, a sum, an average, a highest, a lowest and a filtered count; guards over the row's fields, the Workflow's status and the caller compared with a field that holds a subject; a counter an operation adjusts; comments upserted under keys the core makes, and their count; an operation that writes the row's own title through an update's rules; an operation that moves the Workflow; two reactions heard from the change queue; the owner kept as its create gave it and a title an accepted row freezes, in Constants' and StateRules' words; and the define refusals. Cases written by hand in the recorded format, since no engine implements a declarative behavior. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
   "source": "written by hand (D103's step 5): runtime/engine/testdata/rules/scenarios/core-declarative.json",
   "declarations": [
     "../declarations/test.Votes.behavior.json"
@@ -167,7 +167,8 @@
               "test.Votes": {
                 "voteCount": 0,
                 "scoreSum": 0,
-                "approvals": 0
+                "approvals": 0,
+                "commentCount": 0
               }
             }
           }
@@ -330,6 +331,40 @@
         },
         {
           "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Proposal",
+            "p1",
+            "comment",
+            {
+              "body": "Pizza?"
+            }
+          ],
+          "now": 1006000,
+          "expect": {
+            "commentCount": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Proposal",
+            "p1",
+            "comment",
+            {
+              "body": "Tacos"
+            }
+          ],
+          "now": 1007000,
+          "expect": {
+            "commentCount": 2
+          }
+        },
+        {
+          "engine": "e1",
           "call": "instances.get",
           "principal": "alice",
           "args": [
@@ -353,6 +388,7 @@
                 "voteCount": 2,
                 "scoreSum": 7,
                 "approvals": 1,
+                "commentCount": 2,
                 "lastVoter": "alice",
                 "lastVotedAt": 1003000,
                 "scoreAverage": 3.5,
@@ -524,7 +560,8 @@
               "test.Votes": {
                 "voteCount": 0,
                 "scoreSum": 0,
-                "approvals": 0
+                "approvals": 0,
+                "commentCount": 0
               }
             }
           }
@@ -618,6 +655,7 @@
                 "voteCount": 0,
                 "scoreSum": 0,
                 "approvals": 0,
+                "commentCount": 0,
                 "flags": 2
               }
             }
@@ -671,6 +709,7 @@
                 "voteCount": 0,
                 "scoreSum": 0,
                 "approvals": 0,
+                "commentCount": 0,
                 "flags": 3
               }
             }
@@ -892,7 +931,8 @@
               "test.Votes": {
                 "voteCount": 0,
                 "scoreSum": 0,
-                "approvals": 0
+                "approvals": 0,
+                "commentCount": 0
               }
             }
           }
@@ -1018,6 +1058,7 @@
                 "voteCount": 2,
                 "scoreSum": 7,
                 "approvals": 2,
+                "commentCount": 0,
                 "lastVoter": "carol",
                 "lastVotedAt": 1003000,
                 "scoreAverage": 3.5,
@@ -1084,6 +1125,7 @@
                 "voteCount": 2,
                 "scoreSum": 7,
                 "approvals": 2,
+                "commentCount": 0,
                 "lastVoter": "carol",
                 "lastVotedAt": 1003000,
                 "scoreAverage": 3.5,
@@ -1101,12 +1143,60 @@
           "args": [
             "Proposal",
             "p1",
+            "retitle",
+            {
+              "title": "Supper"
+            }
+          ],
+          "now": 1006500,
+          "expect": {
+            "title": "Supper"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
             "accept",
             {}
           ],
           "now": 1007000,
           "expect": {
             "status": "accepted"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proposal",
+            "p1",
+            "retitle",
+            {
+              "title": "Brunch"
+            }
+          ],
+          "now": 1007500,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior test.Votes vetoes update of Proposal p1: Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+            "details": {
+              "behavior": "test.Votes",
+              "action": "update",
+              "reason": "Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "accepted",
+                "fields": [
+                  "title"
+                ]
+              }
+            }
           }
         },
         {
@@ -1180,7 +1270,7 @@
             "schema": "Proposal",
             "id": "p1",
             "data": {
-              "title": "Dinner",
+              "title": "Supper",
               "owner": "alice"
             },
             "behaviors": {
@@ -1192,6 +1282,7 @@
                 "voteCount": 2,
                 "scoreSum": 7,
                 "approvals": 2,
+                "commentCount": 0,
                 "lastVoter": "carol",
                 "lastVotedAt": 1003000,
                 "scoreAverage": 3.5,

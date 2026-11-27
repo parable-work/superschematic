@@ -166,7 +166,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // The declarative vocabulary (D103's step 5): test.Votes, whose
   // declaration states its rules, which the transcript holds whole and the
   // core is handed (declare) before the replay.
-  { file: 'core-declarative', floor: 45 },
+  { file: 'core-declarative', floor: 49 },
   // acme.Rating as a declaration with no crate (D103's step 5): the acme
   // example's extension's file, which the transcript holds whole.
   { file: 'acme-rating', floor: 26 },

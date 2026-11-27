@@ -367,7 +367,7 @@ const ALIASED_FLOOR: usize = 46;
 /// written by hand over test.Votes, a behavior whose declaration states its
 /// rules, which the transcript holds whole and the core is handed before
 /// the replay.
-const DECLARATIVE_FLOOR: usize = 45;
+const DECLARATIVE_FLOOR: usize = 49;
 /// acme-rating's floor (D103's step 5): the acme example's acme.Rating as a
 /// declaration with no crate, the transcript holding the extension's file.
 const ACME_RATING_FLOOR: usize = 26;

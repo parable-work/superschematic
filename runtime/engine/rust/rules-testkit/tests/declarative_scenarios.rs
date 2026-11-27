@@ -16,11 +16,11 @@ use superschematic_rules_testkit::{hand_written_path, ported, replay_path};
 /// The steps of `core-declarative.json` the replayer maps and compares: all
 /// of its 4 scenarios', the 4 `open` steps among them, which count and
 /// compare nothing. None is left out.
-const FLOOR: usize = 46;
+const FLOOR: usize = 52;
 
 /// The steps of the acme example's `acme-rating.json` the replayer maps
 /// and compares: all of its 4 scenarios', the 4 `open` steps among them.
-pub const ACME_RATING_FLOOR: usize = 28;
+pub const ACME_RATING_FLOOR: usize = 33;
 
 /// The acme example's scenarios of acme.Rating as a declarative behavior
 /// (`examples/acme-schematic/testdata/rules/acme-rating.json`), whose

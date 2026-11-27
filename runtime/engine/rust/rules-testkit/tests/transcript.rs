@@ -599,12 +599,12 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
 }
 
 /// The steps `core-declarative.transcript.json` holds, of the hand-written
-/// `core-declarative.json`'s 48 (D103's step 5): its define and publish
+/// `core-declarative.json`'s 52 (D103's step 5): its define and publish
 /// checks, five of them refused, and its creates, votes, flags, accepts,
 /// summaries and updates, with the changes the runner's sweeps ran for
 /// test.Votes' reactions, each holding its row's version; the opens and the
 /// reads of rows are left out.
-const DECLARATIVE_FLOOR: usize = 45;
+const DECLARATIVE_FLOOR: usize = 49;
 
 /// A transcript of declarative behaviors (D103's step 5) holds each one's
 /// declaration file whole, which a host hands its core before it replays

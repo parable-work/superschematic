@@ -1,6 +1,6 @@
 {
   "name": "test.Votes",
-  "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
+  "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; comments, each a row of a sub-table under a key the core makes, and their count; a retitle that writes the row's own title through an update's rules; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -20,7 +20,8 @@
     { "name": "flags", "description": "How many times the row was flagged.", "type": "Generic.Int64" },
     { "name": "lastVoter", "description": "Who voted last.", "type": "string" },
     { "name": "lastVotedAt", "description": "When the last vote came.", "type": "Temporal.DateTime" },
-    { "name": "quorate", "description": "Whether the votes reached the quorum once.", "type": "boolean" }
+    { "name": "quorate", "description": "Whether the votes reached the quorum once.", "type": "boolean" },
+    { "name": "commentCount", "description": "How many comments the row has.", "type": "Generic.Int64" }
   ],
   "tables": [
     {
@@ -31,6 +32,16 @@
         { "name": "voter", "description": "The voter's subject.", "type": "string" },
         { "name": "score", "description": "The score.", "type": "Generic.Int64" },
         { "name": "votedAt", "description": "When the vote came.", "type": "Temporal.DateTime" }
+      ]
+    },
+    {
+      "name": "comments",
+      "description": "One row per comment, under a key the core makes from the request.",
+      "key": "number",
+      "fields": [
+        { "name": "number", "description": "The comment's key.", "type": "string" },
+        { "name": "body", "description": "What it says.", "type": "string" },
+        { "name": "by", "description": "Who wrote it.", "type": "string" }
       ]
     }
   ],
@@ -64,6 +75,30 @@
       "description": "Moves the row to accepted: its owner's, once the votes reach the quorum.",
       "paramsSchema": { "type": "object", "additionalProperties": false },
       "resultSchema": { "type": "object" },
+      "writes": true
+    },
+    {
+      "name": "comment",
+      "description": "Adds a comment by the caller.",
+      "paramsSchema": {
+        "type": "object",
+        "required": ["body"],
+        "additionalProperties": false,
+        "properties": { "body": { "description": "What it says.", "type": "string", "minLength": 1 } }
+      },
+      "resultSchema": { "type": "object", "properties": { "commentCount": { "type": "integer" } } },
+      "writes": true
+    },
+    {
+      "name": "retitle",
+      "description": "Writes the row's title, held to an update's rules: a frozen title stays.",
+      "paramsSchema": {
+        "type": "object",
+        "required": ["title"],
+        "additionalProperties": false,
+        "properties": { "title": { "description": "The new title.", "type": "string", "minLength": 1 } }
+      },
+      "resultSchema": { "type": "object", "properties": { "title": { "type": "string" } } },
       "writes": true
     },
     {
@@ -108,6 +143,16 @@
         "effects": [{ "move": { "to": "accepted" } }],
         "result": { "status": { "field": "status" } }
       },
+      "comment": {
+        "effects": [
+          { "upsert": { "table": "comments", "key": { "newKey": true }, "values": { "body": { "param": "body" }, "by": { "caller": true } } } }
+        ],
+        "result": { "commentCount": { "field": "commentCount" } }
+      },
+      "retitle": {
+        "effects": [{ "update": { "title": { "param": "title" } } }],
+        "result": { "title": { "field": "title" } }
+      },
       "summary": {
         "result": {
           "voteCount": { "field": "voteCount" },
@@ -130,7 +175,8 @@
       "scoreAverage": { "average": { "table": "votes", "field": "score" } },
       "topScore": { "max": { "table": "votes", "field": "score" } },
       "lowScore": { "min": { "table": "votes", "field": "score" } },
-      "approvals": { "count": { "table": "votes", "where": { "score": { "gte": 3 } } } }
+      "approvals": { "count": { "table": "votes", "where": { "score": { "gte": 3 } } } },
+      "commentCount": { "count": { "table": "comments" } }
     }
   }
 }

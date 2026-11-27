@@ -35,7 +35,7 @@
   "declarations": [
     {
       "name": "test.Votes",
-      "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
+      "description": "A test behavior defined with no Rust (D103's step 5), whose rules come from the declarative vocabulary alone: votes on a row, one per voter, each a score from 1 to the config's maxScore; their count, sum, average, highest and lowest, and the count of scores of 3 or more, derived from the votes; flags any caller but the row's owner raises, a counter; comments, each a row of a sub-table under a key the core makes, and their count; a retitle that writes the row's own title through an update's rules; an accept only its owner makes, once the votes reach the config's quorum, which moves the row's Workflow; the row's owner kept as its create gave it, and its title frozen once it is accepted; and two reactions, one marking the row quorate and one closing a row flagged three times.",
       "configSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -107,6 +107,11 @@
           "name": "quorate",
           "description": "Whether the votes reached the quorum once.",
           "type": "boolean"
+        },
+        {
+          "name": "commentCount",
+          "description": "How many comments the row has.",
+          "type": "Generic.Int64"
         }
       ],
       "tables": [
@@ -129,6 +134,28 @@
               "name": "votedAt",
               "description": "When the vote came.",
               "type": "Temporal.DateTime"
+            }
+          ]
+        },
+        {
+          "name": "comments",
+          "description": "One row per comment, under a key the core makes from the request.",
+          "key": "number",
+          "fields": [
+            {
+              "name": "number",
+              "description": "The comment's key.",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "description": "What it says.",
+              "type": "string"
+            },
+            {
+              "name": "by",
+              "description": "Who wrote it.",
+              "type": "string"
             }
           ]
         }
@@ -194,6 +221,60 @@
           },
           "resultSchema": {
             "type": "object"
+          },
+          "writes": true
+        },
+        {
+          "name": "comment",
+          "description": "Adds a comment by the caller.",
+          "paramsSchema": {
+            "type": "object",
+            "required": [
+              "body"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "body": {
+                "description": "What it says.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "resultSchema": {
+            "type": "object",
+            "properties": {
+              "commentCount": {
+                "type": "integer"
+              }
+            }
+          },
+          "writes": true
+        },
+        {
+          "name": "retitle",
+          "description": "Writes the row's title, held to an update's rules: a frozen title stays.",
+          "paramsSchema": {
+            "type": "object",
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "description": "The new title.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "resultSchema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            }
           },
           "writes": true
         },
@@ -381,6 +462,47 @@
               }
             }
           },
+          "comment": {
+            "effects": [
+              {
+                "upsert": {
+                  "table": "comments",
+                  "key": {
+                    "newKey": true
+                  },
+                  "values": {
+                    "body": {
+                      "param": "body"
+                    },
+                    "by": {
+                      "caller": true
+                    }
+                  }
+                }
+              }
+            ],
+            "result": {
+              "commentCount": {
+                "field": "commentCount"
+              }
+            }
+          },
+          "retitle": {
+            "effects": [
+              {
+                "update": {
+                  "title": {
+                    "param": "title"
+                  }
+                }
+              }
+            ],
+            "result": {
+              "title": {
+                "field": "title"
+              }
+            }
+          },
           "summary": {
             "result": {
               "voteCount": {
@@ -477,6 +599,11 @@
                   "gte": 3
                 }
               }
+            }
+          },
+          "commentCount": {
+            "count": {
+              "table": "comments"
             }
           }
         }
@@ -720,7 +847,8 @@
                 "test.Votes": {
                   "voteCount": 0,
                   "scoreSum": 0,
-                  "approvals": 0
+                  "approvals": 0,
+                  "commentCount": 0
                 }
               }
             },
@@ -770,6 +898,7 @@
                   "voteCount": 1,
                   "scoreSum": 4,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1001000,
                   "scoreAverage": 4,
@@ -837,6 +966,7 @@
                   "voteCount": 2,
                   "scoreSum": 6,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "bob",
                   "lastVotedAt": 1002000,
                   "scoreAverage": 3,
@@ -911,6 +1041,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -995,6 +1126,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -1079,6 +1211,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -1164,6 +1297,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -1240,6 +1374,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "alice",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -1270,6 +1405,179 @@
             },
             "version": 4
           }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "comment",
+              "params": {
+                "body": "Pizza?"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "commentCount": 1
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "commentCount": 1,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "comments": [
+                  {
+                    "key": "request-9:test.Votes:comments:1",
+                    "values": {
+                      "body": "Pizza?",
+                      "by": "carol"
+                    }
+                  }
+                ],
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "comment",
+              "params": {
+                "body": "Tacos"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "commentCount": 2
+            },
+            "row": {
+              "own": {
+                "title": "Lunch",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 1,
+                  "commentCount": 2,
+                  "lastVoter": "alice",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 5,
+                  "lowScore": 2
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "comments": [
+                  {
+                    "key": "request-10:test.Votes:comments:1",
+                    "values": {
+                      "body": "Tacos",
+                      "by": "bob"
+                    }
+                  },
+                  {
+                    "key": "request-9:test.Votes:comments:1",
+                    "values": {
+                      "body": "Pizza?",
+                      "by": "carol"
+                    }
+                  }
+                ],
+                "votes": [
+                  {
+                    "key": "alice",
+                    "values": {
+                      "score": 5,
+                      "votedAt": 1003000
+                    }
+                  },
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 2,
+                      "votedAt": 1002000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
         }
       ],
       "skipped": [
@@ -1279,7 +1587,7 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 12,
+          "step": 14,
           "call": "instances.get",
           "reason": "a read of rows, which the transcript holds after each command that names one"
         }
@@ -1521,7 +1829,8 @@
                 "test.Votes": {
                   "voteCount": 0,
                   "scoreSum": 0,
-                  "approvals": 0
+                  "approvals": 0,
+                  "commentCount": 0
                 }
               }
             },
@@ -1579,7 +1888,8 @@
                 "test.Votes": {
                   "voteCount": 0,
                   "scoreSum": 0,
-                  "approvals": 0
+                  "approvals": 0,
+                  "commentCount": 0
                 }
               }
             },
@@ -1626,6 +1936,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 1
                 }
               }
@@ -1673,6 +1984,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 2
                 }
               }
@@ -1712,7 +2024,8 @@
                     "test.Votes": {
                       "voteCount": 0,
                       "scoreSum": 0,
-                      "approvals": 0
+                      "approvals": 0,
+                      "commentCount": 0
                     }
                   }
                 }
@@ -1735,6 +2048,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 2
                 }
               }
@@ -1774,7 +2088,8 @@
                     "test.Votes": {
                       "voteCount": 0,
                       "scoreSum": 0,
-                      "approvals": 0
+                      "approvals": 0,
+                      "commentCount": 0
                     }
                   }
                 },
@@ -1792,6 +2107,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 1
                     }
                   }
@@ -1815,6 +2131,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 2
                 }
               }
@@ -1855,6 +2172,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 1
                     }
                   }
@@ -1873,6 +2191,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 2
                     }
                   }
@@ -1896,6 +2215,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 2
                 }
               }
@@ -1943,6 +2263,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 3
                 }
               }
@@ -1983,6 +2304,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 2
                     }
                   }
@@ -2001,6 +2323,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 3
                     }
                   }
@@ -2024,6 +2347,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 3
                 }
               }
@@ -2064,6 +2388,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 3
                     }
                   }
@@ -2082,6 +2407,7 @@
                       "voteCount": 0,
                       "scoreSum": 0,
                       "approvals": 0,
+                      "commentCount": 0,
                       "flags": 3
                     }
                   }
@@ -2105,6 +2431,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 3
                 }
               }
@@ -2164,6 +2491,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 3
                 }
               }
@@ -2225,6 +2553,7 @@
                   "voteCount": 0,
                   "scoreSum": 0,
                   "approvals": 0,
+                  "commentCount": 0,
                   "flags": 3
                 }
               }
@@ -2487,7 +2816,8 @@
                 "test.Votes": {
                   "voteCount": 0,
                   "scoreSum": 0,
-                  "approvals": 0
+                  "approvals": 0,
+                  "commentCount": 0
                 }
               }
             },
@@ -2537,6 +2867,7 @@
                   "voteCount": 1,
                   "scoreSum": 3,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "bob",
                   "lastVotedAt": 1001000,
                   "scoreAverage": 3,
@@ -2613,6 +2944,7 @@
                   "voteCount": 1,
                   "scoreSum": 3,
                   "approvals": 1,
+                  "commentCount": 0,
                   "lastVoter": "bob",
                   "lastVotedAt": 1001000,
                   "scoreAverage": 3,
@@ -2680,6 +3012,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -2763,6 +3096,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -2826,7 +3160,8 @@
                     "test.Votes": {
                       "voteCount": 0,
                       "scoreSum": 0,
-                      "approvals": 0
+                      "approvals": 0,
+                      "commentCount": 0
                     }
                   }
                 }
@@ -2849,6 +3184,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -2912,7 +3248,8 @@
                     "test.Votes": {
                       "voteCount": 0,
                       "scoreSum": 0,
-                      "approvals": 0
+                      "approvals": 0,
+                      "commentCount": 0
                     }
                   }
                 },
@@ -2930,6 +3267,7 @@
                       "voteCount": 1,
                       "scoreSum": 3,
                       "approvals": 1,
+                      "commentCount": 0,
                       "lastVoter": "bob",
                       "lastVotedAt": 1001000,
                       "scoreAverage": 3,
@@ -2957,6 +3295,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3021,6 +3360,7 @@
                       "voteCount": 1,
                       "scoreSum": 3,
                       "approvals": 1,
+                      "commentCount": 0,
                       "lastVoter": "bob",
                       "lastVotedAt": 1001000,
                       "scoreAverage": 3,
@@ -3043,6 +3383,7 @@
                       "voteCount": 2,
                       "scoreSum": 7,
                       "approvals": 2,
+                      "commentCount": 0,
                       "lastVoter": "carol",
                       "lastVotedAt": 1003000,
                       "scoreAverage": 3.5,
@@ -3070,6 +3411,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3135,6 +3477,7 @@
                       "voteCount": 2,
                       "scoreSum": 7,
                       "approvals": 2,
+                      "commentCount": 0,
                       "lastVoter": "carol",
                       "lastVotedAt": 1003000,
                       "scoreAverage": 3.5,
@@ -3157,6 +3500,7 @@
                       "voteCount": 2,
                       "scoreSum": 7,
                       "approvals": 2,
+                      "commentCount": 0,
                       "lastVoter": "carol",
                       "lastVotedAt": 1003000,
                       "scoreAverage": 3.5,
@@ -3185,6 +3529,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3269,6 +3614,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3338,6 +3684,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3382,34 +3729,37 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1007000,
+            "now": 1006500,
             "action": {
               "kind": "operation",
               "key": "p1",
               "useId": "test.Votes",
-              "operation": "accept",
-              "params": {}
+              "operation": "retitle",
+              "params": {
+                "title": "Supper"
+              }
             },
             "request": "request-12"
           },
           "expect": {
             "result": {
-              "status": "accepted"
+              "title": "Supper"
             },
             "row": {
               "own": {
-                "title": "Dinner",
+                "title": "Supper",
                 "owner": "alice"
               },
               "owned": {
                 "status": {
-                  "status": "accepted",
-                  "enteredAt": 1007000
+                  "status": "open",
+                  "enteredAt": 1000000
                 },
                 "test.Votes": {
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3445,7 +3795,7 @@
         {
           "kind": "command",
           "step": 14,
-          "call": "instances.update",
+          "call": "instances.invoke",
           "database": "{{dir:1}}/engine.db",
           "type": "Proposal",
           "version": 0,
@@ -3454,15 +3804,90 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1008000,
+            "now": 1007000,
             "action": {
-              "kind": "update",
+              "kind": "operation",
               "key": "p1",
-              "patch": {
+              "useId": "test.Votes",
+              "operation": "accept",
+              "params": {}
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "status": "accepted"
+            },
+            "row": {
+              "own": {
+                "title": "Supper",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "accepted",
+                  "enteredAt": 1007000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "commentCount": 0,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1007500,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "test.Votes",
+              "operation": "retitle",
+              "params": {
                 "title": "Brunch"
               }
             },
-            "request": "request-13"
+            "request": "request-14"
           },
           "expect": {
             "refused": {
@@ -3485,7 +3910,7 @@
             },
             "row": {
               "own": {
-                "title": "Dinner",
+                "title": "Supper",
                 "owner": "alice"
               },
               "owned": {
@@ -3497,6 +3922,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3526,12 +3952,100 @@
                 ]
               }
             },
-            "version": 6
+            "version": 7
           }
         },
         {
           "kind": "command",
-          "step": 15,
+          "step": 16,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Proposal",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1008000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Brunch"
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior test.Votes vetoes update of Proposal p1: Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+              "details": {
+                "behavior": "test.Votes",
+                "action": "update",
+                "reason": "Proposal p1 is accepted, which freezes title: it does not change while it is accepted",
+                "vetoCode": "frozen_fields",
+                "vetoDetails": {
+                  "state": "accepted",
+                  "fields": [
+                    "title"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Supper",
+                "owner": "alice"
+              },
+              "owned": {
+                "status": {
+                  "status": "accepted",
+                  "enteredAt": 1007000
+                },
+                "test.Votes": {
+                  "voteCount": 2,
+                  "scoreSum": 7,
+                  "approvals": 2,
+                  "commentCount": 0,
+                  "lastVoter": "carol",
+                  "lastVotedAt": 1003000,
+                  "scoreAverage": 3.5,
+                  "topScore": 4,
+                  "lowScore": 3,
+                  "quorate": true
+                }
+              }
+            },
+            "subRows": {
+              "test.Votes": {
+                "votes": [
+                  {
+                    "key": "bob",
+                    "values": {
+                      "score": 3,
+                      "votedAt": 1001000
+                    }
+                  },
+                  {
+                    "key": "carol",
+                    "values": {
+                      "score": 4,
+                      "votedAt": 1003000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
           "call": "instances.invoke",
           "database": "{{dir:1}}/engine.db",
           "type": "Proposal",
@@ -3551,7 +4065,7 @@
                 "score": 1
               }
             },
-            "request": "request-14"
+            "request": "request-16"
           },
           "expect": {
             "refused": {
@@ -3571,7 +4085,7 @@
             },
             "row": {
               "own": {
-                "title": "Dinner",
+                "title": "Supper",
                 "owner": "alice"
               },
               "owned": {
@@ -3583,6 +4097,7 @@
                   "voteCount": 2,
                   "scoreSum": 7,
                   "approvals": 2,
+                  "commentCount": 0,
                   "lastVoter": "carol",
                   "lastVotedAt": 1003000,
                   "scoreAverage": 3.5,
@@ -3612,7 +4127,7 @@
                 ]
               }
             },
-            "version": 6
+            "version": 7
           }
         }
       ],
@@ -3628,7 +4143,7 @@
           "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
-          "step": 16,
+          "step": 18,
           "call": "instances.get",
           "reason": "a read of rows, which the transcript holds after each command that names one"
         }

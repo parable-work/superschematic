@@ -130,7 +130,7 @@ var transcriptFiles = []transcriptFile{
 	// The declarative vocabulary (D103's step 5): test.Votes, whose
 	// declaration states its rules, which the transcript holds whole and
 	// the core is handed (Declare) before the replay.
-	{"../../engine/testdata/rules/core-declarative.transcript.json", 45},
+	{"../../engine/testdata/rules/core-declarative.transcript.json", 49},
 	// acme.Rating as a declaration with no crate (D103's step 5): the acme
 	// example's extension's file, which the transcript holds whole.
 	{"../../engine/testdata/rules/acme-rating.transcript.json", 26},
