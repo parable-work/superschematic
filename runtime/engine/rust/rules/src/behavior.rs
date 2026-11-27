@@ -134,6 +134,15 @@ pub struct Declaration {
     /// none cannot be anchored on a field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Whether a create gives the value field (D147's first primitive): on
+    /// a field anchor, a create's own member of the anchor's name is no
+    /// own field but the value the core hands the use, setting its value
+    /// field before validation, so its hooks read it as their own
+    /// ([`crate::View::get`]), as Aliased's name is. An update still names
+    /// it as no own field: only the behavior's operations change it. A
+    /// declaration file says so on its value field (`"fromCreate": true`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub value_from_create: bool,
     /// The sub-tables it keeps per row, each a child table of the row its
     /// uses run on, deleted with it, which only its operations write.
     #[serde(default)]
@@ -377,6 +386,14 @@ impl Declaration {
             self.fields.push(name.clone());
         }
         self.value = Some(name);
+        self
+    }
+
+    /// The declaration whose value field a create gives (D147): a field
+    /// anchor's own member of a create is the use's value, which the core
+    /// sets before the create's hooks run.
+    pub fn value_from_create(mut self) -> Self {
+        self.value_from_create = true;
         self
     }
 

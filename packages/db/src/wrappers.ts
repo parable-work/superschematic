@@ -613,6 +613,29 @@ export interface NumberingConfig {
  */
 export type Numbering<C extends NumberingConfig> = string | null;
 
+/** Aliased's config on a field (D147). */
+export interface AliasedConfig {
+  /** How two names read as one: lower, the default, ignores their case and their runs of white space; slug keeps only their letters and digits, in lower case. */
+  readonly normalize?: "lower" | "slug";
+}
+
+/**
+ * A name on each row with the names it was also known by, unique across
+ * the table (D147): `name: Aliased<string, { normalize: "slug" }>`. No two
+ * rows hold one name, as a name or an alias, in its normalized form. The
+ * type stays a table: the field's column holds the name, which a create
+ * gives and only its operations change (name.rename, which keeps the old
+ * name as an alias, name.addAlias, name.removeAlias, and name.resolve on
+ * the table). Its aliases are a sub-table of the row (company_name_aliases)
+ * and every name a row holds a row of a table of the use's own, kept for
+ * the table as a whole and keyed by the normalized form (company_name_names),
+ * which the database holds unique. A name another row holds is refused
+ * with that row's key, the veto name_taken. A delete frees the row's
+ * names, and a merge (Mergeable) moves the row merged away's aliases to
+ * the row that stays, its name among them. T is the name's type, string.
+ */
+export type Aliased<T extends string, C extends AliasedConfig = {}> = T;
+
 /** Revisions' config on a table (D16, D103's step 4): with review, a caller proposes a change of the own fields and a caller who holds the permission approves or rejects it. */
 export interface RevisionsOn {
   /** Turns on the review step: propose, approve, reject and listProposals. */
@@ -843,6 +866,13 @@ export type RollupOn =
       readonly gatedStates?: readonly string[];
       /** The outcomes a linked row's terminal state must have to count; every outcome when absent. */
       readonly outcomes?: readonly WorkflowOutcome[];
+      /**
+       * The moves into the gated states the gate lets through though the
+       * rollup does not hold (D104's Barrier): a caller's who holds
+       * permission, and the move each named deadline of the table's Timers
+       * makes as it falls due, its then moving into a gated state.
+       */
+      readonly exemptions?: { readonly permission?: string; readonly deadlines?: readonly string[] };
     });
 
 /** Rollups' config on a table (D104's step 4): the rollups, by name. */
@@ -885,6 +915,52 @@ export interface DependenciesOn<T> {
  * the table itself.
  */
 export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;
+
+/** When a step of BlueprintOn<T> is stamped (D149): the table's own field equals a value, or is a list that includes one, compared as JSON. */
+export type BlueprintWhenOn<T> =
+  | { readonly field: Extract<keyof T, string>; readonly equals: unknown }
+  | { readonly field: Extract<keyof T, string>; readonly includes: unknown };
+
+/** One step of BlueprintOn<T>'s template (D149): the steps whose children block its child, when it is stamped, and the child's own fields beside its key and the copied ones. */
+export interface BlueprintStepOn<T> {
+  /** The keys of the steps of the template whose children block this step's child. */
+  readonly after?: readonly string[];
+  /** Stamps the step only when it holds; always when absent. A step left out passes the steps it comes after on to the steps that come after it. */
+  readonly when?: BlueprintWhenOn<T>;
+  /** Fields of the child, beside its key and the copied fields. */
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+/** Blueprint's config on a table (D149): the child table, its to-one relation to this one, the field each child holds its step's key in, the template's steps by key, and what each child copies. */
+export interface BlueprintOn<T> {
+  /** The child table. It composes Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
+  readonly schema: string;
+  /** The child table's to-one relation to this table, through which each child points at its parent. */
+  readonly parentLink: string;
+  /** A string field of the child table that each child holds its step's key in. */
+  readonly keyField: string;
+  /** The steps, by key: letters, digits, dots, underscores, colons and hyphens, at most 500 of them. */
+  readonly steps: Readonly<Record<string, BlueprintStepOn<T>>>;
+  /** Fields of this table copied to every child, a field of the child table of the same name. */
+  readonly copyFields?: readonly Extract<keyof T, string>[];
+  /** To-one relations of this table copied to every child, a relation of the child table of the same name to the same table. */
+  readonly copyLinks?: readonly Extract<keyof T, string>[];
+}
+
+/**
+ * Children created with their parent (D149): `export abstract class Batch
+ * implements Blueprint<Batch, { schema: "Job"; parentLink: "batch";
+ * keyField: "step"; steps: { fetch: {}; index: { after: ["fetch"] } } }>`.
+ * The type stays a table. A create of a row stamps a row of the child
+ * table per step whose when holds, in the create's change set, each through
+ * the child table's own create, with its key, the copied fields and
+ * relations, the step's data, its relation to the row, and its blockers in
+ * the child table's Dependencies, so the steps run in the template's order.
+ * Blueprint keeps no column: a read of the row computes its children, the
+ * child rows that point at it. Like Timers, it resolves to the empty
+ * object type; the first type argument is the table itself.
+ */
+export type Blueprint<T, C extends BlueprintOn<T>> = NonNullable<unknown>;
 
 /** One derived field of DerivedOn<T> (D73): the table's own fields it is derived from, never itself or another derived field; what the model is asked; the label of its model; and the states of the table's Workflow it is derived in. */
 export interface DerivedFieldOn<T> {

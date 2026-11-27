@@ -571,7 +571,9 @@ impl Bridge<'_> {
                         .map(|(name, value)| (name.clone(), value.clone()))
                         .collect(),
                 },
-                SharedRowChange::Update { .. } => shared.change.clone(),
+                SharedRowChange::Update { .. } | SharedRowChange::Delete { .. } => {
+                    shared.change.clone()
+                }
                 other => {
                     return Ran::Refused(Refusal::internal(format!(
                         "the development store takes no shared-table change of this kind: {other:?}"

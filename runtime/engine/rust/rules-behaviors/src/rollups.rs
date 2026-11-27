@@ -46,6 +46,17 @@
 //! bound does not. It reads the state from transition's `to`, the only
 //! state Workflow's closed parameters name.
 //!
+//! A gating rollup's `exemptions` (D104's Barrier) let a move through its
+//! gate though it does not hold: a caller's who holds the `permission`
+//! they name, a person's go-ahead; and the move a `deadlines` entry makes,
+//! a deadline of the table's one Timers whose `then` moves into a state the
+//! rollup gates, as it falls due. A deadline's move is the Timers use's
+//! call of Workflow's transition while the named deadline is due and has
+//! not fired, which its sub-table row says; each named deadline is held at
+//! define to the Timers config: it is one of its deadlines, and its `then`
+//! moves into a state the rollup gates. A table's alone: an engine type
+//! refuses exemptions.
+//!
 //! The bound: a rollup reads the rows a linked page at a time, as the host
 //! has them, as Reactions' rule over every row does, up to
 //! [`MAX_ROLLUP_READ`] rows (10,000, twenty pages). Past it the rollup has no
@@ -82,6 +93,7 @@ use superschematic_rules::{
 
 use crate::declared;
 use crate::schema::{self, Issues};
+use crate::timers;
 use crate::workflow::{self, state_outcome, WorkflowOutcome};
 
 /// The behavior's name, as its declaration has it.
@@ -105,7 +117,8 @@ const WORKFLOW_STATUS: &str = "Workflow.status";
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 1] = ["rollups"];
-const ROLLUP_KEYS: [&str; 6] = [
+const ROLLUP_KEYS: [&str; 7] = [
+    "exemptions",
     "field",
     "function",
     "gatedStates",
@@ -113,6 +126,7 @@ const ROLLUP_KEYS: [&str; 6] = [
     "outcomes",
     "schema",
 ];
+const EXEMPTION_KEYS: [&str; 2] = ["deadlines", "permission"];
 
 // The patterns the configSchema holds names to.
 const NAME_PATTERN: &str = "^[a-z][A-Za-z0-9]{0,63}$";
@@ -189,6 +203,19 @@ pub struct RollupSpec {
     /// For all and any, the outcomes a linked row's terminal state must
     /// have to count; every outcome when `None`.
     pub outcomes: Option<Vec<WorkflowOutcome>>,
+    /// For a gating rollup, the moves into its gated states its gate lets
+    /// through though it does not hold (D104's Barrier).
+    pub exemptions: Option<RollupExemptions>,
+}
+
+/// A gating rollup's exemptions (D104's Barrier): the permission whose
+/// holder moves through the gate, and the deadlines of the table's Timers
+/// whose moves do, each with the state its `then` moves into.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RollupExemptions {
+    pub permission: Option<String>,
+    /// Each exempt deadline's name and its `then`'s state.
+    pub deadlines: Vec<(String, String)>,
 }
 
 /// Rollups' config, parsed: each rollup by name, in the config's order,
@@ -198,6 +225,9 @@ pub struct RollupsConfig {
     pub rollups: Vec<(String, RollupSpec)>,
     /// The id of the table's one Workflow use, when a rollup gates it.
     pub gated: Option<String>,
+    /// The id of the table's one Timers use, when a rollup exempts its
+    /// deadlines' moves.
+    pub timers: Option<String>,
 }
 
 impl RollupsConfig {
@@ -231,6 +261,7 @@ impl RollupsConfig {
             .collect();
         let mut parsed = Vec::new();
         let mut gated = None;
+        let mut timers_use = None;
         for (name, entry) in rollups {
             let text = |key: &str| {
                 entry
@@ -258,7 +289,16 @@ impl RollupsConfig {
                         .filter_map(|outcome| WorkflowOutcome::parse(outcome))
                         .collect()
                 }),
+                exemptions: None,
             };
+            let mut spec = spec;
+            if let Some(exemptions) = entry.get("exemptions") {
+                let (exempt, timers_id) = exemptions_of(name, exemptions, &spec, target)?;
+                if timers_id.is_some() {
+                    timers_use = timers_id;
+                }
+                spec.exemptions = Some(exempt);
+            }
             if spec.function == RollupFunction::Latest {
                 return Err(format!(
                     "rollup {name}: latest reads the linked row created last, and a table's row carries no time of its creation the core reads: latest waits for a later step (D104's step 4)"
@@ -332,8 +372,152 @@ impl RollupsConfig {
         Ok(RollupsConfig {
             rollups: parsed,
             gated,
+            timers: timers_use,
         })
     }
+}
+
+// exemptions_of parses a gating rollup's exemptions, the configSchema
+// having held their shape: each exempt deadline held to the table's one
+// Timers, one of its deadlines whose then moves into a state the rollup
+// gates. It returns the Timers use's id when the rollup names deadlines.
+fn exemptions_of(
+    name: &str,
+    raw: &Value,
+    spec: &RollupSpec,
+    target: &ConfigTarget<'_>,
+) -> Result<(RollupExemptions, Option<String>), ConfigError> {
+    let mut exempt = RollupExemptions {
+        permission: raw
+            .get("permission")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        deadlines: Vec::new(),
+    };
+    let deadlines = strings(raw.get("deadlines"));
+    if deadlines.is_empty() {
+        return Ok((exempt, None));
+    }
+    let uses: Vec<&UseSpec> = target
+        .uses()
+        .iter()
+        .filter(|entry| entry.behavior == timers::NAME)
+        .collect();
+    let timers_use = match uses.as_slice() {
+        [] => {
+            let reason = format!(
+                "rollup {name} exempts deadlines of the type's Timers, which the type does not compose"
+            );
+            return Err(reason.into());
+        }
+        [entry] => *entry,
+        several => {
+            let ids: Vec<&str> = several.iter().map(|entry| entry.id()).collect();
+            return Err(format!(
+                "rollup {name} exempts deadlines of the type's Timers, and the type has several ({}): name the deadlines of its one Timers",
+                ids.join(", ")
+            )
+            .into());
+        }
+    };
+    let config = timers_use.config.clone().unwrap_or(Value::Null);
+    let empty = Map::new();
+    let declared = config
+        .get("deadlines")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    for deadline in deadlines {
+        let Some(entry) = declared.get(&deadline) else {
+            let names: Vec<&str> = declared.keys().map(String::as_str).collect();
+            return Err(format!(
+                "rollup {name}: exempt deadline \"{deadline}\" is not a deadline of the type's Timers ({})",
+                if names.is_empty() {
+                    "none".to_owned()
+                } else {
+                    names.join(", ")
+                }
+            )
+            .into());
+        };
+        let Some(state) = entry
+            .get("then")
+            .and_then(|then| then.get("transition"))
+            .and_then(Value::as_str)
+        else {
+            return Err(format!(
+                "rollup {name}: exempt deadline \"{deadline}\" has no then, so it moves the row into no state the rollup gates"
+            )
+            .into());
+        };
+        if !spec.gated_states.iter().any(|gated| gated == state) {
+            return Err(format!(
+                "rollup {name}: exempt deadline \"{deadline}\" moves to {state}, which the rollup does not gate ({})",
+                spec.gated_states.join(", ")
+            )
+            .into());
+        }
+        exempt.deadlines.push((deadline, state.to_owned()));
+    }
+    Ok((exempt, Some(timers_use.id().to_owned())))
+}
+
+// exempt says whether a gating rollup's exemptions let a move into `to`
+// through its gate: the caller holds the permission they name, or the move
+// is the Timers use's call of the transition while an exempt deadline whose
+// then moves into `to` is due and has not fired.
+fn exempt(
+    view: &View<'_, RollupsConfig>,
+    request: &GuardRequest<'_>,
+    spec: &RollupSpec,
+    to: &str,
+) -> Hook<bool> {
+    let Some(exemptions) = &spec.exemptions else {
+        return Ok(false);
+    };
+    if let Some(permission) = &exemptions.permission {
+        if view.can(permission)? {
+            return Ok(true);
+        }
+    }
+    let moving: Vec<&str> = exemptions
+        .deadlines
+        .iter()
+        .filter(|(_, state)| state == to)
+        .map(|(deadline, _)| deadline.as_str())
+        .collect();
+    if moving.is_empty() {
+        return Ok(false);
+    }
+    let GuardRequest::Operation {
+        caller: Some(caller),
+        ..
+    } = request
+    else {
+        return Ok(false);
+    };
+    let (Some(timers_use), Some(key)) = (view.config().timers.as_deref(), view.key()) else {
+        return Ok(false);
+    };
+    if *caller != timers_use {
+        return Ok(false);
+    }
+    let rows = view.sub_rows_of(view.type_name(), key, timers_use, timers::DEADLINES)?;
+    let now = view.now();
+    Ok(rows.iter().any(|row| {
+        // A SQLite column holds a boolean as 0 or 1.
+        let fired = match row.values.get("fired") {
+            Some(Value::Bool(fired)) => *fired,
+            Some(other) => number_of(other).is_some_and(|n| n != 0.0),
+            None => false,
+        };
+        moving.contains(&row.key.as_str())
+            && !fired
+            && row
+                .values
+                .get("dueAt")
+                .and_then(number_of)
+                .is_some_and(|due| due <= now as f64)
+    }))
 }
 
 /// Whether a terminal state's outcome counts for a list of outcomes: every
@@ -724,9 +908,15 @@ impl Behavior for Rollups {
                     ..
                 }
             );
-            if !holds {
-                return Ok(Some(refusal(view, to, &name, &result)));
+            if holds {
+                continue;
             }
+            if let Some(spec) = config.get(&name) {
+                if exempt(view, request, spec, to)? {
+                    continue;
+                }
+            }
+            return Ok(Some(refusal(view, to, &name, &result)));
         }
         Ok(None)
     }
@@ -887,6 +1077,36 @@ fn rollup_issues(at: &str, rollup: &Value, issues: &mut Issues) {
     }
     if let Some(name) = members.get("schema") {
         pattern_issues(&schema::member(at, "schema"), name, SCHEMA_PATTERN, issues);
+    }
+    // allOf[3]: exemptions are a gating rollup's.
+    if let Some(exemptions) = members.get("exemptions") {
+        if !members.contains_key("gatedStates") {
+            issues.push(at, "if", "must match \"then\" schema");
+            issues.push(at, "required", "must have required property 'gatedStates'");
+        }
+        exemptions_issues(&schema::member(at, "exemptions"), exemptions, issues);
+    }
+}
+
+// exemptions_issues lists what a gating rollup's exemptions break of `{
+// type: object, additionalProperties: false, minProperties: 1, properties:
+// { permission: { type: string, minLength: 1 }, deadlines: { type: array,
+// minItems: 1, uniqueItems: true, items: { type: string, minLength: 1 } } }
+// }`.
+fn exemptions_issues(at: &str, value: &Value, issues: &mut Issues) {
+    let Some(members) = value.as_object() else {
+        issues.push(at, "type", "must be object");
+        return;
+    };
+    unknown_keys(at, members, &EXEMPTION_KEYS, issues);
+    if members.is_empty() {
+        issues.push(at, "minProperties", "must NOT have fewer than 1 properties");
+    }
+    if let Some(deadlines) = members.get("deadlines") {
+        gated_issues(&schema::member(at, "deadlines"), deadlines, issues);
+    }
+    if let Some(permission) = members.get("permission") {
+        schema::text_issues(&schema::member(at, "permission"), permission, issues);
     }
 }
 

@@ -72,8 +72,11 @@ type mergeStep struct {
 	source        string
 	field         string
 	selfReference string
-	collisions    []mergeStatement
-	repoint       mergeStatement
+	// before run first, counted nowhere: an Aliased use's insert of the row
+	// merged away's name as an alias of the row that stays (D147).
+	before     []mergeStatement
+	collisions []mergeStatement
+	repoint    mergeStatement
 }
 {{- range .Repositories }}
 {{- if .Merge }}
@@ -86,6 +89,13 @@ var {{ lowerFirst .TypeName }}MergeSteps = []mergeStep{
 		field:  {{ printf "%q" .Field }},
 		{{- if .SelfReference }}
 		selfReference: {{ goRawString .SelfReference }},
+		{{- end }}
+		{{- if .Before }}
+		before: []mergeStatement{
+			{{- range .Before }}
+			{sql: {{ goRawString .SQL }}{{ if .Actor }}, actor: true{{ end }}},
+			{{- end }}
+		},
 		{{- end }}
 		{{- if .Collisions }}
 		collisions: []mergeStatement{
@@ -195,6 +205,11 @@ func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyTy
 				}
 				if references {
 					return nil, fmt.Errorf("merge {{ .TypeName }}: %v references %v through %s, and would reference itself: %w", into, from, step.field, ErrMergeSelfReference)
+				}
+			}
+			for _, before := range step.before {
+				if _, err := before.run(ctx, tx, fromKey, intoKey, actor); err != nil {
+					return nil, fmt.Errorf("merge {{ .TypeName }}: move %s.%s: %w", step.source, step.field, err)
 				}
 			}
 			for _, collision := range step.collisions {

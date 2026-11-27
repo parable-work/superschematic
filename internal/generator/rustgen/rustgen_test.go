@@ -62,6 +62,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		// lists its fences, on Postgres and on SQLite, which the runtime's
 		// repositories advance, and Depot's soft deletes carry the bump.
 		{service: "fixture-fenced-db", sqlite: true},
+		// A variant field (D149): Step reads through StepWire, whose
+		// TryFrom decodes its result with StepResult::from_variant by its
+		// kind, and validate_step checks it with validate_step_result_by;
+		// the API's views read the database's union.
+		{service: "fixture-variant-field-db", sqlite: true},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
 		// References and attachments (D154, D185): the Postgres definition in
 		// src/orm.rs carries them, and the repositories open references()
 		// and attachments().

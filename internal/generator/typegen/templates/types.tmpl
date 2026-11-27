@@ -1371,6 +1371,15 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 				errors.AddNestedError(fieldKey, itemErrs)
 			}
 		}
+		{{else if .Variant}}
+		// A variant field (D149): its value is the member its sibling
+		// {{.Variant.ByKey}} names, or the field holds none.
+		{{template "variantBy" .Variant}}
+		if !({{$wrapper}}{Value: value}).HoldsArm(by) {
+			errors.AddFieldError("{{.Name}}", "variant", {{printf "%q" (print "holds a value its " .Variant.ByKey " names no member for")}})
+		} else if fieldErrs := ({{$wrapper}}{Value: value}).Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("{{.Name}}", fieldErrs)
+		}
 		{{else}}
 		if fieldErrs := ({{$wrapper}}{Value: value}).Validate(); fieldErrs.HasErrors() {
 			errors.AddNestedError("{{.Name}}", fieldErrs)
@@ -2140,7 +2149,13 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 			t.{{.GoName}}.Value = values
 			{{- else}}
 			var w {{unionWrapperType .Type $.ImportedUnions}}
+			{{- if .Variant}}
+			// A variant field (D149): the member its sibling names.
+			{{template "variantBy" .Variant}}
+			if err := w.UnmarshalVariantJSON(by, aux.{{.GoName}}); err != nil {
+			{{- else}}
 			if err := w.UnmarshalJSON(aux.{{.GoName}}); err != nil {
+			{{- end}}
 				return fmt.Errorf("decode {{.Name}}: %w", err)
 			}
 			t.{{.GoName}}.Value = w.Value
@@ -2202,7 +2217,13 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 {{- else}}
 	if len(aux.{{.GoName}}) > 0 && string(aux.{{.GoName}}) != "null" {
 		var w {{unionWrapperType .Type $.ImportedUnions}}
+		{{- if .Variant}}
+		// A variant field (D149): the member its sibling names.
+		{{template "variantBy" .Variant}}
+		if err := w.UnmarshalVariantJSON(by, aux.{{.GoName}}); err != nil {
+		{{- else}}
 		if err := w.UnmarshalJSON(aux.{{.GoName}}); err != nil {
+		{{- end}}
 			return fmt.Errorf("decode {{.Name}}: %w", err)
 		}
 		t.{{.GoName}} = w.Value
@@ -2736,4 +2757,15 @@ func {{.AccessorName}}() {{.Type}} {
 {{- end}}
 		}
 	}
+{{- end}}
+
+{{/* variantBy declares by, the value of a variant field's sibling (D149),
+   "" when it holds none. */}}
+{{define "variantBy"}}
+{{- if eq .ByPresent "true"}}by := {{.ByValue}}
+{{- else}}by := ""
+	if {{.ByPresent}} {
+		by = {{.ByValue}}
+	}
+{{- end}}
 {{- end}}

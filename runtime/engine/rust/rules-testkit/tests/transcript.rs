@@ -18,7 +18,8 @@
 //! Schedules' and Pool's (`core-seats`, `core-reconcile`, `core-schedules`,
 //! `core-pool`) among them, behaviors no engine implements, Schedules' and
 //! Pool's holding the events each command wrote, and Pool's its picks, each
-//! a command without a row (D104).
+//! a command without a row (D104), and Aliased's (`core-aliased`, D147), its
+//! resolves commands without a row.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,8 +27,8 @@ use std::fs;
 use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::Core;
 use superschematic_rules_testkit::{
-    hand_written_path, hand_written_transcript, ported, scenario_path, transcript, transcript_path,
-    Transcript, TranscriptStep,
+    declarations_of, hand_written_path, hand_written_transcript, hand_written_transcript_declaring,
+    ported, scenario_path, transcript, transcript_path, Transcript, TranscriptStep,
 };
 
 /// The steps `core-workflow.transcript.json` holds, of `core-workflow.json`'s
@@ -413,6 +414,39 @@ const REFUNDS_FLOOR: usize = 52;
 /// `core-payments.json` (D70 on the core, D103's step 4).
 const PAYMENTS_FLOOR: usize = 73;
 
+/// The steps `core-blueprint.transcript.json` holds, of the engine's
+/// `workqueue-blueprint.json`'s 405 (D149): 101 define and publish checks
+/// and 50 commands, creates whose after-change hook creates each child in
+/// the create's change set, its blockers Dependencies' create parameters,
+/// updates, and Dependencies' listBlockers on the children. The rest of the
+/// 254 left out are opens, reads of rows and of the event log, and what the
+/// replay skips: the scenarios whose links pin, the one that composes
+/// Queue, the one whose access policy is the test's own, the defines the
+/// engine refused for what the child schema lacks, and the refusals that
+/// name Links. An adapter's replay holds its own count to this one.
+const BLUEPRINT_FLOOR: usize = 151;
+/// The steps `core-aliased.transcript.json` holds, of the hand-written
+/// `core-aliased.json`'s 54 (D147): its define and publish checks, two of
+/// them refused, and its commands, creates (four refused for a name
+/// another row holds), Aliased's operations, four of them repeats
+/// answered unchanged, resolve's commands without a row, and a delete, 36
+/// commands and 10 checks, each command holding its row's version after
+/// the step, with its aliases as its sub-rows, in its 5 scenarios. The 8
+/// left out are the opens and the reads of rows. An adapter's replay holds
+/// its own count to this one.
+const ALIASED_FLOOR: usize = 46;
+/// The steps `core-bundles.transcript.json` holds, of the hand-written
+/// `core-bundles.json`'s 81 (D103's step 5): the 12 define and publish
+/// checks of each bundle's table, whose uses are the parts the loader
+/// expands the bundle into, and 78 commands, each holding its row's
+/// version after the step, the deadlines the runner's runDues ran and the
+/// changes of the tables Timers hears among them, in its 4 scenarios,
+/// Reservation's, Barrier's (its gate's exemptions among them, D104),
+/// Mailbox's and Assignment's; none is a repeat. The 11 left out are the
+/// opens, the reads of rows and a runDue that ran nothing. An adapter's
+/// replay holds its own count to this one.
+const BUNDLES_FLOOR: usize = 90;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -450,8 +484,9 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ),
         ("core-bookings", "commerce-calendar", BOOKINGS_FLOOR),
         ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
+        ("core-blueprint", "workqueue-blueprint", BLUEPRINT_FLOOR),
     ] {
-        let written = written(name, &scenario_path(source), transcript);
+        let written = written(name, &scenario_path(source), &transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
             written
                 .scenarios
@@ -506,8 +541,10 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-commerce", COMMERCE_FLOOR, false),
         ("core-calendar", CALENDAR_FLOOR, false),
         ("core-payments", PAYMENTS_FLOOR, false),
+        ("core-aliased", ALIASED_FLOOR, true),
+        ("core-bundles", BUNDLES_FLOOR, false),
     ] {
-        let written = written(name, &hand_written_path(name), hand_written_transcript);
+        let written = written(name, &hand_written_path(name), &hand_written_transcript);
         let mut repeats = 0;
         for scenario in &written.scenarios {
             // The version each row's last command left it at.
@@ -573,8 +610,95 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
     }
 }
 
+/// The steps `core-declarative.transcript.json` holds, of the hand-written
+/// `core-declarative.json`'s 52 (D103's step 5): its define and publish
+/// checks, five of them refused, and its creates, votes, flags, accepts,
+/// summaries and updates, with the changes the runner's sweeps ran for
+/// test.Votes' reactions, each holding its row's version; the opens and the
+/// reads of rows are left out.
+const DECLARATIVE_FLOOR: usize = 49;
+
+/// A transcript of declarative behaviors (D103's step 5) holds each one's
+/// declaration file whole, which a host hands its core before it replays
+/// it, and names it among its behaviors after the core's own.
+#[test]
+fn a_declarative_transcript_holds_its_declarations() {
+    let name = "core-declarative";
+    let source = hand_written_path(name);
+    let declarations = declarations_of(&source).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        declarations.len(),
+        1,
+        "core-declarative declares test.Votes"
+    );
+    let write = |file: &ScenarioFile, make_core: &dyn Fn() -> Core| {
+        hand_written_transcript_declaring(
+            file,
+            make_core,
+            &declarations,
+            "runtime/engine/testdata/rules/scenarios/core-declarative.json",
+        )
+    };
+    let written = written(name, &source, &write);
+    assert_eq!(written.declarations, declarations);
+    assert_eq!(
+        written.behaviors.last().map(String::as_str),
+        Some("test.Votes")
+    );
+    println!(
+        "{}: {} scenarios, {} steps, {} left out",
+        written.file,
+        written.scenarios.len(),
+        written.steps(),
+        written.skipped()
+    );
+    assert!(
+        written.steps() >= DECLARATIVE_FLOOR,
+        "{name}'s transcript holds {} steps, under the floor of {DECLARATIVE_FLOOR}",
+        written.steps()
+    );
+}
+
+/// The steps `acme-rating.transcript.json` holds, of the acme example's
+/// hand-written `acme-rating.json` (D103's step 5): acme.Rating as a
+/// declaration with no crate, its define and publish checks and its
+/// creates, rates and summaries, each holding its row's version.
+const ACME_RATING_FLOOR: usize = 26;
+
+/// acme.Rating's transcript (D103's step 5), written from the acme
+/// example's scenarios beside its declaration
+/// (`examples/acme-schematic/testdata/rules/acme-rating.json`), holds the
+/// extension's declaration file whole, so every host replays it with no
+/// file of the example's: the core's own transcripts' directory keeps it.
+#[test]
+fn acme_ratings_transcript_holds_its_declaration() {
+    let name = "acme-rating";
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../examples/acme-schematic/testdata/rules/acme-rating.json");
+    let declarations = declarations_of(&source).unwrap_or_else(|error| panic!("{error}"));
+    let write = |file: &ScenarioFile, make_core: &dyn Fn() -> Core| {
+        hand_written_transcript_declaring(
+            file,
+            make_core,
+            &declarations,
+            "examples/acme-schematic/testdata/rules/acme-rating.json",
+        )
+    };
+    let written = written(name, &source, &write);
+    assert_eq!(written.declarations, declarations);
+    assert_eq!(
+        written.behaviors.last().map(String::as_str),
+        Some("acme.Rating")
+    );
+    assert!(
+        written.steps() >= ACME_RATING_FLOOR,
+        "{name}'s transcript holds {} steps, under the floor of {ACME_RATING_FLOOR}",
+        written.steps()
+    );
+}
+
 // The writer of a scenario file's transcript.
-type Writer = fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
+type Writer<'w> = &'w dyn Fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
 
 // written writes a scenario file's transcript under a name, which names the
 // file it is written to and its `file`, rewrites the checked-in file when

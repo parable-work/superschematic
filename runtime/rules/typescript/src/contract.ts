@@ -472,6 +472,8 @@ export interface BehaviorDeclaration {
   /** The signals it declares (D77's primitive 2): typing, viewing and draft of Comments; absent for none. */
   readonly signals?: readonly DeclaredSignal[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
+  /** The rules of a declarative behavior (D103's step 5), in the vocabulary the core interprets: a behavior no Rust implements, which a host hands the core with declare. Absent for one the core implements. */
+  readonly rules?: Record<string, unknown>;
   readonly [member: string]: unknown;
 }
 

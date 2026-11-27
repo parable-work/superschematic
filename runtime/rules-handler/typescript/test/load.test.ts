@@ -31,7 +31,7 @@ test('the module imports nothing and exports the C ABI', () => {
   const module = new WebAssembly.Module(wasmBytes);
   expect(WebAssembly.Module.imports(module)).toEqual([]);
   const names = WebAssembly.Module.exports(module).map(entry => entry.name);
-  for (const name of ['memory', 'handler_alloc', 'handler_dealloc', 'handler_free', 'handler_run', 'handler_route', 'handler_respond', 'handler_events', 'handler_tool', 'handler_bridge', 'handler_core', 'handler_layout']) {
+  for (const name of ['memory', 'handler_alloc', 'handler_dealloc', 'handler_free', 'handler_run', 'handler_route', 'handler_respond', 'handler_events', 'handler_tool', 'handler_bridge', 'handler_core', 'handler_layout', 'handler_declare']) {
     expect(names).toContain(name);
   }
 });

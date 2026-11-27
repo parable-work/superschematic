@@ -128,9 +128,12 @@ func TestOpenAPISeatsOperations(t *testing.T) {
 	for _, p := range catalog.Permissions {
 		operations[p.Name] = p.Operations
 	}
-	seatsOperations := []string{"ProblemSeatsLeaveSeatHandler", "ProblemSeatsListSeatsHandler", "ProblemSeatsTakeSeatHandler"}
+	// takeSeat checks a seat's take and assign, leaveSeat its assign and
+	// listSeats none, as Seats' declaration says (D103's step 5).
+	both := []string{"ProblemSeatsLeaveSeatHandler", "ProblemSeatsTakeSeatHandler"}
+	take := []string{"ProblemSeatsTakeSeatHandler"}
 	for permission, want := range map[string][]string{
-		"problems.assign": seatsOperations, "problems.own": seatsOperations, "problems.release": seatsOperations, "problems.work": seatsOperations,
+		"problems.assign": both, "problems.own": take, "problems.release": both, "problems.work": take,
 		"problems.override": {"ProblemStatusTransitionHandler"}, "sandboxes.observe": {"SandboxObservedObserveHandler"}, "sandboxes.stop": {"SandboxStatusTransitionHandler"},
 	} {
 		if got := operations[permission]; !slices.Equal(got, want) {

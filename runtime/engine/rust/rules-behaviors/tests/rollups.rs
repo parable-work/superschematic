@@ -7,8 +7,9 @@
 //! and any with outcomes, a state Workflow's finished names counting (D113);
 //! the gate, whoever asks, an any gate, a table whose relation no longer
 //! points here holding none, every linked page read, the read bound; a rollup
-//! over the table itself (a task done as its subtasks are); and the config
-//! change.
+//! over the table itself (a task done as its subtasks are); the gate's
+//! exemptions, a permission's holder and a Timers deadline's move (D104's
+//! Barrier); and the config change.
 
 mod support;
 mod tables;
@@ -573,4 +574,145 @@ fn a_config_changes_freely_and_rollups_comes_and_goes() {
     changed(publish(&host, live, without.clone()));
     changed(publish(&host, without, host.spec("Project")));
     let _ = Map::<String, Value>::new();
+}
+
+// A project whose finished gate exempts what exemptions names, beside a
+// Timers deadline, closeBy, that moves it to done a second after it is
+// active.
+fn exempting(exemptions: Value) -> TypeSpec {
+    TypeSpec::new("Project")
+        .with(UseSpec::on_type(
+            "Rollups",
+            json!({"rollups": {"finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"], "exemptions": exemptions}}}),
+        ))
+        .with(UseSpec::on_type(
+            "Timers",
+            json!({"deadlines": {"closeBy": {"start": {"enters": "active"}, "afterMs": 1000, "then": {"transition": "done"}}}}),
+        ))
+        .with(UseSpec::on_type("Workflow", project_flow()))
+        .with_field(FieldSpec::new("title", "string"))
+}
+
+/// Exemptions are a gating rollup's, an object of a permission and the
+/// deadlines of the table's one Timers whose then moves into a gated state,
+/// each held to the Timers config at define.
+#[test]
+fn a_gates_exemptions_are_held_to_its_schema_and_the_tables_timers() {
+    let core = core();
+    let of = |config: Value| {
+        let spec = TypeSpec::new("Project")
+            .with(UseSpec::on_type("Workflow", project_flow()))
+            .with(UseSpec::on_type("Rollups", config));
+        shape(&core, &spec)
+    };
+    assert_eq!(
+        of(
+            json!({"rollups": {"finished": {"schema": "Task", "link": "project", "function": "all", "exemptions": {"permission": "projects.close"}}}})
+        ),
+        [
+            "/config/rollups/finished: must match \"then\" schema",
+            "/config/rollups/finished: must have required property 'gatedStates'"
+        ]
+    );
+    assert_eq!(
+        of(
+            json!({"rollups": {"finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"], "exemptions": {}}}})
+        ),
+        ["/config/rollups/finished/exemptions: must NOT have fewer than 1 properties"]
+    );
+    assert_eq!(
+        of(
+            json!({"rollups": {"finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"], "exemptions": {"deadlines": [], "who": "x"}}}})
+        ),
+        [
+            "/config/rollups/finished/exemptions: unknown key \"who\"",
+            "/config/rollups/finished/exemptions/deadlines: must NOT have fewer than 1 items"
+        ]
+    );
+    let refusal = |spec: TypeSpec| rule(&core, &spec, "Rollups");
+    assert_eq!(
+        refusal(exempting(json!({"deadlines": ["openBy"]}))),
+        "rollup finished: exempt deadline \"openBy\" is not a deadline of the type's Timers (closeBy)"
+    );
+    assert_eq!(
+        refusal(project(
+            json!({"finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"], "exemptions": {"deadlines": ["closeBy"]}}})
+        )),
+        "rollup finished exempts deadlines of the type's Timers, which the type does not compose"
+    );
+    let dropping = TypeSpec::new("Project")
+        .with(UseSpec::on_type(
+            "Rollups",
+            json!({"rollups": {"finished": {"schema": "Task", "link": "project", "function": "all", "gatedStates": ["done"], "exemptions": {"deadlines": ["closeBy"]}}}}),
+        ))
+        .with(UseSpec::on_type(
+            "Timers",
+            json!({"deadlines": {"closeBy": {"start": {"enters": "active"}, "afterMs": 1000, "then": {"transition": "dropped"}}}}),
+        ))
+        .with(UseSpec::on_type("Workflow", project_flow()));
+    assert_eq!(
+        refusal(dropping),
+        "rollup finished: exempt deadline \"closeBy\" moves to dropped, which the rollup does not gate (done)"
+    );
+    assert!(define(
+        &core,
+        &exempting(json!({"permission": "projects.close", "deadlines": ["closeBy"]}))
+    )
+    .is_ok());
+}
+
+/// A caller who holds the permission the gate exempts moves into the gated
+/// state though the rollup does not hold; one who does not is vetoed.
+#[test]
+fn a_holder_of_the_exempt_permission_passes_the_gate() {
+    let mut host = Host::new(
+        core(),
+        [task(), exempting(json!({"permission": "projects.close"}))],
+    );
+    changed(host.create("Project", &alice(), T0, "p1", json!({"title": "p1"})));
+    add_task(&mut host, "t1", json!({"title": "t1", "projectId": "p1"}));
+    let (code, _) = veto_of(mv(&mut host, "Project", "p1", "done"));
+    assert_eq!(code, rollups::NOT_HELD);
+    let lead = Caller::new("lead", ["projects.close"]);
+    assert_eq!(
+        result(host.invoke(
+            "Project",
+            &lead,
+            T0 + 1000,
+            "p1",
+            "Workflow",
+            "transition",
+            json!({"to": "done"}),
+        )),
+        json!({"from": "active", "to": "done"})
+    );
+}
+
+/// The move an exempt deadline makes as it falls due passes the gate, its
+/// fire recorded moved, though the runner holds no permission; with no
+/// exemption the same fire is vetoed.
+#[test]
+fn an_exempt_deadlines_move_passes_the_gate() {
+    let runner = Caller::new("runner", Vec::<String>::new());
+    for (exemptions, outcome, status) in [
+        (json!({"deadlines": ["closeBy"]}), "moved", "done"),
+        (json!({"permission": "projects.close"}), "vetoed", "active"),
+    ] {
+        let mut host = Host::new(core(), [task(), exempting(exemptions.clone())]);
+        changed(host.create("Project", &alice(), T0, "p1", json!({"title": "p1"})));
+        add_task(&mut host, "t1", json!({"title": "t1", "projectId": "p1"}));
+        let fired = host.fall_due(T0 + 1000, &runner);
+        assert_eq!(fired.len(), 1, "{exemptions}");
+        changed(fired.into_iter().next().unwrap().2);
+        let deadlines = host.sub_rows("Project", "p1", "Timers", "deadlines");
+        assert_eq!(
+            deadlines[0]["values"]["outcome"], outcome,
+            "{exemptions}: {deadlines}"
+        );
+        assert_eq!(
+            host.owned("Project", "p1", "Workflow", "status"),
+            status,
+            "{exemptions}"
+        );
+    }
 }

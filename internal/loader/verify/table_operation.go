@@ -92,6 +92,7 @@ func checkTableOperations(schema *ir.Schema, in Input, r *Result) {
 	}
 	for _, m := range ops {
 		checkTableOperation(schema, db, m.set, m.op, r)
+		refuseSQLiteMergeRoutes(schema, in, dbName, m.set.Name+"."+m.op.Name, m.op, r)
 	}
 	// Each operation the loader filled documents itself (D111).
 	documentTableOperations(schema, in.registry().ToolInvocationPolicy())
@@ -278,6 +279,10 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 		switch {
 		case list:
 			r.errorf("", "%s: a POST creates a row of %s and answers its view, not a list", owner, result.source.Name)
+		case keyArg != nil && inPath[ir.TableOperationInto] && result.source.Mergeable:
+			// A merge (D147): the row of the key folded into the row of
+			// {into}.
+			kind = ir.TableOperationMerge
 		case keyArg != nil:
 			r.errorf("", "%s: a POST creates a row of %s, and its path holds {%s}, a row's key; an update of that row is a PATCH", owner, result.source.Name, key)
 		default:
@@ -327,7 +332,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 	var parents []ir.TableOperationParent
 	parentOf := map[string]bool{}
 	for _, arg := range path {
-		if arg == keyArg {
+		if arg == keyArg || (kind == ir.TableOperationMerge && arg.Name == ir.TableOperationInto) {
 			if column := result.column(key); column != nil && column.Def != nil && column.Def.TypeRef.Name != arg.TypeRef.Name {
 				r.errorf("", "%s: path parameter %s holds %s, and %s's key %s holds %s", owner, arg.Name, typeLabel(arg.TypeRef), result.source.Name, key, column.Def.TypeRef.Name)
 			}
@@ -370,6 +375,11 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 	}
 
 	checkResultView(owner, result, r)
+	if kind == ir.TableOperationMerge && (len(op.TableOperation.By) > 0 || len(parents) > 0) {
+		// A merge reaches both rows, which no row rule or parent holds to
+		// one caller or one parent (D147).
+		r.errorf("", "%s: a merge folds a row of %s into another, both by their keys alone; it takes no row rule (by) and no parent in its path: write it by hand to hold either", owner, result.source.Name)
+	}
 	callerSets := checkRowRule(owner, kind, op, db, result, key, parentOf, r)
 
 	var input *tableView

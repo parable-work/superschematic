@@ -132,6 +132,9 @@ type Check struct {
 	// code points as every validator counts them (Validate minLength and
 	// maxLength).
 	MinLength, MaxLength *int
+	// Variant holds a variant field's JSON column to the member its sibling
+	// column names (D149); its predicate differs by dialect.
+	Variant *VariantCheck
 }
 
 // ColumnCheck returns the check of field's column, named column and of
@@ -178,6 +181,9 @@ func EnumValues(enum *ir.EnumDef) []string {
 // `rating >= 1 AND rating <= 5`, `length(title) <= 100`. length() counts
 // characters in Postgres and SQLite alike.
 func (c Check) Expression(quote func(string) string) string {
+	if c.Variant != nil {
+		return c.Variant.expression(postgresVariant, c.Column, quote)
+	}
 	col := quote(c.Column)
 	if len(c.In) > 0 {
 		values := make([]string, len(c.In))
@@ -201,6 +207,16 @@ func (c Check) Expression(quote func(string) string) string {
 		terms = append(terms, "length("+col+") <= "+strconv.Itoa(*c.MaxLength))
 	}
 	return strings.Join(terms, " AND ")
+}
+
+// SQLiteExpression is Expression on SQLite: the same predicate, but a
+// variant's (D149), which asks its JSON column through SQLite's json_type
+// and json_extract in place of Postgres's jsonb operators.
+func (c Check) SQLiteExpression(quote func(string) string) string {
+	if c.Variant != nil {
+		return c.Variant.expression(sqliteVariant, c.Column, quote)
+	}
+	return c.Expression(quote)
 }
 
 // CheckName is the name of the check on table's column: ck_<table>_<column>,

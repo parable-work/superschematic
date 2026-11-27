@@ -1,0 +1,58 @@
+{
+  "kind": "General",
+  "name": "Job",
+  "description": "A job a worker claims, holds under a lease while it runs, and finishes, on development mode (D117). A claim is a read of the queued jobs of a topic, most urgent first, and Lease's acquire on the first that no blocker holds. A job whose lease ends without it finishing goes back in the queue; a failed attempt is retried per failure class; each claim reserves CPU seconds from the job's budget. A job a batch stamps is one of its steps, and does not start until the steps before it are done.",
+  "scalars": {
+    "Generic.Int64": { "name": "Generic.Int64", "languagePrimitive": "number" }
+  },
+  "types": {
+    "Job": {
+      "name": "Job",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["queued", "running", "done", "failed"],
+            "transitions": [
+              { "from": "queued", "to": "running" },
+              { "from": "running", "to": "queued" },
+              { "from": "running", "to": "done" },
+              { "from": "running", "to": "failed" },
+              { "from": "queued", "to": "failed" }
+            ],
+            "outcomes": { "failed": "failure" }
+          }
+        },
+        {
+          "name": "Lease",
+          "config": {
+            "ttlMs": 30000,
+            "onExpiry": { "transition": "queued", "from": ["running"] },
+            "maxExpiries": 3,
+            "escalate": { "transition": "failed", "from": ["running"] },
+            "overridePermission": "jobs.override"
+          }
+        },
+        { "name": "Budget", "config": { "meters": { "cpuSeconds": { "limit": 600, "reserve": 60 } } } },
+        {
+          "name": "Retries",
+          "config": {
+            "classes": { "transient": { "attempts": 2, "hint": "Try again; the source may be back." }, "invalid": "terminal", "cancelled": "terminal" },
+            "totalAttempts": 3,
+            "exhaustedState": "failed"
+          }
+        },
+        { "name": "Dependencies", "config": { "gatedStates": ["running"] } },
+        { "name": "Constants", "config": { "fields": ["step", "topic"] } }
+      ],
+      "fields": [
+        { "name": "title", "description": "What the job does.", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "topic", "description": "The kind of work, which a worker claims by.", "typeRef": { "name": "string" } },
+        { "name": "priority", "description": "Higher runs first.", "typeRef": { "name": "Generic.Int64" } },
+        { "name": "step", "description": "The step of its batch the job is, for a job a batch stamped.", "typeRef": { "name": "string" } },
+        { "name": "batch", "description": "The batch that stamped it, for a job a batch stamped.", "typeRef": { "name": "Batch" }, "relation": { "type": "Batch" } }
+      ]
+    }
+  }
+}

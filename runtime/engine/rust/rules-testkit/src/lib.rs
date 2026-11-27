@@ -67,12 +67,14 @@ pub use host::{
     Applied, ApplyError, Armed, DeadlineKey, Logged, MemoryHost, Outboxed, QueuedChange, Store,
     StoredRow, SubRowKey, TypeVersions, MAX_ATTEMPTS, MAX_CHANGES,
 };
-pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
+pub use replay::{
+    declarations_of, replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped,
+};
 pub use transcript::{
-    hand_written_path, hand_written_transcript, transcript, transcript_path, Transcript,
-    TranscriptClock, TranscriptDeadline, TranscriptEvent, TranscriptExpect, TranscriptField,
-    TranscriptOther, TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep,
-    TranscriptType,
+    hand_written_path, hand_written_transcript, hand_written_transcript_declaring, transcript,
+    transcript_path, Transcript, TranscriptClock, TranscriptDeadline, TranscriptEvent,
+    TranscriptExpect, TranscriptField, TranscriptOther, TranscriptRow, TranscriptScenario,
+    TranscriptSkip, TranscriptStep, TranscriptType,
 };
 
 use superschematic_rules::Core;

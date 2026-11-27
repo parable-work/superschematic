@@ -612,6 +612,21 @@ function parseUnionDefinitions(root: JsonObject): Record<string, UnionDef> {
       description: asString(unionRaw.description),
       types,
     };
+    // A variant union (D149): x-by names the sibling, x-arms each of its
+    // values' member.
+    const by = asString(unionRaw['x-by']);
+    if (by) {
+      const arms: Record<string, string> = {};
+      if (isObject(unionRaw['x-arms'])) {
+        for (const [value, member] of Object.entries(unionRaw['x-arms'])) {
+          if (typeof member === 'string') {
+            arms[value] = member;
+          }
+        }
+      }
+      unions[name].by = by;
+      unions[name].arms = arms;
+    }
   }
 
   return unions;

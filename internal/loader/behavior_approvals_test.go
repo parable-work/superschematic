@@ -112,8 +112,8 @@ func TestApprovalsFixturesLoad(t *testing.T) {
 	}
 	if want := []string{
 		"TaskActions.approvalsSignOff task/{id}/approvals/sign-off task_approvals_sign_off Approvals tasks.review",
-		"TaskActions.approvalsWithdrawSignOff task/{id}/approvals/withdraw-sign-off task_approvals_withdraw_sign_off Approvals tasks.review",
-		"TaskActions.approvalsListSignOffs task/{id}/approvals/list-sign-offs task_approvals_list_sign_offs Approvals tasks.review",
+		"TaskActions.approvalsWithdrawSignOff task/{id}/approvals/withdraw-sign-off task_approvals_withdraw_sign_off Approvals ",
+		"TaskActions.approvalsListSignOffs task/{id}/approvals/list-sign-offs task_approvals_list_sign_offs Approvals ",
 		"TaskActions.statusTransition task/{id}/status/transition task_status_transition status ",
 	}; !slices.Equal(operations, want) {
 		t.Errorf("the behavior operations =\n%s\nwant\n%s", strings.Join(operations, "\n"), strings.Join(want, "\n"))

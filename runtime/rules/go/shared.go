@@ -44,12 +44,13 @@ type SharedRowChangeKind string
 const (
 	SharedRowInsert SharedRowChangeKind = "insert"
 	SharedRowUpdate SharedRowChangeKind = "update"
+	SharedRowDelete SharedRowChangeKind = "delete"
 )
 
 // SharedRowChange is what happens to a row of a shared table: an insert of
-// its values at version 1, or an update of the values it sets held to the
-// version ExpectedVersion, which it moves on by one. Values are by the
-// declared field's name.
+// its values at version 1, an update of the values it sets held to the
+// version ExpectedVersion, which it moves on by one, or a delete held to
+// it (D147). Values are by the declared field's name.
 type SharedRowChange struct {
 	Kind            SharedRowChangeKind        `json:"kind"`
 	ExpectedVersion int64                      `json:"expectedVersion,omitempty"`
@@ -73,6 +74,11 @@ func (c SharedRowChange) MarshalJSON() ([]byte, error) {
 			ExpectedVersion int64                      `json:"expectedVersion"`
 			Values          map[string]json.RawMessage `json:"values"`
 		}{c.Kind, c.ExpectedVersion, objectOf(c.Values)})
+	case SharedRowDelete:
+		return json.Marshal(struct {
+			Kind            SharedRowChangeKind `json:"kind"`
+			ExpectedVersion int64               `json:"expectedVersion"`
+		}{c.Kind, c.ExpectedVersion})
 	}
 	if len(c.Raw) > 0 {
 		return c.Raw, nil
@@ -256,6 +262,15 @@ func sharedRowStatement(layout *Layout, dialect Dialect, write SharedRowWrite) (
 			Text: fmt.Sprintf("UPDATE %s SET %s WHERE %s = %s AND %s = %s",
 				quote(shared.Table), strings.Join(sets, ", "), quote(shared.Key.Column.Column), placeholder(dialect, 1), quote(shared.Version), placeholder(dialect, 2)),
 			Values: values,
+			Expect: 1,
+		}, nil
+	case SharedRowDelete:
+		// Held to its version (D147): a row a writer moved or deleted
+		// first deletes nothing, and the unit runs the command again.
+		return &Statement{
+			Text: fmt.Sprintf("DELETE FROM %s WHERE %s = %s AND %s = %s",
+				quote(shared.Table), quote(shared.Key.Column.Column), placeholder(dialect, 1), quote(shared.Version), placeholder(dialect, 2)),
+			Values: []any{write.Key, write.Change.ExpectedVersion},
 			Expect: 1,
 		}, nil
 	}

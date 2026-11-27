@@ -222,6 +222,8 @@ func ExtractUnions(schema *ir.Schema) []UnionInfo {
 			Types:         append([]string{}, unionDef.Types...),
 			Discriminator: discriminator,
 			Members:       members,
+			By:            unionDef.By,
+			Arms:          unionDef.ArmList(),
 		})
 	}
 

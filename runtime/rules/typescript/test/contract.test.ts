@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments', 'Recurrence']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Comments', 'Derived', 'Provenance', 'Stock', 'Holds', 'Calendar', 'Payments', 'Recurrence', 'Blueprint', 'Aliased']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -514,6 +514,48 @@ test('check is each spec define check: null for one the core takes, its refusal 
   };
   expect(core.check([order, bad])).toEqual([null, refusal]);
   expect(core.check([{ name: 'Gizmo', uses: [{ behavior: 'Gadget' }] }], { caller: alice, now: 5 })[0]?.code).toBe('invalid_schema');
+});
+
+test('declare hands the core a declarative behavior, which it runs from then on and lists after its own; a file it cannot read is a RulesError (D103 step 5)', async () => {
+  // A core of the test's own, so the shared one keeps the core's behaviors alone.
+  const declaring = await init();
+  const tally: BehaviorDeclaration = {
+    name: 'test.Tally',
+    fields: [{ name: 'count', type: 'Generic.Int64' }],
+    operations: [{ name: 'add', paramsSchema: { type: 'object', additionalProperties: false }, resultSchema: { type: 'object' }, writes: true }],
+    rules: { operations: { add: { effects: [{ adjust: { count: 1 } }], result: { count: { field: 'count' } } } } },
+  };
+  expect(declaring.declare([tally])).toEqual(['test.Tally']);
+  expect(declaring.declare([tally])).toEqual(['test.Tally']);
+  expect(declaring.declarations().at(-1)).toEqual(tally);
+  const counter: TypeSpec = { name: 'Counter', uses: [{ behavior: 'test.Tally', anchor: 'type' }] };
+  expect(declaring.check([counter])).toEqual([null]);
+  const add: Command = { caller: alice, now: 2000, request: 'r2', action: { kind: 'operation', key: 'c1', useId: 'test.Tally', operation: 'add', params: {} } };
+  const row: Row = { own: {}, owned: { 'test.Tally': { count: 2 } }, version: 1 };
+  const step = declaring.run(counter, add, { reads: [{ request: { kind: 'row', type: 'Counter', key: 'c1' }, answer: { row } }] });
+  expect(step).toEqual({
+    done: {
+      changed: {
+        rows: [{ kind: 'update', type: 'Counter', key: 'c1', expectedVersion: 1, own: {}, owned: { 'test.Tally': { count: 3 } } }],
+        subRows: [],
+        events: [],
+        deadlines: [],
+        result: { count: 3 },
+      },
+    },
+  });
+  // The shared core runs none of it.
+  expect(core.check([counter])[0]?.code).toBe('invalid_schema');
+  for (const refused of [{ ...tally, description: 'another' }, { name: 'Workflow', rules: {} }, { name: 'test.Plain' }]) {
+    let thrown: unknown;
+    try {
+      declaring.declare([refused]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RulesError);
+    expect((thrown as RulesError).code).toBe('invalid_input');
+  }
 });
 
 test('an input of another shape is a RulesError, never a refusal', () => {

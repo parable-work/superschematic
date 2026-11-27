@@ -1,0 +1,149 @@
+{
+  "name": "fixture-variant-field-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-variant-field-db",
+      "types": [
+        "StepKind",
+        "StepResult"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-variant-field-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "CreateStepInput": {
+      "name": "CreateStepInput",
+      "owner": "src/steps.schema.ts",
+      "comment": "What a caller sets to record a step: a result its kind names no shape\nfor is refused with the rule variant.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-variant-field-db.Step",
+        "omittedFromSource": [
+          "id"
+        ]
+      },
+      "fields": [
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "kind",
+          "typeRef": {
+            "name": "StepKind"
+          },
+          "required": true
+        },
+        {
+          "name": "result",
+          "typeRef": {
+            "name": "StepResult"
+          }
+        }
+      ]
+    },
+    "StepView": {
+      "name": "StepView",
+      "owner": "src/steps.schema.ts",
+      "comment": "A step as the API shows it: its result in the shape its kind gives it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-variant-field-db.Step"
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "kind",
+          "typeRef": {
+            "name": "StepKind"
+          },
+          "required": true
+        },
+        {
+          "name": "result",
+          "typeRef": {
+            "name": "StepResult"
+          }
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Steps",
+      "operations": [
+        {
+          "name": "getStep",
+          "comment": "One step.",
+          "typeRef": {
+            "name": "StepView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "steps/{id}"
+        },
+        {
+          "name": "createStep",
+          "comment": "Records a step.",
+          "typeRef": {
+            "name": "StepView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateStepInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "httpMethod": "POST",
+          "restPath": "steps"
+        }
+      ]
+    }
+  ]
+}

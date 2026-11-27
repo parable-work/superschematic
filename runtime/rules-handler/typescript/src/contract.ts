@@ -154,8 +154,11 @@ export type StoreAnswer =
 /** What happens to a sub-table row. */
 export type SubRowChange = { kind: 'insert'; values: JsonObject } | { kind: 'update'; values: JsonObject } | { kind: 'delete' };
 
-/** What happens to a row of a shared table. */
-export type SharedRowChange = { kind: 'insert'; values: JsonObject } | { kind: 'update'; expectedVersion: number; values: JsonObject };
+/** What happens to a row of a shared table: a delete, as an update, is held to the version read (D147). */
+export type SharedRowChange =
+  | { kind: 'insert'; values: JsonObject }
+  | { kind: 'update'; expectedVersion: number; values: JsonObject }
+  | { kind: 'delete'; expectedVersion: number };
 
 /** One write of a unit. A store applies a unit's writes in order, all of them or none. */
 export type StoreWrite =

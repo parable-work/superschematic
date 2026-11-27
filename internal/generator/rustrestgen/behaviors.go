@@ -1,6 +1,7 @@
 package rustrestgen
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -104,11 +105,19 @@ const PreconditionsMember = "preconditions"
 // (internal/generator/behaviorlayout, indented as the Go ORM's RulesLayout
 // holds it), which src/behaviors.rs embeds, and the directories, relative
 // to the API crate's, of superschematic-rules-adapter and
-// superschematic-rules-behaviors, which its Cargo.toml depends on.
+// superschematic-rules-behaviors, which its Cargo.toml depends on. When
+// the database's tables compose a behavior a class or an extension
+// declares with the Rust crate that runs it (D103's step 5), ProjectCrate
+// names the project's rules crate the build writes for the database
+// (internal/generator/rulescore) and ProjectCratePath its directory,
+// relative to the API crate's: the crate depends on it, and its core is
+// that crate's core().
 type DepsBehaviors struct {
-	Layout        string
-	AdapterPath   string
-	BehaviorsPath string
+	Layout           string
+	AdapterPath      string
+	BehaviorsPath    string
+	ProjectCrate     string
+	ProjectCratePath string
 }
 
 // behaviorInfo is the behavior operation endpoint runs, nil for an
@@ -291,6 +300,58 @@ func (o *APIOutput) behaviorWork() string {
 		return "serves the behavior operations of " + o.behaviorUse()
 	}
 	return "runs " + o.behaviorUse()
+}
+
+// RulesCore is the Rust expression src/behaviors.rs builds its core with,
+// once per process (D103's step 5): the stock core,
+// superschematic_rules_behaviors::core, or the project's rules crate's
+// core() when the Deps name one; and, when the layout holds the
+// declarations of declarative behaviors the tables compose, that core with
+// them, the stock one's through superschematic_rules_behaviors::
+// core_declaring. A declaration the core refuses is a defect of the build,
+// which wrote the layout.
+func (o *APIOutput) RulesCore() string {
+	base := "superschematic_rules_behaviors::core"
+	if b := o.behaviorsDeps(); b != nil && b.ProjectCrate != "" {
+		base = strings.ReplaceAll(b.ProjectCrate, "-", "_") + "::core"
+	}
+	if !o.LayoutDeclares() {
+		return base
+	}
+	const refused = `panic!("the behaviors' layout, RULES_LAYOUT, declares a behavior the core refuses: {reason}")`
+	if base == "superschematic_rules_behaviors::core" {
+		return "|| {\n        superschematic_rules_behaviors::core_declaring(&layout().declarations)\n            .unwrap_or_else(|reason| " + refused + ")\n    }"
+	}
+	return "|| {\n        let mut core = " + base + "();\n        let declared = superschematic_rules_behaviors::declaratives(&layout().declarations)\n            .unwrap_or_else(|reason| " + refused + ");\n        for behavior in declared {\n            core.push(behavior);\n        }\n        core\n    }"
+}
+
+// RulesCoreCrate is the crate RulesCore's core comes from, as
+// src/behaviors.rs's docs name it.
+func (o *APIOutput) RulesCoreCrate() string {
+	if b := o.behaviorsDeps(); b != nil && b.ProjectCrate != "" {
+		return b.ProjectCrate + ", the project's rules crate,"
+	}
+	return RulesBehaviorsCrate
+}
+
+// LayoutDeclares reports whether the layout holds the declarations of
+// declarative behaviors (D103's step 5), which the core is built with.
+func (o *APIOutput) LayoutDeclares() bool {
+	b := o.behaviorsDeps()
+	if b == nil || b.Layout == "" {
+		return false
+	}
+	var layout struct {
+		Declarations []json.RawMessage `json:"declarations"`
+	}
+	return json.Unmarshal([]byte(b.Layout), &layout) == nil && len(layout.Declarations) > 0
+}
+
+func (o *APIOutput) behaviorsDeps() *DepsBehaviors {
+	if o.Deps == nil {
+		return nil
+	}
+	return o.Deps.Behaviors
 }
 
 // RulesLayout is the layout document as the Rust raw string literal

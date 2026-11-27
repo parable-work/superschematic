@@ -40,7 +40,27 @@ var _ = json.Marshal
 {{- end }}
 
 {{- range .Fields }}
-{{- if and .IsJSONField .IsUnion }}
+{{- if .VariantByFunc }}
+
+// {{ .VariantByFunc }} is the value of {{ .Name }}'s sibling on entity, which
+// names the member of its variant union the column holds (D149).
+func {{ .VariantByFunc }}(entity *types.{{ $.TypeName }}) string {
+	{{ .VariantByBody }}
+}
+
+// {{ .JSONUnionDecoder }} decodes {{ .Name }} as the member by, its sibling's
+// value, names (D149), as every other reader of the row does.
+func {{ .JSONUnionDecoder }}(raw []byte, by string) ({{ .ValueGoType }}, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var wrapper types.{{ .IRType }}Wrapper
+	if err := wrapper.UnmarshalVariantJSON(by, raw); err != nil {
+		return nil, err
+	}
+	return wrapper.Value, nil
+}
+{{- else if and .IsJSONField .IsUnion }}
 func {{ .JSONUnionDecoder }}(raw []byte) ({{ .ValueGoType }}, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -160,6 +180,8 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 
 	result := &types.{{ .TypeName }}{}
 	{{- range .Fields }}
+	{{- if .VariantByFunc }}
+	{{- else }}
 	if rawValue, ok := values["{{ .DBName }}"]; ok && len(rawValue) > 0{{ if not (and .PreservesExplicitJSONNull .IsRequired) }} && string(rawValue) != "null"{{ end }} {
 		{{- if and .IsJSONField .IsUnion }}
 		decoded, err := {{ .JSONUnionDecoder }}(rawValue)
@@ -252,6 +274,7 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		{{- end }}
 	}
 	{{- end }}
+	{{- end }}
 	{{- range .Relationships }}
 	{{- if not .IsArray }}
 	if rawValue, ok := values["{{ .DBColumnName }}"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
@@ -264,6 +287,18 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		{{- else }}
 		result.{{ toGoName .FieldName }} = &types.{{ .TargetType }}{Id: {{ if .TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(relID){{ else }}relID{{ end }}}
 		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+	{{- range .Fields }}
+	{{- if .VariantByFunc }}
+	// A variant field (D149), read once its sibling is.
+	if rawValue, ok := values["{{ .DBName }}"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
+		decoded, err := {{ .JSONUnionDecoder }}(rawValue, {{ .VariantByFunc }}(result))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		result.{{ toGoName .Name }} = decoded
 	}
 	{{- end }}
 	{{- end }}
@@ -305,7 +340,7 @@ var temp{{ toGoName $member.Field.Name }} *{{ $member.Field.GoType }}
 {{- if $member.IsRelationship }}
 {{- else if and $member.Field.IsJSONField $member.Field.IsUnion }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }})
+	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }}{{ if $member.Field.VariantByFunc }}, {{ $member.Field.VariantByFunc }}(result){{ end }})
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
@@ -380,7 +415,7 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 {{- if $member.IsRelationship }}
 {{- else if and $member.Field.IsJSONField $member.Field.IsUnion }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }})
+	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }}{{ if $member.Field.VariantByFunc }}, {{ $member.Field.VariantByFunc }}(entity){{ end }})
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
@@ -564,7 +599,7 @@ case "{{ $field.DBName }}":
 {{- range $field := . }}
 {{- if and $field.IsJSONField $field.IsUnion }}
 if len(temp{{ toGoName $field.Name }}) > 0 {
-	decoded, err := {{ $field.JSONUnionDecoder }}(temp{{ toGoName $field.Name }})
+	decoded, err := {{ $field.JSONUnionDecoder }}(temp{{ toGoName $field.Name }}{{ if $field.VariantByFunc }}, {{ $field.VariantByFunc }}(result){{ end }})
 	if err != nil {
 		jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field {{ $field.Name }}: %w", err)
 	} else {
@@ -5047,7 +5082,7 @@ type {{ .TypeName }}Create struct {
 	{{- range .OrderedMembers }}
 	{{- if .IsRelationship }}
 	{{ toGoName .Relationship.FieldName }} {{ .Relationship.MemberGoType }}
-	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (or (not .Field.IsOwned) .Field.IsGivenAtCreate) }}
 	{{ toGoName .Field.Name }} {{ .Field.MemberGoType }}
 	{{- end }}
 	{{- end }}
@@ -5063,7 +5098,7 @@ func (input *{{ .TypeName }}Create) row() *types.{{ .TypeName }} {
 	{{- range .OrderedMembers }}
 	{{- if .IsRelationship }}
 	row.{{ toGoName .Relationship.FieldName }} = input.{{ toGoName .Relationship.FieldName }}
-	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (or (not .Field.IsOwned) .Field.IsGivenAtCreate) }}
 	row.{{ toGoName .Field.Name }} = input.{{ toGoName .Field.Name }}
 	{{- end }}
 	{{- end }}
@@ -5321,7 +5356,8 @@ func (r *{{ .Name }}) createColumns(row *types.{{ .TypeName }}) (map[string]any,
 func (r *{{ .Name }}) corePatch(update *{{ .TypeName }}Update) map[string]any {
 	patch := map[string]any{}
 	{{- range .CoreOwn }}
-	{{- if .Relationship }}
+	{{- if .Given }}
+	{{- else if .Relationship }}
 	{{- $member := printf "%sID" (toGoName .Relationship.FieldName) }}
 	{{- if not .Relationship.IsRequired }}
 	if update.{{ $member }}SetNull {

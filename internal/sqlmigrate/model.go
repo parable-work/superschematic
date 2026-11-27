@@ -17,6 +17,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -269,11 +270,14 @@ type Check struct {
 	Max       *float64 `json:"max,omitempty"`
 	MinLength *int     `json:"minLength,omitempty"`
 	MaxLength *int     `json:"maxLength,omitempty"`
+	// Variant holds a variant field's JSON column to the member its
+	// sibling column names (D149), which each dialect renders its own way.
+	Variant *sqlutil.VariantCheck `json:"variant,omitempty"`
 }
 
 // spec is the check's rule as sqlutil renders it.
 func (c *Check) spec() sqlutil.Check {
-	return sqlutil.Check{Column: c.Column, In: c.In, Min: c.Min, Max: c.Max, MinLength: c.MinLength, MaxLength: c.MaxLength}
+	return sqlutil.Check{Column: c.Column, In: c.In, Min: c.Min, Max: c.Max, MinLength: c.MinLength, MaxLength: c.MaxLength, Variant: c.Variant}
 }
 
 // sameRule reports whether two checks hold their columns to the same rule,
@@ -281,7 +285,8 @@ func (c *Check) spec() sqlutil.Check {
 func sameRule(a, b *Check) bool {
 	eqF := func(x, y *float64) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
 	eqI := func(x, y *int) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
-	return slices.Equal(a.In, b.In) && eqF(a.Min, b.Min) && eqF(a.Max, b.Max) && eqI(a.MinLength, b.MinLength) && eqI(a.MaxLength, b.MaxLength)
+	return slices.Equal(a.In, b.In) && eqF(a.Min, b.Min) && eqF(a.Max, b.Max) && eqI(a.MinLength, b.MinLength) && eqI(a.MaxLength, b.MaxLength) &&
+		reflect.DeepEqual(a.Variant, b.Variant)
 }
 
 // RawSQL is a piece of raw SQL the schema declares (@rawSql, D83). A plan

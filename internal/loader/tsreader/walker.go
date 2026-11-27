@@ -39,6 +39,12 @@ type walker struct {
 	// clause.
 	classImplements map[*astNode][]fieldUse
 
+	// classBundles holds, beside classFields, the bundles each class
+	// declaration implements (D103, step 5), in the order of its
+	// implements clause, each with the parts its settings were substituted
+	// into.
+	classBundles map[*astNode][]bundleUse
+
 	// imports accumulates cross-service named imports: package -> symbols.
 	imports map[string]map[string]bool
 
@@ -100,6 +106,7 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 		classFields:     make(map[*astNode][]*ir.FieldDef),
 		classUses:       make(map[*astNode][]fieldUse),
 		classImplements: make(map[*astNode][]fieldUse),
+		classBundles:    make(map[*astNode][]bundleUse),
 		imports:         make(map[string]map[string]bool),
 		externals:       make(map[string]bool),
 		externalTypes:   make(map[string]*ir.TypeDef),
@@ -940,6 +947,11 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 				if _, _, carrier := w.implementsCarrier(t); carrier {
 					continue
 				}
+				// So is a bundle a table implements, which the reader
+				// reads into its parts (D103, step 5).
+				if _, bundle := w.bundleAliasOf(t); bundle {
+					continue
+				}
 				// The user model's traits are core IR, not TraitRefs, and
 				// RawHeritage leaves them out (users.go).
 				if trait, core := w.identityTraitEntry(t); core {
@@ -1198,6 +1210,7 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 
 	var fields []*ir.FieldDef
 	var implemented []fieldUse
+	var bundled []bundleUse
 	ok := true
 
 	for _, clause := range heritageClauses(node) {
@@ -1218,6 +1231,18 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 						continue
 					}
 					implemented = append(implemented, use)
+					continue
+				}
+				// Nor does a bundle: its parts are the class's uses, read
+				// with its settings substituted (D103, step 5).
+				if bundleID, bundle := w.bundleAliasOf(t); bundle {
+					use, serr := w.bundleImplementsOf(node, t, bundleID)
+					if serr != nil {
+						w.addErr(serr)
+						ok = false
+						continue
+					}
+					bundled = append(bundled, use)
 					continue
 				}
 				// The user model's traits carry no fields.
@@ -1314,6 +1339,7 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	w.classFields[node] = fields
 	w.classUses[node] = uses
 	w.classImplements[node] = implemented
+	w.classBundles[node] = bundled
 	return fields, ok
 }
 
@@ -1490,6 +1516,10 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		for _, use := range w.classUses[id.decl] {
 			uses = append(uses, use.ref)
 		}
+		// A bundle's parts are the table's uses (D103, step 5).
+		for _, use := range w.classBundles[id.decl] {
+			uses = append(uses, use.parts...)
+		}
 		ext := &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
 		// A table's @audience adds columns a view may read, and the
 		// @accessGrants and @accessLog classes all their fields (D156), and
@@ -1588,6 +1618,7 @@ func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
 			delete(w.classFields, node)
 			delete(w.classUses, node)
 			delete(w.classImplements, node)
+			delete(w.classBundles, node)
 		}
 	}
 	for name := range w.schema.Scalars {
@@ -1641,12 +1672,23 @@ func (w *walker) walkEnum(node *astNode) {
 }
 
 // walkTypeAlias converts an exported object-shaped type alias into an
-// EmbeddedStruct TypeDef. Other alias forms are not schema declarations.
+// EmbeddedStruct TypeDef, and an alias of Variant<By, Arms> into a variant
+// union (walkVariantAlias, D149). Other alias forms are not schema
+// declarations.
 func (w *walker) walkTypeAlias(node *astNode) {
 	alias := node.AsTypeAliasDeclaration()
 	name := node.Name().Text()
+	if w.variantAlias(alias.Type) {
+		w.walkVariantAlias(node)
+		return
+	}
+	// A bundle a project declares is no type: a table that implements it
+	// reads its parts (D103, step 5).
+	if w.isBundleMarker(alias.Type) {
+		return
+	}
 	if alias.Type.Kind != kindTypeLiteral {
-		w.addErr(errorAtNode(node, "type aliases must be object shapes; use an enum or class for other forms"))
+		w.addErr(errorAtNode(node, "type aliases must be object shapes or a Variant<By, Arms>; use an enum or class for other forms"))
 		return
 	}
 	file := getSourceFileOfNode(node)

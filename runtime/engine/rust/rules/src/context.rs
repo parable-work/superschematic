@@ -62,6 +62,22 @@ impl<'r, C> View<'r, C> {
         self.config
     }
 
+    /// The view of the same use, row and request with another config, one
+    /// the use's own holds: what a behavior whose declaration states its
+    /// rules (D103's step 5) hands the code of a rule it shares with
+    /// another behavior, as the declarative vocabulary hands Constants' and
+    /// StateRules' rules the part of its config they read.
+    pub fn with_config<D>(&self, config: &'r D) -> View<'r, D> {
+        View {
+            run: self.run,
+            frame: self.frame,
+            index: self.index,
+            config,
+            action: self.action,
+            precondition: self.precondition,
+        }
+    }
+
     /// The name of the type of the row the hook runs on.
     pub fn type_name(&self) -> &'r str {
         &self.frame.spec.name
@@ -428,6 +444,18 @@ impl<'r, C> Cx<'r, C> {
         &self.view
     }
 
+    /// The context of the same use and row with another config, one the
+    /// use's own holds ([`View::with_config`]): it writes as this one does.
+    pub fn with_config<D>(&self, config: &'r D) -> Cx<'r, D> {
+        Cx {
+            view: self.view.with_config(config),
+            writable: self.writable,
+            own: self.own,
+            handler: self.handler,
+            fired: self.fired,
+        }
+    }
+
     /// Whether the context writes: false in a read-only operation.
     pub fn writable(&self) -> bool {
         self.writable
@@ -671,6 +699,25 @@ impl<'r, C> Cx<'r, C> {
                 expected_version,
                 values,
             },
+        )
+    }
+
+    /// Deletes the row of a key of one of the use's shared tables, held to
+    /// the version it was read at ([`View::shared_row`], D147's second
+    /// primitive): a row a concurrent writer moved past that version, or
+    /// deleted, deletes nothing, and the host runs the command again from
+    /// fresh state. A key a behavior keeps unique across the table's rows
+    /// is freed so: Aliased's removed alias, and a deleted row's names.
+    pub fn delete_shared(&self, table: &str, key: &str, expected_version: i64) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "delete_shared",
+            table,
+            key,
+            SharedRowChange::Delete { expected_version },
         )
     }
 

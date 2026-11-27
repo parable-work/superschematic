@@ -162,7 +162,7 @@ export type {
 } from './credentials.js';
 export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions, principalCaller } from './behavior-routes.js';
 export type { BehaviorCaller } from './behavior-routes.js';
-export { tableCreate, tableDelete, tableFilter, tableList, tableRead, tableUpdate } from './table-routes.js';
+export { tableCreate, tableDelete, tableFilter, tableList, tableMerge, tableRead, tableUpdate } from './table-routes.js';
 export type { TableOperation, TableOperationKind, TableRequest } from './table-routes.js';
 export {
   GRAPH_PRIMARY_NAME,

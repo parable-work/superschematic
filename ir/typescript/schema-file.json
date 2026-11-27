@@ -192,6 +192,32 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Aliased"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "normalize": {
+                    "description": "How two names are read as one: lower, the default, compares them in lower case with the white space at their ends dropped and each run of it within one space; slug compares only their letters and digits, in lower case, each run of anything else one hyphen.",
+                    "enum": [
+                      "lower",
+                      "slug"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Approvals"
               }
             }
@@ -3346,9 +3372,44 @@
                               }
                             }
                           }
+                        },
+                        {
+                          "if": {
+                            "required": [
+                              "exemptions"
+                            ]
+                          },
+                          "then": {
+                            "required": [
+                              "gatedStates"
+                            ]
+                          }
                         }
                       ],
                       "properties": {
+                        "exemptions": {
+                          "additionalProperties": false,
+                          "description": "For a rollup that gates states, the moves into them its gate lets through though it does not hold: a caller's who holds permission, and the move each deadline of the table's Timers that deadlines names makes, its then, as it falls due. A table's alone: an engine type refuses it.",
+                          "minProperties": 1,
+                          "properties": {
+                            "deadlines": {
+                              "description": "Deadlines of the table's Timers whose then moves into a state the rollup gates, each passing the gate as it falls due.",
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            "permission": {
+                              "description": "The permission whose holder moves into a gated state whether the rollup holds or not.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "field": {
                           "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field; for latest, any field of theirs, or status when their schema composes Workflow.",
                           "minLength": 1,
@@ -4246,6 +4307,7 @@
         },
         "name": {
           "enum": [
+            "Aliased",
             "Approvals",
             "Assignment",
             "Blueprint",
@@ -4304,6 +4366,199 @@
       },
       "required": [
         "type"
+      ],
+      "type": "object"
+    },
+    "BundleRef": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Assignment"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "assign": {
+                    "description": "The permission a caller needs to assign the row to another subject or unassign another; no caller may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "take": {
+                    "description": "The permission a caller needs to assign the row to itself; any caller may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Barrier"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "link": {
+                    "description": "The to-one relation of that table to the barrier.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "releasePermission": {
+                    "description": "The permission a caller needs to release the barrier: a person's go-ahead.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "rows": {
+                    "description": "The table whose rows relate to the barrier, each of which says it is ready by finishing its Workflow with the outcome success.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "timeoutMs": {
+                    "description": "How long after the barrier begins waiting its deadline releases it, in milliseconds.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "rows",
+                  "link",
+                  "timeoutMs",
+                  "releasePermission"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "settings"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Mailbox"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "takePermission": {
+                    "description": "The permission a caller needs to take a message, Lease's acquirePermission; any caller who may write the row when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "ttlMs": {
+                    "description": "How long a taker's lease lasts after its acquire or its last heartbeat, in milliseconds; Lease's 60000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Reservation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "description": "The own integer field that holds what a booking owes, in the currency's minor units.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "description": "The currency of the amount: an ISO 4217 code.",
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  },
+                  "interval": {
+                    "additionalProperties": false,
+                    "description": "The booking's time: the own date-time fields it starts and ends at.",
+                    "properties": {
+                      "end": {
+                        "description": "The own date-time field the booking ends at.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "start": {
+                        "description": "The own date-time field the booking starts at.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "type": "object"
+                  },
+                  "resource": {
+                    "description": "The to-one relation of the table to the resource whose time a booking holds: a table that implements Calendar.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "resource",
+                  "interval",
+                  "amount",
+                  "currency"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "settings"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "Assignment",
+            "Barrier",
+            "Mailbox",
+            "Reservation"
+          ],
+          "type": "string"
+        },
+        "settings": {
+          "default": {}
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -7362,6 +7617,13 @@
           },
           "type": "array"
         },
+        "bundles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BundleRef"
+          },
+          "type": "array"
+        },
         "calendarSources": {
           "default": [],
           "items": {
@@ -7707,6 +7969,17 @@
     "UnionDef": {
       "additionalProperties": false,
       "properties": {
+        "arms": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "by": {
+          "default": "",
+          "type": "string"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -7734,6 +8007,17 @@
     "UnionFile": {
       "additionalProperties": false,
       "properties": {
+        "arms": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "by": {
+          "default": "",
+          "type": "string"
+        },
         "comment": {
           "default": "",
           "type": "string"

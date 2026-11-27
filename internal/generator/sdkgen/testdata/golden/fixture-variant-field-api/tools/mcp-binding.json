@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-variant-field-api",
+  "sdkClassName": "FixtureVariantFieldApiSDK",
+  "tools": [
+    {
+      "toolName": "steps.createStep",
+      "apiId": "fixture-variant-field-api",
+      "namespace": "steps",
+      "methodName": "createStep",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "title",
+          "required": true,
+          "kind": "input",
+          "target": "input.title"
+        },
+        {
+          "toolParameter": "kind",
+          "required": true,
+          "kind": "input",
+          "target": "input.kind"
+        },
+        {
+          "toolParameter": "result",
+          "required": false,
+          "kind": "input",
+          "target": "input.result"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["title", "kind", "result"]
+        }
+      ]
+    },
+    {
+      "toolName": "steps.getStep",
+      "apiId": "fixture-variant-field-api",
+      "namespace": "steps",
+      "methodName": "getStep",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    }
+  ]
+}

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -15,27 +14,26 @@ import (
 const timersBehavior = "Timers"
 
 // checkTimersConfig holds the config of a Timers use a table implements to
-// the table (D103), in the core's words: the Workflow its deadlines read
-// (an enters start, a then, an until) is the one its status names, or the
-// table's one Workflow; a field start names an own field of the table
-// that holds date-times; and each deadline's start, then and until are
-// held to that Workflow as the core's parse_deadline holds them: an enters
-// state, a then's transition and its from states and an until's states are
-// states of it, a transition leads from each from state to the then's, a
-// deadline that starts at a field names its then's from and takes no
-// until.leaves, having no state of its own, and only a field start takes a
-// negative afterMs. A config that breaks one of these would otherwise pass
-// the build and fail every command on the table, the create among them,
-// at the core's define check. Workflow's own rules stay the core's. Each
-// problem is the core's define issue (superschematic_rules_behaviors::
-// timers), `type <T>: behavior Timers config: <reason>`, and like the core
-// it reports the first: the status, then each deadline in name order (the
-// canonical config's, which the core reads), each place in the order
-// start, afterMs, then, until. The own fields are
-// the layout's (behaviorlayout.OwnFields), which the core's spec lists,
-// so both name the same fields. A config the configSchema refuses is
-// reported by checkTypeBehaviors and left alone here.
-func checkTimersConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
+// the table (D103), in the core's words, in what Timers' declaration does
+// not state. Its references state the rest (D103's step 5), which
+// configReferencesHold holds first: status names a Workflow of the type,
+// an enters start a state of the Workflow it reads, and a field start an
+// own field that holds date-times. Here each deadline's then and until are
+// held to that Workflow as the core's parse_deadline holds them: a then's
+// transition and its from states and an until's states are states of it,
+// a transition leads from each from state to the then's, a deadline that
+// starts at a field names its then's from and takes no until.leaves,
+// having no state of its own, and only a field start takes a negative
+// afterMs. A config that breaks one of these would otherwise pass the
+// build and fail every command on the table, the create among them, at the
+// core's define check. Workflow's own rules stay the core's. Each problem
+// is the core's define issue (superschematic_rules_behaviors::timers),
+// `type <T>: behavior Timers config: <reason>`, and like the core it
+// reports the first: each deadline in name order (the canonical config's,
+// which the core reads), each place in the order afterMs, then, until. A
+// config the configSchema refuses is reported by checkTypeBehaviors and
+// left alone here.
+func checkTimersConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 	var config struct {
 		Status    *string                    `json:"status"`
 		Deadlines map[string]json.RawMessage `json:"deadlines"`
@@ -46,25 +44,10 @@ func checkTimersConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r 
 	fail := func(format string, args ...any) {
 		r.errorf(td.Owner, "type %s: behavior %s config: %s", td.Name, ref.Name, fmt.Sprintf(format, args...))
 	}
-	var workflows []string
-	for _, use := range td.TableBehaviors() {
-		if use.Name == workflowBehavior {
-			workflows = append(workflows, use.UseID())
-		}
-	}
+	workflows := workflowUses(td)
 	listed := "none"
 	if len(workflows) > 0 {
 		listed = strings.Join(workflows, ", ")
-	}
-	if config.Status != nil {
-		named := false
-		for _, workflow := range workflows {
-			named = named || workflow == *config.Status
-		}
-		if !named {
-			fail("status %q is not a Workflow of the type (its Workflows: %s)", *config.Status, listed)
-			return
-		}
 	}
 	// readsStatus is why a place that reads the status cannot: the type
 	// lists no Workflow, or several and the config names none.
@@ -94,8 +77,6 @@ func checkTimersConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r 
 		}
 		return fmt.Sprintf("%s %q is not a state of the type's Workflow (%s)", at, state, strings.Join(timed.states, ", "))
 	}
-	var own []behaviorlayout.Column
-	ownRead := false
 	// The canonical config's order: a deadline's name is never an integer,
 	// so a JavaScript object's key order, which the core reads, is the
 	// sorted one.
@@ -123,43 +104,13 @@ func checkTimersConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r 
 		// none.
 		startState := ""
 		fieldStart := false
+		// The references held the start: an enters state is a state of
+		// the Workflow, and a field start's field holds date-times.
 		switch {
 		case deadline.Start.Enters != nil:
-			if why := readsStatus(at + ".start.enters"); why != "" {
-				fail("%s", why)
-				return
-			}
-			if why := isState(at+".start.enters", *deadline.Start.Enters); why != "" {
-				fail("%s", why)
-				return
-			}
 			startState = *deadline.Start.Enters
 		case deadline.Start.Field != nil:
 			fieldStart = true
-			if !ownRead {
-				own, ownRead = behaviorlayout.OwnFields(schema, td), true
-			}
-			field := *deadline.Start.Field
-			var found *behaviorlayout.Column
-			known := make([]string, 0, len(own))
-			for i := range own {
-				known = append(known, own[i].Field)
-				if own[i].Field == field {
-					found = &own[i]
-				}
-			}
-			fields := "none"
-			if len(known) > 0 {
-				fields = strings.Join(known, ", ")
-			}
-			if found == nil {
-				fail("%s.start.field %q is not a field of %s (its fields: %s)", at, field, td.Name, fields)
-				return
-			}
-			if found.Convert != behaviorlayout.ConvertEpochMillis {
-				fail("%s.start.field %q is not a date-time field of %s: a deadline starts from the time a value holds", at, field, td.Name)
-				return
-			}
 		default:
 			if timed != nil {
 				startState = timed.initial

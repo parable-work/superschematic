@@ -816,6 +816,7 @@ impl<'a> Run<'a> {
                         held.version += 1;
                     }
                 }
+                SharedRowChange::Delete { .. } => row = None,
             }
         }
         Ok(row)
@@ -835,8 +836,10 @@ impl<'a> Run<'a> {
         change: SharedRowChange,
     ) -> Hook<()> {
         let declared = self.shared_table(frame, index, call, table)?;
+        let none = Map::new();
         let values = match &change {
             SharedRowChange::Insert { values } | SharedRowChange::Update { values, .. } => values,
+            SharedRowChange::Delete { .. } => &none,
         };
         if declared.is_checked() {
             for name in values.keys() {
@@ -1102,6 +1105,15 @@ impl<'a> Run<'a> {
             .core
             .matcher()
             .matches(&caller.permissions, &[permission.to_owned()]))
+    }
+
+    // give sets each value a create gave a field anchor whose behavior
+    // takes it from a create (given_at_create) on the row the create
+    // makes, before any of its hooks run.
+    fn give(&self, row: usize, given: Given) {
+        for (use_id, field, value) in given {
+            self.set_owned(row, &use_id, &field, value);
+        }
     }
 
     pub fn set_owned(&self, row: usize, use_id: &str, field: &str, value: Value) {
@@ -1537,14 +1549,16 @@ impl<'a> Run<'a> {
         self.nested(from, from_index, &format!("create of {type_name}"), || {
             self.undoing(|| {
                 self.on_type(type_name, |spec, uses| {
-                    let row = self.touch(Touched::created(type_name, Some(key), own));
+                    let (own, given) = given_at_create(uses, own);
+                    let row = self.touch(Touched::created(type_name, Some(key), &own));
+                    self.give(row, given);
                     let frame = Frame {
                         spec,
                         uses,
                         row,
                         key: Some(key),
                     };
-                    self.create_on(frame, own, params)
+                    self.create_on(frame, &own, params)
                 })
             })
         })
@@ -1636,8 +1650,10 @@ impl<'a> Run<'a> {
                 Ok(ChangeSet::default())
             }
             Action::Create { id, own, params } => {
-                self.touch(Touched::created(&self.top.spec.name, id.as_deref(), own));
-                self.create_on(self.top, own, params)?;
+                let (own, given) = given_at_create(self.top.uses, own);
+                let row = self.touch(Touched::created(&self.top.spec.name, id.as_deref(), &own));
+                self.give(row, given);
+                self.create_on(self.top, &own, params)?;
                 Ok(self.changes(Value::Null))
             }
             Action::Update { key, patch } => self.update(key, patch),
@@ -2771,6 +2787,35 @@ struct Calling<'c> {
     caller_type: Option<&'c str>,
     fired: bool,
     as_caller: bool,
+}
+
+// Given are the values a create gives field anchors (given_at_create): each
+// use's id, its value field and the value.
+type Given = Vec<(String, String, Value)>;
+
+// given_at_create splits a create's own fields (D147's first primitive):
+// each member that names a field anchor whose behavior takes its value from
+// a create (Declaration::value_from_create) is that use's value, by its use
+// id and its value field, which the core sets on the new row; the rest are
+// own fields. Every other field anchor's member stays, which
+// anchored_writes refuses.
+fn given_at_create(uses: &[Bound<'_>], own: &Map<String, Value>) -> (Map<String, Value>, Given) {
+    let mut kept = own.clone();
+    let mut given = Vec::new();
+    for bound in uses {
+        let declaration = &bound.registered.declaration;
+        let (Some(field), Some(value), true) = (
+            bound.spec.field(),
+            declaration.value.as_deref(),
+            declaration.value_from_create,
+        ) else {
+            continue;
+        };
+        if let Some(member) = kept.remove(field) {
+            given.push((bound.spec.id().to_owned(), value.to_owned(), member));
+        }
+    }
+    (kept, given)
 }
 
 // anchored_writes is the issues of own fields a write names that are a field

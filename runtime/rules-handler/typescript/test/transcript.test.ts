@@ -40,7 +40,7 @@ type Step =
   | { kind: 'check'; step: number; call: string; database: string; spec: Spec; command: Command; expect: Expect }
   | { kind: 'raw'; step: number; call: string; database: string; type: string; key: string; owned: Record<string, JsonObject> };
 type Scenario = { name: string; types?: { name: string; versions?: Spec[] }[]; steps?: Step[] };
-type Transcript = { scenarios: Scenario[] };
+type Transcript = { declarations?: object[]; scenarios: Scenario[] };
 
 /** rules-dev's TRANSCRIPTS: each transcript's name and floor. */
 function transcripts(): [string, number][] {
@@ -54,6 +54,9 @@ function transcript(name: string): Transcript {
   return JSON.parse(readFileSync(join(checkout, `runtime/engine/testdata/rules/${name}.transcript.json`), 'utf8')) as Transcript;
 }
 
+// The handler runs the declarative behaviors the transcripts declare (D103's
+// step 5), and its layout lists them, before any store is made.
+handler.declare(transcripts().flatMap(([name]) => transcript(name).declarations ?? []));
 const layout = handler.layout();
 const behaviors = new Map(layout.behaviors.map(behavior => [behavior.name, behavior]));
 const useId = (entry: Use): string => (entry.anchor === 'type' ? entry.behavior : entry.anchor.field);

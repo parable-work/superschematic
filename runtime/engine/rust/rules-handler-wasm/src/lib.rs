@@ -64,6 +64,13 @@
 //! - `core`: `{"spec", "command", "answers"?}` to the core's step, as
 //!   `@superschematic/rules`' `run` returns it: what a replay's define and
 //!   publish checks run.
+//! - `declare`: `{"declarations": [declaration file]}`, the declaration
+//!   files of declarative behaviors (D103's step 5), each whole, to
+//!   `{"declared": [name]}`, every declarative behavior the handler runs
+//!   since: every operation runs them after the core's own, and `layout`
+//!   lists them. A file the vocabulary does not read, one that names a
+//!   behavior the core implements, and a second file of a declared name
+//!   that differs are the error document `invalid_input` with the reason.
 //! - `layout`: no input, to what a store's tables are made from and the
 //!   bounds of its host loop: `{"namespace", "behaviors": [{"name",
 //!   "storageKey", "rowTables", "tables": [{"name", "shared"}],
@@ -76,7 +83,8 @@
 //! and a panic `internal`; [`run_json`] says which by its second value.
 //!
 //! The core and the declarations are built once per process (on wasm, once
-//! per instance), the first time an operation runs, and kept.
+//! per instance), the first time an operation runs, and kept; a `declare`
+//! that adds a behavior builds both again.
 //!
 //! [`StoreRead`]: superschematic_rules_handler::StoreRead
 //! [`StoreAnswer`]: superschematic_rules_handler::StoreAnswer
@@ -85,7 +93,7 @@
 pub mod ffi;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -101,10 +109,71 @@ use superschematic_rules_handler::{
     Request, StoreAnswers, MAX_ATTEMPTS, MAX_READ_ROUNDS, MAX_RUNS,
 };
 
-// The core every operation runs on, each behavior ported so far, and the
-// declarations of those behaviors, built the first time an operation runs.
-static CORE: LazyLock<Core> = LazyLock::new(superschematic_rules_behaviors::core);
-static DECLARATIONS: LazyLock<Declarations> = LazyLock::new(Declarations::ported);
+// The core every operation runs on, each behavior ported so far and each
+// declarative one a declare added, and the declarations of those
+// behaviors, built the first time an operation runs.
+static STATE: LazyLock<RwLock<Arc<State>>> = LazyLock::new(|| {
+    RwLock::new(Arc::new(State {
+        core: superschematic_rules_behaviors::core(),
+        declarations: Declarations::ported(),
+        files: Vec::new(),
+    }))
+});
+
+// The core, its behaviors' declarations, and the declaration files of the
+// declarative behaviors among them.
+struct State {
+    core: Core,
+    declarations: Declarations,
+    files: Vec<Value>,
+}
+
+// The state as declare last left it.
+fn current() -> Arc<State> {
+    STATE.read().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
+// declare adds the declarative behaviors of declaration files, building
+// the core and the declarations again when one is new.
+fn declare(state: &RwLock<Arc<State>>, input: DeclareInput) -> Result<Value, Failure> {
+    let mut held = state.write().unwrap_or_else(PoisonError::into_inner);
+    let mut files = held.files.clone();
+    for file in input.declarations {
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
+    let declared = superschematic_rules_behaviors::declaratives(&files)
+        .map_err(|reason| ("invalid_input", format!("declare: {reason}")))?;
+    let names: Vec<Value> = declared
+        .iter()
+        .map(|behavior| Value::from(behavior.name()))
+        .collect();
+    let files: Vec<Value> = declared
+        .iter()
+        .map(|behavior| behavior.document().clone())
+        .collect();
+    if files != held.files {
+        let declarations = Declarations::ported_with(&files)
+            .map_err(|reason| ("invalid_input", format!("declare: {reason}")))?;
+        let mut core = superschematic_rules_behaviors::core();
+        for behavior in declared {
+            core.push(behavior);
+        }
+        *held = Arc::new(State {
+            core,
+            declarations,
+            files,
+        });
+    }
+    Ok(json!({ "declared": names }))
+}
+
+/// `declare`'s input.
+#[derive(Deserialize)]
+struct DeclareInput {
+    declarations: Vec<Value>,
+}
 
 /// An operation of the ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +186,7 @@ pub enum Op {
     Bridge,
     Core,
     Layout,
+    Declare,
 }
 
 impl Op {
@@ -131,6 +201,7 @@ impl Op {
             Op::Bridge => "bridge",
             Op::Core => "core",
             Op::Layout => "layout",
+            Op::Declare => "declare",
         }
     }
 }
@@ -162,9 +233,14 @@ fn output(op: Op, input: &[u8]) -> Result<Value, Failure> {
         Op::Bridge => bridge(parse(op, input)?),
         Op::Core => {
             let input: CoreInput = parse(op, input)?;
-            to_json(&CORE.run(&input.spec, &input.command, &input.answers))
+            to_json(
+                &current()
+                    .core
+                    .run(&input.spec, &input.command, &input.answers),
+            )
         }
         Op::Layout => Ok(layout()),
+        Op::Declare => declare(&STATE, parse(op, input)?),
     }
 }
 
@@ -239,7 +315,8 @@ fn run(op: Op, input: RunInput) -> Result<Value, Failure> {
         request,
         id,
     };
-    let handler = Handler::new(&CORE, &DECLARATIONS).with_policy(&input.policy);
+    let state = current();
+    let handler = Handler::new(&state.core, &state.declarations).with_policy(&input.policy);
     let (response, unit) = match handler.run(&input.request, &context, &input.answers) {
         HandlerStep::Read(reads) => return Ok(json!({ "read": to_json(&reads)? })),
         HandlerStep::Done(Done { response, unit }) => (response, unit),
@@ -482,7 +559,8 @@ struct EventsInput {
 
 fn events_of(op: Op, input: EventsInput) -> Result<Value, Failure> {
     let query = query_of(op, &input.query)?;
-    let handler = Handler::new(&CORE, &DECLARATIONS).with_policy(&input.policy);
+    let state = current();
+    let handler = Handler::new(&state.core, &state.declarations).with_policy(&input.policy);
     let refused = |refusal: Refusal| -> Result<Value, Failure> {
         Ok(json!({ "refused": to_json(&refusal)? }))
     };
@@ -544,8 +622,9 @@ struct BridgeInput {
 }
 
 fn bridge(input: BridgeInput) -> Result<Value, Failure> {
+    let state = current();
     let bridge = Bridge {
-        core: &CORE,
+        core: &state.core,
         specs: &input.specs,
         hearing: &input.hearing,
         own: None,
@@ -572,7 +651,9 @@ struct CoreInput {
 }
 
 fn layout() -> Value {
-    let behaviors: Vec<Value> = DECLARATIONS
+    let state = current();
+    let behaviors: Vec<Value> = state
+        .declarations
         .iter()
         .map(|declared| {
             json!({
@@ -607,6 +688,49 @@ mod tests {
 
     fn context() -> Value {
         json!({"caller": {"subject": "alice"}, "now": 1_000, "request": "r1", "id": "00000000-0000-4000-8000-000000000007"})
+    }
+
+    /// A declare adds a declarative behavior (D103's step 5) to the core
+    /// and to the declarations a store's tables are made from; the same
+    /// file again is one behavior, and one the vocabulary does not read is
+    /// refused, leaving the state as it was. A state of the test's own keeps
+    /// the process's as it is for the other tests.
+    #[test]
+    fn declare_adds_a_declarative_behavior_to_the_core_and_the_layout() {
+        let votes: Value = serde_json::from_str(include_str!(
+            "../../../testdata/rules/declarations/test.Votes.behavior.json"
+        ))
+        .unwrap();
+        let state = RwLock::new(Arc::new(State {
+            core: superschematic_rules_behaviors::core(),
+            declarations: Declarations::ported(),
+            files: Vec::new(),
+        }));
+        let input = || DeclareInput {
+            declarations: vec![votes.clone()],
+        };
+        assert_eq!(
+            declare(&state, input()),
+            Ok(json!({"declared": ["test.Votes"]}))
+        );
+        let first = state.read().unwrap().clone();
+        assert_eq!(
+            declare(&state, input()),
+            Ok(json!({"declared": ["test.Votes"]}))
+        );
+        // The same file again builds nothing.
+        assert!(Arc::ptr_eq(&first, &state.read().unwrap()));
+        assert!(first.core.declaration("test.Votes").is_some());
+        let declared = first.declarations.get("test.Votes").expect("declared");
+        assert!(declared.has_row_tables());
+        let refused = declare(
+            &state,
+            DeclareInput {
+                declarations: vec![json!({"name": "test.Plain"})],
+            },
+        );
+        assert!(matches!(refused, Err(("invalid_input", _))), "{refused:?}");
+        assert_eq!(state.read().unwrap().files, [votes]);
     }
 
     #[test]

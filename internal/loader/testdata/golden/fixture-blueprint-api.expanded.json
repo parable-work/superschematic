@@ -1,0 +1,773 @@
+{
+  "name": "fixture-blueprint-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-blueprint-db",
+      "types": [
+        "Batch",
+        "Job"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-blueprint-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "BatchStatusTransitionInput": {
+      "name": "BatchStatusTransitionInput",
+      "owner": "fixture-blueprint-api",
+      "comment": "The parameters of Batch's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "BatchStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "BatchStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "BatchStatusTransitionResult": {
+      "name": "BatchStatusTransitionResult",
+      "owner": "fixture-blueprint-api",
+      "comment": "What Batch's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "BatchStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "BatchStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesAddBlockerInput": {
+      "name": "JobDependenciesAddBlockerInput",
+      "owner": "fixture-blueprint-api",
+      "comment": "The parameters of Job's dependencies addBlocker.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "id",
+          "comment": "The blocker's id.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validatePattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "comment": "The blocker's schema; Job when absent.",
+          "typeRef": {
+            "name": "JobDependenciesAddBlockerInputSchema"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesAddBlockerResult": {
+      "name": "JobDependenciesAddBlockerResult",
+      "owner": "fixture-blueprint-api",
+      "comment": "What Job's dependencies addBlocker returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "open",
+          "comment": "Whether it is not finished, so it blocks: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "JobDependenciesAddBlockerResultSchema"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "status",
+          "comment": "The blocker's Workflow status.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesListBlockersInput": {
+      "name": "JobDependenciesListBlockersInput",
+      "owner": "fixture-blueprint-api",
+      "comment": "The parameters of Job's dependencies listBlockers.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many blockers; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 500,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesListBlockersResult": {
+      "name": "JobDependenciesListBlockersResult",
+      "owner": "fixture-blueprint-api",
+      "comment": "What Job's dependencies listBlockers returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "JobDependenciesListBlockersResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null after the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesListBlockersResultItems": {
+      "name": "JobDependenciesListBlockersResultItems",
+      "owner": "fixture-blueprint-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "open",
+          "comment": "Whether it is not finished, so it blocks: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "JobDependenciesListBlockersResultItemsSchema"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "status",
+          "comment": "The blocker's Workflow status.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesRemoveBlockerInput": {
+      "name": "JobDependenciesRemoveBlockerInput",
+      "owner": "fixture-blueprint-api",
+      "comment": "The parameters of Job's dependencies removeBlocker.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "id",
+          "comment": "The blocker's id.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validatePattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "comment": "The blocker's schema; Job when absent.",
+          "typeRef": {
+            "name": "JobDependenciesRemoveBlockerInputSchema"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesRemoveBlockerResult": {
+      "name": "JobDependenciesRemoveBlockerResult",
+      "owner": "fixture-blueprint-api",
+      "comment": "What Job's dependencies removeBlocker returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "JobDependenciesRemoveBlockerResultSchema"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusTransitionInput": {
+      "name": "JobStatusTransitionInput",
+      "owner": "fixture-blueprint-api",
+      "comment": "The parameters of Job's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusTransitionResult": {
+      "name": "JobStatusTransitionResult",
+      "owner": "fixture-blueprint-api",
+      "comment": "What Job's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "BatchStatusState": {
+      "name": "BatchStatusState",
+      "owner": "fixture-blueprint-api",
+      "comment": "A state of Batch's status Workflow.",
+      "values": [
+        {
+          "name": "Running",
+          "serializedAs": "running"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesAddBlockerInputSchema": {
+      "name": "JobDependenciesAddBlockerInputSchema",
+      "owner": "fixture-blueprint-api",
+      "comment": "The blocker's schema; Job when absent.",
+      "values": [
+        {
+          "name": "Job",
+          "serializedAs": "Job"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesAddBlockerResultSchema": {
+      "name": "JobDependenciesAddBlockerResultSchema",
+      "owner": "fixture-blueprint-api",
+      "values": [
+        {
+          "name": "Job",
+          "serializedAs": "Job"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesListBlockersResultItemsSchema": {
+      "name": "JobDependenciesListBlockersResultItemsSchema",
+      "owner": "fixture-blueprint-api",
+      "values": [
+        {
+          "name": "Job",
+          "serializedAs": "Job"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesRemoveBlockerInputSchema": {
+      "name": "JobDependenciesRemoveBlockerInputSchema",
+      "owner": "fixture-blueprint-api",
+      "comment": "The blocker's schema; Job when absent.",
+      "values": [
+        {
+          "name": "Job",
+          "serializedAs": "Job"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobDependenciesRemoveBlockerResultSchema": {
+      "name": "JobDependenciesRemoveBlockerResultSchema",
+      "owner": "fixture-blueprint-api",
+      "values": [
+        {
+          "name": "Job",
+          "serializedAs": "Job"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusState": {
+      "name": "JobStatusState",
+      "owner": "fixture-blueprint-api",
+      "comment": "A state of Job's status Workflow.",
+      "values": [
+        {
+          "name": "Queued",
+          "serializedAs": "queued"
+        },
+        {
+          "name": "Running",
+          "serializedAs": "running"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "BatchActions",
+      "comment": "A batch's Workflow, for any signed-in caller (D149). Blueprint declares\nno operation: a batch's create stamps its jobs.",
+      "operations": [
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Batch status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "batch.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "batch_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "BatchStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Batch row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "BatchStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-blueprint-db",
+            "type": "Batch",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "batch/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Batch"
+      },
+      "auth": true
+    },
+    {
+      "name": "JobActions",
+      "comment": "A job's Workflow and its blockers, for any signed-in caller: a move to\nrunning waits for the jobs of the steps before it (D149).",
+      "operations": [
+        {
+          "name": "dependenciesAddBlocker",
+          "comment": "Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished.",
+          "docs": {
+            "title": "Job dependencies: add blocker",
+            "description": "Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished.",
+            "capability": "job.dependencies.add-blocker",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_dependencies_add_blocker",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobDependenciesAddBlockerResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobDependenciesAddBlockerInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-blueprint-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Dependencies",
+            "behavior": "Dependencies",
+            "operation": "addBlocker",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/dependencies/add-blocker",
+          "origin": "behavior"
+        },
+        {
+          "name": "dependenciesRemoveBlocker",
+          "comment": "Stops another instance from blocking this one.",
+          "docs": {
+            "title": "Job dependencies: remove blocker",
+            "description": "Stops another instance from blocking this one.",
+            "capability": "job.dependencies.remove-blocker",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_dependencies_remove_blocker",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobDependenciesRemoveBlockerResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobDependenciesRemoveBlockerInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-blueprint-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Dependencies",
+            "behavior": "Dependencies",
+            "operation": "removeBlocker",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/dependencies/remove-blocker",
+          "origin": "behavior"
+        },
+        {
+          "name": "dependenciesListBlockers",
+          "comment": "Lists the instance's blockers in the order they were added, one page at a time, with each one's status and whether it blocks.",
+          "docs": {
+            "title": "Job dependencies: list blockers",
+            "description": "Lists the instance's blockers in the order they were added, one page at a time, with each one's status and whether it blocks.",
+            "capability": "job.dependencies.list-blockers",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "job_dependencies_list_blockers",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobDependenciesListBlockersResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobDependenciesListBlockersInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-blueprint-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Dependencies",
+            "behavior": "Dependencies",
+            "operation": "listBlockers"
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/dependencies/list-blockers",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Job status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "job.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-blueprint-db",
+            "type": "Job",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Job"
+      },
+      "auth": true
+    }
+  ]
+}
