@@ -1891,7 +1891,7 @@ count.
 |----------|------------------------|
 | A grant is a row of the class marked `@accessGrants`, whose fields the loader fills: the holder's id and kind (`party`, `agent`), the role's name, the target's type and key, `startsAt`, `endsAt`, `endsWhenField` and `endsWhenState` (an end when the target reaches a state), `revokedAt`, `tokenHash` and who made it. | A table the loader adds unasked, as the user model's are, which every database with a User table would carry. Its target as a relation, which would tie a grant to one table. |
 | A role is a row of the UserRole table: its permissions are what the holder may do, and its optional `reaches` field lists the relation paths it reaches from a target, each `Type:path` (`Request:unit.contract`), or `Type:*` for every row of a table. Policy is data. | The paths in the schema, which ground rule 1 turns down. The paths on each grant, which would repeat the role's on every row. |
-| `grantAuthenticator` runs a request with a `grant_` token as the grant's holder, reading the grant, its target's state and its role on every call: a grant that ended or was revoked is the 401 of the very next call. The token is 32 random bytes in base64url after `grant_`, stored as its SHA-256, as D114's keys are. | A token that carries its own expiry, which a revocation could not end. |
+| `grantAuthenticator` runs a request with a `grant_` token as the grant's holder, reading the grant, its target's state and its role on every call: a grant that ended or was revoked is the 401 of the very next call. A grant an agent run holds is the run's token, which it refuses 401: the agent dispatcher's `agents.authenticator()` alone resolves it, narrowed and gated (D194). The token is 32 random bytes in base64url after `grant_`, stored as its SHA-256, as D114's keys are. | A token that carries its own expiry, which a revocation could not end. |
 | A party's or an agent run's reads and writes keep to the rows its grants reach, the target and the rows of the tables its role's paths name, through the same paths a row rule follows; a table no path names has none. A create that leaves a row outside its reach is the 403 `forbidden`, and the transaction keeps nothing. | Reach as a row rule of each operation, which a hand-written implementation would skip. |
 | `activeGrants(orm, filter)` reads the active grants. | A generated declared query (left). |
 
@@ -2217,8 +2217,9 @@ which embeds every row again. A table made `@searchable` with rows in it
 needs `reindexSearch` once.
 
 How section 8 calls search for an agent run: the run's token is a grant
-(D156), so the MCP endpoint's authenticator, `grantAuthenticator`, resolves
-the call to the run's principal (`kind: "agent"`, `actingFor`, `grants`),
+(D156), so the MCP endpoint's authenticator, the dispatcher's
+`agents.authenticator()` (`grantAuthenticator` refuses a run's token,
+D194), resolves the call to the run's principal (`kind: "agent"`, `actingFor`, `grants`),
 and the endpoint answers `tools/call` of `search` with
 `callSearchTool(orm, principal, args, options)`. Its hits keep to the rows
 its grants' paths reach, by the `EXISTS` above, and to the rows whose
@@ -2494,7 +2495,7 @@ task bounds, autonomy per operation, budgets and stop switches.
 |----------|------------------------|
 | The orchestration's tables are classes the database declares, one per part with `@agents("<part>")`: `definitions` (`@versioned`), `runs`, `requests` (a `@queue`), `policies`, `approvals` and `controls`, every one required. The loader adds each part's field a class does not declare, and holds one it declares to the part's scalar (the runs' `status` excepted), so the runs may compose Lease and Retries over a Workflow `status`, and the controls a Budget over `budgetLimit`. Postgres alone. | Tables the loader adds unasked, which every database would carry. A class the loader fills only when it is empty, as D153's notifier parts are, which leaves no room for the behaviors D104 meters and retries with. |
 | Each agent is its own principal: its runs act with its definition's `role`, never a user's. A run's principal is `kind: "agent"` with the run's id as its subject, so a row's audience admits the run or whom it acts for (D156). The run records the definition's `_version`. | A principal per agent, whose token would outlive a run. |
-| The run's token is a D156 grant per target row, held by the run (`holderKind: "agent"`), its role the agent's, ending at the definition's `limits.maxSeconds` and revoked when the run ends. `agents.authenticator()` resolves it through `grantAuthenticator`, then reads every active grant of the run and the run's row: a run that ended is a 401, `actingFor` is whom the run acts for, and the permissions are the role's narrowed to those that principal holds (each the two share, the narrower of a pair). | A token with its own claims, which a revocation could not end. The agent's role alone, under which an agent answering a party could do what the party may not. |
+| The run's token is a D156 grant per target row, held by the run (`holderKind: "agent"`), its role the agent's, ending at the definition's `limits.maxSeconds` and revoked when the run ends. `agents.authenticator()` resolves it through the grants' authenticator, in a variant the package does not export (the plain `grantAuthenticator` refuses a run's token, D194), then reads every active grant of the run and the run's row: a run that ended is a 401, `actingFor` is whom the run acts for, and the permissions are the role's narrowed to those that principal holds (each the two share, the narrower of a pair). | A token with its own claims, which a revocation could not end. The agent's role alone, under which an agent answering a party could do what the party may not. |
 | The dispatcher is a worker of the requests queue (`agents.workerQueue(pool)`, `agents.handle`). A start writes the run, takes its Lease (D104) as the dispatcher's behavior caller, mints the token and starts a sandbox instance (D159) with the definition, the token as a secret, the agent routes' URL and the credential references. A `watch` message, a delayed enqueue (D80), polls the instance and heartbeats the lease until it ends; the run then ends: token revoked, cost metered, transcript written, lease released. A start that fails is recorded with Retries, whose backoff sets when the start is tried again; exhausted, the run fails. On Workers the queue drains as any `@worker`'s does, at each Cron firing and on a wake for a message due within the minute (D92, D151): no process waits on an instance. | A long-running supervisor per run, which Workers has no place for. The queue's own claim lease and attempts in place of Lease and Retries, which the plan names and which give a run a fencing token and per-class backoff. |
 | The model turn runs in the app, not the sandbox: the instance posts its tool results to `<endpoint>/turn`, where the definition's model provider completes the turn with the run's tools, records the usage on the run and the budget, and writes the transcript. The instance calls tools at `<endpoint>/mcp` with its token, and runs the sandbox's own tools (a fetch, a browser) in process. `runAgentInstance` in `./providers` is that side. | The model called from the sandbox, which needs a model key in every instance and a budget the app cannot see. |
 | Credentials are references in the definition. The instance resolves each with `useCredential` into the runner that uses it and reports the reference, provider, target and time to `<endpoint>/credential`, which the run's `credentialUses` keeps. The app passes the broker's own settings to the instance through `sandboxSpec`. | Resolving in the app and passing values to the instance, which puts them in the app's memory and the spec's log. |
@@ -2872,10 +2873,11 @@ Left:
   `@autonomy` read by their gates, and the generated wiring (D158's left).
 - A run's token on the API's own routes: the generated server accepts it
   only where the implementation's authenticator does
-  (`deps.agents.authenticator(inner)`), and a route holds the call to its
-  run's autonomy only where the implementation asks `deps.agents.gate`;
-  the generated router could gate every route an agent calls as the MCP
-  endpoint does.
+  (`deps.agents.authenticator(inner)`; `grantAuthenticator`, an app's
+  authenticator of its parties, refuses it, D194), and a route holds
+  the call to its run's autonomy only where the implementation asks
+  `deps.agents.gate`; the generated router could gate every route an
+  agent calls as the MCP endpoint does.
 - The approval routes (`<endpoint>/approvals/<id>/approve`) in the
   generated server, which `routes()` serves only with an authenticator of
   a `Request`; approvals are decided through a reply or the app's own
@@ -3101,6 +3103,43 @@ Left:
   mounts the inbox and the relay routes, and fills a `@worker` of the
   dispatch queue with `handle`; an app wires them, as in TypeScript
   (D153's left).
+
+## D194. TypeScript's `grantAuthenticator` refuses an agent run's token, which the agent dispatcher's authenticator alone resolves, as Go (D192) and Rust (D193) do (D156, D158, D183 amended)
+
+`grantAuthenticator` resolved any `grant_` token as its grant's holder. A
+run's token, a grant whose holder is the run (`holderKind: "agent"`),
+came back as kind `agent` with the agent role's every permission and the
+grant's reach: narrowed to no one the run acts for, its paths to no
+party's grant (D183), and held to no autonomy. Only
+`agents.authenticator()` narrows and gates it, so an app that mounts the
+plain `grantAuthenticator`, the documented way to serve its parties
+(D156, D157), let a run act as its grant's bare holder.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `grantAuthenticator` answers 401 to a grant an agent run holds: "An agent run's token is resolved by the agent dispatcher's authenticator alone", the meaning of Go's and Rust's. It refuses it after the calendar feed's refusal and before the grant's end is read, as Rust's does. | Resolving it narrowed in `grantAuthenticator`, which would need the dispatcher's tables and policy in the access module. |
+| `agents.ts`'s `principalOf` reads a run's token through `grantAuthenticatorAdmittingRuns`, which `access.ts` exports to the runtime's own modules and no entry of the package re-exports (the package's `exports` hold deep imports out), as Rust keeps `admitting_runs` to its crate. A token that is no running run's, an ended run's whose grant still stands among them, falls to the plain `grantAuthenticator`, which refuses it. | A public `admitRuns` option, which any app could set. The admitting variant as the fallback too, under which a run that ended while its grant stood would run as its bare holder. |
+
+Settled. A run's token is resolved by the dispatcher alone in all three
+languages; every other grant's runs as its holder through either
+authenticator. No caller on `main` presented a run's token to the plain
+`grantAuthenticator`: the generated servers take the implementation's
+authenticator (`deps.agents.authenticator(inner)` where it serves runs),
+and the examples, `parties.ts` and `calendar.ts` hold parties' and feeds'
+grants alone.
+
+Built: the refusal and `grantAuthenticatorAdmittingRuns`
+(`runtime/http/typescript/src/access.ts`), `principalOf`'s use of it
+(`agents.ts`). The tests: `src/run-tokens.test.ts`, over an ORM in
+memory: a live run's token is a 401 of `grantAuthenticator` and resolves
+through `agents.authenticator()` as the run, its permissions narrowed to
+the user it acts for; an ended run's is refused by both; a party's runs
+through either; the admitting variant is no export. `TestAgentRunsEndToEnd`
+gains the case on Postgres with a real run's token, and
+`TestGeneratedAccessEndToEnd` (and its SQLite run) the generated router's
+401 to an agent-held grant.
+
+Left: nothing of its own.
 
 ## D200. Approvals takes requirements each instance sets: rows a gate reads, who counts and as whom, the proof, whom it excludes and when it applies, a reset per requirement and pins on named fields; the caller carries its Agent and assurance; and a generated index name past 63 bytes is shortened (D56, D103, D104 amended)
 
