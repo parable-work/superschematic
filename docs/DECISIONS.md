@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D199 is the highest so far.
+  the highest number any branch has used. D201 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -2281,8 +2281,9 @@ Left:
   and missed (the overdue deadline's) events Recurrence emits, and no
   deadline is armed at the due, so a "due now" event waits for one.
 - `completedBy` converging with references (section 4) once they merge.
-- Replanning a relative recurrence when its target's date changes: today
-  the row plans again on its own write, at a fire, or at `setRecurrence`.
+- Replanning a relative recurrence when its target's date changes, by
+  hearing the target's write. The row plans again on its own write, at a
+  fire, and at a `setRecurrence` with the rule it holds (D201).
 - The generated router mounting `calendarRoutes` and the calendar MCP
   tool; an app wires them, as it wires `grantAuthenticator` (D156).
 - A Go or a Rust server whose database lists sqlite first, which is
@@ -3365,3 +3366,71 @@ gains the case on Postgres with a real run's token, and
 401 to an agent-held grant.
 
 Left: nothing of its own.
+
+## D201. A generated TypeScript router reads its per-operation options through constants, a behavior's route answers a row kept from its caller as a key no row holds, two operations on one route are refused, and `setRecurrence` with the rule a relative row holds plans again (D103, D106, D152, D156 amended)
+
+Four findings from an app of 357 operations built on D152 to D156.
+
+- `tsc` gave up on the generated `buildRouter` (TS2563, "too large for
+  control flow analysis") past roughly 330 operations, and typed every
+  implementation as `any`. Each operation read `options.bodyLimits?.<op>`,
+  `options.rateLimits?.<op>` and `options.timeouts?.<op>`, and each
+  optional chain on a parameter's property deepens the flow analysis of
+  every later reference in the function.
+- A behavior's operation on an `@audience` row its caller is kept from
+  answered 500 `internal_error`. The repository's reach check (D156, #554)
+  throws a `NotFoundError` over no refusal, and the route's
+  `behaviorOperation` knows a `NotFoundError` only by the refusal under
+  it: a bare one it leaves to a table operation's route, which answers it
+  in its own words (D106). Nothing was read or written.
+- Two operations declared `@rest(HttpMethod.GET, 'logins')` in two classes
+  built with no word, and a request reached only the one the router
+  mounted first.
+- `setRecurrence` with the rule a row already holds answered `unchanged`
+  without planning. A relative recurrence reads its date from another
+  table's row, whose write the recurrence does not hear, so the one call
+  an app has for "date it again" did nothing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `buildRouter` reads each per-operation map once, into `bodyLimits`, `rateLimits`, `timeouts` and `manualRoutes`, each typed `NonNullable<typeof options.x>` and defaulting to `{}`, and an operation reads `bodyLimits.<op>`. A constant is declared only in a router that reads it, so a consumer's `noUnusedLocals` finds none unused. | One function per operation set, which changes the router's shape for the same result. Raising nothing and telling apps to skip the type check, as the app did. |
+| A behavior's operation on a row its caller does not see, or for a writing operation may not write, throws the repository's `NotFoundError` over the `not_found` refusal the core gives a key no row holds, in the core's words (`<Type> <key> does not exist`, the key in its wire form). Its route answers 404 `not_found` with the same body for both, so the answer never says which. | The `NotFoundError`'s own words (`<Type> <key> not found`) for a kept row, which tells it from a missing one. Asking the core about a kept row, which reads it. |
+| The loader refuses two operations of an API that are one route: the same HTTP method, and paths that are the same text segment for segment with a `{parameter}`, of any name, in the same places. It reads each operation's method and path as apigen routes it, `@rest`'s or the defaults, over every set, the operations an expansion added among them, and names both operations. | A warning, which a build log loses. Refusing paths that only overlap (`orders/{id}` and `orders/latest`), which routers serve and many APIs declare; the checks of D104's and D138's added operations still refuse those overlaps. |
+| `setRecurrence` with the rule the row holds, on a relative recurrence, plans again when a plan would now date its upcoming and open occurrences otherwise. It runs the plan a fire runs: the recurrence stays as it was set, its `setAt` and `revision` with it, an open occurrence stays, and an occurrence moved by `moveOne` keeps its date. It answers `unchanged` only when the plan dates what the row holds, and then writes nothing, as before. A calendar or afterDone recurrence with the same rule is answered `unchanged` as before. | Setting the recurrence anew (a new `setAt` and `revision`), which drops a moved occurrence and dates nothing before now. Hearing the target's write through a change queue (below). |
+
+Settled. Each replaces a workaround in the app: a patch of its generated
+`router.ts` before a type check, and a write of an obligation's relation
+field that stood in for a replan.
+
+Built: `tsrestgen`'s `router.tmpl` and `APIOutput.ReadsBodyLimits`;
+`TableRepository.keptNotFound`
+(`runtime/http/typescript/src/orm.ts`);
+`verify.checkOperationRoutes` (`internal/loader/verify/operation_routes.go`);
+Recurrence's `settle` and `set_recurrence`
+(`runtime/engine/rust/rules-behaviors/src/recurrence/behavior.rs`), its
+declaration and the guide. The tests: `TestALargeGeneratedAPICompiles`
+type-checks an API of 840 operations, which fails with TS2563 on the old
+template; `TestAudienceBehaviorsEndToEnd` holds a route's answer for a
+kept row equal to its answer for a key no row holds, on bun:sqlite and on
+Postgres; `TestTwoOperationsOnOneRouteAreRefused`; and
+`set_recurrence_with_the_rule_a_relative_row_holds_follows_its_targets_date`.
+
+Left:
+
+- Go and Rust on a behavior's operation of a kept row. Read in the
+  source, not run: neither repository checks the caller's reach before a
+  behavior's row operation (`RunOperation` in ormgen's `repository.tmpl`,
+  `Runner::operation` in `runtime/http/rust/src/orm/run.rs`), where both
+  check it before `updateOne` and `deleteOne`; and neither rules adapter
+  reads a list of UUIDs (`runtime/rules/go/convert.go`,
+  `rules-adapter/src/convert.rs`), so a behavior's call on a private or
+  named row fails for every caller, the bug #554 fixed in TypeScript.
+  D180 lists the Go half. A caller with grants on a table without an
+  audience meets no list, so its behavior operations there are not held
+  to its grants.
+- A relative recurrence hearing its target's write (D152's left item):
+  the target table may compose no behaviors and so have no change queue,
+  and the core's listening runs from a changed row to the rows its own
+  relations name, the other way.
+- An overlap among an API's own routes, which stays each router's
+  precedence.
