@@ -280,6 +280,11 @@ pub struct Column {
     /// How the adapter converts it; `None` for none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convert: Option<Convert>,
+    /// The field is a list of its type, a `UUID[]` of ids on Postgres and
+    /// the JSON text of an array on SQLite (D156, D182), which the adapter
+    /// reads and binds element by element.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub list: bool,
 }
 
 impl Column {
@@ -294,6 +299,7 @@ impl Column {
             column: column.into(),
             type_name: type_name.into(),
             convert: None,
+            list: false,
         }
     }
 

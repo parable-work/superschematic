@@ -549,6 +549,24 @@ pub struct Behaviors {
     /// insert would leave unwritten, so the table has no upserts.
     #[serde(default)]
     pub no_upsert: bool,
+    /// The operations on a row that write nothing, by the member they sit
+    /// under (`comments`: `listMessages`), as the core declares them: a
+    /// caller who sees the row may run one of them, and every other
+    /// operation needs a caller who may write it (D156).
+    #[serde(default)]
+    pub reads: BTreeMap<String, Vec<String>>,
+}
+
+impl Behaviors {
+    /// Whether `operation` under `member` writes: every operation the
+    /// definition does not name a read, so one written before it named
+    /// them needs a caller who may write the row.
+    pub fn writes(&self, member: &str, operation: &str) -> bool {
+        !self
+            .reads
+            .get(member)
+            .is_some_and(|reads| reads.iter().any(|read| read == operation))
+    }
 }
 
 impl Table {

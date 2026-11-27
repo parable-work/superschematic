@@ -334,6 +334,9 @@ type ormFence struct {
 type ormBehaviors struct {
 	Owned    []string `json:"owned"`
 	NoUpsert bool     `json:"noUpsert,omitempty"`
+	// Reads are the operations on a row that write nothing, by the member
+	// they sit under, which a caller who sees the row may run (D156).
+	Reads map[string][]string `json:"reads,omitempty"`
 }
 
 type ormColumn struct {
@@ -572,6 +575,19 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// insert.
 				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
+				}
+				for _, op := range use.Operations {
+					if op.Table || op.Writes {
+						continue
+					}
+					member := use.Member
+					if member == "" {
+						member = use.ID
+					}
+					if behaviors.Reads == nil {
+						behaviors.Reads = map[string][]string{}
+					}
+					behaviors.Reads[member] = append(behaviors.Reads[member], op.Name)
 				}
 			}
 			typed.Behaviors, info.Rules = true, true

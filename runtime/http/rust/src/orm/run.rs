@@ -119,7 +119,7 @@ impl<C: Client> Runner<'_, C> {
     /// Refuses, as not found, a write of the row whose key is `key` that
     /// the caller may not write (D156): a row the caller may not write is
     /// not there.
-    async fn require_reach(&self, key: &Value, write: bool) -> Result<(), Error> {
+    pub(crate) async fn require_reach(&self, key: &Value, write: bool) -> Result<(), Error> {
         if !self.plan.kept(self.table) {
             return Ok(());
         }
@@ -547,6 +547,10 @@ impl<C: Client> Runner<'_, C> {
 
     /// Runs `operation` of the behavior under `member` on the row whose
     /// key is `key`, through the core (D103), and answers its result.
+    /// Opened for a caller (D156), it runs only on a row the caller may
+    /// write, or for an operation that writes nothing, a row the caller
+    /// sees, as an update and a read are held: any other row is not found
+    /// before the core runs.
     pub(crate) async fn operation(
         &self,
         member: &str,
@@ -555,6 +559,12 @@ impl<C: Client> Runner<'_, C> {
         params: &Value,
         options: &WriteOptions,
     ) -> Result<Value, Error> {
+        let writes = self
+            .table
+            .behaviors
+            .as_ref()
+            .is_none_or(|behaviors| behaviors.writes(member, operation));
+        self.require_reach(key, writes).await?;
         let command = self
             .plan
             .core_operation(member, operation, key, params, options)?;

@@ -126,6 +126,48 @@ func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
 	runBehaviorRepositoriesWith(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest, true)
 }
 
+//go:embed testdata/orm/audience_rules.rs
+var audienceRulesTest string
+
+// audienceRulesCases are the cases audience_rules.rs runs, by name, each
+// of which it prints as it starts it: ormgen's
+// TestBehaviorOperationsKeepToTheCallerOnPostgres holds the Go ORM to the
+// same ones.
+var audienceRulesCases = []string{
+	"a private row's and a named row's behaviors are not found for a user outside their audience, and write nothing",
+	"a private row's behaviors answer its owner",
+	"a named row's behaviors answer the principals it names",
+	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
+	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
+}
+
+// TestRepositoriesKeepBehaviorOperationsToTheCaller runs
+// fixture-audience-behaviors-db's Task, an @audience table whose status is
+// a Workflow and which holds a conversation, on Postgres (D156, D181,
+// D103): the repositories opened for a caller run a behavior operation on
+// a row only for a caller who may write it, or for one that writes
+// nothing (Comments' listMessages) one who sees it, as update_one and a
+// read are held, and any other caller's is not found before the core runs
+// and writes nothing. A private row answers its owner, a named row the
+// principals it names, a party the row its grant names, and an agent run
+// with read-only access its conversation's reads; the core reads the
+// row's audience ids, a UUID[], as a list. Every case of
+// audienceRulesCases must run.
+//
+// It needs cargo, which it skips without, the database, and runs outside
+// -short.
+func TestRepositoriesKeepBehaviorOperationsToTheCaller(t *testing.T) {
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Rust repositories' behavior operations under per-record access against Postgres")
+	}
+	out := runBehaviorRepositoriesWith(t, "fixture-audience-behaviors-db", "audience_rules", audienceRulesTest, true)
+	for _, name := range audienceRulesCases {
+		if !strings.Contains(out, "case: "+name+"\n") {
+			t.Errorf("the case %q did not run:\n%s", name, out)
+		}
+	}
+}
+
 // runBehaviorRepositories generates fixture's Rust types with both
 // dialects' repositories and the core bound, holds the types crate to
 // cargo clippy, and runs source, the test crate's tests/<name>.rs, over the
@@ -138,8 +180,9 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 
 // runBehaviorRepositoriesWith is runBehaviorRepositories, the test crate
 // depending on the HTTP runtime's checkout as well when runtime is set,
-// for a test that runs the runtime's own loops over the repositories.
-func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) {
+// for a test that runs the runtime's own loops over the repositories, and
+// returns what the cases printed.
+func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping the behavior tables' cargo test in -short mode")
@@ -249,6 +292,7 @@ func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, run
 		t.Errorf("the Postgres half did not run:\n%s", out)
 	}
 	t.Logf("%s", out)
+	return string(out)
 }
 
 // ormBehaviorsManifest is the test crate's Cargo.toml, given the types
