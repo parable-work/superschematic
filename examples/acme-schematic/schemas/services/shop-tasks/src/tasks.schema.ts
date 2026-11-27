@@ -1,3 +1,6 @@
+import { ShopApi } from "@acme/shop-api";
+import { ShopCatalog } from "@acme/shop-catalog";
+import { ShopStorefront } from "@acme/shop-storefront";
 import { task, tasks } from "@superschematic/tasks";
 
 // The defaults of every task: the image a task runs from, by its digest,
@@ -22,14 +25,16 @@ export abstract class Shop {}
 // Builds every schema service. It reads the binary's sources and four
 // services, each a schema input: the service's directory, the directory
 // of each service it names (shop-api and shop-storefront name shop-db),
-// and the schemas root's shared files. Its output is the generated tree,
-// which ApiBuild reads.
+// and the schemas root's shared files. Three are named by their handles,
+// so a wrong name fails in the editor. shop-config is named by its name:
+// its package exports a class called ShopConfig, which hides its handle.
+// Its output is the generated tree, which ApiBuild reads.
 @task({
   run: ["acme-schematic", "build-all", "examples/acme-schematic/schemas/services"],
   inputs: [
-    { kind: "schema", spec: { service: "shop-api", root: "examples/acme-schematic/schemas" } },
-    { kind: "schema", spec: { service: "shop-storefront", root: "examples/acme-schematic/schemas" } },
-    { kind: "schema", spec: { service: "shop-catalog", root: "examples/acme-schematic/schemas" } },
+    { kind: "schema", spec: { service: ShopApi, root: "examples/acme-schematic/schemas" } },
+    { kind: "schema", spec: { service: ShopStorefront, root: "examples/acme-schematic/schemas" } },
+    { kind: "schema", spec: { service: ShopCatalog, root: "examples/acme-schematic/schemas" } },
     { kind: "schema", spec: { service: "shop-config", root: "examples/acme-schematic/schemas" } },
     "examples/acme-schematic/ext",
     "examples/acme-schematic/cmd",

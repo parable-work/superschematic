@@ -3,16 +3,19 @@
 // nothing at run time; superschematic reads the arguments statically and
 // writes the task file from them, and the types here check in the editor
 // what the loader checks again.
+import type { ServiceHandle } from "@superschematic/schema-config";
 
 /**
  * The input kinds a task may name, each with the spec its resolver reads:
- * the core's `path` and `schema`, and each kind whose authoring package
+ * the core's `path` and `schema`; the four of the official `resolvers`
+ * extension, which the installed binary links, `go-module`, `rust-crate`,
+ * `js-package` and `image`; and each kind whose authoring package
  * augments this interface when an extension registers its resolver.
  *
  * ```ts
  * declare module "@superschematic/tasks" {
  *   interface InputKinds {
- *     "go-module": { readonly dir: string };
+ *     "bazel-target": { readonly label: string };
  *   }
  * }
  * ```
@@ -25,12 +28,40 @@ export interface InputKinds {
    */
   path: { readonly paths: readonly string[]; readonly exclude?: readonly string[] };
   /**
-   * A schema service by its name: its directory, the directory of each
-   * service it names, its schemas root's shared files and the naming
-   * file's `[cache] inputs`. `root` names the schemas root when the
-   * repository has several with a service of that name.
+   * A schema service, by its handle or its name: its directory, the
+   * directory of each service it names, its schemas root's shared files
+   * and the naming file's `[cache] inputs`. A handle is the service's
+   * sentinel, imported from its package, so a wrong name fails in the
+   * editor. `root` names the schemas root when the repository has several
+   * with a service of that name.
    */
-  schema: { readonly service: string; readonly root?: string };
+  schema: { readonly service: ServiceHandle | string; readonly root?: string };
+  /**
+   * A Go module, by the directory of its go.mod: its files without the
+   * modules nested in it, the modules its `replace` lines point at, and
+   * the modules of its go.work that it requires.
+   */
+  "go-module": { readonly dir: string };
+  /**
+   * A Rust crate, by the directory of its Cargo.toml: its files without
+   * the crates nested in it, the crates its dependency tables name by a
+   * path, and its workspace's manifest and lockfile. A workspace's
+   * directory is every member.
+   */
+  "rust-crate": { readonly dir: string };
+  /**
+   * A JS package, by the directory of its package.json: its files, the
+   * packages of its workspace it depends on, the packages it names by a
+   * path, and the workspace root's manifests and lockfiles.
+   */
+  "js-package": { readonly dir: string };
+  /**
+   * An image, by its Dockerfile: the Dockerfile and each file of the
+   * build context a `COPY`, an `ADD` or a bind mount names. The context
+   * is the Dockerfile's directory unless `context` names one, `.` for
+   * the repository root.
+   */
+  image: { readonly dockerfile: string; readonly context?: string };
 }
 
 /**

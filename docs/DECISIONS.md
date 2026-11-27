@@ -3633,8 +3633,8 @@ fields.
 | The input key covers, in order: the key version with the repository's object format (`1:sha1`); the work hash, the SHA-256 of the work fields in canonical JSON with the image and platform in effect; the digest of each input; and the key of each task used, by task and output. Every key is known before any task runs. | Content hashes of files, which the plan would compute and git already holds. A key with no version, which a change of its definition could not void. |
 | An input's digest is the SHA-256 over the sorted lines `<mode> <path> <object id>` of the tracked files it resolves to in the commit's tree. The mode is in the line. The plan reads a commit through git and never a working tree, with replace refs off. In a SHA-1 repository the key rests on git's hardened SHA-1; the sha256 format gives another key version. It is a second convention beside the build cache's `TreeDigest`, not the same one. | `TreeDigest`, which hashes a working tree with untracked files and needs no git: right for the build cache, wrong for a function of a commit. `<path> <id>` alone, which misses an executable bit, a symbolic link and a submodule. |
 | `tasks plan <commit> --file <path> [--base <commit>]` prints the plan: each task's work hash, key, edges and section parts, and an order. With `--base`, a task whose work hash differs from the base's is keyed on both hashes and on the inputs of both definitions, read against the commit's tree. Those keys differ from the keys of the same tree with no base, so the task and each task that uses it runs once more after the change lands. The plan command ships in the image the file names, the file's default. | A key that is a function of the tree alone, which lets a change reuse a pass of the task it replaced, or pass by narrowing what the task reads. One commit argument, which leaves the base's file unread. |
-| An input resolver is a registration (`RegisterTaskResolver`). It reads tracked files only, through a `TaskTree`; it runs no build tool and starts no process; it uses no network; it executes nothing of the tree; it reads at most 1 MiB of one file. A path a manifest names and the commit lacks is reported, and the plan requires an output the task uses to cover it, or fails with the path, the manifest and the edge to add. The core registers `path` and `schema`. | `cargo metadata`, `turbo run --dry` and the like, which fail before anything is generated and run tools on a commit somebody else wrote. Hashing an untracked directory. |
-| The `schema` resolver takes a service's name and resolves to a static set found from tracked text alone: its directory; the directory of each service of its schemas root it names by directory name or package name, transitively; the root's files that belong to no service; and the naming file's `[cache] inputs`. No schema loads and no config is evaluated, so it needs only git and no sentinel on disk. A file over the limit is taken to name every service. | Reading each config with the TypeScript reader, which reads a directory and needs the sentinels a build writes. The services a build recorded in its depfiles, which exist only after it. One schema-build input for the whole root, which voids every key on any schema edit. |
+| An input resolver is a registration (`RegisterTaskResolver`). It reads tracked files only, through a `TaskTree`; it runs no build tool and starts no process; it uses no network; it executes nothing of the tree; it reads at most 1 MiB of one file. A path a manifest names and the commit lacks is reported, and the plan requires an output the task uses to cover it, or fails with the path, the manifest and the edge to add. The core registers `path` and `schema`. The official extension `extensions/resolvers`, which the installed binary links, registers `go-module`, `rust-crate`, `js-package` and `image`: each a unit named by the directory of its manifest, resolved to its files, without the units nested in it, and to each unit of the repository its manifest names, with the workspace's manifests and lockfiles. | `cargo metadata`, `turbo run --dry` and the like, which fail before anything is generated and run tools on a commit somebody else wrote. Hashing an untracked directory. |
+| The `schema` resolver takes a service's name, or its handle, which `@task` records as an identity and keeps as the name, and resolves to a static set found from tracked text alone: its directory; the directory of each service of its schemas root it names by directory name or package name, transitively; the root's files that belong to no service; and the naming file's `[cache] inputs`. No schema loads and no config is evaluated, so it needs only git and no sentinel on disk. A file over the limit is taken to name every service. | Reading each config with the TypeScript reader, which reads a directory and needs the sentinels a build writes. The services a build recorded in its depfiles, which exist only after it. One schema-build input for the whole root, which voids every key on any schema edit. |
 | `tasks inputs` checks the static set after a build: for each schema input it gathers what the build cache keys the service on, from the configs and the depfiles the last build wrote, and fails with each service or file the set at HEAD lacks. It is a command of its own, run in the task that builds schemas. | A check inside `build`, which would fail builds of every distribution, with a Tasks service or without. No check, which leaves the set's soundness to the scan. |
 | The task file is `version`, the default `image` and `platform`, `tasks` by name, and `sections`: keys sorted, a two-space indent, a trailing newline, and no byte that depends on the machine. A reader refuses an unknown field and a newer version and names it. Three places are open: an input's `spec`, `sections.<name>` and a task's `sections.<name>`. The image digest carries the plan command, so one change moves the file's version and the plan command together. | Open everywhere, which lets a reader act on half of what a newer file says. |
 | The `tasks` generator writes the file under the output root with its install path beside it, and a build-all hook, `tasks-install`, installs what the output root holds at `outputs.tasks.install` on every build-all. The hook loads no schema: a service the build restored from the cache is not loaded. A missing install directory fails the build; a build with no repository above it logs a line and installs nothing; two services at one path are refused. `tasks <dir> --check` renders the file, writes nothing and fails on a difference. | Installing inside the generator, as the Stack's `ci` does (D47), which a cache restore skips. Rendering in the hook, which has no schema after a restore. Skipping a missing directory silently, which is right for an optional workflow and wrong for a file a forge trusts. |
@@ -3652,7 +3652,9 @@ render, the tree over git, the two resolvers, the key and the plan);
 `tasks` package with its two JSON Schemas; `cli/tasks.go` (`tasks`,
 `tasks plan`, `tasks inputs`) and `json-schema --task-file` and
 `--task-plan`; `@superschematic/tasks`; the naming file's
-`[tasks.sections]`; the TypeScript writer's `@task`; and
+`[tasks.sections]`; the TypeScript writer's `@task`;
+`extensions/resolvers`, a Go module of its own; `new service --kind
+Tasks`; and
 `examples/acme-schematic`'s `shop-tasks`, its `acme` section and its
 committed `ci/tasks.json`. The tests: `TestKeyVectors`, the keys of a
 fixed tree in both object formats, whose golden is rewritten only when
@@ -3672,18 +3674,17 @@ its key.
 
 Left:
 
-- Resolvers for a Rust crate, a Go module, a JS package and an image, as
-  extension modules beside `extensions/topcoat`. Each parses tracked
-  manifests and reports a generated member, by the rules above.
+- What the four resolvers of `extensions/resolvers` leave wider than a
+  build reads: a `.dockerignore` is taken as a file and not applied, a
+  tsconfig's project references are not followed, and a JS dependency
+  written `*` on a name no tracked member has is taken for a generated
+  member whenever the workspace lists a directory the commit lacks.
 - A CI renderer that writes a workflow from a Tasks schema: a job per
   task, both edges as `needs`, a paths output carried as an artifact
   named by task and output, an image or a value as a job output, and its
   `on:` from a section of its own. Without the artifacts it would cover
   only tasks that use nothing. It would be the file's second reader in
   this repository, and the step that joins D47's workflow to tasks.
-- A schema input by handle, so a wrong name fails in the editor. It takes
-  the service's name today, which the plan and `tasks inputs` check.
-- `new service --kind Tasks`.
 - Two measures no test here gives: the plan's time on a large
   repository, where one `git ls-tree -r` covers every task and the
   resolvers are the likely cost; and how narrow a schema input's set is,

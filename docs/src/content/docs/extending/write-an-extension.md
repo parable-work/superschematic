@@ -527,16 +527,20 @@ A Tasks service declares the work a commit needs
 two places.
 
 **An input resolver** turns one kind of input into tracked files of a
-commit. The core has `path` and `schema`; a resolver for a Go module or
-a Rust crate is an extension's:
+commit. The core has `path` and `schema`, and the official
+`extensions/resolvers` has a Go module, a Rust crate, a JS package and
+an image, which are the worked examples. A resolver for another
+toolchain is yours:
 
 ```go
 r.RegisterTaskResolver(registry.TaskResolverSpec{
-    Kind:      "go-module",
+    Kind:      "bazel-target",
     Extension: Name,
-    Spec:      json.RawMessage(`{"type":"object","required":["dir"],"additionalProperties":false,"properties":{"dir":{"type":"string"}}}`),
+    Spec:      json.RawMessage(`{"type":"object","required":["label"],"additionalProperties":false,"properties":{"label":{"type":"string"}}}`),
     Resolve: func(req registry.TaskResolveRequest) (registry.TaskResolution, error) {
         // req.Tree is the commit: Entries, Entry and Read.
+        // registry.TaskEntriesUnder and registry.MatchTaskPaths read it
+        // by directory and by pattern.
         // Return the tracked files the input covers in Paths, and in
         // Generated each path a manifest names that the commit lacks.
     },
@@ -562,7 +566,7 @@ Type the spec in your authoring package, so a schema's editor checks it:
 ```ts
 declare module "@superschematic/tasks" {
   interface InputKinds {
-    "go-module": { readonly dir: string };
+    "bazel-target": { readonly label: string };
   }
 }
 ```

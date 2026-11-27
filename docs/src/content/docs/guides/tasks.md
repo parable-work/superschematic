@@ -45,6 +45,8 @@ export default defineConfig({
 
 Nothing names a Tasks service, so it has no sentinel. A repository may
 have several, each with an install path of its own.
+`superschematic new service repo-tasks --kind Tasks` writes one with a
+starter task.
 
 ## Declare the tasks
 
@@ -151,7 +153,9 @@ must give the same result with it and without it.
 ## Inputs and resolvers
 
 A task names its inputs by kind. A **resolver** turns an input into
-tracked files of the commit. The core has two.
+tracked files of the commit. The core has two, `path` and `schema`, and
+the installed binary links four more, one per
+[unit of a toolchain](#a-go-module-a-rust-crate-a-js-package-an-image).
 
 **`path`** covers tracked files by path or glob. A string is short for
 it:
@@ -166,11 +170,17 @@ directories. A path with no wildcard that covers no tracked file fails
 the plan: it is a slip, or a file a task writes, which a task reads
 through `uses`.
 
-**`schema`** covers a schema service by its name:
+**`schema`** covers a schema service, by its handle or its name:
 
 ```ts
-inputs: [{ kind: "schema", spec: { service: "shop-api" } }]
+import { ShopApi } from "@acme/shop-api";
+
+inputs: [{ kind: "schema", spec: { service: ShopApi } }, { kind: "schema", spec: { service: "shop-db" } }]
 ```
+
+A handle is the service's sentinel, imported from its package, so a
+wrong name fails in the editor. The task file holds the name either way,
+and the import names the service without reading any type of it.
 
 It resolves to a static set that holds everything a build of the service
 may read of the commit:
@@ -205,6 +215,74 @@ When a manifest names a path that no tracked file holds, such as a
 workspace member a build writes, the resolver reports it. The plan then
 requires the task to use an output that covers the path, and fails with
 the path, the manifest and the edge to add when it does not.
+
+### A Go module, a Rust crate, a JS package, an image
+
+The official `resolvers` extension, which the installed binary links,
+resolves the common units of a repository. Each is named by the
+directory of its manifest, from the repository root, `.` for the root
+itself.
+
+```ts
+inputs: [
+  { kind: "go-module", spec: { dir: "go/shop-api" } },
+  { kind: "rust-crate", spec: { dir: "crates/shop" } },
+  { kind: "js-package", spec: { dir: "web/shop" } },
+  { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } }
+]
+```
+
+| Kind | Resolves to |
+| --- | --- |
+| `go-module` | the module's files, without the modules nested in it; each module a `replace` of its `go.mod` points at by a path; the `go.work` above it, and each module that workspace uses that the module requires |
+| `rust-crate` | the crate's files, without the crates nested in it; each crate its dependency tables name by a path, `workspace = true` read from the workspace's own table; each crate a `[patch]` points at; the workspace's `Cargo.toml` and `Cargo.lock`; the `.cargo/config.toml` and `rust-toolchain.toml` above it. A workspace's directory is every member |
+| `js-package` | the package's files, without the workspace members nested in it; each member of its workspace it depends on by name; each package it names by `file:`, `link:` or `portal:`; the workspace root's `package.json`, lockfiles and package manager configuration; each tsconfig it extends by a path |
+| `image` | the Dockerfile and its context's `.dockerignore`; each file of the context a `COPY` or an `ADD` names; each file a `RUN --mount=type=bind` mounts. The context is the Dockerfile's directory unless `context` names one |
+
+Each follows a unit to the units it names, and those in turn. Each
+parses manifests and runs nothing: no `go list`, no `cargo metadata`, no
+install.
+
+A manifest often names something a build writes: a `replace` to a
+generated Go module, a path dependency on a generated crate, a `COPY` of
+a binary. The resolver reports it, and the plan requires the task to
+use the output that covers it:
+
+```ts
+@task({
+  run: ["go", "test", "./..."],
+  inputs: [{ kind: "go-module", spec: { dir: "go/shop-api" } }],
+  uses: [{ task: SchemaBuild, output: "generated" }]
+})
+export abstract class GoTest {}
+```
+
+Without the `uses`, the plan fails and names the edge to add:
+
+```
+task go-test: go/shop-api/go.mod names schemas/dist/orm/shop-db, which no
+tracked file of the commit holds. Output generated of task schema-build
+covers it: add `uses: [{ task: schema-build, output: "generated" }]`
+```
+
+Three cases need a word:
+
+- **A JS dependency on a generated package.** A workspace often lists a
+  directory a build writes, as `schemas/dist/types/typescript/*`. A
+  dependency whose version is `workspace:` or `*`, and whose name no
+  tracked member has, may be one of those packages, so the directory of
+  each member pattern that names no tracked package is reported as
+  generated. Any other dependency is the registry's, which the lockfile
+  holds to what was installed.
+- **A source with a variable.** `COPY ${DIR} /app` cannot be read from
+  the Dockerfile, so the whole context is taken.
+- **What a unit reads from outside itself and names in no manifest**,
+  as `include_str!("../../x")` does, is a `path` input's.
+
+A resolver's set is wider than what one build reads and never narrower
+by design. The `.dockerignore` is taken as a file and not applied, and a
+`COPY --from` another stage, an `ADD` of a URL and a base image are not
+the commit's.
 
 ## The task file
 
@@ -393,9 +471,8 @@ Tasks service never runs it, so a build changes for no one else.
 
 ## What is not built
 
-- Resolvers for a Rust crate, a Go module, a JS package and an image.
-  They are extensions; the core ships `path` and `schema`.
 - A CI renderer that writes a workflow from a Tasks schema.
-- `new service --kind Tasks`.
+- A resolver that follows a tsconfig's project references or applies a
+  `.dockerignore`'s exclusions. Both leave a set wider, never narrower.
 
 `docs/DECISIONS.md` lists these under D203.

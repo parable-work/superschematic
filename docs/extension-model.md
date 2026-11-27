@@ -1502,9 +1502,27 @@ build cache's `TreeDigest` (section 7.4), not the same one: `TreeDigest`
 hashes a working tree's contents with no git and sees untracked files,
 which the build cache needs, and a plan must be a function of a commit.
 
+A resolver reads a tree by directory and by pattern with
+`registry.TaskEntriesUnder` and `registry.MatchTaskPaths`, and the
+pattern a task names files by is the public `tasks` package's
+(`tasks.Covers`), which a runner that stores an output reads too.
+
+The official `extensions/resolvers`, which the installed binary links,
+registers four: `go-module`, `rust-crate`, `js-package` and `image`.
+Each names a unit by the directory of its manifest and resolves to the
+unit's files, without the units nested in it, and to each unit of the
+repository its manifest names, with the workspace's manifests and
+lockfiles. Each parses manifests and runs nothing, and reports a
+replaced module, a path dependency, a workspace member or a `COPY`
+source the commit does not hold as generated. They are an extension's
+and not the core's because which toolchains a repository builds with is
+the repository's (D10); their specs are typed in `@superschematic/tasks`
+all the same, since the installed binary carries them.
+
 The core registers `path` and `schema` (`internal/tasks/resolve.go`).
-`schema` resolves a schema service to a static set found from tracked
-text: its directory, the directory of each service of its schemas root
+`schema` resolves a schema service, named by its name or by its handle,
+which `@task` records as an identity and keeps as the name, to a static
+set found from tracked text: its directory, the directory of each service of its schemas root
 it names by directory name or package name, transitively, the root's
 files that belong to no service, and the naming file's `[cache] inputs`.
 The build cache's own key for a service holds more than a commit can

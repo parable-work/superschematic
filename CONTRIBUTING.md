@@ -67,7 +67,7 @@ By making a contribution to this project, I certify that:
 
 | Path | What it is |
 | --- | --- |
-| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, pulumi) linked |
+| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, resolvers, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
 | [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity`, `tasks` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
@@ -85,19 +85,19 @@ By making a contribution to this project, I certify that:
 | [`runtime/rules-handler/`](runtime/rules-handler/) | `@superschematic/rules-handler`: development mode's request handler for a TypeScript server (D117) |
 | [`tasks/`](tasks/) | The shape of the task file and of the plan (D203), with their JSON Schemas: what a Tasks service's build writes and `tasks plan` prints, which a forge reads |
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
-| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `resolvers`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
 | [`docs/`](docs/) | The docs site, the open decisions and the design documents |
 | [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, the engine's addon, release archives and tags, and the scrub check |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has fourteen Go modules: the root (the compiler), `ir`,
+The repository has fifteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
 `runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
 behaviors' core's binding and adapter, D103),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
-`extensions/cloudflare`, `extensions/embedded`, `extensions/pulumi`,
-`extensions/topcoat` and
+`extensions/cloudflare`, `extensions/embedded`, `extensions/resolvers`,
+`extensions/pulumi`, `extensions/topcoat` and
 `cmd/superschematic` (the installed binary). Generated code imports the
 runtimes and the IR, never the compiler, and the root module never imports
 an extension.
@@ -503,7 +503,7 @@ module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/engine/go/vX.Y.Z`, `runtime/rules/go/vX.Y.Z`,
 `runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/embedded/vX.Y.Z`,
-`extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
+`extensions/resolvers/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
 a test fails when a module is missing). The `require`
 lines between them carry the release version so a consumer at a tag resolves

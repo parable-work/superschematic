@@ -1,11 +1,15 @@
 // Type-level checks of @superschematic/tasks (D203). Nothing imports this
 // file: `bun run typecheck`, which `make ts` runs, checks it, and fails on
 // an @ts-expect-error that no longer errors.
+import { service } from "@superschematic/schema-config";
+
 import { task, tasks } from "../src/index";
+
+const ShopApi = service({ name: "shop-api", kind: "API" });
 
 declare module "../src/index" {
   interface InputKinds {
-    "go-module": { readonly dir: string };
+    "bazel-target": { readonly label: string };
   }
   interface TaskSections {
     forge?: { readonly tier: "pr" | "nightly"; readonly timeoutSeconds?: number };
@@ -24,7 +28,14 @@ export abstract class Repo {}
 
 @task({
   run: ["superschematic", "build-all", "schemas/services"],
-  inputs: [{ kind: "schema", spec: { service: "shop-api" } }],
+  inputs: [
+    { kind: "schema", spec: { service: ShopApi } },
+    { kind: "schema", spec: { service: "shop-db", root: "schemas" } },
+    { kind: "rust-crate", spec: { dir: "crates/shop" } },
+    { kind: "js-package", spec: { dir: "web/shop" } },
+    { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } },
+    { kind: "bazel-target", spec: { label: "//shop:api" } }
+  ],
   outputs: [{ name: "generated", paths: ["schemas/dist"] }]
 })
 export abstract class SchemaBuild {}
@@ -61,6 +72,10 @@ export abstract class WrongSpec {}
 // @ts-expect-error an input names a registered kind
 @task({ run: ["true"], inputs: [{ kind: "cargo", spec: {} }] })
 export abstract class UnknownKind {}
+
+// @ts-expect-error a unit is named by its directory
+@task({ run: ["true"], inputs: [{ kind: "rust-crate", spec: { manifest: "Cargo.toml" } }] })
+export abstract class CrateByManifest {}
 
 // @ts-expect-error an edge names a task's class, not its name
 @task({ run: ["true"], after: ["lint"] })

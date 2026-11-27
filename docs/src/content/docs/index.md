@@ -36,14 +36,15 @@ consumed at a commit. APIs an extension depends on (`registry`, `loader`,
 
 ## What the core knows
 
-The core registers seven schema kinds (DB, API, General, Stack, Bucket,
-Site and MemoryStore), one auth provider (`session`) and the generic
+The core registers eight schema kinds (DB, API, General, Stack, Bucket,
+Site, MemoryStore and Tasks), one auth provider (`session`) and the generic
 scalar set. A kind, decorator, document,
 generator, auth provider or command that only one deployment needs lives in
 an extension: a Go package you pass to `cli.New`. The `superschematic`
 binary you install (`cmd/superschematic`) is the core with the official
 extensions linked: the gcp target, the Cloudflare DNS platform and
-target, the embedded target, and the Pulumi provisioner. The core with none, `internal/cmd/superschematic-core`,
+target, the embedded target, the resolvers of a task's common inputs, and
+the Pulumi provisioner. The core with none, `internal/cmd/superschematic-core`,
 is what the repository's checks build to prove the core works alone.
 
 `examples/acme-schematic` is a complete downstream example. The
@@ -52,6 +53,8 @@ the same surfaces. The official extensions, `extensions/gcp`,
 `extensions/cloudflare`, `extensions/embedded` and `extensions/pulumi`,
 are the worked examples of a deploy target, a DNS platform and a
 provisioner; see [stack targets](/superschematic/extending/stack-targets/).
+`extensions/resolvers` is the worked example of a task's input
+resolvers; see [Tasks](/superschematic/guides/tasks/#a-go-module-a-rust-crate-a-js-package-an-image).
 
 Names of generated packages come from `superschematic.toml` at the schemas
 root. The [naming-file reference](/superschematic/reference/naming/) lists
